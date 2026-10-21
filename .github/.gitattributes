@@ -1,0 +1,2 @@
+# Keep CI sources on LF even on Windows checkouts.
+* text=auto eol=lf

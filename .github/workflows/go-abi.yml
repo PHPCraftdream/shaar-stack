@@ -62,7 +62,12 @@ jobs:
           gcc -dumpmachine
       - name: Check source formatting
         run: |
-          test -z "$(gofmt -l .github/abi/goprobe/main.go)"
+          git ls-files --eol -- .github/abi/goprobe/main.go
+          unformatted=$(gofmt -l .github/abi/goprobe/main.go)
+          if [[ -n "$unformatted" ]]; then
+            gofmt -d .github/abi/goprobe/main.go
+            exit 1
+          fi
           rustfmt --edition 2024 --check .github/abi/rustprobe/probe.rs
       - name: Build the Go archive
         run: |
