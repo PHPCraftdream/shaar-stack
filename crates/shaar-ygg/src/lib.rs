@@ -1,4 +1,4 @@
 #![deny(unsafe_code)]
-//! Транспортный адаптер Yggdrasil: датаграммы по публичному ключу без TUN.
+//! Yggdrasil transport adapter: key-addressed datagrams without TUN.
 //!
-//! Каркас: FFI-граница и реализация появятся на этапе P07.
+//! Scaffold: the FFI boundary and implementation follow in P07.

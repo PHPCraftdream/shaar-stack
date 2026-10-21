@@ -1,4 +1,4 @@
 #![forbid(unsafe_code)]
-//! SDK Sha'ar Stack: сетевое ядро, идентичность и публичный API.
+//! Sha'ar Stack SDK: networking, identity, and public API.
 //!
-//! Каркас: реализация появится на функциональных этапах (P04+).
+//! Scaffold: implementation follows in the functional stages (P04+).

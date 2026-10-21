@@ -1,12 +1,12 @@
-# Артефакты сборки и локальные данные инструментов
+# Build artifacts and local tool data
 /target/
 /.claude/
 /.rush/
 
-# Изолированные рабочие деревья /wrush
+# Isolated /wrush worktrees
 /worktrees/
 
-# Секреты и локальные конфиги запуска
+# Secrets and local runtime configuration
 *.key
 *.secret
 *.local.ktav

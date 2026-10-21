@@ -1,4 +1,4 @@
-# Сервер Sha'ar Stack.
+# Sha'ar Stack server.
 [package]
 name = "shaar-server"
 version.workspace = true

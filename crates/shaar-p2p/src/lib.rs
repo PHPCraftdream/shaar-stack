@@ -1,4 +1,4 @@
 #![forbid(unsafe_code)]
-//! Транспортный адаптер libp2p: согласование соединений, не данные приложения.
+//! libp2p transport adapter: connection signaling, not application data.
 //!
-//! Каркас: реализация появится на этапе P08.
+//! Scaffold: implementation follows in P08.

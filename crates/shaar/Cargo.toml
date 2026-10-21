@@ -1,4 +1,4 @@
-# SDK Sha'ar Stack.
+# Sha'ar Stack SDK.
 [package]
 name = "shaar"
 version.workspace = true

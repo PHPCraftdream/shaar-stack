@@ -1,4 +1,4 @@
-# Корень Cargo workspace Sha'ar Stack.
+# Sha'ar Stack Cargo workspace.
 [workspace]
 resolver = "3"
 members = [

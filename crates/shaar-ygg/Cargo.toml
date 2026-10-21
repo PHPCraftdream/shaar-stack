@@ -1,4 +1,4 @@
-# Транспортный адаптер Yggdrasil (будущий FFI-крейт).
+# Yggdrasil transport adapter (future FFI crate).
 [package]
 name = "shaar-ygg"
 version.workspace = true

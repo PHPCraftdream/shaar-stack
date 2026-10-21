@@ -1,4 +1,4 @@
-# Клиент Sha'ar Stack.
+# Sha'ar Stack client.
 [package]
 name = "shaar-client"
 version.workspace = true

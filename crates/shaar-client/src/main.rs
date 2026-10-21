@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
-//! Заглушка клиента: реализация ещё не готова (этап P12).
+//! Client scaffold: not implemented yet (P12).
 
 fn main() -> std::process::ExitCode {
-    eprintln!("shaar-client: реализация ещё не готова, это каркас проекта.");
+    eprintln!("shaar-client: not implemented yet; this is a project scaffold.");
     std::process::ExitCode::FAILURE
 }

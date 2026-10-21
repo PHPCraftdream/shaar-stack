@@ -1,4 +1,4 @@
-# Транспортный адаптер libp2p (signaling).
+# libp2p transport adapter (signaling).
 [package]
 name = "shaar-p2p"
 version.workspace = true
