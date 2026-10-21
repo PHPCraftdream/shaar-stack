@@ -12,7 +12,8 @@ written in English. The directory `docs/checkpoints/` may remain in Russian.
 ## 1. No unsafe outside the FFI boundary
 
 - Our own Rust code contains no `unsafe` except the minimal code required at
-  the FFI boundary, including integration with the Yggdrasil core in Go.
+  an isolated native FFI boundary (for example the Windows key ACL).
+  The Yggdrasil adapter uses a safe Rust API and receives no unsafe exception.
 - FFI is isolated in a dedicated module or low-level crate and provides a safe
   interface to the rest of the Rust code.
 - All ordinary crate roots, binary roots, examples, integration tests, and
@@ -135,7 +136,9 @@ written in English. The directory `docs/checkpoints/` may remain in Russian.
 
 ## Consequence for the architectural draft
 
-`docs/architecture/keypipe.md` is an architectural draft. Integration with
-the Yggdrasil core in Go via FFI is allowed provided the requirements for an
-isolated safe wrapper are met. Sketches do not exempt one from verifying FFI
-invariants or from the other rules.
+`docs/architecture/keypipe.md` is an architectural draft. Its Go shim for
+Yggdrasil is superseded by the native Rust backend decision
+(Yggdrasil-ng): integration with the native Yggdrasil core is done as an
+isolated Rust adapter meeting the same isolation and safety requirements.
+Historical Go-FFI sketches remain superseded reference; sketches do not
+exempt one from verifying isolation invariants or from the other rules.

@@ -1,9 +1,8 @@
-# Standard-library-only Go runtime and Rust ABI check.
-name: Go ABI
+# Historical ABI check, no longer part of automatic CI.
+# Source removal is pending explicit tool permission.
+name: Go ABI (retired)
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 permissions:

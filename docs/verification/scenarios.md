@@ -1,6 +1,9 @@
 # Sha'ar Stack Verification Scenario Matrix (P01)
 
-Date: 2026-10-21. Caveat: at the P01 stage nothing was run —
+Date: 2026-10-21. Revised: 2026-10-22 — reconciled to the native Rust Yggdrasil
+backend (crate `yggdrasil` 0.3.1, pinned commit
+c9a54f1587bb133a06072596484c972a336db0d2); Go/cgo is removed. Caveat: at the
+P01 stage nothing was run —
 no tests, no builds, no experiments. All P01 statuses in the tables are
 "planned". Level notation: unit — a deterministic test;
 CI rig — a controlled rig in CI; P03 — a blocking experiment
@@ -84,18 +87,23 @@ the client establishes a new connection.
 | Streams on truly limited connections | libp2p-stream behavior on a relayed connection | Confirmed limitation or working behavior is documented | P03 | planned |
 | open_stream over a relayed connection | Verify absence of a code gate | `open_stream` over a relayed connection is not forbidden by code (behaviour.rs without an is_relayed gate) — confirmed by reading v0.57.1; actual relay-server limits — measurement | unit | planned |
 
-## 4. Yggdrasil FFI
+## 4. Yggdrasil native adapter
+
+The native Rust core (pinned commit) exposes a fully async API: `read_from`
+(in-place, strips a 1-byte session type), `write_to` (prepends it), `mtu()`,
+`Core::new`/`start`/`close`. `Addr` is the 32-byte peer key; the session type
+byte is internal to the core.
 
 | Scenario | Goal | Expected result | Level | P01 status |
 |---|---|---|---|---|
-| Sending/receiving datagrams by 32-byte key | ReadFrom/WriteTo contract | `ReadFrom` returns an `iwt.Addr` of 32 key bytes; `WriteTo` to such an address delivers | unit | planned |
-| MTU boundaries | Packet size boundaries | `MTU()` = PacketConn.MTU() − 1, cap 65535; exceeding is discarded with an error | unit | planned |
-| Blocking receive on a dedicated OS thread | CLAUDE.md rule 7 | Receive does not block the async executor; the thread terminates correctly | unit | planned |
-| Stop and cancellation of reading | Orderly termination | `Stop()` completes: cancel, links.shutdown, Close; receive is interrupted without leaks | unit | planned |
-| Concurrent calls | Concurrency rules | Lifecycle contract: a single receiving worker thread per recv, a SEPARATE control/stop path (admission stop, no new operations allowed); handle release after all calls cease and recv completes; serializing everything through a single queue, including the blocking recv, is inadmissible (Stop/WriteTo would hang behind recv). Exact safety of concurrent ReadFrom/Stop and handle transfer — source reading and P07 tests; the test does not replace the SAFETY justification | unit | planned |
-| Startup errors | Invalid certificate/secret | `core.New` without an ed25519 certificate returns an error; panics do not cross the ABI | unit | planned |
-| Building c-archive on Windows | Early CI item | Static support of `-buildmode=c-archive` for windows confirmed by reading supported.go (go1.25.0); actual cross-language linking is to be verified: Rust x86_64-pc-windows-gnu + Go windows/amd64 + gcc (MinGW); MSVC-ABI spike — a separate decision | CI rig | planned |
-| Building c-archive on Linux/amd64 | Early CI item (next to Windows) | Static support for linux/amd64 confirmed by reading supported.go; actual linking: x86_64-unknown-linux-gnu + gcc/ld | CI rig | planned |
+| Sending/receiving datagrams by 32-byte key | `write_to`/`read_from` contract | `write_to(buf, &Addr)` to a peer key delivers; `read_from` returns `(Range<usize>, Addr)` with a 32-byte key; the session type byte is internal | unit | planned |
+| MTU boundaries | Packet size boundaries | `mtu()` = inner − 1, cap 65535; payload maximum = buffer length − 1; exceeding is rejected/behaves per the core contract — the exact overflow behavior of `write_to` requires an experiment | unit | planned |
+| Asynchronous receive | No dedicated blocking OS thread | The core is fully async; receive does not require a dedicated blocking thread; executor rules still apply to blocking on recv — cancellation of a pending `read_from` is verified | unit | planned |
+| Stop and cancellation | Orderly termination | The adapter stops owned tasks, joins them, and releases the node; upstream `close()` alone has detached-task/strong-cycle blockers documented in rust-ygg.md | unit | blocked: source gate |
+| Concurrent calls | Concurrency rules | The native concurrency contract (concurrent `read_from`/`write_to`/`close`, shared `&Arc<Core>` use) must be established from the pinned sources and P07 tests. Superseded reference: the old single-queue-recv hazard was a Go-shim finding, not a native-core finding; the test does not replace the SAFETY justification | unit | planned |
+| Startup errors | Invalid key/config | Adapter validation rejects invalid input before construction and reports supported startup failures; `Core::new` returns `Arc<Self>`, not `Result`, so no upstream error-return contract is assumed | unit | planned |
+| Adapter build and actual interoperability on Linux/amd64 CI | Early CI item | The adapter builds and performs an actual datagram exchange through the native core on Linux/amd64; the retired Go c-archive check (go-abi.md) is historical evidence only, not a prerequisite | CI rig | planned |
+| Adapter build and actual interoperability on Windows/amd64 CI | Early CI item (next to Linux) | The adapter builds and performs an actual datagram exchange through the native core on Windows/amd64; the retired Go c-archive check is historical evidence only, not a prerequisite | CI rig | planned |
 
 ## 5. pkarr matrix (unit/CI)
 

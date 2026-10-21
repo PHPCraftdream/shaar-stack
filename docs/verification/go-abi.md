@@ -1,5 +1,17 @@
 # Limited Go c-archive ↔ Rust ABI check
 
+> **Status: RETIRED — superseded historical evidence.**
+> The task-#28 check below genuinely passed on both OSes; the observed-run facts
+> are kept untouched. After the architecture decision to use a native Rust
+> Yggdrasil backend (crate `yggdrasil` 0.3.1, Revertron/Yggdrasil-ng, pinned
+> commit c9a54f1587bb133a06072596484c972a336db0d2), this Go c-archive ABI check
+> is **no longer a prerequisite for any stage** and is **NOT evidence of
+> Rust-interop or adapter correctness**. Automatic push/PR execution is retired;
+> the legacy workflow is manually dispatchable only. Removing the historical
+> workflow and sources was denied by the tool as `Irreversible Local Destruction`.
+> Those files remain pending removal permission, not as production dependencies.
+> Revision date: 2026-10-22.
+
 Task #28. Status: passed on Linux and Windows in GitHub CI.
 No Go/Rust compilation or probe execution was performed locally.
 

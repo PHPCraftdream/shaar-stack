@@ -1,7 +1,15 @@
 # Sha'ar Stack — Development Plan
 
-Status: plan; implementation has not started.
-Date: 2026-10-21.
+Status: plan; the workspace skeleton and CI foundation passed (P02). P01 contract
+research is reconciled to the native Rust Yggdrasil backend. Identity (P04),
+ktav configs (P05), the P03 experiment, and the Yggdrasil adapter (P07) are
+pending.
+Date: 2026-10-21. Revised: 2026-10-22 — native Rust replaces Go/cgo in the
+intended architecture. Yggdrasil-ng (`yggdrasil` 0.3.1, source revision
+c9a54f1587bb133a06072596484c972a336db0d2) is a candidate, not an integrated
+dependency. Its shutdown/ownership source gate is open; see
+[the investigation](../verification/rust-ygg.md). Preparation of actual
+third-party integration was denied by the tool; source review is not CI proof.
 
 ## 1. Goal and scope of the first version
 
@@ -22,7 +30,8 @@ Server and Client startup configs use the ktav 0.8.* format.
 
 Not included: UDP forwarding, multiple published services on the server, a GUI,
 a single CLI replacing separate Server and Client, an in-house Yggdrasil
-implementation, DHT record encryption, system packages, and automated release
+protocol implementation (a reviewed external Rust core is required), DHT
+record encryption, system packages, and automated release
 publication. New modes, parameters, and dependencies are added only when necessary
 for agreed acceptance criteria.
 
@@ -80,18 +89,21 @@ upstream APIs. No separate shared crate is added without a demonstrated need.
 
 ### 4.1. Compatibility and contracts
 
-Choose compatible versions of iroh, libp2p, yggdrasil-go, and ktav 0.8.*
-from sources and documentation, not from the draft's pseudocode. The initial
+Choose compatible versions of iroh, libp2p, and ktav 0.8.*
+from sources and documentation, not from the draft's pseudocode. The Yggdrasil
+core is pinned: native Rust crate `yggdrasil` 0.3.1 (Revertron/Yggdrasil-ng,
+commit c9a54f1587bb133a06072596484c972a336db0d2, MPL-2.0). The initial
 choice of dependencies is not a permission to upgrade versions later.
-Pin the Rust toolchain/MSRV and the Go toolchain required by these versions.
+Pin the Rust toolchain/MSRV required by these versions.
 
 Verify the availability of custom transports, NAT traversal, path observation,
 publishing custom addresses, discovery configuration, and fully disabling n0.
 For ktav, verify the exact library name, syntax, the supported format branch,
 parser behavior, and diagnostics. Do not invent config syntax.
 
-Determine the target OSes of the first version from Go c-archive compatibility and the
-Rust linker. Windows is a mandatory verification environment; Linux is for server
+Determine the target OSes of the first version from the native Rust Yggdrasil
+core's platform support and the Rust linker, confirmed by our CI. Windows is a
+mandatory verification environment; Linux is for server
 deployment. If the external stack does not support one of them, escalate the specific
 blocker to the user rather than silently dropping the OS.
 
@@ -120,8 +132,14 @@ Silently replacing signaling-only with carrying user traffic is not allowed.
 
 - Ed25519 seed, iroh public key, Yggdrasil address, and libp2p PeerId:
   fixed conversion vectors; the PeerId is not equal to the raw key bytes.
-- The Yggdrasil core really carries datagrams by public key without TUN;
-  the MTU, rules for concurrent calls, and the read-interruption mechanism are known.
+- The Yggdrasil core really carries datagrams by public key without TUN:
+  verify actual asynchronous `read_from`/`write_to` exchange by 32-byte key
+  (`Addr` = peer key; the 1-byte session type is stripped/prepended by the core,
+  so the payload maximum is `buf.len() − 1`), MTU boundaries (`mtu()` = inner − 1,
+  capped at 65535), cancellation and `close()` semantics (no leaked tasks), and
+  actual interoperability with the deployed Yggdrasil network — the upstream
+  README's interoperability claim with yggdrasil-go v0.5.x is an upstream claim,
+  not our proof.
 - Public Amino relays really permit reservation and the needed protocol;
   advertising a relay protocol by itself does not guarantee a free slot.
 - Real relay limitations and opening streams on limited connections are verified.
@@ -150,7 +168,7 @@ Dependencies: P01.
 Create the five crates and place documentation according to the target structure.
 Configure the unsafe lint policy with a local exception only for FFI.
 Add CI for formatting, clippy, tests, and checks of file and directory
-limits. Build jobs account for Go and platform linker requirements.
+limits. Build jobs account for the platform linker requirements of the native Rust core.
 Heavy network tests are separated from deterministic checks.
 
 Acceptance: CI checks the workspace on the agreed OSes, rule violations
@@ -208,19 +226,33 @@ cancellation, and endpoint shutdown lose no resources. Failure of an individual 
 does not abort the others. Established TCP sessions make no promise to survive
 closing of the whole QUIC connection; new connections may establish a new one.
 
-### P07. Implement the Yggdrasil transport with an isolated FFI
+### P07. Implement the Yggdrasil transport as an isolated adapter over the native Rust core
 
 Dependencies: P03, P04, P06.
 
-A Go shim and a minimal unsafe module with a safe Rust API.
-Explicitly define ownership of the node, buffers, and handles; exclude global-state
-conflicts with multiple SDK instances. Receiving and terminating a blocking
-Go read must not block the async executor; threads terminate cleanly.
-Check lengths, MTU, error codes, and the ABI and Go/cgo constraints on pointers.
+Select and verify a native Rust core before implementing `shaar-ygg`.
+Yggdrasil-ng (`yggdrasil` 0.3.1, source revision
+c9a54f1587bb133a06072596484c972a336db0d2) has unresolved detached-task and
+strong-ownership-cycle findings. Calling `close()` alone does not satisfy
+SDK shutdown; resolving that gate is mandatory, not optional polish.
+Its candidate packet interface is:
+`Core::new(SigningKey, Config)`/`start`/`close` lifecycle; bounded read/write
+buffers respecting the core's payload range semantics (in-place `read_from`
+returns a `Range<usize>` and strips the 1-byte session type; `write_to`
+prepends it and returns n − 1); MTU handling (`mtu()` = inner − 1, cap 65535);
+cancellation and shutdown without leaked tasks; key→`Addr` mapping (a 32-byte
+peer key); explicit state ownership to exclude conflicts between multiple SDK
+instances. Feature hygiene: the `tun`/`ckr`/`systemd` features must not be
+enabled — no OS routes, no TUN, no root. No unsafe is expected in this adapter
+(the crate root forbids unsafe); any native OS FFI stays a separate isolated
+boundary. Actual interoperability with the deployed Yggdrasil network is
+verified on Linux and Windows CI; the retired Go c-archive ABI check is
+historical evidence only, not a prerequisite.
 
-Acceptance: datagram exchange without TUN, correct start/stop, startup errors,
-queue overflow, cancellation, and concurrent operations are covered by tests.
-Build and linking on the target OSes are confirmed.
+Acceptance: datagram exchange by key without TUN, correct start/stop, startup
+errors (adapter validation/startup failures; `Core::new` is not fallible), backpressure and
+queue bounds, cancellation, and concurrent operations are covered by tests.
+Builds on the target OSes are confirmed in CI.
 
 ### P08. Implement the libp2p signaling transport
 

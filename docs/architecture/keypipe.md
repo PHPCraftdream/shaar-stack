@@ -4,6 +4,15 @@ An architecture draft and code sketch. This is not a finished program: API names
 (pre-1.0), rust-libp2p, and yggdrasil-go change from version to version, so everything
 marked **⚠ verify** must be checked against the sources of the chosen versions.
 
+> **STATUS (2026-10-22):** this is the original architectural draft. The
+> Yggdrasil integration sections — the Go shim, `build.rs`, and the FFI sketch
+> (section 11 and related roadmap items) — are **SUPERSEDED** by the native
+> Rust backend decision (Revertron/Yggdrasil-ng, pinned commit
+> c9a54f1587bb133a06072596484c972a336db0d2). The draft is kept as a historical
+> sketch, not the current design; the current adapter contract lives in
+> `docs/architecture/contracts.md` (section 4) and development plan stage P07.
+> iroh/libp2p sketch claims remain unverified as before.
+
 ---
 
 ## 1. The idea
@@ -523,6 +532,11 @@ ssh -p 2222 user@127.0.0.1
 
 ## 11. The `iroh-yggdrasil` transport
 
+> **SUPERSEDED (2026-10-22):** the Go shim, `build.rs`, and FFI sketch below are
+> superseded by the native Rust backend decision — see the STATUS note at the
+> top of this document and section 11's replacement: the native adapter
+> contract in `../architecture/contracts.md` section 4 and development plan P07.
+
 ### The idea
 
 The yggdrasil-go core by itself works as a **packet conn addressed by public key**:
@@ -850,7 +864,7 @@ pub const BOOTSTRAP: &[&str] = &[
 | Relay limits in Kubo | If the limits are small, the handshake may not fit | Measure; if insufficient — several relays in parallel |
 | Amino bootstrap via IPFS nodes | Initial entry depends on known addresses | Cache peers; add your own known nodes |
 | Publicity of the Mainline record | Home IP becomes visible | Publish only libp2p relay addresses (section 6) |
-| Go in the build | Requires a Go toolchain, increases binary size | Accept; in the future — a Rust implementation of the Yggdrasil protocol |
+| Go in the build *(SUPERSEDED in the intended native Rust architecture; the historical ABI sources remain pending removal — see go-abi.md)* | Requires a Go toolchain, increases binary size | Accept; in the future — a Rust implementation of the Yggdrasil protocol |
 
 ---
 

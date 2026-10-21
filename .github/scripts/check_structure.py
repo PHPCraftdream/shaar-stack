@@ -6,8 +6,8 @@ Rules (CLAUDE.md):
    directory, per git tracked paths.
 3. unsafe policy: every workspace-package target (all kinds: lib, bin,
    test, example, bench, custom-build, proc-macro) must have EXACTLY
-   #![forbid(unsafe_code)] as its FIRST physical line; crates/shaar-ygg
-   packages must have exactly #![deny(unsafe_code)].
+   #![forbid(unsafe_code)] as its FIRST physical line. The current
+   workspace has no native FFI crate; Yggdrasil uses a safe Rust adapter.
 
 Code extensions (subject to the line limit):
     .rs, .go, .py, .sh, .bash, .ps1, .toml, .yml, .yaml
@@ -71,7 +71,6 @@ CHUNK = 65536
 BOM = b"\xef\xbb\xbf"
 FORBID = b"#![forbid(unsafe_code)]"
 DENY = b"#![deny(unsafe_code)]"
-DENY_PACKAGE = "shaar-ygg"
 IGNORED_PREFIXES = (b".git/", b".claude/", b".rush/", b"worktrees/", b"target/")
 CODE_EXTS = frozenset(
     (b".rs", b".go", b".py", b".sh", b".bash", b".ps1", b".toml", b".yml", b".yaml")
@@ -297,8 +296,8 @@ def parse_metadata(raw: bytes, root: Path, tracked: set[bytes]) -> tuple[list[tu
 def check_unsafe_policy(root: Path, targets: list[tuple[bytes, str]]) -> list[str]:
     """First line of each target must be exactly the required unsafe attribute."""
     errors: list[str] = []
-    for path, package in targets:
-        expected = DENY if package == DENY_PACKAGE else FORBID
+    for path, _package in targets:
+        expected = FORBID
         full = root / path.decode("utf-8", "surrogateescape")
         try:
             with _open_checked(root, full) as fh:

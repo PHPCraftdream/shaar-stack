@@ -436,15 +436,15 @@ class UnsafePolicyTests(TempCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("forbid", errors[0])
 
-    def test_ygg_requires_deny(self):
+    def test_ygg_requires_forbid(self):
         with self.tmp() as tmp:
-            self.write(tmp, "crates/shaar-ygg/src/lib.rs", cs.DENY + b"\n//! docs\n")
+            self.write(tmp, "crates/shaar-ygg/src/lib.rs", cs.FORBID + b"\n//! docs\n")
             targets = [(b"crates/shaar-ygg/src/lib.rs", "shaar-ygg")]
             self.assertEqual(cs.check_unsafe_policy(Path(tmp), targets), [])
-            self.write(tmp, "crates/shaar-ygg/src/lib.rs", cs.FORBID + b"\n")
+            self.write(tmp, "crates/shaar-ygg/src/lib.rs", cs.DENY + b"\n")
             errors = cs.check_unsafe_policy(Path(tmp), targets)
             self.assertEqual(len(errors), 1)
-            self.assertIn("deny", errors[0])
+            self.assertIn("forbid", errors[0])
 
 
 class MainTests(TempCase):

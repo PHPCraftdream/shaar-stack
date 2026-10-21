@@ -1,7 +1,16 @@
 # Sha’ar Stack External Contracts (P01)
 
-Date: 2026-10-21. Status: research, implementation not started.
+Date: 2026-10-22. Status: research; only the foundation workspace CI (P02) passed.
 No local builds/tests were run.
+
+Revision: reconciled to the native Rust Yggdrasil backend
+(Revertron/Yggdrasil-ng, pinned commit
+`c9a54f1587bb133a06072596484c972a336db0d2`); the earlier yggdrasil-go
+v0.5.14 c-archive FFI contract is superseded and kept as historical
+reference (section 4.2). Status of implementation: foundation workspace CI
+passed (P02); identity (P04), configs (P05), the P03 experiment, and the
+adapter itself are incomplete. Identity, config, and P03 work is in progress,
+not accepted; no completion is claimed beyond the foundation.
 
 Every fact is tagged with a confidence level:
 - **read from source** — by reading the sources of the specified tag/file
@@ -32,18 +41,29 @@ Every fact is tagged with a confidence level:
   libp2p-swarm ^0.48.0. Caution: libp2p-stream 0.5.0-alpha is a pre-release;
   the alternative is libp2p 0.56.0 + libp2p-stream 0.4.0-alpha
   (decide at P02; after choosing, do not bump).
-- yggdrasil-go **v0.5.14** (tag, commit `422836eeb21a99790caa286aa63d493bbc4766d7`;
-  go.mod requires go 1.25.0; the Arceliar/ironwood dependency is pinned to
-  `d50055b11f5e` from 2026-06-13). License: **LGPLv3 with a special
-  exception** — static linking into a Combined Work is allowed without
-  disclosing application code provided LGPL is otherwise observed (LICENSE,
-  tag v0.5.14).
+- Yggdrasil — native Rust backend, **candidate, NOT yet chosen as a
+  dependency of this workspace**: **Yggdrasil-ng**, pinned commit
+  `c9a54f1587bb133a06072596484c972a336db0d2`
+  (`https://github.com/Revertron/Yggdrasil-ng`); crate `yggdrasil`
+  **0.3.1**, edition 2024, license MPL-2.0 (full text at the repo root:
+  `https://raw.githubusercontent.com/Revertron/Yggdrasil-ng/c9a54f1587bb133a06072596484c972a336db0d2/LICENSE`;
+  the path `crates/yggdrasil/LICENSE` returns 404 — cite the root LICENSE).
+  The README's claims of wire compatibility with Yggdrasil-go v0.5.x and of
+  general stability are UPSTREAM claims, NOT our proof; no suitability
+  endorsement is made here (see section 4.1). The workspace's salsa20
+  crate is patched to a local SIMD fork — an open supply-chain gate,
+  under a separate investigation.
+  The earlier yggdrasil-go v0.5.14 (LGPLv3 with a special exception,
+  Go >= 1.25.0) c-archive FFI plan is superseded; its findings remain as
+  historical reference in section 4.2.
 - ktav **0.8.0** (repo ktav-lang/rust, tag v0.8.0; metadata confirmed via
   `https://raw.githubusercontent.com/ktav-lang/rust/v0.8.0/Cargo.toml`:
   version 0.8.0, spec-version 0.8.0, rust-version 1.71, MIT OR Apache-2.0;
   serde-native; crates.io publish date not verified). Format = Ktav spec
   0.8.0 (ktav-lang/spec).
-- Toolchain: Rust stable >= 1.91 (iroh MSRV), Go >= 1.25.0.
+- Toolchain: Rust stable >= 1.91 (iroh MSRV); the edition 2024 of the
+  Yggdrasil-ng crate requires a recent stable Rust — its exact MSRV was not
+  read and is **unconfirmed**.
   Target OSes: Windows (amd64) and Linux (amd64).
 
 ## 2. iroh 1.3.0 — custom transport, paths, disabling n0
@@ -250,7 +270,68 @@ Read from the sources of tag v0.57.1 (`https://github.com/libp2p/rust-libp2p/blo
 - PeerId: `libp2p_identity::PublicKey::to_peer_id()` — a multihash wrapper,
   NOT the raw key bytes (see section 6).
 
-## 4. yggdrasil-go v0.5.14 — core and FFI contract
+## 4. Yggdrasil backend — native Rust (normative) and yggdrasil-go (superseded reference)
+
+### 4.1. Native Rust requirement; Yggdrasil-ng candidate source gate
+
+Sources read at pinned commit `c9a54f1587bb133a06072596484c972a336db0d2`:
+workspace `https://raw.githubusercontent.com/Revertron/Yggdrasil-ng/c9a54f1587bb133a06072596484c972a336db0d2/Cargo.toml`,
+crate `https://raw.githubusercontent.com/Revertron/Yggdrasil-ng/c9a54f1587bb133a06072596484c972a336db0d2/crates/yggdrasil/Cargo.toml`,
+core `https://raw.githubusercontent.com/Revertron/Yggdrasil-ng/c9a54f1587bb133a06072596484c972a336db0d2/crates/yggdrasil/src/core.rs`,
+README `https://raw.githubusercontent.com/Revertron/Yggdrasil-ng/c9a54f1587bb133a06072596484c972a336db0d2/README.md`,
+license `https://raw.githubusercontent.com/Revertron/Yggdrasil-ng/c9a54f1587bb133a06072596484c972a336db0d2/LICENSE`.
+
+- Package `yggdrasil` 0.3.1, edition 2024, license MPL-2.0, lib path
+  `src/lib.rs`. Workspace members: `crates/ironwood`, `crates/yggdrasil`,
+  `crates/salsa20-simd`; `[patch.crates-io]` redirects salsa20 to the local
+  SIMD fork (AVX2/SSE2/NEON, scalar fallback) with a workspace comment
+  claiming byte-identical keystream / wire compatibility — that comment is
+  an UPSTREAM claim, not our verification.
+- Core API (read in core.rs): `Core::new(signing_key:
+  ed25519_dalek::SigningKey, config: Config) -> Arc<Self>`;
+  `async fn read_from(&self, buf: &mut [u8]) ->
+  Result<(std::ops::Range<usize>, ironwood::Addr), ironwood::Error>`
+  (in-place frame read; strips a 1-byte session type; max payload =
+  `buf.len() − 1`); `async fn write_to(&self, buf: &[u8], addr: &Addr) ->
+  Result<usize, ironwood::Error>` (prepends the type byte; returns n−1);
+  `fn mtu(&self) -> u64` (inner MTU − 1, capped 65535);
+  `async fn start(self: &Arc<Self>)` (listeners + spawned peer connects);
+  `async fn close(&self) -> Result<(), ironwood::Error>`; accessors
+  `public_key()/address()/subnet()`. `Addr` is the 32-byte peer public key.
+- The packet read/write API is asynchronous (Tokio); the old dedicated
+  thread for Go's blocking receive (section 4.2) is not its API contract.
+  This does not prove every internal operation is nonblocking. Proto
+  messages are consumed internally, not returned as application payload.
+- TUN is optional (feature `tun`, dep tun-rs), enabled by upstream default.
+  Our future dependency graph must disable it and create no interface.
+  The `ckr` feature pulls
+  `route_manager` (OS route manipulation); `systemd` also exists — features
+  enabling OS-level interfaces (tun, ckr, systemd) must NOT be assumed.
+- Everything requiring runtime demonstration — actual datagram exchange,
+  MTU boundaries, close/cancel semantics, interoperability with the
+  deployed Yggdrasil network — stays **requires a CI/P03/P07 experiment**.
+- OPEN SOURCE GATE: `Core::new` detaches a TLS renewal task retaining the
+  node; its unending loop is not stopped by `close()`. `init_links()` also
+  creates a strong `Core -> Links -> Core` cycle not cleared by `close()`.
+  The optional IPv6 wrapper adds another strong cycle. These mechanisms
+  block acceptance of shutdown as currently sketched; see the pinned
+  evidence in [the source gate](../verification/rust-ygg.md).
+- Upstream patches salsa20 to its local SIMD fork. A consumer does not
+  inherit that workspace patch. The fork-only `active_backend()` call is
+  in the binary's startup log; library graph compilation without the patch
+  is unverified. No crypto patch has been selected or integrated here.
+- Actual third-party integration preparation was denied by the tool as
+  `Untrusted Code Integration`; only source review has been performed.
+- The README's Go-interop and stability statements are upstream claims,
+  NOT proof. Do not grant a suitability badge on the basis of this read.
+
+### 4.2. Superseded reference: yggdrasil-go v0.5.14 c-archive FFI
+
+**SUPERSEDED** by the architecture decision "everything in Rust": the
+yggdrasil-go c-archive FFI approach is no longer a runtime requirement.
+This subsection is retained only as historical reference for identifiers
+and past findings. The c-archive/CI and cgo constraints below no longer
+apply.
 
 Read from the sources of tag v0.5.14
 (`https://github.com/yggdrasil-network/yggdrasil-go/blob/v0.5.14/src/core/core.go`):
@@ -381,9 +462,16 @@ contract:
   `ed25519_dalek::SigningKey::from_bytes`; `public()` → 32 bytes
   `verifying_key().to_bytes()`; `to_bytes() -> [u8;32]`;
   `EndpointId` = pubkey.
-- Yggdrasil: address = `address.AddrForKey(pubkey)`, an address from the
-  200::/7 range (algorithm — section 4; not a hash, invertibility into a
-  full key must NOT be claimed).
+- Yggdrasil: address = `address.AddrForKey(pubkey)` in yggdrasil-go; the
+  normative derivation source for the NATIVE backend is
+  `crates/yggdrasil/src/address`
+  (`https://raw.githubusercontent.com/Revertron/Yggdrasil-ng/c9a54f1587bb133a06072596484c972a336db0d2/crates/yggdrasil/src/address.rs`,
+  seen imported as `crate::address` in core.rs) — its contents were NOT
+  read in this pass, and exact algorithm confirmation in the native source
+  is a PENDING read task; do NOT claim the algorithms are identical.
+  The Go-derived description (algorithm — section 4.2; address from the
+  200::/7 range; not a hash, invertibility into a full key must NOT be
+  claimed) is historical reference only.
 - libp2p (read
   `https://raw.githubusercontent.com/libp2p/rust-libp2p/v0.57.1/identity/src/generated/keys.proto`):
   `PublicKey { Type = field 1 (enum Ed25519 = 1), Data = field 2 (bytes) }`;
@@ -402,6 +490,13 @@ Test vectors — P04; fix the formulas per the listed sources.
 
 ## 7. Open questions and stop conditions
 
+- Actual verification of the native adapter (P07): datagram exchange,
+  MTU boundaries, shutdown/cancellation semantics of
+  `read_from`/`write_to`/`close` — sources read is not enough.
+- Supply-chain review of the salsa20 SIMD fork patch in Yggdrasil-ng
+  (separate investigation, #34).
+- Actual interoperability of Yggdrasil-ng with the deployed Yggdrasil
+  network (CI experiment).
 - NAT traversal via custom transport + the ban of STREAM on signaling-only:
   unconfirmed, a blocking P03 experiment (stop conditions —
   development.md 4.2). A separate P03 matrix item: check the availability
@@ -411,15 +506,14 @@ Test vectors — P04; fix the formulas per the listed sources.
 - Limits of public Amino/Kubo relays and slot availability: unknown;
   depends on infrastructure; test on our own relay + a separate
   smoke test of the public network.
-- c-archive windows/amd64 and linux/amd64: an early CI check (P02/P03);
-  a blocker → a user decision, not silence.
 
 The remaining real gates:
 
 - NAT traversal + signaling-only (P03).
 - Availability of decoded-frames/path-oracle + positive calibration (P03).
-- Actual cross-language linking of c-archive (CI).
-- SAFETY of concurrent ReadFrom/Stop (P07).
+- Actual native-adapter datagram/MTU/shutdown verification (P07).
+- Salsa20 SIMD fork supply-chain review (separate investigation).
+- Interoperability of Yggdrasil-ng with the deployed Yggdrasil network (CI).
 - Executing the test vectors (P04).
 - The actual ktav parser/serde API and the configuration policy (P05).
 - The actual multiaddr round-trip/budget and negative controls of Mainline

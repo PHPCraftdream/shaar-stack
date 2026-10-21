@@ -1,15 +1,24 @@
 # Sha'ar Stack v1 Threat Model (pre-implementation)
 
-Status: **no implementation exists**. This is a document of requirements and verifiable
-commitments, not an audit report. Nothing is "verified"; for each invariant the document
-specifies where it must be proven (unit/integration tests in CI, the P03 experiment,
-the NAT testbed, a manual testbed). The success criterion is explicit, formulatable
-failure, not fabricated results.
+Status: the foundation workspace skeleton and CI have passed (P02 done); **no SDK, server,
+client, or transport-adapter implementation exists yet**. This is a document of requirements and
+verifiable commitments, not an audit report. Nothing is "verified" beyond the CI skeleton; for
+each invariant the document specifies where it must be proven (unit/integration tests in CI, the
+P03 experiment, the NAT testbed, a manual testbed). The success criterion is explicit,
+formulatable failure, not fabricated results. All invariants remain unconfirmed commitments.
+
+Revision note (2026-10-22): reconciled to the native Rust Yggdrasil backend — the
+Yggdrasil-ng candidate inspected at revision `c9a54f1587bb133a06072596484c972a336db0d2`
+(package `yggdrasil` 0.3.1). No backend dependency has been integrated. Its
+[shutdown/ownership source gate](../verification/rust-ygg.md) is unresolved.
+The former yggdrasil-go c-archive FFI model is superseded historical reference,
+not part of the intended runtime architecture.
 
 ## 1. Scope
 
-The model covers Sha'ar Stack v1: the SDK crate `shaar`, the transports `shaar-ygg` (FFI to
-yggdrasil-go), `shaar-p2p` (libp2p signaling), `shaar-server`, `shaar-client`, work with
+The model covers Sha'ar Stack v1: the SDK crate `shaar`, the transports
+`shaar-ygg` (native Rust adapter, backend acceptance pending), `shaar-p2p`
+(libp2p signaling), `shaar-server`, `shaar-client`, work with
 the Mainline DHT via pkarr, and ktav 0.8.* configuration. Out of scope: physical security
 of the host, security of the OS environment, exploitation of vulnerabilities in upstream
 libraries (counted only as a supply-chain risk).
@@ -41,7 +50,10 @@ punching) and is **never** a fallback data path.
 ## 3. Trust boundaries
 
 **Trusted:**
-- the Rust and Go runtimes, the operating system;
+- the Rust runtime, the operating system;
+- a reviewed backend and its cryptographic dependencies, once accepted.
+  Yggdrasil-ng and its upstream SIMD patch have not reached that gate; source
+  pinning alone does not establish their suitability;
 - upstream cryptography: QUIC/TLS of iroh (authenticated encryption on endpoint keys),
   Ed25519, the libp2p noise protocol, pkarr signatures;
 - the local user who owns the key file.
@@ -80,7 +92,8 @@ is not disabled):**
 - key storage: atomic creation, permissions, absence from logs (I3, I4);
 - validation of the ktav config before any network action (I2);
 - handling of untrusted DHT records: signature, size, freshness, replay (I6);
-- FFI safety at the yggdrasil-go boundary (I9);
+- adapter-boundary safety over the native core (I9); the only expected unsafe surface is
+  isolated native OS FFI (e.g. the Windows key ACL);
 - supply-chain and CI hygiene (I10).
 
 ## 5. Semantics of a single seed across multiple protocols
@@ -166,7 +179,8 @@ where it is proven. All of them are commitments; none has yet been confirmed by 
   Yggdrasil likewise carries only signaling (Ygg is the standby for *data*; the relay is
   never a data fallback). A violation of this rule with QUIC/TLS intact is **not**
   automatic decryption but a routing violation: metadata disclosure and dependence on an
-  untrusted intermediary path, its limits and cost. Execution through yggdrasil-go is not
+  untrusted intermediary path, its limits and cost. Execution through the native Yggdrasil
+backend is not
   a default iroh property: custom NAT traversal and the strict path policy are **not yet
   proven**.
 - **Threat:** the Amino DHT relay and public Ygg peers are untrusted (§3): metadata,
@@ -218,33 +232,29 @@ where it is proven. All of them are commitments; none has yet been confirmed by 
   runs; no unclosed tasks after shutdown.
 - **Proof:** CI unit tests + CI integration, SEC-RES-01/02/03, SEC-CONC-01/02.
 
-### I9. FFI safety at the yggdrasil-go boundary
-- **Statement:** in all crates a root `#![forbid(unsafe_code)]`; only the FFI crate is
-  `#![deny(unsafe_code)]` with a local allow restricted to the ABI boundary and SAFETY
-  comments. At the ABI boundary, pointer ownership and lengths, handle lifetimes, and cgo
-  lifetime are strictly defined; the allowed-threads / thread-affinity contract
-  (including destruction/drop; blocking recv runs in a dedicated thread, not on an
-  async executor) is fixed **before** any unsafe Send/Sync; Go and Rust panics do not
-  cross the ABI (containment — see the limitations in SEC-FFI-04); stop/unblock/join are
-  complete. The safe API must forbid invalid states/sizes **before** the FFI call;
-  knowingly dangling/invalid Rust pointers are never passed into real foreign code
-  (overflow/validation checks live in the safe wrapper). Specific boundary checks:
-  partial failure at startup of several resources with full cleanup; concurrent
-  stop/send/recv; repeated shutdown cycles; boundary lengths: MTU — a valid boundary
-  (passes), MTU+1 and length overflow — negative; zero length — per the ABI/protocol
-  contract, not universally; stale/unknown handle. *The boundary requirements are only
-  formulated here; the actual guarantees of yggdrasil-go are verified by P01 — this
-  document asserts nothing about the properties of the external library.*
-- **Threat:** UB at the ABI boundary — memory corruption, executor deadlocks, panic
-  propagation into the foreign runtime.
+### I9. Adapter-boundary safety over the native core
+- **Statement:** in all crates a root `#![forbid(unsafe_code)]` — `shaar-ygg` has no FFI of
+  its own; the only expected unsafe is the isolated native OS FFI boundary (e.g. the
+  Windows key ACL), which is `#![deny(unsafe_code)]` with a local allow restricted to that
+  boundary and SAFETY comments. Adapter obligations toward the pinned Yggdrasil-ng core:
+  bounded buffers respecting the core's `read_from` payload-range semantics (max payload =
+  buffer length − 1, MTU cap 65535), validation of all inputs before core calls,
+  cancellation/close without leaked tasks, no panics escaping task boundaries into the SDK,
+  and a correct start/shutdown lifecycle (`Core::new` / `start` / `close`). *The boundary
+  requirements are only formulated here; the pinned core's runtime guarantees (datagram
+delivery,
+  MTU behavior, close/cancel semantics, wire interoperability) are verified by the P07/CI
+  experiments — this document asserts nothing about the properties of the external library.*
+- **Threat:** UB at the unsafe boundary — memory corruption, executor deadlocks, panic
+  propagation into the SDK runtime.
 - **Oracle and verification levels (each with explicit limitations):**
-  1) static SAFETY/ownership/cgo-contract review — not executed, covers only the read
-  code; 2) Miri — only where it runs without executing foreign code (limitation: the
-  foreign part does not execute); 3) real sanitizer/FFI checks in CI
+  1) static SAFETY/ownership review of the unsafe allow sites — not executed, covers only
+  the read code; 2) Miri — only where it runs without executing foreign code (limitation:
+  the foreign part does not execute); 3) real sanitizer checks in CI
   (ASan/UBSan/valgrind — where applicable; platform/tool limitations are recorded).
   Stable resource counters, debug assertions, and stress runs **do not** prove the
   absence of UB.
-- **Proof:** static review (P01/P07), Miri in CI where possible, a sanitizer-FFI run;
+- **Proof:** static review (P07), Miri in CI where possible, a sanitizer run;
   controls SEC-FFI-01/02/03/04/05.
 
 ### I10. Supply chain and CI

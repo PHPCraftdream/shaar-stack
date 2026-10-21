@@ -1,10 +1,17 @@
 # Sha'ar Stack v1 Security Verification Plan
 
-Status: **no implementation exists — no checks have passed.** Each control below is a
+Status: **foundation CI passed (workspace skeleton and CI, P02); no adapter,
+identity, or config implementation has been accepted — no further controls have passed, and
+all controls below remain not passed.** Each control below is a
 commitment with an observable outcome. Invariant references are I1…I10 from
 `docs/architecture/threat-model.md`. The oracle is always external observation (a log with
 a failure code, a connection counter, inspection of the network path, resource metrics);
 "tests that test their own constant" and mock-success oracles are forbidden.
+
+Revised: 2026-10-22 — the Yggdrasil transport is reconciled to the native Rust
+backend (crate `yggdrasil` 0.3.1, pinned commit c9a54f1587bb133a06072596484c972a336db0d2);
+Go/cgo is removed; the SEC-FFI section now covers the native adapter boundary.
+P03/SEC-PATH remains a blocking gate and is not passed.
 
 Stages: **CI-unit**, **CI-integration**, **P03** (blocking custom transport experiment),
 **NAT rig**, **manual rig**.
@@ -202,53 +209,69 @@ prove absence of STREAM on the wire. With an insufficient oracle, P03 under I5 r
   `signal` mode is also signaling only.
 - Oracle: decoded-frames oracle. Stage: P03 + NAT rig.
 
-## FFI boundary of yggdrasil-go
+## Yggdrasil adapter boundary (native Rust core)
 
 **SEC-FFI-01 — double start and partial startup failure** (I9)
-- Steps: a repeated start call while the core is running; starting several resources where one
-  fails midway.
+- Steps: a repeated start of the adapter while the core is running (creating
+  the core twice); starting several resources where one
+  fails midway (adapter validation or supported startup failures;
+  `Core::new` returns `Arc<Self>`, not an error result).
 - Expected: an explicit error, state not corrupted; partial failure ends with full
   cleanup of already created resources (not a single leak/semi-alive resource).
 - Oracle: error code, health afterwards, resource counters == baseline.
   Stage: CI-integration.
 
 **SEC-FFI-02 — stop without hangs and shutdown cycles** (I9)
-- Steps: stop during an active blocking recv; repeated start/stop cycles; concurrent
-  stop/send/recv.
-- Expected: join completes, threads finish, resources are freed; cycles are resilient.
-- Oracle: thread/fd counters before/after; a timeout on join. Stage: CI-integration + FFI rig.
+- Steps: `close()` during in-flight async `read_from`/`write_to` (cancellation);
+  repeated start/stop cycles; concurrent stop/send/recv; task join and drop
+  semantics after cancellation. There is no blocking recv thread anymore, but
+  cancellation and drop behavior must be proven, not assumed.
+- Expected: cancellation completes, all spawned tasks join, resources are freed;
+  cycles are resilient.
+- Oracle: task/fd counters before/after; a timeout on join. Stage: CI-integration + adapter rig.
 
 **SEC-FFI-03 — concurrent send/recv and boundary parameters** (I9)
 - Steps: parallel send/recv from several tasks; calls with boundary lengths:
   MTU (a valid boundary — must pass), MTU+1 and values causing length
-  overflow (negative); zero length — per the ABI/protocol contract, not universal;
-  stale/unknown handle.
-- Expected: the safe API rejects invalid states/sizes **before** the FFI call
-  (validation at the wrapper level; obviously dangling/invalid pointers are never passed into
-  foreign code); no UB/deadlocks.
+  overflow (negative); zero length — per the adapter/core contract, not universal;
+  stale/unknown handle (an adapter handle observed after shutdown/unknown state).
+- Expected: the safe API rejects invalid states/sizes **before** the core calls
+  (validation at the wrapper level; the wrapper owns buffer range semantics —
+  payload maximum is buffer length − 1 per the core contract); no UB/deadlocks.
 - Oracle: failure codes at the boundary; a stress loop under debug-assertions with stable
   resource counters (counters/debug asserts do not prove absence of UB — see I9, verification
-  levels). Stage: FFI rig.
+  levels). Stage: adapter rig.
 
 **SEC-FFI-04 — panic containment with limitations** (I9)
-- Steps: an induced panic in a Go callback and in the Rust wrapper — only where
-  unwind+recover is actually in use (catch_unwind / recover()).
-- Expected: the panic is converted into an ABI error code where recover is configured; **abort
-  is not caught magically**; the process may require fail-closed (a documented shutdown
+- Steps: an induced panic in the Rust adapter and wrapper — only where
+  `catch_unwind` is actually used at the adapter boundary.
+- Expected: the panic is converted into an error at the boundary where `catch_unwind`
+  is configured; **abort is not caught magically**; the process may require fail-closed (a documented shutdown
   instead of "always survives") — "the process always survives" is not promised.
-- Oracle: a log with an error code in the recover configuration; abort behavior matches the
-  documented fail-closed. Stage: FFI rig.
+  Panics must not leak across spawned tasks silently.
+- Oracle: a log with an error code in the `catch_unwind` configuration; abort behavior matches the
+  documented fail-closed. Stage: adapter rig.
 
 **SEC-FFI-05 — levels of boundary verification** (I9)
-- Steps: (a) static SAFETY/ownership/cgo-contract review of all unsafe sites;
-  (b) Miri where it works without executing foreign code; (c) sanitizer/FFI runs in CI
+- Steps: (a) ownership review of the safe adapter (its crate root forbids
+  all unsafe) and SAFETY review of unsafe sites in the separate
+  isolated native OS FFI (e.g. the Windows key ACL);
+  (b) Miri where it works without executing foreign code; (c) sanitizer runs in CI
   (ASan/UBSan/valgrind, where applicable).
 - Expected: no level substitutes another; each one's limitations are recorded:
-  (a) covers only reviewed code and is not executed; (b) the foreign part does not run;
-  (c) platform/tool limitations are documented.
+  (a) covers only reviewed code and is not executed; (b) native Rust core
+  interaction is not inherently excluded from Miri: unsupported OS/runtime
+  operations determine the runnable subset; (c) platform/tool limitations
+  are documented.
 - Oracle: each level's reports in CI/rig artifacts. Stage: P01/P07 review + CI.
 
 ## Supply chain and CI (P02+)
+
+Open gate (2026-10-22): the candidate's upstream workspace patches crates.io
+salsa20 to a local SIMD fork; Sha'ar does not inherit or adopt that patch.
+The resolved consumption path, origin, and security review must be established
+before SEC-SUP-01 can pass for the backend. Its detached tasks and ownership
+cycles also block lifecycle acceptance; see [the source gate](rust-ygg.md).
 
 **SEC-SUP-01 — dependencies: pinning/origin/licenses** (I10)
 - Steps: independent verification of the lock file, sources (registry/git URL/rev), and licenses
@@ -286,7 +309,7 @@ prove absence of STREAM on the wire. With an insufficient oracle, P03 under I5 r
 ## What requires a real rig and is not covered by unit tests
 
 - **SEC-PATH-01/02/03** — only P03/NAT rig with inspection of the actual network path.
-- **SEC-FFI-02/03/04** (parts about real threads and cgo lifetime) — FFI rig.
+- **SEC-FFI-02/03/04** (parts about real adapter lifecycle and cancellation) — adapter rig.
 - **NAT traversal as such** — NAT rig; **real NATs and public infrastructure
   (Amino DHT, Mainline) are verified separately, success is not guaranteed** — connectivity
   is best-effort (§3 threat-model).
