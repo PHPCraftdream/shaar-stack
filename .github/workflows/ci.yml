@@ -25,6 +25,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.1"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -33,22 +35,20 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
-      - name: Установка stable toolchain
-        run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          rustup default stable
+      - name: Install Rust 1.99.1
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
       # --locked отклоняет несоответствие графу без пересоздания lock.
       # Полные тестовые прогоны выполняются только в CI.
       - name: cargo fmt
-        run: cargo +stable fmt --all -- --check
+        run: cargo fmt --all -- --check
       - name: cargo clippy
-        run: cargo +stable clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test
-        run: cargo +stable test --workspace --locked
+        run: cargo test --workspace --locked
       - name: Запись версий toolchain
         run: |
-          rustc +stable --version --verbose
-          cargo +stable --version
+          rustc --version --verbose
+          cargo --version
       - name: Структурные ограничения
         run: python -I -X utf8 .github/scripts/check_structure.py
       - name: Тесты структурного guard

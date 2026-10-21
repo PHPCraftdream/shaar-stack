@@ -23,8 +23,9 @@
       репозитории нет, границы генерируются тестами во временных
       каталогах).
 
-Корневые target'ы: источник истины -- `cargo +stable metadata --no-deps
---format-version 1 --locked --offline`. Проверяются только пакеты из
+Корневые target'ы: источник истины -- `cargo metadata --no-deps
+--format-version 1 --locked --offline`; toolchain задан RUSTUP_TOOLCHAIN в CI.
+Проверяются только пакеты из
 workspace_members (сторонние игнорируются). src_path нормализуется через
 Path.resolve + relative_to(root): ./, .., symlink-родители и диск
 учитываются; target вне корня или не в tracked-наборе -- явная ошибка.
@@ -96,7 +97,7 @@ def run_git_ls_files() -> subprocess.CompletedProcess:
 def run_cargo_metadata(root: Path) -> subprocess.CompletedProcess:
     """Данные о target'ах workspace; cargo вызывается только в CI."""
     return subprocess.run(
-        ["cargo", "+stable", "metadata", "--no-deps", "--format-version", "1",
+        ["cargo", "metadata", "--no-deps", "--format-version", "1",
          "--locked", "--offline"],
         cwd=root,
         stdout=subprocess.PIPE,
