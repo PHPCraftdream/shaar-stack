@@ -1,7 +1,7 @@
-# CI Sha'ar Stack: форматирование, линк, тесты, структурные ограничения.
-# Примечание: структурный guard и его тесты в CI выполняются на tracked-путях.
-# `git ls-files` не видит новые untracked-файлы текущей задачи; после
-# integration commit все новые файлы проверяются штатно.
+# Sha'ar Stack CI: formatting, lint, tests, structural limits.
+# Note: the structural guard and its tests in CI run on tracked paths.
+# `git ls-files` does not see new untracked files of the current task;
+# after the integration commit all new files are checked normally.
 name: CI
 
 on:
@@ -31,25 +31,25 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      # Фиксация версии Python для стабильности guard'а и его тестов.
+      # Pin the Python version for stability of the guard and its tests.
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
       - name: Install Rust 1.99.1
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
-      # --locked отклоняет несоответствие графу без пересоздания lock.
-      # Полные тестовые прогоны выполняются только в CI.
+      # --locked rejects mismatches with the lock graph without regenerating it.
+      # Full test runs are executed only in CI.
       - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test
         run: cargo test --workspace --locked
-      - name: Запись версий toolchain
+      - name: Record toolchain versions
         run: |
           rustc --version --verbose
           cargo --version
-      - name: Структурные ограничения
+      - name: Structural limits
         run: python -I -X utf8 .github/scripts/check_structure.py
-      - name: Тесты структурного guard
+      - name: Structural guard tests
         run: python -I -X utf8 -m unittest discover -s .github/scripts/tests
