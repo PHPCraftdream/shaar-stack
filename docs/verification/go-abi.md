@@ -1,7 +1,17 @@
 # Limited Go c-archive ↔ Rust ABI check
 
-Task #28. Status: prepared; compilation and execution are pending GitHub CI.
+Task #28. Status: passed on Linux and Windows in GitHub CI.
 No Go/Rust compilation or probe execution was performed locally.
+
+## Observed result
+
+[Run 39678188652](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39678188652),
+commit `b3a7089`, completed successfully on both matrix targets. Each job
+compiled the Go c-archive, linked the Rust executable, and reported
+`ABI probe passed: 51 foreign-call vectors`. The Windows job also confirmed
+an LF working-tree checkout of the Go source (`i/lf w/lf`). The common
+workspace CI [run 39678195069](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39678195069)
+passed on both operating systems at the same commit.
 
 ## Scope and oracle
 
@@ -57,7 +67,7 @@ check is not a Miri or general memory-safety proof.
 
 ## Unproven boundaries
 
-Only a successful future CI run can confirm linking and all 51 foreign-call
-vectors on both OSes. This does **not** establish Yggdrasil Core initialization,
+The successful CI run confirms linking and all 51 foreign-call vectors on
+both tested targets. This does **not** establish Yggdrasil Core initialization,
 MTU, shutdown, concurrency, datagram delivery, NAT traversal, or the P07 safe
 wrapper. Those remain separate obligations. MSVC compatibility is not claimed.
