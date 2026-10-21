@@ -1,0 +1,33 @@
+# Минимальный lock-файл, составлен вручную (P02): только локальные пакеты.
+# Clippy/CI с --locked проверяют граф зависимостей без пересоздания lock-файла.
+version = 4
+
+[[package]]
+name = "shaar"
+version = "0.1.0"
+dependencies = [
+ "shaar-p2p",
+ "shaar-ygg",
+]
+
+[[package]]
+name = "shaar-client"
+version = "0.1.0"
+dependencies = [
+ "shaar",
+]
+
+[[package]]
+name = "shaar-p2p"
+version = "0.1.0"
+
+[[package]]
+name = "shaar-server"
+version = "0.1.0"
+dependencies = [
+ "shaar",
+]
+
+[[package]]
+name = "shaar-ygg"
+version = "0.1.0"

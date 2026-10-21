@@ -1,0 +1,8 @@
+# Транспортный адаптер Yggdrasil (будущий FFI-крейт).
+[package]
+name = "shaar-ygg"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]

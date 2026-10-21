@@ -1,0 +1,9 @@
+# Сервер Sha'ar Stack.
+[package]
+name = "shaar-server"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+shaar = { path = "../shaar" }

@@ -1,0 +1,10 @@
+# SDK Sha'ar Stack.
+[package]
+name = "shaar"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+shaar-ygg = { path = "../shaar-ygg" }
+shaar-p2p = { path = "../shaar-p2p" }
