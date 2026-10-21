@@ -1,133 +1,141 @@
-# Sha’ar Stack — правила разработки
+# Sha’ar Stack — Development Rules
 
-Один репозиторий `shaar-stack`, несколько крейтов в Cargo workspace.
-Правила обязательны для всех крейтов: SDK, Server, Client и транспортов,
-включая тесты, примеры, вспомогательный код и скрипты сборки.
-Новые крейты наследуют эти правила без исключений.
+One repository `shaar-stack`, several crates in a Cargo workspace.
+These rules are mandatory for all crates: SDK, Server, Client, and transports,
+including tests, examples, auxiliary code, and build scripts.
+New crates inherit these rules without exceptions.
 
-## 1. Никакого unsafe вне границы FFI
+English is the language of repository content. All maintained repository
+content — comments, docstrings, diagnostics, and new commit/PR text — must be
+written in English. The directory `docs/checkpoints/` may remain in Russian.
 
-- Собственный Rust-код не содержит `unsafe`, кроме минимального кода,
-  необходимого на границе FFI, включая интеграцию с ядром Yggdrasil на Go.
-- FFI изолируется в отдельном модуле или низкоуровневом крейте и предоставляет
-  остальному Rust-коду безопасный интерфейс.
-- Все обычные корни крейтов, бинарников, примеров, интеграционных тестов и
-  `build.rs` должны содержать `#![forbid(unsafe_code)]`.
-- В крейте с FFI-модулем применяется `#![deny(unsafe_code)]`, а разрешение
-  `#[allow(unsafe_code)]` задаётся только для изолированной FFI-границы.
-  `forbid` нельзя локально отменить через `allow`.
-- Каждый unsafe-блок и unsafe-реализация на FFI-границе сопровождаются кратким
-  комментарием `SAFETY:` с обоснованием соблюдения инвариантов.
-- Обёртка обеспечивает корректные указатели, длины, владение и время жизни
-  буферов, потокобезопасность, обработку ошибок и завершение работы.
-  Паники и исключения не должны пересекать ABI-границу без обработки.
-- Тесты FFI покрывают ошибки, граничные размеры, жизненный цикл и допустимые
-  конкурентные вызовы. Безопасный API не должен позволять нарушать инварианты.
-- Исключение не разрешает unsafe-оптимизации и обход правил через макросы,
-  генерацию кода или отдельные крейты вне задач FFI.
-- Зависимость с безопасным публичным API не делает её внутреннюю реализацию
-  проверенной: безопасность и сопровождение такой зависимости оцениваются
-  отдельно. `forbid(unsafe_code)` не проверяет код зависимостей.
+## 1. No unsafe outside the FFI boundary
 
-## 2. Не более 700 строк в файле кода
+- Our own Rust code contains no `unsafe` except the minimal code required at
+  the FFI boundary, including integration with the Yggdrasil core in Go.
+- FFI is isolated in a dedicated module or low-level crate and provides a safe
+  interface to the rest of the Rust code.
+- All ordinary crate roots, binary roots, examples, integration tests, and
+  `build.rs` must contain `#![forbid(unsafe_code)]`.
+- In a crate with an FFI module, `#![deny(unsafe_code)]` applies, and the
+  `#[allow(unsafe_code)]` permission is granted only for the isolated FFI
+  boundary. `forbid` cannot be locally overridden via `allow`.
+- Every unsafe block and unsafe impl at the FFI boundary is accompanied by a
+  brief `SAFETY:` comment justifying that the invariants are upheld.
+- The wrapper must guarantee correct pointers, lengths, ownership, and buffer
+  lifetimes, thread safety, error handling, and shutdown. Panics and
+  exceptions must not cross the ABI boundary unhandled.
+- FFI tests cover errors, boundary sizes, lifecycles, and permitted concurrent
+  calls. The safe API must not allow invariants to be violated.
+- The exception does not permit unsafe optimizations or rule workarounds via
+  macros, code generation, or separate crates outside FFI tasks.
+- A dependency with a safe public API does not make its internal
+  implementation vetted: the safety and maintenance of such a dependency are
+  evaluated separately. `forbid(unsafe_code)` does not check dependency code.
 
-- Каждый поддерживаемый в проекте файл кода содержит не более 700 строк,
-  включая пустые строки и комментарии. Правило распространяется также
-  на тесты, примеры, FFI-прослойки и скрипты.
-- Документация не подпадает под лимит 700 строк, включая документы
-  со встроенными примерами кода.
-- При приближении к лимиту файл кода разделяется по ответственности.
-- Нельзя обходить лимит минификацией или объединением независимых выражений
-  в одну строку.
+## 2. No more than 700 lines per code file
 
-## 3. Не более 7 элементов в каталоге
+- Every code file maintained in the project contains no more than 700 lines,
+  including blank lines and comments. The rule also applies to tests,
+  examples, FFI shims, and scripts.
+- Documentation is not subject to the 700-line limit, including documents
+  with embedded code examples.
+- As a code file approaches the limit, it is split by responsibility.
+- The limit must not be circumvented by minification or by joining independent
+  expressions into a single line.
 
-- В каждом каталоге не более 7 непосредственно вложенных элементов:
-  файлов и подкаталогов суммарно. Скрытые элементы проекта тоже учитываются.
-- Правило действует и для корня репозитория, и для каталогов тестов и документации.
-- Служебные данные инструментов и генерируемые артефакты, не являющиеся
-  исходниками проекта, не учитываются: например, `.git` и `target`.
-- Структуру нужно планировать заранее; новые уровни каталогов должны отражать
-  назначение компонентов, а не маскировать нарушение лимита.
+## 3. No more than 7 items per directory
 
-## 4. Все кейсы покрыты тестами
+- Each directory contains at most 7 directly nested items: files and
+  subdirectories combined. Hidden project items count too.
+- The rule applies to the repository root as well as to test and
+  documentation directories.
+- Tool service data and generated artifacts that are not project sources do
+  not count: for example, `.git` and `target`.
+- Structure must be planned in advance; new directory levels must reflect the
+  purpose of components, not mask a violation of the limit.
 
-- Для каждого поведения задаются проверяемые ожидаемые результаты.
-- Тесты покрывают успешные сценарии, границы, некорректный ввод и ошибки.
-- Для сетевого и конкурентного кода дополнительно покрываются тайм-ауты,
-  отмена, разрыв и восстановление соединений, backpressure, завершение работы
-  и существенные варианты взаимного порядка операций.
-- Каждый исправленный дефект получает регрессионный тест.
-- Тест проверяет контракт, а не повторяет алгоритм реализации.
-- Процент покрытия строк сам по себе не доказывает покрытие сценариев.
-- Непроверенные сценарии нельзя объявлять покрытыми. Добавление тестов
-  и их фактический запуск отражаются в отчёте отдельно.
+## 4. All cases covered by tests
 
-## 5. Минимальная алгоритмическая сложность
+- For every behavior, verifiable expected results are specified.
+- Tests cover success paths, boundaries, invalid input, and errors.
+- For network and concurrent code, additionally cover timeouts, cancellation,
+  connection loss and recovery, backpressure, shutdown, and significant
+  interleavings of operations.
+- Every fixed defect gets a regression test.
+- A test verifies the contract, not a re-implementation of the algorithm.
+- A line-coverage percentage by itself does not prove scenario coverage.
+- Untested scenarios must not be declared covered. Adding tests and actually
+  running them are reported separately.
 
-- Выбирать минимальную обоснованную временную и пространственную сложность
-  для требуемой семантики и ожидаемых размеров данных.
-- На горячих путях исключать лишние проходы, линейный поиск там, где нужен
-  индекс, и повторное вычисление неизменных значений.
-- Оценивать худший случай и рост состояния, особенно для недоверенного ввода.
-- При конфликте времени и памяти явно фиксировать выбранный компромисс.
-- Оптимизация не должна нарушать корректность, безопасность или контракт API.
+## 5. Minimal algorithmic complexity
 
-## 6. Минимум аллокаций
+- Choose the minimal justified time and space complexity for the required
+  semantics and expected data sizes.
+- On hot paths, eliminate extra passes, linear search where an index is
+  needed, and recomputation of immutable values.
+- Estimate the worst case and state growth, especially for untrusted input.
+- When time and memory conflict, explicitly record the chosen trade-off.
+- Optimization must not break correctness, safety, or the API contract.
 
-- Не создавать лишние `String`, `Vec`, `Box`, `Arc` и копии буферов.
-- Предпочитать заимствования, повторное использование буферов и передачу
-  владения там, где это сохраняет ясный и безопасный жизненный цикл.
-- Не выделять память на каждый пакет, если возможен безопасный reuse.
-- Ограничивать размеры очередей, кешей и буферов; backpressure обязателен.
-- Не заменять аллокации неограниченным потреблением стека или удержанием памяти.
+## 6. Minimal allocations
 
-## 7. Максимум async и lock-free
+- Do not create needless `String`, `Vec`, `Box`, `Arc`, or buffer copies.
+- Prefer borrowing, buffer reuse, and transfer of ownership where it preserves
+  a clear and safe lifecycle.
+- Do not allocate per packet when safe reuse is possible.
+- Bound queue, cache, and buffer sizes; backpressure is mandatory.
+- Do not trade allocations for unbounded stack consumption or memory holds.
 
-- Сетевой ввод-вывод, ожидания и координация выполняются асинхронно.
-- Блокирующие операции и длительные вычисления не выполняются на потоках
-  async executor; для них используется подходящий изолированный исполнитель.
-- Не делать чистые вычисления асинхронными без необходимости.
-- Предпочитать владение состоянием одной задачей и передачу сообщений вместо
-  разделяемого изменяемого состояния; для разделяемых структур — безопасные
-  lock-free решения, где они действительно применимы.
-- Не считать канал или атомарный тип автоматически доказанным lock-free решением.
-- Не удерживать блокировку при `.await`; избегать активного ожидания.
-- Если корректное lock-free решение недоступно, необходимость блокировки,
-  область критической секции и влияние на конкуренцию обосновываются явно.
-- Корректность, отсутствие гонок, ограниченность ресурсов и корректная отмена
-  важнее формального отсутствия блокировок.
+## 7. Maximum async and lock-free
 
-## Конфигурация запуска
+- Network I/O, waiting, and coordination are performed asynchronously.
+- Blocking operations and long computations are not run on async executor
+  threads; use a suitable isolated executor for them.
+- Do not make pure computations asynchronous without need.
+- Prefer single-task ownership of state and message passing over shared
+  mutable state; for shared structures use proven lock-free solutions where
+  they are genuinely applicable.
+- Do not assume a channel or atomic type automatically constitutes a proven
+  lock-free solution.
+- Do not hold a lock across `.await`; avoid busy waiting.
+- If no correct lock-free solution is available, the necessity of locking,
+  the scope of the critical section, and the contention impact must be
+  explicitly justified.
+- Correctness, absence of races, bounded resources, and correct cancellation
+  matter more than formal lock-freedom.
 
-- Server и Client могут запускаться с конфигурационными файлами.
-- Формат конфигурационных файлов — **ktav 0.8.***.
-- Схемы Server и Client должны соответствовать этой версии формата;
-  другой формат или переход на другую ветку версий требует согласования.
-- Загрузку конфигурации отделять от сетевой логики SDK.
-- Валидировать конфигурацию до запуска сетевых сервисов; ошибки должны
-  указывать проблемное поле и не раскрывать секреты.
-- Тестировать корректные конфиги, значения по умолчанию, некорректный синтаксис
-  и недопустимые значения параметров.
+## Runtime configuration
 
-## Порядок работы
+- Server and Client can be started with configuration files.
+- The configuration file format is **ktav 0.8.***.
+- Server and Client schemas must conform to that format version; a different
+  format or a switch to another version branch requires coordination.
+- Keep configuration loading separate from the SDK's networking logic.
+- Validate configuration before starting network services; errors must
+  identify the offending field and must not disclose secrets.
+- Test valid configs, default values, invalid syntax, and invalid parameter
+  values.
 
-- Не запускать локальные тесты, сборки и компиляции без явной просьбы
-  пользователя. По умолчанию проверки выполняются в GitHub CI.
-- Из локальных проверок разрешены только `cargo clippy`, `cargo fmt`
-  и проверка синтаксиса. `cargo check`, `cargo build`, `cargo test`,
-  а также сборки и тесты Go локально не запускать: сборки и тесты —
-  только в GitHub CI; локальные проверки — только clippy, форматирование
-  и синтаксис. Локальный smoke разрешён только в самом конце всего
-  проекта и без локальных build/test — бинарники берутся из проверенных
-  CI-артефактов. Если проверка запускает сборку стороннего кода через
-  `build.rs`, сначала требуется отдельное разрешение на эту сборку.
-- Не повышать версии проекта и зависимостей без явной просьбы пользователя.
-- Не делать коммит, push и не запускать подагентов без явной просьбы пользователя.
-- Комментарии в коде — краткие, на русском языке.
+## Working procedure
 
-## Следствие для архитектурного черновика
+- Do not run local tests, builds, or compilations without an explicit user
+  request. By default, checks run in GitHub CI.
+- Of local checks, only `cargo clippy`, `cargo fmt`, and syntax checks are
+  allowed. Do not run `cargo check`, `cargo build`, `cargo test`, or Go
+  builds/tests locally: builds and tests run only in GitHub CI; local checks
+  are clippy, formatting, and syntax only. A local smoke run is allowed only
+  at the very end of the entire project and without local build/test —
+  binaries are taken from verified CI artifacts. If a check triggers a build
+  of third-party code via `build.rs`, a separate permission for that build is
+  required first.
+- Do not bump project or dependency versions without an explicit user request.
+- Do not commit, push, or run subagents without an explicit user request.
+- Comments in code are concise and written in English.
 
-`docs/architecture/keypipe.md` — архитектурный черновик. Интеграция с ядром Yggdrasil на Go
-через FFI допустима при соблюдении требований к изолированной безопасной
-обёртке. Эскизы не освобождают от проверки инвариантов FFI и остальных правил.
+## Consequence for the architectural draft
+
+`docs/architecture/keypipe.md` is an architectural draft. Integration with
+the Yggdrasil core in Go via FFI is allowed provided the requirements for an
+isolated safe wrapper are met. Sketches do not exempt one from verifying FFI
+invariants or from the other rules.

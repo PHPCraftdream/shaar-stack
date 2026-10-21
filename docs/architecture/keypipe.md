@@ -1,175 +1,175 @@
-# keypipe — проброс портов по ключу без сетевых интерфейсов
+# keypipe — key-based port forwarding without network interfaces
 
-Черновик архитектуры и эскиз кода. Это не готовая программа: имена API в iroh
-(до 1.0), rust-libp2p и yggdrasil-go меняются от версии к версии, поэтому всё
-помеченное **⚠ проверить** нужно сверить с исходниками выбранных версий.
+An architecture draft and code sketch. This is not a finished program: API names in iroh
+(pre-1.0), rust-libp2p, and yggdrasil-go change from version to version, so everything
+marked **⚠ verify** must be checked against the sources of the chosen versions.
 
 ---
 
-## 1. Идея
+## 1. The idea
 
-Устройство в сети определяется **ключом**, а не IP-адресом. В системе ничего не
-настраивается: нет TUN-интерфейсов, нет VPN-маршрутов, нет открытых портов на
-роутере, не нужен root.
+A device on the network is identified by a **key**, not an IP address. Nothing in the
+system needs configuring: no TUN interfaces, no VPN routes, no open ports on the router,
+no root required.
 
-- **Сервер** держит внутренний сервис на `127.0.0.1` (SSH, веб-панель, бот) и
-  «выставляет» этот порт под своим ключом.
-- **Клиент** находит сервер по ключу и открывает у себя локальный порт. Всё, что
-  приходит на этот порт, попадает во внутренний сервис сервера.
+- The **server** keeps an internal service on `127.0.0.1` (SSH, web panel, bot) and
+  "exposes" that port under its key.
+- The **client** finds the server by key and opens a local port on its side. Everything
+  that arrives at that port goes to the server's internal service.
 
 ```
-  Клиент                                                      Сервер
-  ssh -p 2222 127.0.0.1                                       sshd на 127.0.0.1:22
+  Client                                                      Server
+  ssh -p 2222 127.0.0.1                                       sshd on 127.0.0.1:22
         │                                                            ▲
         ▼                                                            │
-  [keypipe connect] ═══ QUIC + TLS, аутентификация по ключам ═══ [keypipe listen]
+  [keypipe connect] ═══ QUIC + TLS, key-based authentication ═══ [keypipe listen]
    127.0.0.1:2222                                               --target 127.0.0.1:22
 ```
 
-Вся инфраструктура принадлежит сообществам, а не компаниям: инфраструктура n0
-(DNS и relay) в iroh **отключена**.
+All the infrastructure belongs to communities, not companies: n0 infrastructure
+(DNS and relay) in iroh is **disabled**.
 
 ---
 
-## 2. Один ключ — четыре адреса
+## 2. One key — four addresses
 
-Все используемые системы работают на **Ed25519**. Поэтому у устройства один
-секретный ключ, а все адреса из него вычисляются:
+All the systems used run on **Ed25519**. So a device has a single private key, and all
+its addresses are derived from it:
 
-| Где | Адрес | Как получается |
+| Where | Address | How it's derived |
 |---|---|---|
-| iroh | `EndpointId` | Публичный ключ |
-| Mainline DHT (pkarr) | Ключ записи | Тот же публичный ключ |
-| Yggdrasil | Адрес узла `200:…` и ключ маршрутизации | Тот же публичный ключ |
-| libp2p | `PeerId` | Тот же публичный ключ |
+| iroh | `EndpointId` | Public key |
+| Mainline DHT (pkarr) | Record key | The same public key |
+| Yggdrasil | Node address `200:…` and routing key | The same public key |
+| libp2p | `PeerId` | The same public key |
 
-Важное следствие: **адрес сервера в Yggdrasil известен клиенту заранее**, его не
-нужно искать. Значит, даже если поиск в DHT не сработал, путь через Yggdrasil
-остаётся.
+An important corollary: **the server's Yggdrasil address is known to the client in
+advance**, no lookup needed. So even if the DHT search fails, the path via Yggdrasil
+remains.
 
 ---
 
-## 3. Пути и их роли
+## 3. Paths and their roles
 
-Здесь разделяются три функции: **поиск** (где ты), **сигнализация** (договориться
-о пробивке NAT) и **данные** (сам трафик).
+Three functions are separated here: **discovery** (where you are), **signaling**
+(agreeing on NAT traversal) and **data** (the traffic itself).
 
-| Путь | Инфраструктура | Поиск | Сигнализация | Данные |
+| Path | Infrastructure | Discovery | Signaling | Data |
 |---|---|---|---|---|
-| **Прямой QUIC** (IPv6, IPv4, LAN, пробитый NAT) | Нет | — | — | ✅ Основной |
-| **Mainline DHT** (pkarr) | BitTorrent, ~10 млн узлов | ✅ | ❌ | ❌ |
-| **libp2p circuit relay v2** | Публичные узлы IPFS Amino (~25 тыс.) | ✅ (адреса relay) | ✅ | ❌ Только для пробивки |
-| **Yggdrasil** (userspace) | Публичные пиры сообщества | Не нужен: адрес = ключ | ✅ | ✅ Запасной |
+| **Direct QUIC** (IPv6, IPv4, LAN, punched NAT) | None | — | — | ✅ Primary |
+| **Mainline DHT** (pkarr) | BitTorrent, ~10M nodes | ✅ | ❌ | ❌ |
+| **libp2p circuit relay v2** | Public IPFS Amino nodes (~25K) | ✅ (relay addresses) | ✅ | ❌ For traversal only |
+| **Yggdrasil** (userspace) | Community public peers | Not needed: address = key | ✅ | ✅ Fallback |
 
-### Почему libp2p подходит именно для сигнализации
+### Why libp2p fits exactly for signaling
 
-Публичные узлы IPFS (Kubo) по умолчанию работают как **ограниченные relay**
-(circuit relay v2): соединение через них ограничено по времени и объёму
-(порядка пары минут и ~100 КБ — **⚠ проверить** текущие лимиты Kubo). Для
-передачи данных этого мало, а для обмена кандидатами адресов и пробивки NAT —
-ровно то, что нужно. Они для этого и задуманы.
+Public IPFS (Kubo) nodes by default act as **limited relays**
+(circuit relay v2): connections through them are limited in time and volume
+(on the order of a couple of minutes and ~100 KB — **⚠ verify** current Kubo limits).
+That is too little for data transfer, but exactly right for exchanging address
+candidates and punching NAT. That's what they were designed for.
 
-### Почему пробивает iroh, а не libp2p
+### Why iroh does the punching, not libp2p
 
-У libp2p есть своя пробивка NAT (DCUtR), но она пробивает **сокет libp2p**.
-Нам нужна дыра в NAT для **UDP-сокета iroh**, иначе прямой путь достанется не
-тому стеку. Поэтому libp2p и Yggdrasil служат iroh только **каналом**: через них
-идут QUIC-пакеты, а iroh в новых версиях выполняет обход NAT внутри самого
-QUIC-соединения (multipath + QUIC NAT traversal), используя любой уже
-работающий путь как канал согласования.
+libp2p has its own NAT traversal (DCUtR), but it punches a hole for **the libp2p
+socket**. We need a hole in the NAT for **the iroh UDP socket**, otherwise the direct
+path goes to the wrong stack. So libp2p and Yggdrasil serve iroh only as a **channel**:
+QUIC packets travel through them, and in newer versions iroh performs NAT traversal
+inside the QUIC connection itself (multipath + QUIC NAT traversal), using any
+already-working path as the negotiation channel.
 
 ---
 
-## 4. Как устанавливается соединение
+## 4. How the connection is established
 
 ```
- Клиент                                                            Сервер
-   │ 1. ключ сервера уже известен (конфиг)                           │
-   │                                                                 │ публикует в Mainline:
-   │ 2. поиск в Mainline DHT ──────────────────────────────────────► │  - свои IP-адреса
-   │    получает IP-адреса и relay-адреса libp2p                     │  - relay-адреса libp2p
+ Client                                                            Server
+   │ 1. server key already known (config)                            │
+   │                                                                 │ publishes to Mainline:
+   │ 2. search in Mainline DHT ────────────────────────────────────► │  - its IP addresses
+   │    gets IP addresses and libp2p relay addresses                 │  - libp2p relay addresses
    │                                                                 │
-   │ 3. параллельно пробует все пути:                                │
-   │    ├─ прямой IP ─────────────────────── (если доступен) ───────►│
+   │ 3. tries all paths in parallel:                                 │
+   │    ├─ direct IP ───────────────────── (if available) ──────────►│
    │    ├─ libp2p relay ═══ /p2p/RELAY/p2p-circuit/p2p/SERVER ══════►│
-   │    └─ Yggdrasil ═══ по ключу сервера, без поиска ══════════════►│
+   │    └─ Yggdrasil ═══ by server key, no lookup ══════════════════►│
    │                                                                 │
-   │ 4. по первому заработавшему пути: TLS-рукопожатие, проверка     │
-   │    ключа клиента по allowlist                                   │
+   │ 4. on the first working path: TLS handshake, verification       │
+   │    of the client key against the allowlist                      │
    │                                                                 │
-   │ 5. QUIC NAT traversal: обмен кандидатами по этому пути,         │
-   │    одновременная отправка UDP-пакетов → прямой путь             │
+   │ 5. QUIC NAT traversal: candidate exchange over that path,       │
+   │    simultaneous UDP packet sending → direct path                │
    │                                                                 │
-   │ 6. данные идут напрямую;                                        │
-   │    libp2p relay закрывается сам (лимиты);                       │
-   │    Yggdrasil остаётся в резерве или закрывается (режим ниже)    │
+   │ 6. data goes directly;                                          │
+   │    libp2p relay closes by itself (limits);                      │
+   │    Yggdrasil stays in reserve or is closed (mode below)         │
 ```
 
 ---
 
-## 5. Политика путей
+## 5. Path policy
 
-**Приоритет для данных:** прямой QUIC → Yggdrasil → (libp2p relay — никогда для
-данных).
+**Priority for data:** direct QUIC → Yggdrasil → (libp2p relay — never for data).
 
-**Режимы запасных путей** (флаг `--fallback`):
+**Fallback path modes** (the `--fallback` flag):
 
-| Режим | libp2p relay | Yggdrasil |
+| Mode | libp2p relay | Yggdrasil |
 |---|---|---|
-| `signal` | Только пробивка | Только пробивка, затем путь закрывается |
-| `standby` (по умолчанию) | Только пробивка | Пробивка + резерв: данные идут по нему, если прямого пути нет или он пропал |
+| `signal` | Traversal only | Traversal only, then the path is closed |
+| `standby` (default) | Traversal only | Traversal + reserve: data goes over it if there is no direct path or it disappeared |
 
-**Нюанс: NAT забывает дыры.** Если прямой путь пропал (сменилась сеть, роутер
-сбросил отображения), запасные каналы снова нужны для новой пробивки. Поэтому
-даже в режиме `signal` транспорты не удаляются из endpoint, а «засыпают»:
-- libp2p: при необходимости заново подключается через relay;
-- Yggdrasil: узел остаётся в сети, путь открывается снова по требованию.
+**Nuance: NAT forgets holes.** If the direct path disappeared (network changed, the
+router dropped its mappings), the fallback channels are needed again for a new
+traversal. So even in `signal` mode the transports are not removed from the endpoint
+but "go to sleep":
+- libp2p: reconnects via relay when needed;
+- Yggdrasil: the node stays on the network, the path is opened again on demand.
 
-QUIC keepalive на прямом пути (каждые ~15–25 с) держит дыру в NAT открытой.
-
----
-
-## 6. Доступ и безопасность
-
-- **Allowlist ключей** на сервере (`allowed.txt`): главный механизм доступа.
-  Проверяется после TLS-рукопожатия, где ключ клиента подтверждён криптографически.
-- **Внутренний сервис слушает только `127.0.0.1`.**
-- **Ключ** — один файл с правами `0600`.
-- **Публичность.** Запись в Mainline DHT видят все: в ней IP-адреса сервера и
-  его relay-адреса libp2p. Если не хочется публиковать домашний IP, можно
-  публиковать **только relay-адреса libp2p**: сигнализация через них, Yggdrasil
-  вообще не требует записи. Прямой путь тогда найдётся на шаге пробивки.
-- **Защита в два слоя.** Аутентификация в самом сервисе (SSH-ключи) остаётся.
-- Промежуточные узлы (relay IPFS, пиры Yggdrasil) видят только зашифрованные
-  QUIC-пакеты.
+QUIC keepalive on the direct path (every ~15–25 s) keeps the NAT hole open.
 
 ---
 
-## 7. Структура проекта
+## 6. Access and security
+
+- **Key allowlist** on the server (`allowed.txt`): the primary access mechanism.
+  Checked after the TLS handshake, where the client key has been cryptographically confirmed.
+- **The internal service listens only on `127.0.0.1`.**
+- The **key** is a single file with `0600` permissions.
+- **Publicity.** The Mainline DHT record is visible to everyone: it contains the server's
+  IP addresses and its libp2p relay addresses. If you don't want to publish your home IP,
+  you can publish **only the libp2p relay addresses**: signaling goes through them, and
+  Yggdrasil doesn't require a record at all. The direct path is then found at the
+  traversal step.
+- **Two layers of protection.** Authentication inside the service itself (SSH keys) remains.
+- Intermediate nodes (IPFS relays, Yggdrasil peers) see only encrypted QUIC packets.
+
+---
+
+## 7. Project structure
 
 ```
 keypipe/                         # cargo workspace
 ├── Cargo.toml
-├── keypipe/                     # бинарники
+├── keypipe/                     # binaries
 │   └── src/
-│       ├── common.rs            # ключ, allowlist, endpoint, политика путей
+│       ├── common.rs            # key, allowlist, endpoint, path policy
 │       ├── server.rs
 │       └── client.rs
-├── iroh-yggdrasil/              # custom transport: Yggdrasil в userspace
-│   ├── build.rs                 # собирает Go-прослойку в статическую библиотеку
-│   ├── yggshim/                 # Go: тонкая обёртка над ядром yggdrasil-go
+├── iroh-yggdrasil/              # custom transport: Yggdrasil in userspace
+│   ├── build.rs                 # builds the Go shim into a static library
+│   ├── yggshim/                 # Go: thin wrapper over the yggdrasil-go core
 │   │   ├── go.mod
 │   │   └── shim.go
 │   └── src/
 │       ├── ffi.rs
 │       └── lib.rs
-└── iroh-libp2p/                 # custom transport: QUIC-датаграммы через libp2p relay
+└── iroh-libp2p/                 # custom transport: QUIC datagrams over a libp2p relay
     └── src/
         ├── swarm.rs
         └── lib.rs
 ```
 
-### Корневой Cargo.toml
+### Root Cargo.toml
 
 ```toml
 [workspace]
@@ -177,43 +177,43 @@ members = ["keypipe", "iroh-yggdrasil", "iroh-libp2p"]
 resolver = "2"
 
 [workspace.dependencies]
-iroh   = { version = "0.97", features = ["discovery-pkarr-dht", "unstable-custom-transports"] } # ⚠ актуальная
+iroh   = { version = "0.97", features = ["discovery-pkarr-dht", "unstable-custom-transports"] } # ⚠ current
 tokio  = { version = "1", features = ["full"] }
 anyhow = "1"
 bytes  = "1"
 libp2p = { version = "0.55", features = ["tokio", "tcp", "quic", "noise", "yamux",
-                                          "kad", "identify", "relay", "macros"] }        # ⚠ актуальная
-libp2p-stream = "0.3"                                                                      # ⚠ актуальная
+                                          "kad", "identify", "relay", "macros"] }        # ⚠ current
+libp2p-stream = "0.3"                                                                      # ⚠ current
 ```
 
 ---
 
-## 8. Общий код — `keypipe/src/common.rs`
+## 8. Shared code — `keypipe/src/common.rs`
 
 ```rust
 use std::{collections::HashSet, fs, path::Path, sync::Arc};
 
 use anyhow::{ensure, Context, Result};
 use iroh::{
-    discovery::dht::DhtDiscovery,                 // ⚠ в новых версиях: address_lookup
+    discovery::dht::DhtDiscovery,                 // ⚠ in newer versions: address_lookup
     endpoint::{RecvStream, SendStream},
     Endpoint, EndpointId, RelayMode, SecretKey,
 };
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 pub const ALPN: &[u8] = b"keypipe/tcp/0";
-/// QUIC-поток виден другой стороне только после первых байтов.
+/// The other side sees a QUIC stream only after the first bytes.
 pub const HANDSHAKE: &[u8; 5] = b"kpipe";
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum FallbackMode { Signal, Standby }
 
-/// Один ключ на всё: iroh, pkarr, Yggdrasil, libp2p.
+/// One key for everything: iroh, pkarr, Yggdrasil, libp2p.
 pub fn load_or_create_key(path: &Path) -> Result<SecretKey> {
     if path.exists() {
         let bytes: [u8; 32] = fs::read(path)?
             .try_into()
-            .map_err(|_| anyhow::anyhow!("ключ должен быть 32 байта"))?;
+            .map_err(|_| anyhow::anyhow!("key must be 32 bytes"))?;
         return Ok(SecretKey::from_bytes(&bytes));
     }
     let key = SecretKey::generate(&mut rand::rngs::OsRng);
@@ -228,11 +228,11 @@ pub fn load_or_create_key(path: &Path) -> Result<SecretKey> {
 
 pub fn load_allowlist(path: &Path) -> Result<HashSet<EndpointId>> {
     fs::read_to_string(path)
-        .context("не удалось прочитать allowlist")?
+        .context("failed to read the allowlist")?
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(|l| l.parse::<EndpointId>().context(format!("плохой ключ: {l}")))
+        .map(|l| l.parse::<EndpointId>().context(format!("bad key: {l}")))
         .collect()
 }
 
@@ -242,28 +242,28 @@ pub struct Net {
     pub p2p: Arc<iroh_libp2p::Libp2pTransport>,
 }
 
-/// Endpoint без инфраструктуры n0, с двумя запасными транспортами.
+/// An Endpoint without n0 infrastructure, with two fallback transports.
 pub async fn make_net(key: SecretKey, alpns: Vec<Vec<u8>>, mode: FallbackMode) -> Result<Net> {
-    let seed = key.to_bytes(); // 32-байтовый seed Ed25519 — общий для всех сетей
+    let seed = key.to_bytes(); // 32-byte Ed25519 seed — shared across all networks
 
-    // Yggdrasil в userspace: публичные пиры + multicast в локальной сети.
+    // Yggdrasil in userspace: public peers + LAN multicast.
     let ygg = Arc::new(iroh_yggdrasil::YggTransport::start(
         &seed,
         &[
-            "tls://пир-1.example:443", // ⚠ взять 3–5 пиров из yggdrasil-network/public-peers
-            "tls://пир-2.example:443",
+            "tls://peer-1.example:443", // ⚠ take 3–5 peers from yggdrasil-network/public-peers
+            "tls://peer-2.example:443",
         ],
     )?);
 
-    // libp2p: вход в IPFS Amino DHT, поиск relay, резервирование слотов.
+    // libp2p: entry into the IPFS Amino DHT, relay discovery, slot reservation.
     let p2p = Arc::new(iroh_libp2p::Libp2pTransport::start(&seed).await?);
 
-    let endpoint = Endpoint::empty_builder(RelayMode::Disabled) // без relay n0, без DNS n0
+    let endpoint = Endpoint::empty_builder(RelayMode::Disabled) // no n0 relay, no n0 DNS
         .secret_key(key)
         .discovery(DhtDiscovery::builder())                     // Mainline DHT
-        .add_custom_transport(ygg.clone())                      // ⚠ проверить имя метода
+        .add_custom_transport(ygg.clone())                      // ⚠ verify the method name
         .add_custom_transport(p2p.clone())
-        .path_selector(PathPolicy { mode })                     // ⚠ проверить API выбора пути
+        .path_selector(PathPolicy { mode })                     // ⚠ verify the path selection API
         .alpns(alpns)
         .bind()
         .await?;
@@ -271,20 +271,20 @@ pub async fn make_net(key: SecretKey, alpns: Vec<Vec<u8>>, mode: FallbackMode) -
     Ok(Net { endpoint, ygg, p2p })
 }
 
-/// Политика путей: прямой IP → Yggdrasil → libp2p (никогда для данных).
-/// ⚠ ЭСКИЗ: трейт и контекст выбора пути смотри в iroh/examples/custom-transport.rs.
+/// Path policy: direct IP → Yggdrasil → libp2p (never for data).
+/// ⚠ SKETCH: see the trait and path-selection context in iroh/examples/custom-transport.rs.
 struct PathPolicy { mode: FallbackMode }
 
 impl iroh::endpoint::transports::PathSelector for PathPolicy {
     fn rank(&self, path: &iroh::endpoint::transports::Addr) -> Option<u8> {
         use iroh::endpoint::transports::Addr;
         match path {
-            Addr::Ip(_) => Some(0),                                         // всегда лучший
+            Addr::Ip(_) => Some(0),                                         // always best
             Addr::Custom(a) if a.id() == iroh_yggdrasil::TRANSPORT_ID => match self.mode {
-                FallbackMode::Standby => Some(1),                           // резерв для данных
-                FallbackMode::Signal  => None,                              // только согласование
+                FallbackMode::Standby => Some(1),                           // reserve for data
+                FallbackMode::Signal  => None,                              // negotiation only
             },
-            Addr::Custom(a) if a.id() == iroh_libp2p::TRANSPORT_ID => None, // только согласование
+            Addr::Custom(a) if a.id() == iroh_libp2p::TRANSPORT_ID => None, // negotiation only
             _ => None,
         }
     }
@@ -309,23 +309,22 @@ pub async fn pipe(tcp: TcpStream, mut send: SendStream, mut recv: RecvStream) ->
 pub async fn expect_handshake(recv: &mut RecvStream) -> Result<()> {
     let mut buf = [0u8; HANDSHAKE.len()];
     recv.read_exact(&mut buf).await?;
-    ensure!(&buf == HANDSHAKE, "неверное приветствие");
+    ensure!(&buf == HANDSHAKE, "wrong handshake");
     Ok(())
 }
 ```
 
-**Замечание о «только для сигнализации».** Если путь недопустим для данных
-(`None` в политике), iroh всё равно может использовать его на этапе
-установления соединения и согласования прямого пути, но не отправляет по нему
-данные приложения, когда есть путь лучше. **⚠ проверить**, что выбранная версия
-iroh различает «путь для согласования» и «путь для данных». Если нет, режим
-`signal` реализуется в самом транспорте: после того как наблюдатель за
-соединением (`conn` paths watcher) увидел подтверждённый прямой путь,
-транспорт перестаёт отправлять пакеты этого соединения.
+**A note on "signaling only".** If a path is not eligible for data (`None` in the
+policy), iroh may still use it during connection establishment and negotiation of the
+direct path, but it does not send application data over it when a better path exists.
+**⚠ Verify** that the chosen iroh version distinguishes a "path for negotiation" from
+a "path for data". If it doesn't, the `signal` mode is implemented inside the transport
+itself: once the connection observer (`conn` paths watcher) has seen a confirmed direct
+path, the transport stops sending packets of that connection over the signaling path.
 
 ---
 
-## 9. Сервер — `keypipe/src/server.rs`
+## 9. Server — `keypipe/src/server.rs`
 
 ```rust
 mod common;
@@ -341,7 +340,7 @@ use common::*;
 
 #[derive(Parser)]
 struct Args {
-    /// Внутренний сервис, например 127.0.0.1:22
+    /// Internal service, e.g. 127.0.0.1:22
     #[arg(long)]
     target: String,
     #[arg(long, default_value = "keypipe.key")]
@@ -364,23 +363,23 @@ async fn main() -> Result<()> {
 
     println!("keypipe-server");
     println!("  id:        {}", ep.id());
-    println!("  yggdrasil: {}", net.ygg.address());           // 200:… — из того же ключа
-    println!("  libp2p:    {}", net.p2p.peer_id());           // тот же ключ
+    println!("  yggdrasil: {}", net.ygg.address());           // 200:… — derived from the same key
+    println!("  libp2p:    {}", net.p2p.peer_id());           // same key
     println!("  target:    {target}");
 
-    // Ничего не публикуем вручную:
-    // - DhtDiscovery публикует в Mainline адреса endpoint и обновляет запись;
-    // - libp2p-транспорт сообщает iroh свои relay-адреса как CustomAddr,
-    //   и они попадают в ту же запись (⚠ проверить, какие типы адресов
-    //   публикуются; размер записи ≤ 1000 байт → не более 2–3 relay-адресов);
-    // - Yggdrasil-адрес не публикуется вовсе: клиент вычисляет его из ключа.
+    // Nothing is published manually:
+    // - DhtDiscovery publishes the endpoint addresses to Mainline and refreshes the record;
+    // - the libp2p transport reports its relay addresses to iroh as CustomAddr,
+    //   and they land in the same record (⚠ verify which address types get
+    //   published; record size ≤ 1000 bytes → at most 2–3 relay addresses);
+    // - the Yggdrasil address is not published at all: the client derives it from the key.
 
     while let Some(incoming) = ep.accept().await {
         let allow = allow.clone();
         let target = target.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_connection(incoming, allow, target).await {
-                eprintln!("соединение: {e:#}");
+                eprintln!("connection: {e:#}");
             }
         });
     }
@@ -396,11 +395,11 @@ async fn handle_connection(
     let peer = conn.remote_id();
 
     if !allow.contains(&peer) {
-        eprintln!("отказ: {peer}");
+        eprintln!("denied: {peer}");
         conn.close(1u32.into(), b"forbidden");
         return Ok(());
     }
-    println!("клиент подключён: {peer}");
+    println!("client connected: {peer}");
 
     while let Ok((send, mut recv)) = conn.accept_bi().await {
         let target = target.clone();
@@ -412,18 +411,18 @@ async fn handle_connection(
             }
             .await;
             if let Err(e) = res {
-                eprintln!("поток: {e:#}");
+                eprintln!("stream: {e:#}");
             }
         });
     }
-    println!("клиент отключён: {peer}");
+    println!("client disconnected: {peer}");
     Ok(())
 }
 ```
 
 ---
 
-## 10. Клиент — `keypipe/src/client.rs`
+## 10. Client — `keypipe/src/client.rs`
 
 ```rust
 mod common;
@@ -439,7 +438,7 @@ use common::*;
 
 #[derive(Parser)]
 struct Args {
-    /// Ключ (EndpointId) сервера
+    /// Server key (EndpointId)
     #[arg(long)]
     server: EndpointId,
     #[arg(long, default_value = "127.0.0.1:2222")]
@@ -457,10 +456,10 @@ async fn main() -> Result<()> {
     let net = Arc::new(make_net(key, vec![], args.fallback).await?);
 
     println!("keypipe-client");
-    println!("  мой id: {}  ← добавь в allowed.txt на сервере", net.endpoint.id());
+    println!("  my id: {}  ← add this to allowed.txt on the server", net.endpoint.id());
 
     let listener = TcpListener::bind(&args.listen).await?;
-    println!("  слушаю: {} → {}", args.listen, args.server);
+    println!("  listening: {} → {}", args.listen, args.server);
 
     let slot: Arc<Mutex<Option<Connection>>> = Arc::new(Mutex::new(None));
 
@@ -497,45 +496,45 @@ async fn get_connection(
         }
     }
 
-    // Адрес сервера в Yggdrasil вычисляется из его ключа — добавляем сразу.
-    // Остальные адреса (IP, relay libp2p) iroh найдёт в Mainline DHT сам.
+    // The server's Yggdrasil address is derived from its key — add it right away.
+    // The other addresses (IP, libp2p relay) iroh will find in the Mainline DHT itself.
     let addr = EndpointAddr::new(server)
-        .with_custom_addr(iroh_yggdrasil::addr_for(&server)); // ⚠ проверить API
+        .with_custom_addr(iroh_yggdrasil::addr_for(&server)); // ⚠ verify the API
 
     let c = net.endpoint.connect(addr, ALPN).await?;
-    println!("соединение установлено");
+    println!("connection established");
     *guard = Some(c.clone());
     Ok(c)
 }
 ```
 
-Запуск:
+Running:
 
 ```bash
-# сервер
+# server
 keypipe-server --target 127.0.0.1:22
 
-# клиент
-keypipe-client --server <id_сервера>
+# client
+keypipe-client --server <server_id>
 ssh -p 2222 user@127.0.0.1
 ```
 
 ---
 
-## 11. Транспорт `iroh-yggdrasil`
+## 11. The `iroh-yggdrasil` transport
 
-### Идея
+### The idea
 
-Ядро yggdrasil-go само по себе работает как **packet conn с адресацией по
-публичному ключу**: отправить датаграмму узлу с ключом X, получить датаграмму
-от узла с ключом Y. IPv6, TUN и TCP-стек — это надстройки над ним, и они нам
-не нужны. Берём только ядро.
+The yggdrasil-go core by itself works as a **packet conn addressed by public key**:
+send a datagram to the node with key X, receive a datagram from the node with key Y.
+IPv6, TUN, and the TCP stack are layers on top of it, and we don't need them. We take
+only the core.
 
-Зрелой реализации Yggdrasil на Rust нет, поэтому ядро на Go собирается в
-**статическую библиотеку** (`go build -buildmode=c-archive`) и линкуется в Rust.
-На выходе один бинарник: без отдельного процесса, без TUN, без root.
+There is no mature Yggdrasil implementation in Rust, so the Go core is built into a
+**static library** (`go build -buildmode=c-archive`) and linked into Rust. The result
+is a single binary: no separate process, no TUN, no root.
 
-### Go-прослойка — `iroh-yggdrasil/yggshim/shim.go`
+### The Go shim — `iroh-yggdrasil/yggshim/shim.go`
 
 ```go
 package main
@@ -575,8 +574,8 @@ func ygg_start(seed *C.uint8_t, peers *C.char) C.int {
 		opts = append(opts, core.Peer{URI: u})
 	}
 
-	// ⚠ проверить: в v0.5 core.New принимает TLS-сертификат,
-	// построенный из ключа узла (см. config.NodeConfig в yggdrasil-go).
+	// ⚠ verify: in v0.5 core.New takes a TLS certificate
+	// built from the node key (see config.NodeConfig in yggdrasil-go).
 	cert, err := certFromKey(sk)
 	if err != nil {
 		return -3
@@ -602,7 +601,7 @@ func ygg_send(dst *C.uint8_t, buf *C.uint8_t, n C.int) C.int {
 	return n
 }
 
-// Блокирующий приём: Rust вызывает в отдельном потоке.
+// Blocking receive: Rust calls it on a separate thread.
 //
 //export ygg_recv
 func ygg_recv(buf *C.uint8_t, capacity C.int, src *C.uint8_t) C.int {
@@ -621,7 +620,7 @@ func ygg_stop() { node.Stop() }
 func main() {}
 ```
 
-### Сборка — `iroh-yggdrasil/build.rs`
+### Build — `iroh-yggdrasil/build.rs`
 
 ```rust
 fn main() {
@@ -630,17 +629,17 @@ fn main() {
         .args(["build", "-buildmode=c-archive", "-o", &format!("{out}/libyggshim.a"), "."])
         .current_dir("yggshim")
         .status()
-        .expect("нужен установленный Go");
+        .expect("Go must be installed");
     assert!(status.success());
 
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static=yggshim");
-    println!("cargo:rustc-link-lib=dylib=pthread"); // ⚠ на Linux; на macOS — фреймворки
+    println!("cargo:rustc-link-lib=dylib=pthread"); // ⚠ on Linux; on macOS — frameworks
     println!("cargo:rerun-if-changed=yggshim");
 }
 ```
 
-### Rust-часть — `iroh-yggdrasil/src/lib.rs`
+### The Rust side — `iroh-yggdrasil/src/lib.rs`
 
 ```rust
 mod ffi {
@@ -659,10 +658,10 @@ use bytes::Bytes;
 use iroh::endpoint::transports::{CustomAddr /* , CustomTransport, CustomEndpoint, CustomSender */};
 use tokio::sync::mpsc;
 
-/// ⚠ зарезервировать свой id в iroh/TRANSPORTS.md
+/// ⚠ reserve our own id in iroh/TRANSPORTS.md
 pub const TRANSPORT_ID: u16 = 0x5947; // "YG"
 
-/// Адрес узла в Yggdrasil = его ключ, поэтому вычисляется без поиска.
+/// A node's Yggdrasil address = its key, so it is derived without any lookup.
 pub fn addr_for(id: &iroh::EndpointId) -> CustomAddr {
     CustomAddr::from_parts(TRANSPORT_ID, id.as_bytes())
 }
@@ -677,10 +676,10 @@ impl YggTransport {
     pub fn start(seed: &[u8; 32], peers: &[&str]) -> anyhow::Result<Self> {
         let peers = CString::new(peers.join("\n"))?;
         anyhow::ensure!(unsafe { ffi::ygg_start(seed.as_ptr(), peers.as_ptr()) } == 0,
-                        "не удалось запустить Yggdrasil");
+                        "failed to start Yggdrasil");
         let mtu = unsafe { ffi::ygg_mtu() } as usize;
 
-        // Приём в отдельном OS-потоке: ygg_recv блокирующий.
+        // Receive on a separate OS thread: ygg_recv is blocking.
         let (tx, rx) = mpsc::channel(1024);
         std::thread::spawn(move || {
             let mut buf = vec![0u8; mtu];
@@ -706,8 +705,8 @@ impl YggTransport {
     }
 }
 
-// ⚠ ЭСКИЗ реализации трейтов: сигнатуры строго по
-// iroh/src/socket/transports/custom.rs и примеру транспорта Tor.
+// ⚠ SKETCH of the trait implementations: signatures strictly per
+// iroh/src/socket/transports/custom.rs and the Tor transport example.
 //
 // impl CustomTransport for YggTransport {
 //     fn bind(self: Arc<Self>) -> io::Result<Box<dyn CustomEndpoint>> { … }
@@ -715,13 +714,13 @@ impl YggTransport {
 // impl CustomEndpoint for YggEndpoint {
 //     fn local_addrs(&self) -> … { [CustomAddr::from_parts(TRANSPORT_ID, &self.pubkey)] }
 //     fn poll_recv(&mut self, cx, bufs, metas, src_addrs) -> Poll<io::Result<usize>> {
-//         // взять (src, pkt) из self.rx, src → CustomAddr::from_parts(TRANSPORT_ID, &src)
+//         // take (src, pkt) from self.rx, src → CustomAddr::from_parts(TRANSPORT_ID, &src)
 //     }
 //     fn create_sender(&self) -> Arc<dyn CustomSender> { … }
 // }
 // impl CustomSender for YggSender {
 //     fn poll_send(&self, cx, dst: &CustomAddr, transmit) -> Poll<io::Result<()>> {
-//         // dst.data() → 32 байта ключа → self.send(...)
+//         // dst.data() → 32 bytes of key → self.send(...)
 //     }
 // }
 
@@ -732,22 +731,22 @@ impl Drop for YggTransport {
 
 ---
 
-## 12. Транспорт `iroh-libp2p`
+## 12. The `iroh-libp2p` transport
 
-### Идея
+### The idea
 
-1. Узел libp2p с **тем же ключом** входит в **IPFS Amino DHT** (Kademlia,
-   протокол `/ipfs/kad/1.0.0`).
-2. **Сервер** находит публичные relay-узлы (Kubo с relay v2), резервирует у
-   2–3 из них слот и получает адреса вида
+1. A libp2p node with the **same key** joins the **IPFS Amino DHT** (Kademlia,
+   protocol `/ipfs/kad/1.0.0`).
+2. The **server** finds public relay nodes (Kubo with relay v2), reserves a slot with
+   2–3 of them, and obtains addresses of the form
    `/ip4/…/p2p/RELAY/p2p-circuit/p2p/SERVER`.
-   Эти адреса уходят в iroh как `CustomAddr` и публикуются в Mainline.
-3. **Клиент** подключается к серверу по relay-адресу.
-4. По этому соединению открывается поток с протоколом
-   `/keypipe/dgram/1.0.0`, через который идут **QUIC-датаграммы iroh** в
-   кадрах `[u16 длина][данные]`.
-5. iroh выполняет по этому каналу рукопожатие и пробивку NAT. Лимиты relay
-   закрывают канал сами, когда он отработал.
+   These addresses go to iroh as `CustomAddr` and are published to Mainline.
+3. The **client** connects to the server via the relay address.
+4. Over that connection a stream is opened with protocol
+   `/keypipe/dgram/1.0.0`, through which **iroh QUIC datagrams** travel in
+   `[u16 length][data]` frames.
+5. iroh performs the handshake and NAT traversal over this channel. The relay limits
+   close the channel by themselves once it has served its purpose.
 
 ### `iroh-libp2p/src/swarm.rs`
 
@@ -769,7 +768,7 @@ pub struct Behaviour {
 }
 
 pub fn build(seed: &[u8; 32]) -> anyhow::Result<libp2p::Swarm<Behaviour>> {
-    // Тот же Ed25519-ключ → PeerId совпадает с ключом iroh.
+    // The same Ed25519 key → the PeerId matches the iroh key.
     let key = identity::Keypair::ed25519_from_bytes(*seed)?;
 
     let swarm = SwarmBuilder::with_existing_identity(key)
@@ -784,7 +783,7 @@ pub fn build(seed: &[u8; 32]) -> anyhow::Result<libp2p::Swarm<Behaviour>> {
                 kad::store::MemoryStore::new(peer_id),
                 kad::Config::new(AMINO),
             );
-            kad.set_mode(Some(kad::Mode::Client)); // не храним чужие записи
+            kad.set_mode(Some(kad::Mode::Client)); // we don't store other people's records
             Behaviour {
                 relay_client,
                 kad,
@@ -800,77 +799,77 @@ pub fn build(seed: &[u8; 32]) -> anyhow::Result<libp2p::Swarm<Behaviour>> {
     Ok(swarm)
 }
 
-/// Начальные узлы Amino. Это узлы IPFS; после первого входа список
-/// найденных пиров кешируется на диск, и дальше bootstrap не нужен.
+/// Initial Amino nodes. These are IPFS nodes; after the first join the list of
+/// discovered peers is cached to disk, and bootstrap is no longer needed.
 pub const BOOTSTRAP: &[&str] = &[
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    // + кеш ранее найденных пиров
+    // + cache of previously discovered peers
 ];
 ```
 
-### Логика (эскиз) — `iroh-libp2p/src/lib.rs`
+### The logic (sketch) — `iroh-libp2p/src/lib.rs`
 
 ```rust
-// СЕРВЕР
+// SERVER
 // 1. swarm.dial(BOOTSTRAP…), kad.bootstrap()
-// 2. kad.get_closest_peers(random) → кандидаты; identify показывает,
-//    кто поддерживает /libp2p/circuit/relay/0.2.0/hop
-// 3. swarm.listen_on(relay_addr.with(Protocol::P2pCircuit)) для 2–3 relay
-// 4. на событие NewListenAddr (резервирование подтверждено):
+// 2. kad.get_closest_peers(random) → candidates; identify shows
+//    who supports /libp2p/circuit/relay/0.2.0/hop
+// 3. swarm.listen_on(relay_addr.with(Protocol::P2pCircuit)) for 2–3 relays
+// 4. on the NewListenAddr event (reservation confirmed):
 //      local_addrs ← CustomAddr::from_parts(TRANSPORT_ID, multiaddr.to_vec())
-//    iroh опубликует их в Mainline вместе с остальными адресами
-// 5. резервирования продлевать до истечения
+//    iroh will publish them to Mainline along with the other addresses
+// 5. renew the reservations before they expire
 //
-// КЛИЕНТ
-// 1. получить CustomAddr сервера из записи Mainline (iroh делает сам)
-// 2. poll_send на новый dst: swarm.dial(multiaddr) →
+// CLIENT
+// 1. get the server's CustomAddr from the Mainline record (iroh does this itself)
+// 2. poll_send to a new dst: swarm.dial(multiaddr) →
 //    control.open_stream(server_peer, DGRAM_PROTO)
 //
-// ОБЕ СТОРОНЫ
-// - control.accept(DGRAM_PROTO) → входящий поток
-// - кадрирование датаграмм: [u16 BE длина][пакет QUIC]
-// - поток ↔ CustomEndpoint::poll_recv / CustomSender::poll_send
+// BOTH SIDES
+// - control.accept(DGRAM_PROTO) → incoming stream
+// - datagram framing: [u16 BE length][QUIC packet]
+// - stream ↔ CustomEndpoint::poll_recv / CustomSender::poll_send
 //
-// ⚠ ВАЖНО: по умолчанию libp2p не открывает потоки поверх ограниченных
-//   (relay) соединений — для DGRAM_PROTO это нужно явно разрешить.
-// ⚠ Поток надёжный и упорядоченный, а QUIC ждёт ненадёжные датаграммы —
-//   для сигнализации это приемлемо (данных мало, канал короткий).
+// ⚠ IMPORTANT: by default libp2p does not open streams over limited
+//   (relay) connections — this must be explicitly allowed for DGRAM_PROTO.
+// ⚠ The stream is reliable and ordered, while QUIC expects unreliable datagrams —
+//   for signaling this is acceptable (little data, short-lived channel).
 ```
 
 ---
 
-## 13. Ограничения и открытые вопросы
+## 13. Limitations and open questions
 
-| Вопрос | Риск | Что делать |
+| Question | Risk | What to do |
 |---|---|---|
-| API iroh до 1.0, custom transports помечены нестабильными | Код сломается при обновлении | Зафиксировать версию, обновлять осознанно |
-| Различает ли iroh «путь для согласования» и «путь для данных» | Режим `signal` может потребовать логики в транспорте | Проверить в исходниках; запасной вариант описан в разделе 8 |
-| Использует ли QUIC NAT traversal в iroh custom-пути как канал согласования | Это ключевое допущение всей схемы | **Проверить первым**: прототип на in-memory транспорте из примера iroh |
-| Ядро yggdrasil-go как packet conn по ключу | Внутренние API ядра могут меняться | Зафиксировать версию yggdrasil-go; проверить, что сырые датаграммы доходят |
-| Лимиты relay в Kubo | Если лимиты малы, рукопожатие может не уложиться | Измерить; при нехватке — несколько relay параллельно |
-| Bootstrap Amino через узлы IPFS | Начальный вход зависит от известных адресов | Кешировать пиров; добавить свои известные узлы |
-| Публичность записи в Mainline | Виден домашний IP | Публиковать только relay-адреса libp2p (раздел 6) |
-| Go в сборке | Нужен тулчейн Go, растёт размер бинарника | Принять; в будущем — Rust-реализация протокола Yggdrasil |
+| iroh API pre-1.0, custom transports marked unstable | Code breaks on upgrade | Pin the version, upgrade deliberately |
+| Does iroh distinguish a "path for negotiation" from a "path for data" | The `signal` mode may require logic in the transport | Check the sources; the fallback option is described in section 8 |
+| Does QUIC NAT traversal in iroh use custom paths as the negotiation channel | This is the key assumption of the whole scheme | **Check first**: prototype on the in-memory transport from the iroh example |
+| The yggdrasil-go core as a packet conn by key | The core's internal APIs may change | Pin the yggdrasil-go version; verify raw datagrams get through |
+| Relay limits in Kubo | If the limits are small, the handshake may not fit | Measure; if insufficient — several relays in parallel |
+| Amino bootstrap via IPFS nodes | Initial entry depends on known addresses | Cache peers; add your own known nodes |
+| Publicity of the Mainline record | Home IP becomes visible | Publish only libp2p relay addresses (section 6) |
+| Go in the build | Requires a Go toolchain, increases binary size | Accept; in the future — a Rust implementation of the Yggdrasil protocol |
 
 ---
 
-## 14. Дорожная карта
+## 14. Roadmap
 
-**Этап 0** (всё вместе, но в порядке проверки рисков):
+**Stage 0** (everything together, in risk-check order):
 
-1. **Проверка ключевого допущения:** два iroh-endpoint, relay отключён,
-   in-memory custom transport из примера iroh → убедиться, что прямой путь
-   пробивается через custom-канал и данные переходят на него.
-2. **`iroh-yggdrasil`:** Go-прослойка + транспорт; соединение двух узлов
-   за разными NAT только через Yggdrasil.
-3. **`iroh-libp2p`:** вход в Amino, резервирование relay, канал датаграмм;
-   пробивка NAT через relay IPFS.
-4. **`keypipe-server` / `keypipe-client`:** Mainline DHT, allowlist, политика
-   путей, режимы `signal` / `standby`.
-5. **Испытания:** дом ↔ мобильный интернет, дом ↔ кафе, оба за NAT, без IPv6;
-   выключение каждого пути по очереди.
+1. **Check the key assumption:** two iroh endpoints, relay disabled,
+   in-memory custom transport from the iroh example → confirm that a direct path
+   is punched through the custom channel and data migrates to it.
+2. **`iroh-yggdrasil`:** Go shim + transport; two nodes behind different NATs
+   connected only via Yggdrasil.
+3. **`iroh-libp2p`:** join Amino, reserve relays, datagram channel;
+   NAT traversal via an IPFS relay.
+4. **`keypipe-server` / `keypipe-client`:** Mainline DHT, allowlist, path
+   policy, `signal` / `standby` modes.
+5. **Trials:** home ↔ mobile internet, home ↔ café, both behind NAT, no IPv6;
+   disabling each path in turn.
 
-**Дальше:** шифрование записи в DHT, несколько выставленных портов
-(`--expose ssh=127.0.0.1:22 --expose web=127.0.0.1:8080`), юниты
-systemd/OpenRC, Rust-реализация протокола Yggdrasil вместо Go-прослойки.
+**Next:** encrypting the DHT record, multiple exposed ports
+(`--expose ssh=127.0.0.1:22 --expose web=127.0.0.1:8080`), systemd/OpenRC units,
+a Rust implementation of the Yggdrasil protocol instead of the Go shim.

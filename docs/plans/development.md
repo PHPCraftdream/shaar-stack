@@ -1,50 +1,50 @@
-# Sha’ar Stack — план разработки
+# Sha'ar Stack — Development Plan
 
-Статус: план, реализация не начата.
-Дата: 2026-10-21.
+Status: plan; implementation has not started.
+Date: 2026-10-21.
 
-## 1. Цель и границы первой версии
+## 1. Goal and scope of the first version
 
-Один репозиторий `shaar-stack`, Cargo workspace с SDK, Server, Client
-и двумя транспортными адаптерами. Устройство идентифицируется Ed25519-ключом.
-Client предоставляет локальный TCP-порт, Server соединяет поток с заданным
-внутренним TCP-сервисом после проверки ключа клиента по allowlist.
+A single repository `shaar-stack`, a Cargo workspace with an SDK, a Server, a Client,
+and two transport adapters. The device is identified by an Ed25519 key.
+The Client provides a local TCP port; the Server connects the stream to a specified
+internal TCP service after checking the client key against an allowlist.
 
-Критерий приёмки: разрешённый клиент обращается к сервису через локальный
-порт; неразрешённый клиент не вызывает подключения к target. Соединение
-устанавливается без TUN, root, настройки маршрутов и проброса портов роутера.
-Инфраструктура n0 не используется ни явно, ни через настройки по умолчанию.
+Acceptance criterion: an allowed client reaches the service through the local
+port; a disallowed client causes no connections to the target. The connection
+is established without TUN, root, route configuration, or router port forwarding.
+n0 infrastructure is not used, neither explicitly nor via defaults.
 
-Основной путь — прямой QUIC. Yggdrasil обеспечивает согласование и резерв.
-libp2p relay предназначен исключительно для согласования, не для данных
-приложения. Mainline DHT публикует и разрешает подписанные адресные записи.
-Конфиги запуска Server и Client имеют формат ktav 0.8.*.
+The primary path is direct QUIC. Yggdrasil provides negotiation and fallback.
+The libp2p relay is intended exclusively for negotiation, not for application
+data. The Mainline DHT publishes and resolves signed address records.
+Server and Client startup configs use the ktav 0.8.* format.
 
-Не входят: UDP-проброс, несколько публикуемых сервисов на сервере, GUI,
-единый CLI вместо отдельных Server и Client, собственная реализация Yggdrasil,
-шифрование DHT-записей, системные пакеты и автоматическая публикация релизов.
-Новые режимы, параметры и зависимости добавляются только по необходимости
-для согласованных критериев приёмки.
+Not included: UDP forwarding, multiple published services on the server, a GUI,
+a single CLI replacing separate Server and Client, an in-house Yggdrasil
+implementation, DHT record encryption, system packages, and automated release
+publication. New modes, parameters, and dependencies are added only when necessary
+for agreed acceptance criteria.
 
-## 2. Нормативные правила и исходные материалы
+## 2. Normative rules and source materials
 
-- `../../CLAUDE.md` — обязательные правила разработки.
-- `../architecture/keypipe.md` — исходный архитектурный черновик.
-- Эскизы API и утверждения о внешней инфраструктуре не считаются проверенными.
-- Информация о доступности имён на crates.io не является разрешением
-  на резервирование имён или публикацию пакетов.
-- Реализация и испытания не запускаются в рамках составления этого плана.
+- `../../CLAUDE.md` — mandatory development rules.
+- `../architecture/keypipe.md` — the original architectural draft.
+- API sketches and claims about external infrastructure are not considered verified.
+- Information about name availability on crates.io is not a permission
+  to reserve names or publish packages.
+- Implementation and tests are not run as part of producing this plan.
 
-Лимит 700 строк относится к коду, не к документации. Лимит 7 элементов
-относится к непосредственно вложенным файлам и каталогам проекта.
-Unsafe допустим только внутри изолированной FFI-границы с безопасной обёрткой.
-Тесты и сборки по умолчанию выполняются в GitHub CI; локальный запуск требует
-явной просьбы пользователя. Коммиты, push, подагенты и публикация не разрешены
-самим фактом наличия этого плана.
+The 700-line limit applies to code, not to documentation. The 7-element limit
+applies to directly nested files and directories of the project.
+Unsafe is allowed only inside an isolated FFI boundary with a safe wrapper.
+Tests and builds run in GitHub CI by default; local execution requires
+an explicit user request. Commits, pushes, sub-agents, and publication are not
+permitted by the mere existence of this plan.
 
-## 3. Структура workspace
+## 3. Workspace structure
 
-Целевая структура, не команда немедленно создавать все компоненты:
+Target structure, not an instruction to create all components immediately:
 
 ```text
 shaar-stack/
@@ -65,284 +65,284 @@ shaar-stack/
     └── verification/
 ```
 
-В корне ровно 7 элементов проекта; `.git` и генерируемый `target` не считаются.
-Перед созданием workspace перенести исходный черновик в `docs/architecture/`
-и исправить ссылки. Если понадобится ещё один корневой файл, сначала
-пересмотреть размещение, не нарушая лимит. Вложенные каталоги тоже проверяются.
+Exactly 7 project items at the root; `.git` and the generated `target` are not counted.
+Before creating the workspace, move the original draft into `docs/architecture/`
+and fix the references. If one more root file is needed, reconsider the layout
+first without breaking the limit. Nested directories are checked too.
 
-Зависимости: Server и Client используют `shaar`; SDK подключает адаптеры
-`shaar-ygg` и `shaar-p2p`. Адаптеры не зависят от SDK, Server или Client,
-чтобы не образовать цикл. Внешние типы iroh локализуются в сетевом слое SDK;
-публичная поверхность SDK не должна без необходимости закреплять нестабильные
-API upstream. Отдельный общий крейт не добавляется без доказанной необходимости.
+Dependencies: the Server and Client use `shaar`; the SDK wires in the
+`shaar-ygg` and `shaar-p2p` adapters. The adapters do not depend on the SDK, the Server,
+or the Client, so no cycle forms. External iroh types are localized in the SDK's
+networking layer; the public SDK surface must not needlessly cement unstable
+upstream APIs. No separate shared crate is added without a demonstrated need.
 
-## 4. Решения, которые нужно доказать до основной реализации
+## 4. Decisions to be proven before main implementation
 
-### 4.1. Совместимость и контракты
+### 4.1. Compatibility and contracts
 
-Выбрать совместимые версии iroh, libp2p, yggdrasil-go и ktav 0.8.*
-по исходникам и документации, а не по псевдокоду черновика. Первичный выбор
-зависимостей не является разрешением на последующее обновление версий.
-Зафиксировать Rust toolchain/MSRV и Go toolchain, необходимые для этих версий.
+Choose compatible versions of iroh, libp2p, yggdrasil-go, and ktav 0.8.*
+from sources and documentation, not from the draft's pseudocode. The initial
+choice of dependencies is not a permission to upgrade versions later.
+Pin the Rust toolchain/MSRV and the Go toolchain required by these versions.
 
-Проверить доступность custom transports, NAT traversal, наблюдения путей,
-публикации custom-адресов, настройки discovery и полного отключения n0.
-Для ktav проверить точное имя библиотеки, синтаксис, поддерживаемую ветку
-формата, поведение парсера и диагностик. Не изобретать синтаксис конфигов.
+Verify the availability of custom transports, NAT traversal, path observation,
+publishing custom addresses, discovery configuration, and fully disabling n0.
+For ktav, verify the exact library name, syntax, the supported format branch,
+parser behavior, and diagnostics. Do not invent config syntax.
 
-Определить целевые ОС первой версии по совместимости Go c-archive и Rust
-linker. Windows — обязательная среда проверки; Linux — для серверного
-развёртывания. Если внешний стек не поддерживает одну из них, вынести
-конкретный блокер на решение пользователя, а не исключать ОС молча.
+Determine the target OSes of the first version from Go c-archive compatibility and the
+Rust linker. Windows is a mandatory verification environment; Linux is for server
+deployment. If the external stack does not support one of them, escalate the specific
+blocker to the user rather than silently dropping the OS.
 
-### 4.2. Блокирующий эксперимент iroh
+### 4.2. Blocking iroh experiment
 
-Два endpoint с отключённой инфраструктурой n0 соединяются через контролируемый
-custom transport. Наблюдения должны показать аутентифицированное соединение,
-обмен кандидатами через этот путь и переход на прямой UDP-путь.
+Two endpoints with n0 infrastructure disabled connect over a controlled
+custom transport. Observations must show an authenticated connection,
+candidate exchange over that path, and the transition to a direct UDP path.
 
-Отдельно доказать, что прикладные STREAM-данные не проходят через signaling-only
-путь: до появления прямого пути, после его отказа и при повторной пробивке.
-Простое прекращение отправки пакетов после перехода на прямой путь недостаточно.
-Фильтрация зашифрованных QUIC-пакетов по предположению об их содержимом
-не является допустимым решением.
+Separately, prove that application STREAM data never travels over the signaling-only
+path: before the direct path appears, after it fails, and during re-punching.
+Merely stopping packet transmission after the switch to the direct path is insufficient.
+Filtering encrypted QUIC packets based on assumptions about their contents
+is not an acceptable solution.
 
-In-memory эксперимент проверяет возможности API и миграции путей, но сам
-по себе не доказывает прохождение настоящего NAT. Нужен отдельный управляемый
-NAT-сценарий в CI/стенде; реальные домашние и мобильные сети проверяются позже.
+An in-memory experiment verifies API capabilities and path migration, but by itself
+does not prove traversal of a real NAT. A separate controlled
+NAT scenario in CI/a testbed is required; real home and mobile networks are verified later.
 
-Условия остановки: если используемый iroh не обеспечивает нужное согласование,
-миграцию или запрет данных, дальнейшие этапы зависимых компонентов заблокированы.
-Описать подтверждённое ограничение и минимальные альтернативы для согласования.
-Нельзя молча заменить signaling-only на передачу пользовательского трафика.
+Stop conditions: if the iroh version in use does not provide the required negotiation,
+migration, or data prohibition, subsequent stages of dependent components are blocked.
+Document the confirmed limitation and the minimal alternatives for negotiation.
+Silently replacing signaling-only with carrying user traffic is not allowed.
 
-### 4.3. Остальные обязательные проверки
+### 4.3. Remaining mandatory checks
 
-- Ed25519 seed, публичный ключ iroh, адрес Yggdrasil и libp2p PeerId:
-  фиксированные векторы преобразования; PeerId не равен сырым байтам ключа.
-- Ядро Yggdrasil действительно передаёт датаграммы по публичному ключу без TUN;
-  известны MTU, правила конкурентных вызовов и механизм прерывания чтения.
-- Публичные relay Amino действительно позволяют резервирование и нужный
-  протокол; объявление relay-протокола само по себе не гарантирует свободный слот.
-- Проверены реальные ограничения relay и открытие потоков на limited connections.
-- Подписанная pkarr-запись вмещает нужные адреса с учётом всей сериализации;
-  неизвестные, устаревшие и слишком большие записи обрабатываются безопасно.
+- Ed25519 seed, iroh public key, Yggdrasil address, and libp2p PeerId:
+  fixed conversion vectors; the PeerId is not equal to the raw key bytes.
+- The Yggdrasil core really carries datagrams by public key without TUN;
+  the MTU, rules for concurrent calls, and the read-interruption mechanism are known.
+- Public Amino relays really permit reservation and the needed protocol;
+  advertising a relay protocol by itself does not guarantee a free slot.
+- Real relay limitations and opening streams on limited connections are verified.
+- A signed pkarr record fits the needed addresses accounting for the entire serialization;
+  unknown, stale, and oversized records are handled safely.
 
-## 5. Этапы и критерии завершения
+## 5. Stages and completion criteria
 
-Обозначения P01–P16 используются также в описаниях задач сессии.
-Каждый этап включает собственные тесты; их наличие не означает, что они запущены.
+The labels P01–P16 are also used in session task descriptions.
+Each stage includes its own tests; their existence does not mean they were run.
 
-### P01. Проверить внешние контракты и оформить архитектурные решения
+### P01. Verify external contracts and formalize architectural decisions
 
-Зависимости: нет.
+Dependencies: none.
 
-Результат: таблица точных версий и API, лицензий и ограничений; контракты
-ключей, транспорта, конфигов и ОС; матрица сценариев проверки.
-Открытые вопросы помечены как неподтверждённые, а не замаскированы выбором API.
-Приёмка: каждый ключевой контракт имеет ссылку на источник или конкретный
-эксперимент P03; известны условия продолжения и остановки.
+Deliverable: a table of exact versions and APIs, licenses, and limitations; contracts
+for keys, transport, configs, and OSes; a verification scenario matrix.
+Open questions are marked as unconfirmed, not masked by an API choice.
+Acceptance: every key contract has a link to a source or to the specific
+P03 experiment; continuation and stop conditions are known.
 
-### P02. Создать каркас workspace и GitHub CI
+### P02. Create the workspace skeleton and GitHub CI
 
-Зависимости: P01.
+Dependencies: P01.
 
-Создать пять крейтов, разместить документацию по целевой структуре.
-Настроить lint-политику unsafe с локальным исключением только для FFI.
-Добавить CI для форматирования, clippy, тестов, проверки лимитов файлов
-и каталогов. Сборочные задания учитывают Go и платформенные linker-требования.
-Тяжёлые сетевые испытания отделить от детерминированных проверок.
+Create the five crates and place documentation according to the target structure.
+Configure the unsafe lint policy with a local exception only for FFI.
+Add CI for formatting, clippy, tests, and checks of file and directory
+limits. Build jobs account for Go and platform linker requirements.
+Heavy network tests are separated from deterministic checks.
 
-Приёмка: CI проверяет workspace на согласованных ОС, нарушения правил
-обнаруживаются проверками, каркас не содержит вымышленных рабочих реализаций.
-Если репозиторий ещё не подключён к GitHub, выполнение CI отмечается
-заблокированным до предоставления удалённого репозитория и разрешения на push.
+Acceptance: CI checks the workspace on the agreed OSes, rule violations
+are caught by the checks, and the skeleton contains no fabricated working implementations.
+If the repository is not yet connected to GitHub, CI execution is recorded
+as blocked until a remote repository and push permission are provided.
 
-### P03. Доказать реализуемость custom transport и политики сигнализации
+### P03. Prove the feasibility of the custom transport and the signaling policy
 
-Зависимости: P01, P02.
+Dependencies: P01, P02.
 
-Создать минимальный изолированный эксперимент, описанный в разделе 4.2,
-включая управляемый NAT. Сохранить результаты, выбранные API и ограничения
-в `docs/verification/`. Эксперимент не превращается в лишний публичный режим SDK.
-Приёмка: наблюдения подтверждают переход на прямой путь, восстановление
-и отсутствие прикладных данных на запрещённых путях. Иначе — остановка
-зависимых этапов и согласование архитектуры.
+Create the minimal isolated experiment described in section 4.2,
+including the controlled NAT. Save the results, chosen APIs, and limitations
+in `docs/verification/`. The experiment does not become a spurious public SDK mode.
+Acceptance: observations confirm the transition to the direct path, recovery,
+and the absence of application data on forbidden paths. Otherwise — a stop
+of dependent stages and renegotiation of the architecture.
 
-### P04. Реализовать идентичность и безопасное хранение ключей
+### P04. Implement identity and secure key storage
 
-Зависимости: P01, P02.
+Dependencies: P01, P02.
 
-Один Ed25519 seed и проверенные преобразования для всех стеков.
-Создание ключа атомарно и без перезаписи существующего файла; ограничение
-доступа сразу при создании: Unix permissions и соответствующие Windows ACL.
-Ошибки чтения, формата и доступа не приводят к незаметной генерации новой личности.
-Секреты не попадают в вывод и диагностику; лишние копии не создаются.
+A single Ed25519 seed and verified conversions for all stacks.
+Key creation is atomic and never overwrites an existing file; access is restricted
+immediately at creation: Unix permissions and the corresponding Windows ACLs.
+Read, format, and access errors never lead to silently generating a new identity.
+Secrets never reach output or diagnostics; no extra copies are created.
 
-Приёмка: векторы преобразований, повторное чтение, повреждённые файлы,
-конкурентное создание и ошибки прав покрыты тестами. Идентичность стабильна.
+Acceptance: conversion vectors, re-reading, corrupted files,
+concurrent creation, and permission errors are covered by tests. The identity is stable.
 
-### P05. Реализовать конфиги запуска ktav 0.8.*
+### P05. Implement ktav 0.8.* startup configs
 
-Зависимости: P01, P02.
+Dependencies: P01, P02.
 
-Определить минимальные схемы Server и Client, обязательные поля, defaults
-и порядок применения CLI-параметров и конфигурации. Отделить разбор от запуска.
-Общие типы и проверки не дублировать; не включать парсер в горячий сетевой путь.
-Секретный ключ хранится отдельно, конфиг ссылается на него.
+Define the minimal Server and Client schemas, mandatory fields, defaults,
+and the precedence of CLI arguments over configuration. Separate parsing from startup.
+Do not duplicate shared types and checks; do not put the parser in the hot network path.
+The secret key is stored separately; the config references it.
 
-Приёмка: реальные примеры ktav 0.8.* разбираются; проверены ошибочный синтаксис,
-недопустимые значения, неизвестные поля и приоритеты источников. Ошибки
-возникают до запуска сети и не раскрывают секреты.
+Acceptance: real ktav 0.8.* examples parse; erroneous syntax,
+invalid values, unknown fields, and source precedence are tested. Errors
+occur before the network starts and do not expose secrets.
 
-### P06. Реализовать ядро SDK и прямой TCP-over-QUIC
+### P06. Implement the SDK core and direct TCP-over-QUIC
 
-Зависимости: P03, P04.
+Dependencies: P03, P04.
 
-Создать endpoint без n0, протокол/ALPN, аутентификацию удалённого ключа,
-мультиплексирование TCP-потоков, bounded backpressure и явное завершение.
-Публичные типы ошибок различают отказ доступа, недоступность пути и отказ target.
+Create an endpoint without n0, a protocol/ALPN, remote key authentication,
+TCP stream multiplexing, bounded backpressure, and explicit shutdown.
+Public error types distinguish access denial, path unavailability, and target failure.
 
-Приёмка: прямое соединение, параллельные потоки, half-close, сброс потока,
-отмена и завершение endpoint не теряют ресурсы. Отказ отдельного потока
-не обрывает остальные. Установленные TCP-сессии не обещают пережить закрытие
-всего QUIC-соединения; новые подключения могут установить новое соединение.
+Acceptance: direct connection, parallel streams, half-close, stream reset,
+cancellation, and endpoint shutdown lose no resources. Failure of an individual stream
+does not abort the others. Established TCP sessions make no promise to survive
+closing of the whole QUIC connection; new connections may establish a new one.
 
-### P07. Реализовать транспорт Yggdrasil с изолированной FFI
+### P07. Implement the Yggdrasil transport with an isolated FFI
 
-Зависимости: P03, P04, P06.
+Dependencies: P03, P04, P06.
 
-Go-прослойка и минимальный unsafe-модуль с безопасным Rust API.
-Явно задать владение узлом, буферами и handle; исключить конфликты глобального
-состояния при нескольких экземплярах SDK. Приём и завершение блокирующего
-Go-чтения не блокируют async executor; потоки корректно завершаются.
-Проверять длины, MTU, коды ошибок, ABI и ограничения Go/cgo на указатели.
+A Go shim and a minimal unsafe module with a safe Rust API.
+Explicitly define ownership of the node, buffers, and handles; exclude global-state
+conflicts with multiple SDK instances. Receiving and terminating a blocking
+Go read must not block the async executor; threads terminate cleanly.
+Check lengths, MTU, error codes, and the ABI and Go/cgo constraints on pointers.
 
-Приёмка: обмен датаграммами без TUN, корректный старт/stop, ошибки запуска,
-переполнение очередей, отмена и конкурентные операции покрыты тестами.
-Подтверждена сборка и линковка на целевых ОС.
+Acceptance: datagram exchange without TUN, correct start/stop, startup errors,
+queue overflow, cancellation, and concurrent operations are covered by tests.
+Build and linking on the target OSes are confirmed.
 
-### P08. Реализовать signaling-транспорт libp2p
+### P08. Implement the libp2p signaling transport
 
-Зависимости: P03, P04, P06.
+Dependencies: P03, P04, P06.
 
-Bootstrap Amino, обнаружение и резервирование relay, продление слотов,
-обработка отказов, кеш доступных пиров. Не считать инфраструктуру безлимитной.
-Ограниченное кадрирование QUIC-датаграмм поверх потока с проверкой длины,
-backpressure, повторным открытием по требованию и bounded retry/backoff.
+Amino bootstrap, discovery and relay reservation, slot renewal,
+failure handling, a cache of available peers. Do not treat the infrastructure as
+unlimited. Bounded framing of QUIC datagrams over the stream with length checks,
+backpressure, re-opening on demand, and bounded retry/backoff.
 
-Приёмка: детерминированные проверки на собственном тестовом relay покрывают
-лимиты, истечение резерва, partial read/write, некорректные кадры и reconnect.
-Отдельный smoke-сценарий проверяет публичную инфраструктуру, но её временный
-отказ не маскируется как дефект детерминированного теста.
+Acceptance: deterministic checks against an owned test relay cover
+limits, reservation expiry, partial read/write, malformed frames, and reconnect.
+A separate smoke scenario checks the public infrastructure, but its transient
+failure is not masked as a defect of the deterministic test.
 
-### P09. Реализовать Mainline discovery и адресные записи
+### P09. Implement Mainline discovery and address records
 
-Зависимости: P06, P07, P08.
+Dependencies: P06, P07, P08.
 
-Публикация и обновление подписанных записей, разрешение адресов,
-сериализация custom-адресов, бюджет записи и политика публикации IP.
-Yggdrasil-путь вычисляется из ключа и доступен независимо от DHT.
-Приёмка: round-trip адресов и подписей, лимит размера, устаревшие записи,
-ошибочный ключ, отсутствие DHT и режим без публикации домашнего IP проверены.
-Не обещать анонимность: IP может быть виден другим слоям и участникам связи.
+Publication and refresh of signed records, address resolution,
+serialization of custom addresses, the record budget, and the IP publication policy.
+The Yggdrasil path is computed from the key and is available independently of the DHT.
+Acceptance: round-trip of addresses and signatures, the size limit, stale records,
+a wrong key, absence of the DHT, and the mode without publishing the home IP are verified.
+Do not promise anonymity: the IP may be visible to other layers and to communication peers.
 
-### P10. Реализовать выбор путей и восстановление
+### P10. Implement path selection and recovery
 
-Зависимости: P06, P07, P08, P09.
+Dependencies: P06, P07, P08, P09.
 
-Приоритет данных: прямой QUIC, затем Yggdrasil только в `standby`.
-В `signal` альтернативные пути обеспечивают только согласование.
-libp2p не переносит прикладные данные ни в одном режиме.
-Наблюдение путей, keepalive, реактивация каналов и bounded retries
-реализуются на подтверждённых механизмах P03.
+Data priority: direct QUIC, then Yggdrasil only in `standby`.
+In `signal`, alternative paths carry negotiation only.
+libp2p carries no application data in any mode.
+Path observation, keepalive, channel reactivation, and bounded retries
+are implemented on mechanisms confirmed by P03.
 
-Приёмка: матрица двух режимов, доступности путей, смены сети и повторной
-пробивки подтверждает запреты, отсутствие циклических переключений
-и отсутствие неограниченного роста состояния.
+Acceptance: a matrix of the two modes, path availability, network changes, and re-punching
+confirms the prohibitions, the absence of cyclic switching,
+and the absence of unbounded state growth.
 
-### P11. Реализовать Server
+### P11. Implement the Server
 
-Зависимости: P05, P06, P10.
+Dependencies: P05, P06, P10.
 
-Конфиг, allowlist, фиксированный target, обслуживание потоков и штатный stop.
-Для первой версии target ограничен loopback; открытие иных адресов не добавлять
-без отдельного требования. Доступ проверяется до подключения к target.
-Ограничить число соединений, потоков и время ожидания приветствия/подключения.
-Приёмка: разрешение и отказ, пустой/некорректный allowlist, недоступный target,
-медленный клиент, исчерпание лимитов и shutdown покрыты тестами.
+Config, allowlist, a fixed target, stream servicing, and a clean stop.
+For the first version the target is restricted to loopback; do not add opening other
+addresses without a separate requirement. Access is checked before connecting to the target.
+Limit the number of connections and streams and the greeting/connection timeouts.
+Acceptance: allow and deny, empty/invalid allowlist, unreachable target,
+a slow client, limit exhaustion, and shutdown are covered by tests.
 
-### P12. Реализовать Client
+### P12. Implement the Client
 
-Зависимости: P05, P06, P10.
+Dependencies: P05, P06, P10.
 
-Конфиг, локальный loopback listener, проверка ключа сервера, переиспользование
-соединения и создание нового после его закрытия. Координация установления
-соединения не удерживает блокировку через `.await`. Локальные подключения
-и ожидание восстановления имеют ограниченные очереди и сроки.
-Приёмка: параллельные подключения, отказ сервера, неверный ключ, занятый порт,
-отмена, восстановление для новых потоков и shutdown покрыты тестами.
+Config, a local loopback listener, verification of the server key, connection
+reuse, and creating a new connection after one closes. Connection-establishment
+coordination does not hold a lock across `.await`. Local connections
+and recovery waiting have bounded queues and deadlines.
+Acceptance: parallel connections, server failure, wrong key, busy port,
+cancellation, recovery for new streams, and shutdown are covered by tests.
 
-### P13. Выполнить интеграционную и отказоустойчивую проверку
+### P13. Perform integration and fault-tolerance verification
 
-Зависимости: P11, P12.
+Dependencies: P11, P12.
 
-Детерминированная матрица: прямой IPv4/IPv6, разные NAT, заблокированный UDP,
-DHT недоступен, relay недоступен/исчерпан, Yggdrasil недоступен, смена сети,
-перезапуск процессов, оба режима fallback. Проверить также LAN и отсутствие n0.
-Тестовый стенд контролирует сетевые условия и не зависит от удачи публичной сети.
+A deterministic matrix: direct IPv4/IPv6, various NATs, blocked UDP,
+DHT unavailable, relay unavailable/exhausted, Yggdrasil unavailable, network change,
+process restarts, both fallback modes. Also test LAN and the absence of n0.
+The testbed controls network conditions and does not depend on luck in the public network.
 
-Приёмка: отчёт с результатом каждого применимого сценария, доказательствами
-маршрута данных и отказа неразрешённому ключу. Пропущенное не считается
-успешным. Упавший тест или flake исследуется и исправляется в том же ходе.
-Реальные сценарии дом/мобильная сеть/кафе запускаются отдельно с разрешения
-пользователя и доступом к устройствам, без неподтверждённых заявлений о NAT.
+Acceptance: a report with the result of each applicable scenario, evidence
+of the data route and of denial to an unauthorized key. A skipped item does not
+count as passed. A failing test or flake is investigated and fixed in the same pass.
+Real home/mobile network/café scenarios are run separately with user permission
+and device access, without unconfirmed NAT claims.
 
-### P14. Проверить ресурсы, сложность и производительность
+### P14. Verify resources, complexity, and performance
 
-Зависимости: P13.
+Dependencies: P13.
 
-Проверить сложность горячих путей, аллокации на пакет/поток, копирование,
-границы очередей, CPU в простое, отсутствие busy-loop, завершение FFI
-и освобождение ресурсов после отмены. Целевые бюджеты согласовать до замеров.
-Нагрузочные и длительные измерения запускать только по явному разрешению,
-в CI/стенде; само наличие задачи не разрешает нагрузку на локальную машину.
+Check hot-path complexity, allocations per packet/stream, copying,
+queue bounds, idle CPU, absence of busy-loops, FFI shutdown,
+and resource release after cancellation. Agree on target budgets before measuring.
+Run load and long-duration measurements only with explicit permission,
+in CI/on a testbed; the existence of this task does not authorize load on the local machine.
 
-Приёмка: воспроизводимые измерения с описанием среды, отсутствуют утечки
-и неограниченные очереди; оптимизации сохраняют проверенные контракты.
-Не заявлять оптимальную сложность или lock-free без обоснования.
+Acceptance: reproducible measurements with the environment described, no leaks
+and no unbounded queues; optimizations preserve the verified contracts.
+Do not claim optimal complexity or lock-freedom without justification.
 
-### P15. Завершить документацию SDK и эксплуатации
+### P15. Complete SDK and operations documentation
 
-Зависимости: P11, P12, P13.
+Dependencies: P11, P12, P13.
 
-Описать публичный SDK, конфиги ktav 0.8.*, создание ключа и allowlist,
-запуск Server/Client, режимы путей, раскрытие адресов, ошибки и восстановление.
-Зафиксировать ограничения ОС, NAT, relay и FFI, а также фактически выполненные
-проверки. Примеры конфигов участвуют в тестах парсера.
-Приёмка: новый пользователь может пройти путь от ключей до TCP-подключения
-по инструкции; документация не обещает непроверенные свойства.
+Describe the public SDK, ktav 0.8.* configs, key creation and the allowlist,
+Server/Client startup, path modes, address disclosure, errors, and recovery.
+Record the OS, NAT, relay, and FFI limitations, as well as the checks actually
+performed. Config examples are exercised in parser tests.
+Acceptance: a new user can go from keys to a TCP connection following the
+instructions; the documentation promises no unverified properties.
 
-### P16. Проверить готовность первой версии без публикации
+### P16. Verify first-version readiness without publication
 
-Зависимости: P14, P15.
+Dependencies: P14, P15.
 
-Сверить цель первой версии, правила разработки и матрицу проверок.
-Проверить зависимости, лицензии, секреты в артефактах и воспроизводимость
-сборки на зафиксированном стеке. Зафиксировать результаты CI и открытые риски.
-Приёмка: все обязательные сценарии подтверждены; блокирующих вопросов нет.
-Публикация crates, GitHub release, смена версии, commit и push — только
-по отдельной явной просьбе пользователя.
+Cross-check the first-version goal, the development rules, and the verification matrix.
+Check dependencies, licenses, secrets in artifacts, and build reproducibility
+on the pinned stack. Record CI results and open risks.
+Acceptance: all mandatory scenarios are confirmed; no blocking questions remain.
+Publishing crates, a GitHub release, a version change, commit, and push — only
+on a separate explicit user request.
 
-## 6. Порядок исполнения
+## 6. Order of execution
 
-Критический путь:
+Critical path:
 P01 → P02 → P03 → P06 → P07/P08 → P09 → P10 → P11/P12 → P13 → P14/P15 → P16.
-P04 и P05 могут выполняться после P02 независимо от эксперимента P03;
-P06 дополнительно требует P04, Server/Client дополнительно требуют P05.
-Независимость задач не разрешает автоматически запускать подагентов.
+P04 and P05 may run after P02 independently of the P03 experiment;
+P06 additionally requires P04, and the Server/Client additionally require P05.
+Task independence does not automatically authorize launching sub-agents.
 
-Каждый этап закрывается только после выполнения его критериев приёмки.
-Если тесты ещё не запускались, реализация не объявляется проверенной.
-При внешнем блокере фиксируются причина и необходимое решение пользователя.
-Работы не продолжаются через неподтверждённое ключевое допущение.
+Each stage is closed only after its acceptance criteria are met.
+If tests have not yet been run, the implementation is not declared verified.
+For an external blocker, the cause and the required user decision are recorded.
+Work does not proceed through an unconfirmed key assumption.

@@ -1,253 +1,264 @@
-# Модель угроз Sha'ar Stack v1 (до реализации)
+# Sha'ar Stack v1 Threat Model (pre-implementation)
 
-Статус: **реализации не существует**. Это документ требований и проверяемых обязательств,
-а не отчёт об аудите. Ничего не «проверено»; для каждого инварианта указано, где он
-должен быть доказан (юнит/интеграционные тесты CI, эксперимент P03, NAT-стенд, ручной стенд).
-Критерий успеха — формулируемые отказы (explicit failure), а не вымышленные результаты.
+Status: **no implementation exists**. This is a document of requirements and verifiable
+commitments, not an audit report. Nothing is "verified"; for each invariant the document
+specifies where it must be proven (unit/integration tests in CI, the P03 experiment,
+the NAT testbed, a manual testbed). The success criterion is explicit, formulatable
+failure, not fabricated results.
 
-## 1. Область применения
+## 1. Scope
 
-Модель покрывает v1 Sha'ar Stack: SDK-крейт `shaar`, транспорты `shaar-ygg` (FFI к
-yggdrasil-go), `shaar-p2p` (libp2p signaling), `shaar-server`, `shaar-client`, работу с
-Mainline DHT через pkarr, конфигурацию ktav 0.8.*. Вне области: физическая безопасность
-хоста, безопасность ОС-окружения, эксплуатация уязвимостей upstream-библиотек (учитывается
-только как supply-chain-риск).
+The model covers Sha'ar Stack v1: the SDK crate `shaar`, the transports `shaar-ygg` (FFI to
+yggdrasil-go), `shaar-p2p` (libp2p signaling), `shaar-server`, `shaar-client`, work with
+the Mainline DHT via pkarr, and ktav 0.8.* configuration. Out of scope: physical security
+of the host, security of the OS environment, exploitation of vulnerabilities in upstream
+libraries (counted only as a supply-chain risk).
 
-Топология: устройство — один Ed25519 seed, выводящий iroh EndpointId, ключ pkarr-записи,
-адрес Yggdrasil `200:…`, libp2p PeerId. Клиент слушает loopback TCP; после проверки ключа клиента по allowlist сервер принимает
-аутентифицированный QUIC-поток (QUIC — клиент↔сервер) и открывает отдельное
-TCP-соединение к фиксированному внутреннему сервису (target) на 127.0.0.1.
-Инфраструктура n0 (DNS, relay iroh) отключена. Приоритет путей данных: прямой QUIC →
-Yggdrasil standby. libp2p relay — только signaling (обмен кандидатами, пробивка NAT) и
-**никогда** не является резервным data-путём.
+Topology: the device has a single Ed25519 seed that derives the iroh EndpointId, the pkarr
+record key, the Yggdrasil `200:…` address, and the libp2p PeerId. The client listens on
+loopback TCP; after the client key is checked against an allowlist, the server accepts an
+authenticated QUIC stream (QUIC is client↔server) and opens a separate
+TCP connection to a fixed internal service (target) on 127.0.0.1.
+n0 infrastructure (DNS, iroh relay) is disabled. Data path priority: direct QUIC →
+Yggdrasil standby. The libp2p relay is signaling-only (candidate exchange, NAT hole
+punching) and is **never** a fallback data path.
 
-## 2. Активы
+## 2. Assets
 
-- **A1. Ed25519 seed** — полная компрометация: злоумышленник становится личностью во всех
-  четырёх сетях (EndpointId, pkarr-ключ, Ygg-адрес, PeerId), может выдавать себя за узел
-  и подписывать pkarr-записи.
-- **A2. Target-сервис** — внутренний TCP-сервис на 127.0.0.1 за сервером; доступ к нему =
-  доступ к защищаемому бэкенду.
-- **A3. Аутентифицированная сессия** — установленный канал клиент↔сервер; подмена или
-  встраивание в него раскрывает/искажает прикладной трафик.
-- **A4. Адреса и IP-приватность** — реальные адреса/топология узла; раскрытие через
-  pkarr-записи, signaling-обмен, метаданные relay/Ygg.
-- **A5. Доступность** — способность узла принимать/устанавливать соединения; не
-  защищается от volumetric-атак (см. §3), защищается от исчерпания внутренних ресурсов
-  (очереди, потоки, дескрипторы).
+- **A1. Ed25519 seed** — full compromise: the attacker becomes the identity in all four
+  networks (EndpointId, pkarr key, Ygg address, PeerId), can impersonate the node
+  and sign pkarr records.
+- **A2. Target service** — an internal TCP service on 127.0.0.1 behind the server; access
+  to it = access to the protected backend.
+- **A3. Authenticated session** — the established client↔server channel; spoofing or
+  joining it exposes/corrupts application traffic.
+- **A4. Addresses and IP privacy** — the node's real addresses/topology; disclosure via
+  pkarr records, the signaling exchange, relay/Ygg metadata.
+- **A5. Availability** — the node's ability to accept/establish connections; not protected
+  against volumetric attacks (see §3), protected against exhaustion of internal resources
+  (queues, threads, descriptors).
 
-## 3. Границы доверия
+## 3. Trust boundaries
 
-**Доверяем:**
-- Rust и Go runtime, операционная система;
-- upstream-криптография: QUIC/TLS iroh (аутентифицированное шифрование по ключам
-  endpoint'ов), Ed25519, noise-протокол libp2p, подписи pkarr;
-- локальный пользователь, владеющий файлом ключа.
+**Trusted:**
+- the Rust and Go runtimes, the operating system;
+- upstream cryptography: QUIC/TLS of iroh (authenticated encryption on endpoint keys),
+  Ed25519, the libp2p noise protocol, pkarr signatures;
+- the local user who owns the key file.
 
-**НЕ доверяем:**
-- узлы Mainline DHT — произвольные ответы, отравление, replay;
-- публичные relay Amino DHT — наблюдение метаданных, дропы, задержки;
-- пиры Yggdrasil — задержки, дропы, метаданные, переигрывание записей;
-- любые записи DHT **до** проверки подписи, свежести и пределов размера (бюджет —
-  контракт, подтверждаемый P01; см. И6);
-- адреса, полученные из DHT, до проверки ключа пира;
-- удалённый peer до проверки его ключа (клиент — known-key сервера, сервер — allowlist).
+**NOT trusted:**
+- Mainline DHT nodes — arbitrary responses, poisoning, replay;
+- public Amino DHT relays — metadata observation, drops, delays;
+- Yggdrasil peers — delays, drops, metadata, replay of records;
+- any DHT record **before** verification of signature, freshness, and size limits (the
+  budget is a contract to be confirmed by P01; see I6);
+- addresses obtained from the DHT, before the peer key is verified;
+- a remote peer before its key is verified (client — the known server key; server — the
+  allowlist).
 
-**Явно НЕ защищаем (out of scope):**
-- компрометацию ОС или легитимного клиента, включая чтение ключа из памяти процесса;
-- глобального наблюдателя, коррелирующего трафик всех сетей;
-- гарантированный NAT traversal — связность best-effort;
-- volumetric DDoS на публичные адреса (только bounded internal resources).
+**Explicitly NOT defended (out of scope):**
+- compromise of the OS or of the legitimate client, including reading the key from
+  process memory;
+- a global observer correlating traffic across all networks;
+- guaranteed NAT traversal — connectivity is best-effort;
+- volumetric DDoS on public addresses (only bounded internal resources are defended).
 
-## 4. Разделение ответственности
+## 4. Separation of responsibilities
 
-**Даёт upstream (требование: не писать своего крипто-кода; `_tls`-валидация не отключается):**
-- аутентифицированное шифрование QUIC/TLS по ключам endpoint'ов iroh;
-- noise-шифрование и идентификацию libp2p;
-- подпись/верификацию pkarr-записей;
-- Yggdrasil-шифрование канала `200:…`.
+**Upstream provides (requirement: no in-house crypto code is written; `_tls` validation
+is not disabled):**
+- QUIC/TLS authenticated encryption on iroh endpoint keys;
+- libp2p noise encryption and identification;
+- pkarr record signing/verification;
+- Yggdrasil encryption of the `200:…` channel.
 
-**Обязано обеспечить приложение (требования, не факты):**
-- проверка allowlist клиента **до** любого подключения к target (И1);
-- политика путей: libp2p signaling-only во всех фазах; Yggdrasil в режиме `signal` —
-  только сигнализация (И5; требует доказательства P03);
-- лимиты ресурсов и bounded admissions (И8);
-- хранение ключа: атомарное создание, права, отсутствие в логах (И3, И4);
-- валидация конфига ktav до любых сетевых действий (И2);
-- обработка недоверенных записей DHT: подпись, размер, свежесть, replay (И6);
-- FFI-безопасность границы с yggdrasil-go (И9);
-- supply-chain и CI-гигиена (И10).
+**The application must provide (requirements, not facts):**
+- allowlist check of the client **before** any connection to the target (I1);
+- path policy: libp2p signaling-only in all phases; Yggdrasil in `signal` mode is
+  signaling-only (I5; requires the P03 proof);
+- resource limits and bounded admissions (I8);
+- key storage: atomic creation, permissions, absence from logs (I3, I4);
+- validation of the ktav config before any network action (I2);
+- handling of untrusted DHT records: signature, size, freshness, replay (I6);
+- FFI safety at the yggdrasil-go boundary (I9);
+- supply-chain and CI hygiene (I10).
 
-## 5. Семантика одного seed в нескольких протоколах
+## 5. Semantics of a single seed across multiple protocols
 
-- **Точная связуемость.** Публичные идентификаторы во всех четырёх сетях выводятся из
-  одного seed математически детерминированно. При известном публичном ключе (или при
-  доступных совместных наблюдениях) идентификаторы связываются с одной личностью;
-  детерминированная адресация не обязательно обратима — восстановить *все* идентификаторы
-  из одного наблюдённого адреса (например, только Ygg-адреса) нельзя. Компрометация seed
-  компрометирует все сети. **Анонимность не заявляется и не обеспечивается.**
-- **Known-key аутентификация.** Клиент обязан проверять *конкретный* публичный ключ
-  сервера (pinned/allowlisted), а не «любой валидный TLS-сертификат». Сервер обязан
-  проверять ключ клиента по allowlist до подключения к target. Иначе MITM с валидным
-  самоподписанным сертификатом проходит.
-- **Публичность pkarr-записи ≠ приватность системы.** Запись (пределы размера — контракт,
-  подтверждаемый P01, применяются по фактическому бюджету структуры/поля и overhead
-  записи) может
-  публиковать relay-адреса или IP; публикация адреса в DHT раскрывает существование и
-  адрес узла всему DHT — это принятое решение, а не уязвимость, но оно не отменяет
-  требований И4/И6.
-- Следствие для threat model: компрометация pkarr-ключа = компрометация A1 (тот же seed).
+- **Exact linkability.** Public identifiers in all four networks are derived from one seed
+  in a mathematically deterministic way. Given a known public key (or given available
+  joint observations), the identifiers are linkable to a single identity;
+  deterministic addressing is not necessarily reversible — *all* identifiers cannot be
+  recovered from one observed address (e.g. only the Ygg address). Compromising the seed
+  compromises all networks. **No anonymity is claimed or provided.**
+- **Known-key authentication.** The client must verify *the specific* public key of the
+  server (pinned/allowlisted), not "any valid TLS certificate". The server must
+  verify the client key against the allowlist before connecting to the target. Otherwise
+  a MITM with a valid self-signed certificate succeeds.
+- **Publicity of a pkarr record ≠ privacy of the system.** A record (size limits are a
+  contract to be confirmed by P01; applied according to the actual budget of the
+  structure/field and record overhead) may
+  publish relay addresses or IPs; publishing an address into the DHT reveals the existence
+  and address of the node to the entire DHT — this is an accepted decision, not a
+  vulnerability, but it does not waive the requirements of I4/I6.
+- Consequence for the threat model: compromise of the pkarr key = compromise of A1 (same
+  seed).
 
-## 6. Инварианты (И1…И10)
+## 6. Invariants (I1…I10)
 
-Каждый инвариант: формулировка, реальность угрозы, oracle (наблюдаемая точка проверки),
-где доказывается. Все — обязательства; на текущий момент ни один не подтверждён кодом.
+Each invariant: statement, threat reality, oracle (the observable verification point),
+where it is proven. All of them are commitments; none has yet been confirmed by code.
 
-### И1. Allowlist до target
-- **Формулировка:** сервер не открывает ни одного TCP-соединения к target, пока ключ
-  удалённой стороны не совпал с записью allowlist.
-- **Угроза:** любой участник сети, достучавшийся до QUIC-порта сервера, получает
-  произвольный доступ к внутреннему сервису (A2).
-- **Oracle:** счётчик TCP-подключений на тестовом target; «ноль подключений» при
-  неавторизованном клиенте.
-- **Доказательство:** CI-интеграционный тест; далее — контролы SEC-AUTH-02 в
+### I1. Allowlist before target
+- **Statement:** the server opens no TCP connection to the target until the remote
+  party's key matches an allowlist entry.
+- **Threat:** anyone on the network who can reach the server's QUIC port gains arbitrary
+  access to the internal service (A2).
+- **Oracle:** a TCP connection counter on a test target; "zero connections" for an
+  unauthorized client.
+- **Proof:** CI integration test; then the SEC-AUTH-02 controls in
   docs/verification/security.md.
 
-### И2. Валидация конфигурации до сети; ошибки без секретов
-- **Формулировка:** любые некорректные ktav 0.8-конфиги и CLI-аргументы отвергаются до
-  первого сетевого действия; сообщения об ошибках не содержат seed, приватных ключей,
-  токенов.
-- **Угроза:** запуск с небезопасной конфигурацией (открытый внешний listen, отключённый
-  allowlist); утечка секрета через текст ошибки.
-- **Oracle:** процесс завершается отказом до открытия сокетов; diff вывода ошибки на
-  отсутствие секрета.
-- **Доказательство:** CI-юнит (парсер/валидатор), SEC-CFG-01, SEC-CFG-02.
+### I2. Config validation before network; errors without secrets
+- **Statement:** any invalid ktav 0.8 configs and CLI arguments are rejected before the
+  first network action; error messages contain no seed, private keys,
+  or tokens.
+- **Threat:** starting with an unsafe configuration (an externally open listen, the
+  allowlist disabled); a secret leaking through error text.
+- **Oracle:** the process exits with failure before any socket is opened; diff of the
+  error output to confirm absence of the secret.
+- **Proof:** CI unit tests (parser/validator), SEC-CFG-01, SEC-CFG-02.
 
-### И3. Атомарное создание ключа; различение create_new и загрузки existing
-- **Формулировка:** операция *create_new* выполняется исключительно через O_EXCL (Unix) /
-  CREATE_NEW (Windows): при существующем файле создание поверх — отказ; конкурентное
-  создание двумя процессами — ровно один успех, ни при каком пути не перезапись.
-  *Штатная загрузка existing* — отдельный путь: существующий корректный ключ **читается**
-  и не перезаписывается; повторный штатный запуск с существующим ключом не отвергается.
-- **Угроза:** попытка создать поверх существующего ключа или гонка двух процессов создания
-  затирает ключ → новая личность, недоступность данных, DoS.
-- **Oracle:** при create_new поверх существующего — отказ и неизменность файла (inode/
-  содержимое); при конкурентном создании — один успех; при штатном запуске с существующим
-  корректным ключом — успешная загрузка, файл не изменён.
-- **Доказательство:** CI-юнит (включая конкурентный кейс), SEC-KEY-01.
+### I3. Atomic key creation; distinction between create_new and loading existing
+- **Statement:** the *create_new* operation is performed exclusively via O_EXCL (Unix) /
+  CREATE_NEW (Windows): if the file exists, creating over it fails; concurrent creation
+  by two processes yields exactly one success, and under no path is an overwrite.
+  *Normal loading of an existing key* is a separate path: an existing valid key is
+  **read** and not overwritten; a normal re-run with an existing key is not rejected.
+- **Threat:** an attempt to create over an existing key or a race between two creating
+  processes wipes the key → a new identity, data unavailability, DoS.
+- **Oracle:** on create_new over an existing file — failure and unchanged file (inode/
+  contents); on concurrent creation — one success; on a normal run with an existing
+  valid key — successful load, file unchanged.
+- **Proof:** CI unit tests (including the concurrent case), SEC-KEY-01.
 
-### И4. Права на файл ключа при создании; секреты вне Debug/логов/ошибок/конфигов
-- **Формулировка:** права, ограничивающие доступ, установлены **уже при создании, до
-  первого записанного байта seed** — без окна create→write→chmod: на Unix переносимый
-  путь — создание с O_EXCL и mode 0600 одним вызовом (или установкой umask) с проверкой,
-  что окна не было; на Windows — ACL, ограничивающий доступ владельцем, задаётся при
-  создании. Дополнительно: контролируемая попытка чтения другим непривилегированным
-  principal в паузе между open и первой записью (в тестовой сборке) и после записи должна
-  не давать доступ. Seed/приватные ключи не реализуются в Debug/Display, не попадают в
-  логи, ошибки и сериализованные конфиги. **Документ не обещает защиту от root/admin или
-  компрометации ОС** (§3, out of scope).
-- **Угроза:** локальный пользователь той же машины или артефакты CI читают ключ (A1);
-  окно между созданием и сужением прав раскрывает seed любому локальному читателю.
-- **Oracle:** проверка прав сразу после создания; негативная попытка чтения другим
-  principal в контролируемой паузе (test-only) и после записи; grep-контроль логов/дампов/
-  артефактов на байтовые и hex-представления секрета.
-- **Доказательство:** CI-юнит + grep-контроль CI-артефактов, SEC-KEY-02, SEC-KEY-03.
+### I4. Key file permissions at creation; secrets out of Debug/logs/errors/configs
+- **Statement:** access-restricting permissions are set **at creation time, before the
+  first seed byte is written** — without a create→write→chmod window: on Unix the
+  portable path is creation with O_EXCL and mode 0600 in one call (or by setting umask),
+  with verification that no window existed; on Windows, an ACL restricting access to the
+  owner is set at creation. Additionally: a controlled attempt by another unprivileged
+  principal to read the file in the pause between open and the first write (in a test
+  build) and after the write must not succeed. Seeds/private keys are not implemented in
+  Debug/Display and do not reach logs, errors, or serialized configs. **This document
+  does not promise protection from root/admin or OS compromise** (§3, out of scope).
+- **Threat:** a local user on the same machine or CI artifacts read the key (A1);
+  the window between creation and permission tightening exposes the seed to any local
+  reader.
+- **Oracle:** permission check immediately after creation; a negative read attempt by
+  another principal in the controlled pause (test-only) and after the write; grep checks
+  of logs/dumps/artifacts for byte and hex representations of the secret.
+- **Proof:** CI unit tests + grep checks of CI artifacts, SEC-KEY-02, SEC-KEY-03.
 
-### И5. Signaling-only во всех фазах
-- **Формулировка:** прикладные данные STREAM никогда не передаются через libp2p relay —
-  до установления direct-пути, при его отказе и после reconnect; в режиме `signal`
-  Yggdrasil также переносит только сигнализацию (Ygg — standby *данных*, relay — не
-  data-fallback никогда). Нарушение этого правила при сохранном QUIC/TLS — это **не**
-  автоматическая расшифровка, а нарушение маршрутизации: раскрытие метаданных и
-  зависимость от недоверенного промежуточного пути, его лимитов и стоимости. Выполнение
-  через yggdrasil-go не свойство iroh по умолчанию: custom NAT traversal и строгая
-  политика путей **ещё не доказаны**.
-- **Угроза:** relay Amino DHT и публичные Ygg-пиры недоверенны (§3): метаданные,
-  лимиты/стоимость чужого пути, активное воздействие недоверенного релея.
-- **Oracle:** наблюдение зашифрованных пакетов и маршрута **не** различает STREAM от
-  CRYPTO/ACK/согласования — сам по себе такой oracle недостаточен. Требуемый oracle —
-  *decoded-frames oracle*: декодированные QUIC-кадры с однозначной привязкой к фактическому
-  egress path/transport — например test-only hook до шифрования с path metadata, либо
-  test-only keylog + capture + доказуемое декодирование. Доступность hook/keylog в
-  выбранной версии iroh — **условие, которое подтверждает P03**; её существование здесь
-  не утверждается. Обязательна калибровка чувствительности: положительный контроль —
-  заведомо разрешённый STREAM через custom-путь **должен** фиксироваться как нарушение;
-  нулевой результат без такой калибровки не является доказательством.
-- **Прогон:** все три фазы (до direct, при отказе direct, после reconnect) и оба режима
-  (signal/standby); app-level недоставка данных не доказывает отсутствие STREAM на wire.
-- **Доказательство:** **только P03** + NAT-стенд; контролы SEC-PATH-01/02/03. При
-  недостаточном oracle этап P03 по И5 остаётся **не пройденным** (gate, а не формальность).
+### I5. Signaling-only in all phases
+- **Statement:** application STREAM data is never carried over the libp2p relay — before
+  the direct path is established, when it fails, and after reconnect; in `signal` mode
+  Yggdrasil likewise carries only signaling (Ygg is the standby for *data*; the relay is
+  never a data fallback). A violation of this rule with QUIC/TLS intact is **not**
+  automatic decryption but a routing violation: metadata disclosure and dependence on an
+  untrusted intermediary path, its limits and cost. Execution through yggdrasil-go is not
+  a default iroh property: custom NAT traversal and the strict path policy are **not yet
+  proven**.
+- **Threat:** the Amino DHT relay and public Ygg peers are untrusted (§3): metadata,
+  limits/cost of someone else's path, active interference by an untrusted relay.
+- **Oracle:** observing encrypted packets and routes **does not** distinguish STREAM from
+  CRYPTO/ACK/handshake — such an oracle alone is insufficient. The required oracle is a
+  *decoded-frames oracle*: decoded QUIC frames with unambiguous binding to the actual
+  egress path/transport — e.g. a test-only hook before encryption with path metadata, or
+  test-only keylog + capture + demonstrable decoding. The availability of a hook/keylog in
+  the chosen iroh version is a **condition that P03 confirms**; its existence is not
+  asserted here. Sensitivity calibration is mandatory: a positive control — an
+  intentionally permitted STREAM over the custom path **must** be flagged as a violation;
+  a null result without such calibration is not proof.
+- **Runs:** all three phases (before direct, at direct failure, after reconnect) and both
+  modes (signal/standby); app-level data non-delivery does not prove the absence of
+  STREAM on the wire.
+- **Proof:** **P03 only** + the NAT testbed; controls SEC-PATH-01/02/03. If the oracle is
+  insufficient, the I5 part of P03 remains **not passed** (a gate, not a formality).
 
-### И6. Недоверенные записи Mainline/pkarr
-- **Формулировка:** адрес из DHT не используется до успешной проверки подписи pkarr,
-  соблюдения пределов размера и свежести. Пределы размера — контракт (бюджет на
-  соответствующую структуру/поле и полный overhead записи), который подтверждает P01;
-  лимит применяется по фактическому бюджету, а не как безусловная константа документа.
-  Повтор старой записи (replay) не принимает устаревший адрес как свежий.
-- **Угроза:** отравление DHT направляет клиента к атакующему endpoint; переполнение
-  гигантскими записями.
-- **Oracle:** счётчик отклонённых записей; отсутствие исходящих соединений к
-  неподписанным/устаревшим адресам. Этап и конкретные бюджеты размеров — по результатам
-  P01.
-- **Доказательство:** CI-юнит (мутационные фьючерсы записи), SEC-DHT-01/02/03.
+### I6. Untrusted Mainline/pkarr records
+- **Statement:** an address from the DHT is not used until pkarr signature verification
+  succeeds and the size limits and freshness requirements are met. The size limits are a
+  contract (a budget on the corresponding structure/field and the full record overhead)
+  confirmed by P01; the limit is applied according to the actual budget, not as an
+  unconditional constant of this document. Replay of an old record must not accept a stale
+  address as fresh.
+- **Threat:** DHT poisoning directs the client to an attacker's endpoint; exhaustion by
+  giant records.
+- **Oracle:** a counter of rejected records; no outgoing connections to unsigned/stale
+  addresses. The stage and the concrete size budgets follow from P01's results.
+- **Proof:** CI unit tests (mutated record fixtures), SEC-DHT-01/02/03.
 
-### И7. Недоверенность relay и Ygg-пиров по доступности/метаданным
-- **Формулировка:** отказ или манипуляция relay/Ygg-пиром приводит к деградации пути, а
-  не к панике, неограниченному retry или переходу данных через signaling-only путь.
-- **Угроза:** недоверенный релей как активный противник (§3) — дропы, задержки, replay
-  сигнальных сообщений.
-- **Oracle:** конечный ограниченный retry с backoff; состояние системы после отказа
-  (нет зависших задач, нет роста памяти).
-- **Доказательство:** CI-интеграция (фейловые инъекции), SEC-FAIL-01, SEC-DHT-04.
+### I7. Untrusted relay and Ygg peers for availability/metadata
+- **Statement:** failure or manipulation by a relay/Ygg peer degrades the path, but causes
+  no panic, no unbounded retry, and no fall of data through a signaling-only path.
+- **Threat:** an untrusted relay as an active adversary (§3) — drops, delays, replay of
+  signaling messages.
+- **Oracle:** finite bounded retry with backoff; system state after the failure (no hung
+  tasks, no memory growth).
+- **Proof:** CI integration (failure injections), SEC-FAIL-01, SEC-DHT-04.
 
-### И8. Bounded admissions и абсолютные дедлайны
-- **Формулировка:** все внешние входы проходят через ограниченные квоты: connections,
-  streams, очереди, размер пакетов, кэши, retry — каждый bounded; handshake и подключение
-  к target имеют абсолютные stage-дедлайны; корректная отмена, backpressure,
-  shutdown/half-close; отсутствие утечки дескрипторов/памяти/задач на любых ошибочных
-  путях.
-- **Угроза:** медленный или злонамеренный клиент/peer исчерпывает память/потоки/фд (A5).
-- **Oracle:** метрики ресурсов (счётчики задач, дескрипторов, RSS) до/после негативных
-  прогонов; отсутствие незакрытых задач после shutdown.
-- **Доказательство:** CI-юнит + CI-интеграция, SEC-RES-01/02/03, SEC-CONC-01/02.
+### I8. Bounded admissions and absolute deadlines
+- **Statement:** all external inputs pass through bounded quotas: connections, streams,
+  queues, packet sizes, caches, retries — each bounded; handshake and connection to the
+  target have absolute stage deadlines; correct cancellation, backpressure,
+  shutdown/half-close; no descriptor/memory/task leaks on any error paths.
+- **Threat:** a slow or malicious client/peer exhausts memory/threads/fds (A5).
+- **Oracle:** resource metrics (task, descriptor, RSS counters) before/after negative
+  runs; no unclosed tasks after shutdown.
+- **Proof:** CI unit tests + CI integration, SEC-RES-01/02/03, SEC-CONC-01/02.
 
-### И9. FFI-безопасность границы yggdrasil-go
-- **Формулировка:** во всех крейтах — корневой `#![forbid(unsafe_code)]`; только
-  FFI-крейт — `#![deny(unsafe_code)]` с локальным allow, ограниченным границей ABI и
-  SAFETY-комментариями. На ABI-границе строго определены владение и длины указателей,
-  время жизни handle'ов, cgo lifetime; контракт allowed threads / thread-affinity
-  (включая destruction/drop; блокирующий recv — в выделенном потоке, не на
-  async-исполнителе) зафиксирован **до** любых unsafe Send/Sync; паники Go и Rust не
-  пересекают ABI (containment — см. ограничения в SEC-FFI-04); stop/unblock/join полны.
-  Safe API обязан запрещать некорректные состояния/размеры **до** FFI-вызова; заведомо
-  dangling/невалидные Rust-указатели в реальный foreign-код не подаются (проверка
-  переполнения/валидации — на уровне safe-обёртки). Конкретные граничные проверки:
-  частичный failure при старте нескольких ресурсов с полным cleanup; конкурентные
-  stop/send/recv; повторные shutdown-циклы; граничные длины: MTU — валидная граница
-  (проходит), MTU+1 и overflow длины — отрицательные; нулевая длина — по контракту
-  ABI/протокола, не универсально; stale/unknown handle. *Требования к границе только формулируются здесь; фактические гарантии
-  yggdrasil-go проверяет P01 — данный документ не утверждает ничего о свойствах внешней
-  библиотеки.*
-- **Угроза:** UB на границе ABI — повреждение памяти, дедлоки executor'а, распространение
-  паники в чужой runtime.
-- **Oracle и уровни проверки (с явными ограничениями каждого):**
-  1) статический SAFETY/ownership/cgo-contract review — не исполняется, покрывает только
-  прочитанный код; 2) Miri — только там, где работает без исполнения foreign-кода
-  (ограничение: foreign-часть не выполняется); 3) реальные sanitizer/FFI-проверки в CI
-  (ASan/UBSan/valgrind — где применимо; ограничения платформ/инструментов фиксируются).
-  Стабильные счётчики ресурсов, debug assertions и stress **не** доказывают отсутствие UB.
-- **Доказательство:** статический review (P01/P07), Miri в CI где возможно,
-  sanitizer-FFI прогон; контролы SEC-FFI-01/02/03/04/05.
+### I9. FFI safety at the yggdrasil-go boundary
+- **Statement:** in all crates a root `#![forbid(unsafe_code)]`; only the FFI crate is
+  `#![deny(unsafe_code)]` with a local allow restricted to the ABI boundary and SAFETY
+  comments. At the ABI boundary, pointer ownership and lengths, handle lifetimes, and cgo
+  lifetime are strictly defined; the allowed-threads / thread-affinity contract
+  (including destruction/drop; blocking recv runs in a dedicated thread, not on an
+  async executor) is fixed **before** any unsafe Send/Sync; Go and Rust panics do not
+  cross the ABI (containment — see the limitations in SEC-FFI-04); stop/unblock/join are
+  complete. The safe API must forbid invalid states/sizes **before** the FFI call;
+  knowingly dangling/invalid Rust pointers are never passed into real foreign code
+  (overflow/validation checks live in the safe wrapper). Specific boundary checks:
+  partial failure at startup of several resources with full cleanup; concurrent
+  stop/send/recv; repeated shutdown cycles; boundary lengths: MTU — a valid boundary
+  (passes), MTU+1 and length overflow — negative; zero length — per the ABI/protocol
+  contract, not universally; stale/unknown handle. *The boundary requirements are only
+  formulated here; the actual guarantees of yggdrasil-go are verified by P01 — this
+  document asserts nothing about the properties of the external library.*
+- **Threat:** UB at the ABI boundary — memory corruption, executor deadlocks, panic
+  propagation into the foreign runtime.
+- **Oracle and verification levels (each with explicit limitations):**
+  1) static SAFETY/ownership/cgo-contract review — not executed, covers only the read
+  code; 2) Miri — only where it runs without executing foreign code (limitation: the
+  foreign part does not execute); 3) real sanitizer/FFI checks in CI
+  (ASan/UBSan/valgrind — where applicable; platform/tool limitations are recorded).
+  Stable resource counters, debug assertions, and stress runs **do not** prove the
+  absence of UB.
+- **Proof:** static review (P01/P07), Miri in CI where possible, a sanitizer-FFI run;
+  controls SEC-FFI-01/02/03/04/05.
 
-### И10. Supply-chain и CI
-- **Формулировка:** зависимости зафиксированы (lock + pin), источники (crate/go-модуль)
-  ревьюятся; pin ≠ security proof — pinning сужает поверхность, не заменяет проверку
-  происхождения. GitHub Actions — минимальные permissions (top-level
-  `permissions: { contents: read }`, запись только где необходимо), действия без
-  избыточных прав, явный запрет передачи secret env в build/cache-producing steps,
-  учёт trust boundaries fork PR. Fuzz/property-испытания — исполняемый **доверенный**
-  тестовый код в CI; недоверенные исследуемые материалы — только данные, их не исполнять.
-- **Угроза:** компрометация через зависимость или CI-пайплайн; утечка секрета из раннера.
-- **Oracle:** проверка workflow-файлов (YAML-проверка permissions, secret env в
-  cache-producing steps); независимая проверка lock/sources/лицензий; fork PR границы.
-- **Доказательство:** CI-этап P02 и далее, SEC-SUP-01/02/03.
+### I10. Supply chain and CI
+- **Statement:** dependencies are pinned (lock + pin), sources (crate/go module) are
+  reviewed; pin ≠ security proof — pinning narrows the surface and does not replace
+  verification of provenance. GitHub Actions has minimal permissions (top-level
+  `permissions: { contents: read }`, write only where necessary), actions without
+  excessive rights, an explicit ban on passing secret env into build/cache-producing
+  steps, and accounting of fork PR trust boundaries. Fuzz/property testing is executable
+  **trusted** test code in CI; untrusted inputs under test are data only and must not be
+  executed.
+- **Threat:** compromise through a dependency or the CI pipeline; a secret leaking from a
+  runner.
+- **Oracle:** inspection of workflow files (YAML checks of permissions, secret env in
+  cache-producing steps); independent verification of lock/sources/licenses; fork PR
+  boundaries.
+- **Proof:** the P02 CI stage and beyond, SEC-SUP-01/02/03.
