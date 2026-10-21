@@ -6,11 +6,10 @@
 > Yggdrasil backend (crate `yggdrasil` 0.3.1, Revertron/Yggdrasil-ng, pinned
 > commit c9a54f1587bb133a06072596484c972a336db0d2), this Go c-archive ABI check
 > is **no longer a prerequisite for any stage** and is **NOT evidence of
-> Rust-interop or adapter correctness**. Automatic push/PR execution is retired;
-> the legacy workflow is manually dispatchable only. Removing the historical
-> workflow and sources was denied by the tool as `Irreversible Local Destruction`.
-> Those files remain pending removal permission, not as production dependencies.
-> Revision date: 2026-10-22.
+> Rust-interop or adapter correctness**. Following explicit user authorization,
+> the Go source, Rust foreign-call probe, and Go ABI workflow were removed on
+> 2026-10-22. No Go ABI job remains, automatic or manual. The original sources
+> remain recoverable from Git history; this report preserves the observed results.
 
 Task #28. Status: passed on Linux and Windows in GitHub CI.
 No Go/Rust compilation or probe execution was performed locally.

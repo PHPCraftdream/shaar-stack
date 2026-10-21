@@ -864,7 +864,7 @@ pub const BOOTSTRAP: &[&str] = &[
 | Relay limits in Kubo | If the limits are small, the handshake may not fit | Measure; if insufficient — several relays in parallel |
 | Amino bootstrap via IPFS nodes | Initial entry depends on known addresses | Cache peers; add your own known nodes |
 | Publicity of the Mainline record | Home IP becomes visible | Publish only libp2p relay addresses (section 6) |
-| Go in the build *(SUPERSEDED in the intended native Rust architecture; the historical ABI sources remain pending removal — see go-abi.md)* | Requires a Go toolchain, increases binary size | Accept; in the future — a Rust implementation of the Yggdrasil protocol |
+| Go in the build *(SUPERSEDED in the intended native Rust architecture; the historical ABI sources and workflow were removed — see go-abi.md)* | Requires a Go toolchain, increases binary size | Accept; in the future — a Rust implementation of the Yggdrasil protocol |
 
 ---
 
