@@ -50,6 +50,6 @@ jobs:
           rustc +stable --version --verbose
           cargo +stable --version
       - name: Структурные ограничения
-        run: python -I .github/scripts/check_structure.py
+        run: python -I -X utf8 .github/scripts/check_structure.py
       - name: Тесты структурного guard
-        run: python -I -m unittest discover -s .github/scripts/tests
+        run: python -I -X utf8 -m unittest discover -s .github/scripts/tests
