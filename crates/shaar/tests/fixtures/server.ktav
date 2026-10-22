@@ -1,0 +1,5 @@
+## Sha'ar Server startup configuration (ktav 0.8)
+target: 127.0.0.1:9000
+key_file:: keys/identity.key
+allowlist_path:: conf/allowed.txt
+fallback: signal

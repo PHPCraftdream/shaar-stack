@@ -1,9 +1,10 @@
 # Sha'ar Stack — Development Plan
 
-Status: plan; the workspace skeleton and CI foundation passed (P02). P01 contract
-research is reconciled to the native Rust Yggdrasil backend. Identity (P04),
-ktav configs (P05), the P03 experiment, and the Yggdrasil adapter (P07) are
-pending.
+Status: foundation CI (P02) and ktav configuration acceptance (P05) passed.
+The identity functional baseline passes on Linux/Windows; remaining Windows
+privacy cases keep full P04 acceptance open. P03 and the Yggdrasil adapter
+(P07) are not passed. See [the SDK evidence](../verification/sdk-foundation.md).
+P01 contract research is reconciled to the native Rust requirement.
 Date: 2026-10-21. Revised: 2026-10-22 — native Rust replaces Go/cgo in the
 intended architecture. Yggdrasil-ng (`yggdrasil` 0.3.1, source revision
 c9a54f1587bb133a06072596484c972a336db0d2) is a candidate, not an integrated
@@ -67,7 +68,8 @@ shaar-stack/
 │   ├── shaar-ygg/
 │   ├── shaar-p2p/
 │   ├── shaar-server/
-│   └── shaar-client/
+│   ├── shaar-client/
+│   └── shaar-platform/
 └── docs/
     ├── architecture/
     ├── plans/
@@ -83,7 +85,9 @@ Dependencies: the Server and Client use `shaar`; the SDK wires in the
 `shaar-ygg` and `shaar-p2p` adapters. The adapters do not depend on the SDK, the Server,
 or the Client, so no cycle forms. External iroh types are localized in the SDK's
 networking layer; the public SDK surface must not needlessly cement unstable
-upstream APIs. No separate shared crate is added without a demonstrated need.
+upstream APIs. The small `shaar-platform` leaf supplies atomic Windows
+private-file creation; the SDK uses it only on Windows. Its isolated native
+FFI keeps the SDK's forbid policy intact. No generic shared crate is added.
 
 ## 4. Decisions to be proven before main implementation
 

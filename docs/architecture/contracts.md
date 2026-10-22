@@ -1,16 +1,17 @@
 # Sha’ar Stack External Contracts (P01)
 
-Date: 2026-10-22. Status: research; only the foundation workspace CI (P02) passed.
+Date: 2026-10-22. Status: foundation/configuration CI passed; identity baseline
+passed with open security cases. Networking/transport gates remain unpassed.
 No local builds/tests were run.
 
 Revision: reconciled to the native Rust Yggdrasil backend
 (Revertron/Yggdrasil-ng, pinned commit
 `c9a54f1587bb133a06072596484c972a336db0d2`); the earlier yggdrasil-go
 v0.5.14 c-archive FFI contract is superseded and kept as historical
-reference (section 4.2). Status of implementation: foundation workspace CI
-passed (P02); identity (P04), configs (P05), the P03 experiment, and the
-adapter itself are incomplete. Identity, config, and P03 work is in progress,
-not accepted; no completion is claimed beyond the foundation.
+reference (section 4.2). Configuration acceptance (P05) and the identity
+functional baseline have CI evidence; full P04 privacy acceptance remains
+open. P03 and the adapter itself are incomplete. See
+[the executed checks and limits](../verification/sdk-foundation.md).
 
 Every fact is tagged with a confidence level:
 - **read from source** — by reading the sources of the specified tag/file

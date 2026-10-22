@@ -1,11 +1,11 @@
-# Sha'ar Stack v1 Threat Model (pre-implementation)
+# Sha'ar Stack v1 Threat Model
 
-Status: the foundation workspace skeleton and CI have passed (P02 done); **no SDK, server,
-client, or transport-adapter implementation exists yet**. This is a document of requirements and
-verifiable commitments, not an audit report. Nothing is "verified" beyond the CI skeleton; for
-each invariant the document specifies where it must be proven (unit/integration tests in CI, the
-P03 experiment, the NAT testbed, a manual testbed). The success criterion is explicit,
-formulatable failure, not fabricated results. All invariants remain unconfirmed commitments.
+Status: foundation/configuration CI and the identity functional baseline pass.
+Identity/configuration primitives exist; networking, Server/Client operation,
+and transport adapters remain unimplemented. This is a requirements document,
+not a blanket audit result. [The SDK evidence](../verification/sdk-foundation.md)
+records executed checks and remaining privacy cases. Full invariants require
+all their stated oracles, including the unpassed P03/NAT and security gates.
 
 Revision note (2026-10-22): reconciled to the native Rust Yggdrasil backend — the
 Yggdrasil-ng candidate inspected at revision `c9a54f1587bb133a06072596484c972a336db0d2`

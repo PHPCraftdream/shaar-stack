@@ -1,9 +1,9 @@
 # Sha'ar Stack v1 Security Verification Plan
 
-Status: **foundation CI passed (workspace skeleton and CI, P02); no adapter,
-identity, or config implementation has been accepted — no further controls have passed, and
-all controls below remain not passed.** Each control below is a
-commitment with an observable outcome. Invariant references are I1…I10 from
+Status: foundation/configuration CI and identity functional checks pass;
+[the SDK evidence](sdk-foundation.md) lists exact results and open cases.
+**No complete security control below is marked passed by that functional run.**
+Each control remains a commitment with its own observable acceptance outcome. Invariant references are I1…I10 from
 `docs/architecture/threat-model.md`. The oracle is always external observation (a log with
 a failure code, a connection counter, inspection of the network path, resource metrics);
 "tests that test their own constant" and mock-success oracles are forbidden.

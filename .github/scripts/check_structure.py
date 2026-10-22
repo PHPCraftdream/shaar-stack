@@ -6,8 +6,8 @@ Rules (CLAUDE.md):
    directory, per git tracked paths.
 3. unsafe policy: every workspace-package target (all kinds: lib, bin,
    test, example, bench, custom-build, proc-macro) must have EXACTLY
-   #![forbid(unsafe_code)] as its FIRST physical line. The current
-   workspace has no native FFI crate; Yggdrasil uses a safe Rust adapter.
+   #![forbid(unsafe_code)] as its FIRST physical line, except explicitly
+   listed native FFI library roots, which require #![deny(unsafe_code)].
 
 Code extensions (subject to the line limit):
     .rs, .go, .py, .sh, .bash, .ps1, .toml, .yml, .yaml
@@ -71,6 +71,7 @@ CHUNK = 65536
 BOM = b"\xef\xbb\xbf"
 FORBID = b"#![forbid(unsafe_code)]"
 DENY = b"#![deny(unsafe_code)]"
+FFI_ROOTS = frozenset({(b"crates/shaar-platform/src/lib.rs", "shaar-platform")})
 IGNORED_PREFIXES = (b".git/", b".claude/", b".rush/", b"worktrees/", b"target/")
 CODE_EXTS = frozenset(
     (b".rs", b".go", b".py", b".sh", b".bash", b".ps1", b".toml", b".yml", b".yaml")
@@ -284,6 +285,9 @@ def parse_metadata(raw: bytes, root: Path, tracked: set[bytes]) -> tuple[list[tu
                     f"file: {relative.as_posix()}"
                 )
                 continue
+            if (relative_bytes, name) in FFI_ROOTS and kinds != ["lib"]:
+                errors.append(f"cargo metadata: native FFI root of {name} must be a library only")
+                continue
             targets.append((relative_bytes, name))
     missing = member_ids - found_members
     if missing:
@@ -296,8 +300,8 @@ def parse_metadata(raw: bytes, root: Path, tracked: set[bytes]) -> tuple[list[tu
 def check_unsafe_policy(root: Path, targets: list[tuple[bytes, str]]) -> list[str]:
     """First line of each target must be exactly the required unsafe attribute."""
     errors: list[str] = []
-    for path, _package in targets:
-        expected = FORBID
+    for path, package in targets:
+        expected = DENY if (path, package) in FFI_ROOTS else FORBID
         full = root / path.decode("utf-8", "surrogateescape")
         try:
             with _open_checked(root, full) as fh:

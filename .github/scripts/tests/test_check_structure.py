@@ -384,6 +384,18 @@ class MetadataTests(TempCase):
             self.assertIn("manifest", errors[0])
 
 
+    def test_native_ffi_root_cannot_be_reused_as_another_target_kind(self):
+        with self.tmp() as tmp:
+            source = "crates/shaar-platform/src/lib.rs"
+            for kinds in (["bin"], ["test"], ["example"], ["lib", "bin"]):
+                with self.subTest(kinds=kinds):
+                    raw = meta_json([pkg("p1", "shaar-platform", [tgt(f"{tmp}/{source}", kinds)])])
+                    targets, errors = self.targets(tmp, raw, [source.encode()])
+                    self.assertEqual(targets, [])
+                    self.assertEqual(len(errors), 1)
+                    self.assertIn("library only", errors[0])
+
+
 class UnsafePolicyTests(TempCase):
     def root_errors(self, first_line: bytes, package: str = "fake") -> list[str]:
         with self.tmp() as tmp:
@@ -399,6 +411,7 @@ class UnsafePolicyTests(TempCase):
                 (b"crates/shaar-server/src/main.rs", "shaar-server"),
                 (b"crates/shaar-client/src/main.rs", "shaar-client"),
                 (b"crates/shaar-ygg/src/lib.rs", "shaar-ygg"),
+                (b"crates/shaar-platform/src/lib.rs", "shaar-platform"),
             ]
             self.assertEqual(cs.check_unsafe_policy(Path.cwd(), targets), [])
 
@@ -445,6 +458,25 @@ class UnsafePolicyTests(TempCase):
             errors = cs.check_unsafe_policy(Path(tmp), targets)
             self.assertEqual(len(errors), 1)
             self.assertIn("forbid", errors[0])
+
+
+    def test_native_ffi_exception_is_only_its_named_library_root(self):
+        with self.tmp() as tmp:
+            library = "crates/shaar-platform/src/lib.rs"
+            self.write(tmp, library, cs.DENY + b"\n")
+            target = [(library.encode(), "shaar-platform")]
+            self.assertEqual(cs.check_unsafe_policy(Path(tmp), target), [])
+            self.write(tmp, library, cs.FORBID + b"\n")
+            self.assertIn("deny", cs.check_unsafe_policy(Path(tmp), target)[0])
+            self.write(tmp, library, cs.DENY + b"\n")
+            self.assertIn("forbid", cs.check_unsafe_policy(Path(tmp), [(library.encode(), "other")])[0])
+            for relative in ("tests/native.rs", "examples/native.rs", "build.rs"):
+                path = f"crates/shaar-platform/{relative}"
+                ordinary = [(path.encode(), "shaar-platform")]
+                self.write(tmp, path, cs.FORBID + b"\n")
+                self.assertEqual(cs.check_unsafe_policy(Path(tmp), ordinary), [])
+                self.write(tmp, path, cs.DENY + b"\n")
+                self.assertIn("forbid", cs.check_unsafe_policy(Path(tmp), ordinary)[0])
 
 
 class MainTests(TempCase):
