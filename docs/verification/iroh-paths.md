@@ -420,3 +420,43 @@ an independently observed send boundary and full packet decryption material
 or calibrated packet-identity instrumentation; header-protection keys alone
 cannot decrypt payload frames. Neither this source investigation nor the
 new oracle calibration closes P03.
+
+## 12. Accepted real QUIC traversal through two NATs
+
+Run [39860587690](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39860587690)
+at `77c8ab6` passed the full controlled Linux suite, including positive traversal,
+native-blocked/wrong-public-port negatives, setup/live-peer failures and supervised
+SIGTERM. Artifacts were downloaded and inspected as data. The detailed observations
+and scope are recorded in
+[the topology evidence](../../.github/probes/nat-topology/README.md#accepted-controlled-quic-traversal).
+
+Two Rust peer processes and an owned opaque UDP control relay ran at UID 1001
+with effective capabilities zero. Both peers completed real QUIC/TLS over the
+custom path and queued STREAM/FIN and DATAGRAM once. After the shared phase
+barrier, ordinary iroh address publication exposed the configured public candidates;
+Noq's NAT protocol probed/validated the direct path without the explicit
+`spike_open_ip_path` hook used in earlier same-host experiments.
+
+Private native sockets `10.0.1.2:40001` and `10.0.2.2:40002` were independently
+observed on WAN as `203.0.113.1:41010` and `203.0.113.2:41020`, with exact replied
+conntrack original/reply tuples. Full encrypted packet identities, emitted only
+in generated CI source after packet encryption, correlated decoded frame metadata
+to the real relay/WAN captures. Custom application frames were zero; native
+STREAM/DATAGRAM observations were positive in both directions. Duplicate WAN
+observations are allowed; actual application bytes and FIN were checked exactly.
+No unobserved application frame is accepted; unsent/unobserved control construction
+is separately reported rather than silently attributed to a path.
+
+All six cases cleaned owned resources without host firewall/forwarding changes.
+Privilege was used only by the disposable namespace/capture supervisor, not by the
+Rust networking helpers. Router rules use outbound MASQUERADE and router-local
+unsolicited INPUT drops, not a DNAT/port-forward rule. Public candidate addresses
+and translated-port choices remain controlled fixture inputs, not a proof of
+unassisted discovery or behavior of arbitrary home/mobile NATs.
+
+P03 remains **NOT PASSED**: section 4.2 of the development plan also requires
+physical direct-path loss and re-punch recovery while the original connection
+retains payload and no forbidden custom path carries application STREAM data.
+The sans-I/O loss test and initial successful NAT traversal do not substitute
+for that experiment. Production dependency adoption and selected-custom transport
+authority also remain unimplemented; the Yggdrasil integration denial is unchanged.

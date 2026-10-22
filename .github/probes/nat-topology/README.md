@@ -171,7 +171,7 @@ each in its own per-case directory), validating every case with the strict
 `checks/selftest.py` validators / supervisor, and always uploads `out/` as
 artifacts.
 
-## Authored real-QUIC extension (runtime unverified)
+## Controlled real-QUIC extension
 
 The separate `.github/workflows/quic-nat.yml` builds the reviewed, detached Rust
 `nat-peer` helper and opts into `quic/run.py` by setting `FIXTURE_QUIC_BINARY`.
@@ -239,6 +239,41 @@ phase and alarm-handler restoration. Package installation is separately bounded
 at 600 seconds after two 180-second mirror-download timeouts; native runtime
 deadlines are unchanged.
 
-The complete new two-NAT suite is **not yet runtime accepted**. They do not
-establish production libp2p/Yggdrasil deployment, autonomous discovery, selected
-custom-transport authorization, or P03 completion.
+## Accepted controlled QUIC traversal
+
+[Run 39860587690](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39860587690)
+at `77c8ab6` passed the full six-case Linux suite. Downloaded JSON, tuple and
+cleanup artifacts were independently inspected; this is not inferred from green
+workflow status alone.
+
+| Native peer | Private socket | Observed translated source | Remote public socket |
+|---|---|---|---|
+| A | `10.0.1.2:40001` | `203.0.113.1:41010` | `203.0.113.2:41020` |
+| B | `10.0.2.2:40002` | `203.0.113.2:41020` | `203.0.113.1:41010` |
+
+Both native conntrack entries were replied, with exact original/reply tuples.
+Positive capture contained 36 WAN observations. Custom captures (35/31 packets)
+contained zero STREAM/DATAGRAM frames. Native observations (16/20) contained two
+STREAM and two DATAGRAM frame observations per direction; duplicate WAN copies
+are counted, not extra application deliveries. Exact eight-byte STREAM/FIN and
+DATAGRAM delivery occurred on the original connection. Constructed-but-unobserved
+control packets were reported (10/10); unobserved application frames remained
+forbidden by the verifier.
+
+`blocked` passed with native WAN capture zero, live custom control and router
+native drop counters 23/24. `wrong-tuple` passed with 34 actual WAN attempts and
+zero native/custom application frames. Both peers and the control relay were
+observed at UID 1001 with effective capabilities zero in all live cases.
+
+Setup injection exited 1 at the exact three-namespace stage; live-peer injection
+exited 1 with its exact reason; supervised SIGTERM exited 143 and recorded
+`SystemExit` code `143`. Every case had `cleanup_failed: false`, no remaining
+namespace/process/interface, no child-cleanup errors, and unchanged host firewall
+and forwarding snapshots. The interruption supervisor retained its live-descendant
+and PID start-identity checks.
+
+Scope: controlled Linux NAT traversal and strict custom exclusion are accepted.
+This does not establish physical direct-path loss/re-punch recovery, production
+libp2p/Yggdrasil deployment, autonomous public-address discovery, authorization of
+selected custom transports, or P03 completion. Recovery remains a separate
+mandatory P03 experiment.
