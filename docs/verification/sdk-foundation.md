@@ -1,10 +1,11 @@
 # SDK configuration and identity baseline
 
-Date: 2026-10-22. Status: configuration acceptance passed; identity functional
-baseline passed, and Windows private-file ACL evidence now includes file-object
-denial under the anonymous identity plus SID-only Authz oracle checks, while
-full P04/security acceptance remains open. Networking, Server/Client operation,
-and transport acceptance are not established.
+Date: 2026-10-22. Status: P04 identity/key-storage and P05 configuration
+acceptance passed for Linux and Windows within the documented boundaries.
+Evidence includes exclusive creation across OS processes, foreign-principal
+read denial, public-future cancellation, and known-fixture diagnostic scans.
+Networking, Server/Client operation, and transport acceptance are not
+established.
 
 ## Observed CI evidence
 
@@ -139,10 +140,9 @@ Scope of proof: the anonymous-reopen denial proves file-object denial under
 the anonymous identity; it does not prove full-path/ancestor-directory lookup
 enforcement, nor a second-account logon. The Authz check is a synthetic
 World-SID decision, not a real different-principal read. Public API
-cancellation cannot stop already-running blocking native I/O; cancellation
-coverage at this revision only establishes narrower waiter/backend cleanup.
-Full P04/security acceptance remains open pending the public-future tests
-and final acceptance audit.
+cancellation cannot stop already-running blocking native I/O. Subsequent
+public-future tests below extend the original waiter/backend coverage;
+they do not promise aborting arbitrary native operations.
 
 ## Unix second-UID read evidence
 
@@ -173,13 +173,94 @@ ancestors without weakening either control. The exact offending ancestor
 was not identified. This run establishes actual second-UID reads on Linux;
 it does not add claims about every Unix platform or root/admin protection.
 
-## Explicitly open acceptance
+## Public-future cancellation evidence
 
+[Run 39731282976](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39731282976)
+passed at `def08d68fc6905b010cbe9d42dfa7bd900b3ddc2` on Linux and Windows.
+The logs contain successful execution of all three genuine public-future
+cancellation tests in `identity::store::tests`:
+
+- `cancelled_create_new_worker_still_completes_a_valid_private_file`:
+  cancelled creation can finish; a public load matches the public key
+  independently derived from the zeroizing on-disk seed staging.
+- `cancelled_load_never_modifies_the_existing_private_file`:
+  cancelling a queued read leaves known fixture bytes unchanged.
+- `cancelled_load_or_create_on_absent_path_never_creates_the_file`:
+  dropping the future during its initial read prevents its creation
+  continuation from running.
+
+A retained blocker occupies the fixture runtime's only blocking thread.
+Each actual public future is polled to Pending and dropped before releasing
+that blocker. A subsequently queued sentinel observes completion inside the
+live runtime; both owned handles are joined. FIFO ordering is a fixture
+assumption checked against the pinned Tokio 1.54.1 implementation, not a
+public Tokio scheduling guarantee. Runtime destruction alone is not used as
+proof: queued, never-started nonmandatory jobs can be discarded at shutdown.
+These cases cover queued public-future cancellation and eventual worker
+completion, not interruption of arbitrary in-flight OS I/O. The earlier
+partial-write failure test separately covers worker-owned cleanup after its
+borrowed waiter is dropped.
+
+## Two-OS-process creation evidence
+
+[Run 39735254047](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39735254047)
+passed at `109c43c251c8e0ea3d85cdbbd3fc82d3e2bfc6de` on Linux and Windows.
+Both logs contain
+`test process::two_process_create_new_race_same_fresh_key ... ok`.
+
+The normal integration test launches two actual copies of its test harness
+before releasing either through piped stdin. Each exactly selected ignored
+helper invokes public `Identity::create_new` on the same path. The parent
+requires one creation and one `AlreadyExists` result, encoded as exit codes
+0 and 42; every other result fails. Selecting zero helper tests would yield
+two zero exits and therefore fail. Immediate owned-child guards kill and
+wait on parent unwind. Metadata checks the 32-byte file without reading the
+secret; two public loads produce the same public key. This is a
+launch-before-release interleaving, not a claim that both children reached
+a readiness barrier. Blocking waits rely on the CI job's 30-minute timeout.
+
+## Captured diagnostic-output evidence and P04 acceptance
+
+[Run 39736676155](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39736676155)
+passed at `f92bdf94f596669e492c0440ae15290755f9fbf1` on Linux and Windows.
+Both jobs passed formatting, clippy, Rust tests, the structural guard, and
+87 Python checks covering the guard and scanner. The ordinary test outputs
+on both systems and the explicit Ubuntu foreign-reader output were scanned
+and reported `identity output scan: clean` before being displayed. Cargo
+failure statuses are preserved; a failed scan suppresses the captured log.
+
+The bounded 4 MiB oracle covers listed public RFC 8032 seeds and deterministic
+key-file payload fixtures in raw bytes, case-insensitive hexadecimal, and
+32-value decimal Debug arrays. It rejects unreadable or oversized input with
+static diagnostics, without printing matched material or input paths.
+Regression cases cover every listed representation, clean public keys,
+near misses, read bounds, and redacted error output. They also explicitly
+cover a representation collision: forty ASCII `3` bytes are a valid raw
+32-byte `0x33` fixture occurrence, even though they are only a prefix of its
+hexadecimal form. The detector was not weakened to make that input clean.
+
+This is a known-fixture regression oracle for captured cargo-test stdout
+and stderr, not discovery of arbitrary runtime-generated secrets. No build
+artifacts are uploaded by this workflow, and no arbitrary-artifact scan is
+claimed. Earlier local ad-hoc scanner executions by a delegated worker were
+outside the task's allowed checks and are not used as acceptance evidence;
+the final source was validated by the cited GitHub CI run.
+
+P04 closes with the conversion vectors, unchanged loading, malformed and
+insecure files, exclusive/no-overwrite behavior, task and process races,
+creation-time permissions, actual foreign-principal denial, cancellation
+boundaries, and captured diagnostic checks described above. This acceptance
+does not imply the networking stages are implemented.
+
+## Limits and remaining project acceptance
+
+- The output oracle covers known test fixtures, not unknown random secrets
+  or every possible textual representation.
 - Windows anonymous coverage proves file-object denial, not full-path lookup
   or a second-account logon; the Authz evidence is a synthetic SID decision,
   not a real different-principal read.
-- Whole-public-API cancellation/resource-lifecycle acceptance beyond the
-  documented native-I/O limitations.
+- Native operations remain cancel-unsafe as documented; arbitrary in-flight
+  OS I/O interruption is not promised.
 - P03 strict signaling-only, direct migration, and real NAT traversal.
 - Rust Yggdrasil backend adoption and its unresolved ownership/shutdown gate.
 - Functional networking, allowlist-before-target connection, and the running
