@@ -1,11 +1,11 @@
 # Noq application-payload gate: initial CI spike
 
 Status: **INITIAL REGRESSIONS PASSED; P03 NOT PASSED.**
-[CI run 39793547412](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39793547412)
-at `3d3aa2f` passed seven policy tests, including multipath and client/server
-early-data scenarios, and the complete backend library suite: 434 tests,
-including those seven, with
-0 failures or ignored tests. This is an isolated proof-of-mechanism on checksum-pinned
+[CI run 39800044282](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39800044282)
+at `537412f` passed eight policy tests and the complete 435-test backend
+library suite on **both Ubuntu and Windows**, with 0 failures or ignored tests.
+This includes multipath, client/server early data, and corrected lost-STREAM
+recovery. This is an isolated proof-of-mechanism on checksum-pinned
 `noq-proto 1.3.0`, not a production fork or iroh integration. The production
 workspace and existing standalone baseline lock are unchanged.
 
@@ -74,7 +74,7 @@ DATAGRAM must obey policy, and control handshakes must still complete. These
 phase assertions and positive controls are required, not inferred from eventual
 application non-delivery.
 
-## Authored retransmission follow-up (runtime pending)
+## Confirmed simulated retransmission and path change
 
 A new scenario removes the simulated data route after validation, while the
 control route stays reachable. In each sender direction it writes one small
@@ -94,12 +94,29 @@ and `3496-3497` requeues their STREAM metadata. The corrected test distinguishes
 those mechanisms and retains exclusion, retransmission, exact-byte and FIN
 assertions; it does not modify backend recovery to satisfy the test.
 
+## Authored queue hardening and reset follow-up (runtime pending)
+
+Published Noq counts raw payload lengths in DATAGRAM queues; empty records cost
+zero and can accumulate without bound. The new isolated patch charges at least
+one budget unit per queued datagram in admission, batches, receive eviction,
+serialization, single/batch dequeue and oversize removal. Nonempty payloads keep
+their original charge and wire representation is unchanged. A zero budget admits
+no records, including empty ones. These are accounting units, not an assertion
+that a record uses one byte of allocator memory.
+
+New tests exercise the actual receive queue and public connection APIs: bounded
+empty cardinality, mixed eviction order, single/batch budget release, stalled
+send backpressure, drop-oldest admission, positive empty-datagram transmission,
+and zero budgets. A queued-stream reset must release send-window capacity and
+send RESET_STREAM without serializing forbidden STREAM payload. This tests
+explicit protocol cancellation, not arbitrary async-future drop safety.
+
 ## Explicitly not proven
 
-These tests are not physical-egress attribution. They do not yet prove the new
-lost-STREAM recovery scenario until CI runs it, DATAGRAM queue exhaustion,
-cancellation, autonomous path-failure detection/recovery, Windows behavior, or
-QUIC NAT traversal. Those remain mandatory follow-up proofs before P03 acceptance.
+These tests are not physical-egress attribution. The new queue/reset cases are
+unverified until CI runs them. Arbitrary async cancellation, autonomous
+path-failure detection/recovery, iroh integration and QUIC NAT traversal remain
+unproven. Those remain mandatory follow-up proofs before P03 acceptance.
 The policy is not dynamically toggled to release already prepared packets.
 
 The isolated backend uses its own published test dependency lock, separate from

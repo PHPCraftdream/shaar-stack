@@ -24,6 +24,9 @@ def transport(text):
             application_data_filter: None,""")
     text = replace(text, "            send_fairness,", """            send_fairness,
             application_data_filter: _,""")
+    for direction in ("send", "receive"):
+        method = f"    pub fn datagram_{direction}_buffer_size"
+        text = replace(text, method, "    /// Empty datagrams consume one budget unit; zero budgets admit none.\n" + method)
     return text
 
 
@@ -109,19 +112,51 @@ def connection(text):
     return text
 
 
+def datagrams(text):
+    text = replace(text, "if data.len() > Ord::min(max, send_buffer_size) {", "if data.len() > max || queued_len(data.len()) > send_buffer_size {")
+    text = replace(text, ".any(|data| data.len() > Ord::min(max, send_buffer_size))", ".any(|data| data.len() > max || queued_len(data.len()) > send_buffer_size)")
+    text = replace(text, "outgoing_total += data.len();", "outgoing_total += queued_len(data.len());", count=2)
+    text = replace(text, "self.outgoing_total -= prev.data.len();", "self.outgoing_total -= queued_len(prev.data.len());")
+    text = replace(text, "self.outgoing_total -= datagram.data.len();", "self.outgoing_total -= queued_len(datagram.data.len());", count=2)
+    text = replace(text, "checked_add(datagram_len)", "checked_add(queued_len(datagram_len))")
+    text = replace(text, "if datagram.data.len() > window {", "if queued_len(datagram.data.len()) > window {")
+    text = replace(text, "while datagram.data.len() + self.recv_buffered > window {", "while self.recv_buffered > window - queued_len(datagram.data.len()) {")
+    text = replace(text, "self.recv_buffered += datagram.data.len();", "self.recv_buffered += queued_len(datagram.data.len());")
+    text = replace(text, "self.recv_buffered -= x.len();", "self.recv_buffered -= queued_len(x.len());")
+    text = replace(text, "received_bytes += d.data.len();", "received_bytes += queued_len(d.data.len());")
+    text = replace(text, "    /// Bytes available in the outgoing datagram buffer", "    /// Queue budget available; an empty datagram consumes one unit.")
+    text = replace(text, "#[derive(Default)]\npub(super) struct DatagramState", """// A byte-only budget otherwise permits unbounded empty-datagram metadata.
+fn queued_len(payload_len: usize) -> usize {
+    payload_len.max(1)
+}
+
+#[derive(Default)]
+pub(super) struct DatagramState""")
+    text = replace(text, "    /// Number of bytes of datagrams that have been received by the local transport but not\n    /// delivered to the application", "    /// Received payload budget, charging at least one unit per queued datagram.")
+    return text + '\n#[cfg(test)]\n#[path = "payload_policy_bounds.rs"]\nmod payload_policy_bounds;\n'
+
+
 def apply(root: Path, test_source: Path):
     edits = {
         "src/config/transport.rs": transport,
         "src/connection/spaces.rs": spaces,
         "src/connection/mod.rs": connection,
+        "src/connection/datagrams.rs": datagrams,
     }
     # Build every edited text before writing any file.
     outputs = {name: edit((root / name).read_text(encoding="utf-8")) for name, edit in edits.items()}
     tests = root / "src/tests/mod.rs"
-    outputs["src/tests/mod.rs"] = replace(tests.read_text(encoding="utf-8"), "mod token;", "mod token;\nmod payload_policy;")
+    outputs["src/tests/mod.rs"] = replace(tests.read_text(encoding="utf-8"), "mod token;", "mod token;\nmod payload_policy;\nmod payload_policy_resources;")
     payload_tests = root / "src/tests/payload_policy.rs"
-    if payload_tests.exists():
+    budget_tests = root / "src/connection/payload_policy_bounds.rs"
+    resource_tests = root / "src/tests/payload_policy_resources.rs"
+    if any(p.exists() for p in (payload_tests, budget_tests, resource_tests)):
         raise ValueError("unexpected preexisting policy tests")
+    test_bytes = test_source.read_bytes()
+    budget_bytes = test_source.with_name("payload_policy_bounds.rs").read_bytes()
+    resource_bytes = test_source.with_name("payload_policy_resources.rs").read_bytes()
     for name, text in outputs.items():
         (root / name).write_text(text, encoding="utf-8", newline="\n")
-    payload_tests.write_bytes(test_source.read_bytes())
+    payload_tests.write_bytes(test_bytes)
+    budget_tests.write_bytes(budget_bytes)
+    resource_tests.write_bytes(resource_bytes)
