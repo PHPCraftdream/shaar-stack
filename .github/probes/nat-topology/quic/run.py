@@ -100,6 +100,7 @@ def main():
         ev["exception"] = str(error)
         ev["controls"]["exception"] = {"status": "fail"}
         ev["failed_controls"] = ["exception"]
+        ev["diagnostic_errors"] = core.failure_snapshot(cfg, root)
         raise
     finally:
         normal = ev["status"] == "pass"

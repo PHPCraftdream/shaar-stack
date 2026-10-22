@@ -197,6 +197,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("case_dir must already exist".into());
     }
     let nonce = protocol::nonce(text(&config, "nonce")?)?;
+    if role == "peer" && config.get("native_bind").is_some() {
+        // This target skips packet contents; record only route selection and send errors.
+        tracing_subscriber::fmt()
+            .with_env_filter("warn,iroh::socket::transports=trace")
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+            .try_init()
+            .map_err(io::Error::other)?;
+    }
     if role == "verify" {
         let evidence = verify(&case)?;
         atomic_json(&case, "verified.json", &evidence)?;

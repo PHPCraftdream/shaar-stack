@@ -95,8 +95,9 @@ def unprivileged(pid, uid):
 def wait_files(paths, children, seconds=35):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if any(child.proc.poll() is not None for child in children):
-            raise RuntimeError("owned QUIC/capture child exited before completing its phase")
+        exited = [(child.name, child.proc.returncode) for child in children if child.proc.poll() is not None]
+        if exited:
+            raise RuntimeError(f"owned QUIC/capture child exited before completing its phase: {exited}")
         if all(path.is_file() for path in paths):
             return [json.loads(path.read_text(encoding="utf-8")) for path in paths]
         time.sleep(0.05)
@@ -117,6 +118,22 @@ def helper(cfg, binary, root, role, relay):
     if result.returncode != 0:
         raise RuntimeError(f"{role} helper failed rc={result.returncode}")
     return result.stdout
+
+
+def failure_snapshot(cfg, root):
+    errors = []
+    requests = [(key, ["conntrack", "-L", "-p", "udp"], "conntrack") for key in ("rtr_a", "rtr_b")]
+    requests += [(key, ["iptables-save", "-c"], "rules") for key in ("rtr_a", "rtr_b")]
+    requests += [(key, ["ss", "-uan"], "sockets") for key in ("host_a", "host_b")]
+    for key, args, label in requests:
+        try:
+            result = subprocess.run(command(cfg, key, *args), capture_output=True, text=True, timeout=3)
+            (root / f"failure-{label}-{key}.txt").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
+            if result.returncode != 0:
+                errors.append(f"{key}/{label}: rc={result.returncode}")
+        except Exception as error:
+            errors.append(f"{key}/{label}: {error}")
+    return errors
 
 
 def conntrack_snapshot(cfg, root):

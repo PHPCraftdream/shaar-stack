@@ -56,6 +56,22 @@ class CaptureChecks(unittest.TestCase):
 
 
 class TopologyChecks(unittest.TestCase):
+    def test_failure_diagnostics_preserve_read_errors_and_scope(self):
+        cfg = config()
+        cfg["ns"].update(host_a="snabc123-host-a", host_b="snabc123-host-b")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            result = core.subprocess.CompletedProcess([], 0, "snapshot", "")
+            with patch.object(core.subprocess, "run", return_value=result) as run:
+                self.assertEqual(core.failure_snapshot(cfg, root), [])
+                self.assertEqual(run.call_count, 6)
+                for call in run.call_args_list:
+                    self.assertEqual(call.args[0][:3], ["ip", "netns", "exec"])
+                    self.assertIn(call.args[0][3], cfg["ns"].values())
+                    self.assertEqual(call.kwargs["timeout"], 3)
+            with patch.object(core.subprocess, "run", side_effect=core.subprocess.TimeoutExpired("read-only diagnostic", 3)):
+                self.assertEqual(len(core.failure_snapshot(cfg, root)), 6)
+
     def test_namespace_ownership(self):
         cfg = config()
         self.assertEqual(core.command(cfg, "rtr_a", "true"), ["ip", "netns", "exec", "snabc123-rtr-a", "true"])
