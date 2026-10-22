@@ -286,3 +286,65 @@ This establishes a calibrated, bounded Linux CI topology only. It does not
 prove QUIC hole punching, peer-to-peer connectivity across both NATs,
 strict STREAM exclusion, migration, re-punching, Windows NAT behavior, or
 production root/TUN independence. P03 remains **NOT PASSED**.
+
+## 10. Exact backend gate boundary (source findings, not implementation)
+
+The published `noq-proto 1.3.0` archive was downloaded separately and its
+SHA-256 checked against the committed probe lockfile:
+`7c1e5b6fe668491eca022f745a0a9402585626c73a7b839b3424ace15d6a9c8f`.
+Source inspection only; no downloaded source was executed locally.
+
+The exact source boundaries are:
+
+- `src/connection/mod.rs:1154-1231`, `scheduling_info`: `may_send_data`
+  explicitly admits handshake early data and Backup fallback. It is not an
+  application-payload-only permission.
+- `src/connection/mod.rs:6080-6153`, `populate_packet`: that same flag also
+  gates HANDSHAKE_DONE, ACK and ACK_FREQUENCY. Setting it to false for all
+  signaling paths would suppress required control traffic; this is not the
+  desired gate.
+- `src/connection/mod.rs:6504-6516` and `6562-6568`: the production DATAGRAM
+  writer and STREAM writer callsites are inside `populate_packet`, before
+  encryption. A text search of the full source found no other production
+  callsite of `write_stream_frames`; the additional call in
+  `streams/state.rs:580-588` is a `cfg(test)` helper.
+- `src/connection/streams/state.rs:621-648`: lost STREAM ranges and rejected
+  0-RTT ranges return to the stream pending queue. The same guarded writer
+  therefore owns fresh and retransmitted STREAM serialization. This is a
+  source-level coverage observation, not a tested exclusion guarantee.
+- `src/connection/mod.rs:2193-2229`, `space_can_send`, and `6950-6975`,
+  `can_send_1rtt`: readiness includes pending STREAM/DATAGRAM data. A writer
+  guard alone is inconsistent with this readiness. The assertion at
+  `1730-1743` explicitly detects packets announced writable but producing
+  only ACKs. Denied payload must not create write readiness or a busy loop.
+- `src/connection/spaces.rs:144-158`: ACK/control readiness is separate from
+  the stream/datagram checks and must remain available.
+
+The next backend spike must separate **application-payload eligibility**
+from existing control scheduling. Its immutable per-network-path policy
+must be applied both before payload queue consumption and when calculating
+payload readiness; denied STREAM ranges and DATAGRAMs stay queued under
+existing bounded backpressure. The policy must apply during handshake,
+not only after path validation. Application-path preference must consider
+only application-eligible paths: an Available signaling-only path must not
+shadow an eligible direct Backup path. Control-path preference remains a
+separate decision. New eligible paths must wake pending sends; an all-denied
+state must return without generating empty packets or spinning.
+
+The iroh `QuicTransportConfigBuilder` wraps Noq configuration, while its
+inner conversion is crate-private (`src/endpoint/quic.rs`). Exposing a new
+backend policy therefore also needs an explicit iroh configuration bridge;
+the current public `PathSelector` cannot install this enforcement.
+Transport identity must be derived from iroh's address mapping, not inferred
+from an unauthenticated peer's claimed address or a persistent `PathId`.
+
+A source patch would preserve the single-connection QUIC design but add a
+maintenance obligation across both Noq packetization and the iroh wrapper.
+No patch, dependency fork, custom cryptographic protocol or production API
+was integrated by this investigation. Before choosing that implementation,
+its regression proof must cover: both peer directions; fresh and lost STREAM
+ranges; 0-RTT and server early data; optional DATAGRAMs; successful control-only
+bootstrap; all-denied quiescence/backpressure/cancellation; direct-path
+appearance, loss and recovery; and packet/frame-to-physical-egress
+correlation with positive and negative calibration. Neither the baseline nor
+the UDP NAT fixture supplies that proof.
