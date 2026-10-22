@@ -33,6 +33,12 @@ const ROUNTRIPS: usize = 4;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn baseline_echo_over_custom_only_path() {
+    tracing_subscriber::fmt()
+        .with_env_filter("warn,iroh::socket=debug,iroh::socket::remote_map=trace")
+        .with_test_writer()
+        .with_ansi(false)
+        .try_init()
+        .expect("initialize baseline actor diagnostics");
     let deadline = tokio::time::Instant::now() + OVERALL_DEADLINE;
     tokio::time::timeout_at(deadline, run_baseline(deadline))
         .await
