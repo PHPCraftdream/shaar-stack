@@ -59,6 +59,11 @@ def configure(cfg, root, kind):
         run(cfg, key, ["iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", host,
                       "-p", "udp", "--sport", source_port, "-j", "MASQUERADE", "--to-ports", ports[side]],
             root / f"native-masquerade-{key}.txt")
+        # Unsolicited router-local UDP must not confirm a reverse tuple before SNAT.
+        # Valid NAT replies have already been DNATed and traverse FORWARD, not INPUT.
+        run(cfg, key, ["iptables", "-I", "INPUT", "1", "-d", cfg["ip"][("rtr_a_wan", "rtr_b_wan")[side]],
+                      "-p", "udp", "--dport", ports[side], "-m", "comment", "--comment", "p03-unsolicited-native", "-j", "DROP"],
+            root / f"native-input-filter-{key}.txt")
         if kind == "blocked":
             run(cfg, key, ["iptables", "-I", "FORWARD", "1", "-s", host, "-p", "udp", "--sport", source_port,
                           "-m", "comment", "--comment", "p03-native-block", "-j", "DROP"], root / f"native-block-{key}.txt")

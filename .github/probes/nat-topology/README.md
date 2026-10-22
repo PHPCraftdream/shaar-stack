@@ -189,7 +189,10 @@ and optional public net-report probes are disabled. The candidate addresses and
 translated ports are controlled fixture inputs, not an address-discovery proof.
 
 Additional outbound-only MASQUERADE rules force native source ports to
-41010/41020. There is no DNAT/port-forward rule. A bounded WAN tcpdump capture
+41010/41020. Router-local INPUT drops unsolicited packets to those native public
+ports before their conntrack entries become confirmed. Valid NAT replies have
+already been translated and traverse FORWARD, not INPUT. There is no explicit
+DNAT/port-forward rule. A bounded WAN tcpdump capture
 records actual post-NAT UDP tuples and ciphertext; tshark extracts raw UDP payload,
 without decrypting QUIC. Segmentation/GRO is disabled only on owned veth devices.
 The existing exact-ciphertext oracle requires zero custom STREAM/DATAGRAM frames,
@@ -203,6 +206,16 @@ wrong native public port and requires observed attempts to that wrong port.
 Both peers must remain alive through every negative observation. Setup failure,
 live-peer fixture failure and owned-process SIGTERM/reaping cases are also wired
 into CI. Pure parser/rejection checks live in `quic/checks.py`.
+
+The first runs (`39850312839`, diagnostic `39853975634`) failed before native
+validation. Both non-root peers completed TLS; traces showed successful native
+send calls in both directions, but WAN observation showed only B-to-A. Router A
+contained an unsolicited public B-to-A conntrack entry whose reply tuple occupied
+the exact public tuple needed by A's fixed SNAT. Ten A-side MASQUERADE attempts
+produced no private-A-to-public-B flow. The router-local INPUT filter above fixes
+that fixture state collision without changing backend scheduling, assertions,
+capture limits or deadlines. The existing positive NAT case is red before this
+fix; a pure regression also pins router-local DROP rather than FORWARD ACCEPT.
 
 All new two-NAT cases are authored but **not yet runtime accepted**. They do not
 establish production libp2p/Yggdrasil deployment, autonomous discovery, selected

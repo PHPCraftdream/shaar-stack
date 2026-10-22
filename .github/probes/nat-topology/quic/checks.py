@@ -56,6 +56,23 @@ class CaptureChecks(unittest.TestCase):
 
 
 class TopologyChecks(unittest.TestCase):
+    def test_unsolicited_native_filter_is_router_local_not_a_forwarding_bypass(self):
+        cfg = config()
+        calls = []
+        def observe(_cfg, key, args, _path):
+            calls.append((key, args))
+            return "[]" if args[0] == "ip" else ""
+        with tempfile.TemporaryDirectory() as temp, patch.object(core, "run", side_effect=observe):
+            core.configure(cfg, Path(temp), "positive")
+        filters = [(key, args) for key, args in calls if args[:3] == ["iptables", "-I", "INPUT"]]
+        self.assertEqual(len(filters), 2)
+        for side, (key, args) in enumerate(filters):
+            self.assertEqual(key, ("rtr_a", "rtr_b")[side])
+            self.assertEqual(args[args.index("-d") + 1], IPS[side])
+            self.assertEqual(args[args.index("--dport") + 1], PORTS[side])
+            self.assertEqual(args[-2:], ["-j", "DROP"])
+        self.assertFalse(any("DNAT" in args or "ACCEPT" in args for _, args in calls))
+
     def test_failure_diagnostics_preserve_read_errors_and_scope(self):
         cfg = config()
         cfg["ns"].update(host_a="snabc123-host-a", host_b="snabc123-host-b")
