@@ -9,8 +9,10 @@ and ROOT interruption supervisor (childman.py) as workflow CLI subcommands;
 the default no-argument invocation runs the unittest suite.
 """
 
+import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -47,6 +49,17 @@ LINE_CLI = ("udp      17 src=10.0.1.2 dst=203.0.113.10 sport=40001 "
 LINE_PROC = ("ipv4 2 udp 17 src=10.0.1.2 dst=203.0.113.10 sport=40001 "
              "dport=41000 [UNREPLIED] src=203.0.113.10 dst=203.0.113.1 "
              "sport=41000 dport=41012 [ASSURED] mark=0 use=2")
+
+class EmbeddedPythonSyntaxTests(unittest.TestCase):
+    def test_shell_embedded_python_is_valid(self):
+        with open(os.path.join(HERE, "run.sh"), encoding="utf-8") as fh:
+            shell = fh.read()
+        snippets = re.findall(r"python3\s+-I\s+-c\s+'([^']*)'", shell)
+        self.assertGreaterEqual(len(snippets), 5)
+        for index, source in enumerate(snippets):
+            with self.subTest(snippet=index):
+                ast.parse(source, filename="run.sh:python-%d" % index)
+
 
 class ParseLineTests(unittest.TestCase):
     def test_cli_line_fields(self):

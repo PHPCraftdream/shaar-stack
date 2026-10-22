@@ -79,7 +79,7 @@ if res == out or out not in res.parents:
     sys.stderr.write("error: RUN_DIR must resolve strictly inside %s\n" % out)
     sys.exit(2)
 sys.stdout.write(str(res))
-)' )" || { echo "error: invalid RUN_DIR" >&2; exit 2; }
+')" || { echo "error: invalid RUN_DIR" >&2; exit 2; }
 RUN_DIR="$RUN_DIR_ABS"
 mkdir -p "$(dirname "$RUN_DIR")"
 mkdir "$RUN_DIR" || { echo "error: RUN_DIR already exists: $RUN_DIR" >&2; exit 2; }
