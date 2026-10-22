@@ -36,7 +36,10 @@ jobs:
         run: |
           set -euo pipefail
           timeout 180 sudo apt-get update -qq
-          timeout 180 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends conntrack tcpdump tshark ethtool iptables
+          # The 23.7 MB Wireshark package exceeded 180s on the runner mirror twice.
+          timeout 600 sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+            install -y --no-install-recommends conntrack tcpdump tshark ethtool iptables
           tcpdump --version
           tshark --version
           ethtool --version
