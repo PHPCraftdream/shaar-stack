@@ -204,3 +204,58 @@ fn world_sid_read_denial_has_a_native_positive_control() {
     // actual descriptors, not handle sharing or parent traversal restrictions.
     // This is not a second-account logon/File::open test.
 }
+
+#[test]
+fn anonymous_principal_cannot_read_before_or_after_seed_write() {
+    use std::io::Write;
+    let dir = FixtureDir::new();
+    let control_path = dir.0.join("anonymous-control");
+    let acl: Vec<u16> = "D:P(A;;FA;;;OW)(A;;FR;;;S-1-5-7)"
+        .encode_utf16()
+        .chain([0])
+        .collect();
+    {
+        let mut control = create_new_with_sddl(&control_path, &acl).expect("anonymous control");
+        control.write_all(b"readable").unwrap();
+        control.sync_all().unwrap();
+    }
+    assert_eq!(
+        anonymous::read(&control_path)
+            .expect("anonymous setup")
+            .expect("positive file read must succeed"),
+        b"readable"
+    );
+
+    let path = dir.0.join("key");
+    let file = create_private_new_raw(&path).expect("private creation");
+    validate_owner_only_raw(&file).expect("DACL installed at creation");
+    assert_eq!(file.metadata().unwrap().len(), 0);
+    // Close the owner handle so exclusive sharing cannot masquerade as an ACL denial.
+    drop(file);
+    let before = anonymous::read(&path)
+        .expect("anonymous setup")
+        .unwrap_err();
+    assert_eq!(
+        before.raw_os_error(),
+        Some(5),
+        "expected access denied, not sharing violation"
+    );
+    {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("owner reopen");
+        file.write_all(&[11; 32]).unwrap();
+        file.sync_all().unwrap();
+    }
+    let after = anonymous::read(&path)
+        .expect("anonymous setup")
+        .unwrap_err();
+    assert_eq!(after.raw_os_error(), Some(5));
+    assert_eq!(
+        anonymous::read(&control_path)
+            .expect("anonymous setup")
+            .expect("positive control after denied reads"),
+        b"readable"
+    );
+}
