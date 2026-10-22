@@ -44,19 +44,39 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test
-        run: cargo test --workspace --locked
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/shaar-test.log"
+          if cargo test --workspace --locked >"$log" 2>&1; then
+            status=0
+          else
+            status=$?
+          fi
+          if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
+          cat "$log"
+          exit "$status"
       # SEC-KEY-02: explicit run of the ignored sudo probe. Fail-closed: the
       # step passes only if the standard non-quiet harness prints the exact
       # success line for the fully qualified test name, so a run selecting
       # zero tests, or missing sudo/setup, can never false-pass.
       - name: SEC-KEY-02 unprivileged reader probe (Ubuntu only)
+        shell: bash
         if: matrix.os == 'ubuntu-latest'
         env:
           TEST_NAME: identity::store::tests::unprivileged_reader::identity_unprivileged_uid_cannot_read_seed_file
         run: |
           set -euo pipefail
-          cargo test -p shaar --lib --locked -- --ignored --exact "$TEST_NAME" --color never | tee "$RUNNER_TEMP/shaar-unprivileged-reader.log"
-          grep -Fx "test $TEST_NAME ... ok" "$RUNNER_TEMP/shaar-unprivileged-reader.log"
+          log="$RUNNER_TEMP/shaar-unprivileged-reader.log"
+          if cargo test -p shaar --lib --locked -- --ignored --exact "$TEST_NAME" --color never >"$log" 2>&1; then
+            status=0
+          else
+            status=$?
+          fi
+          if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
+          cat "$log"
+          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+          grep -Fx "test $TEST_NAME ... ok" "$log"
       - name: Record toolchain versions
         run: |
           rustc --version --verbose

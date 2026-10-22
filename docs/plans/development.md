@@ -199,7 +199,7 @@ A single Ed25519 seed and verified conversions for all stacks.
 Key creation is atomic and never overwrites an existing file; access is restricted
 immediately at creation: Unix permissions and the corresponding Windows ACLs.
 Read, format, and access errors never lead to silently generating a new identity.
-Secrets never reach output or diagnostics; no extra copies are created.
+Secrets never reach output or diagnostics; no unnecessary secret copies are created; required staging is zeroized best-effort.
 
 Acceptance: conversion vectors, re-reading, corrupted files,
 concurrent creation, and permission errors are covered by tests. The identity is stable.
