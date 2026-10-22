@@ -13,6 +13,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import policy  # noqa: E402
 import prepare  # noqa: E402
+import workspace  # noqa: E402
 
 
 def make_probe(destination, probe):
@@ -114,6 +115,43 @@ class PreparationChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy.spaces(text)
         self.assertIn("application_data_filter", wrapper)
+
+
+class WorkspaceChecks(unittest.TestCase):
+    def test_seed_lock_preserves_original_identities_and_pins_path_packages(self):
+        repo = ARGS.probe.resolve().parents[2]
+        original = (repo / "Cargo.lock").read_text(encoding="utf-8")
+        seed = workspace.seed_lock(original, (ARGS.probe / "Cargo.lock").read_text(encoding="utf-8"))
+        packages = tomllib.loads(seed)["package"]
+        self.assertFalse(any(p["name"] == "iroh-paths-probe" for p in packages))
+        for name in prepare.PACKAGES:
+            matches = [p for p in packages if p["name"] == name]
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0]["version"], prepare.VERSION)
+            self.assertNotIn("source", matches[0])
+        with self.assertRaisesRegex(ValueError, "SDK lock entry missing"):
+            workspace.seed_lock('version = 4\n[[package]]\nname = "other"\nversion = "0.1.0"\n', "")
+
+    def test_staged_workspace_never_mutates_or_overwrites_original(self):
+        repo = ARGS.probe.resolve().parents[2]
+        sdk_before = (repo / "crates/shaar/Cargo.toml").read_bytes()
+        lock_before = (repo / "Cargo.lock").read_bytes()
+        with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
+            destination = Path(temporary) / "workspace"
+            workspace.stage(repo, destination)
+            manifest = tomllib.loads((destination / "crates/shaar/Cargo.toml").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["dependencies"]["iroh"]["version"], "=1.3.0")
+            self.assertFalse(manifest["dependencies"]["iroh"]["default-features"])
+            self.assertTrue((destination / "crates/shaar/tests/backend_gate.rs").is_file())
+            workspace.validate_lock(repo, destination)
+            with self.assertRaises(FileExistsError):
+                workspace.stage(repo, destination)
+            path = destination / "Cargo.lock"
+            path.write_text(path.read_text(encoding="utf-8").replace('version = "1.3.0"', 'version = "9.9.9"'), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                workspace.validate_lock(repo, destination)
+        self.assertEqual((repo / "crates/shaar/Cargo.toml").read_bytes(), sdk_before)
+        self.assertEqual((repo / "Cargo.lock").read_bytes(), lock_before)
 
 
 if __name__ == "__main__":

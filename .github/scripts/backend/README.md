@@ -49,7 +49,31 @@ clean calibration package using the same-version standalone lock. Linux/Windows
 CI compile the clean sources and run the real constant deny/allow iroh control
 and payload calibration, separately from instrumented wire/NAT fixtures.
 
-These checks are authored; acceptance requires actual CI results. Workspace Cargo
-dependency wiring and production SDK integration are not yet installed. This stage
-must not be reported as a working production SDK or as selected-custom transport
-authorization. Yggdrasil integration's separate permission/lifecycle gate remains.
+[Run 39871119928](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39871119928)
+at `3bcd2f6` passed on Linux and Windows. Each OS ran five preparation checks,
+18 unit tests and one real deny/allow calibration against the clean sources;
+completed job logs were inspected. The instrumented bridge matrix, Noq regression,
+workspace CI and physical loss/re-punch regression also completed successfully.
+
+### Product workspace staging before lock adoption
+
+`workspace.py` stages the real product crates and proposed Cargo dependency wiring
+in a fresh CI directory, without modifying the repository's manifests or lock.
+Its seed graph uses the existing product lock plus already pinned probe entries;
+the resolver runs only in CI. A post-resolution guard rejects any change to an
+existing production registry package/version/checksum or the exact Noq/iroh family.
+Prepared iroh/noq-proto must resolve as path dependencies. The workflow then runs
+formatting, clippy and product workspace tests with `--locked`, including the owned
+`dependency_gate.rs` test copied into the staged SDK integration tests. That test
+uses real loopback UDP and synthetic Ed25519 fixtures, checks peer identity,
+control-only handshake, both payload directions, bounded backpressure, explicit
+reset and shutdown, with constant deny/allow positive calibration. It uses neither
+probe transport nor qlog/ciphertext instrumentation.
+
+This staging step is temporary: after the resolved lock and runtime proof are
+accepted, the actual workspace can adopt those same dependencies and the test.
+The new staging checks and product-native test are authored, not yet run. Workspace
+Cargo dependency wiring and production SDK integration are not yet installed.
+This stage must not be reported as a working production SDK or as selected-custom
+transport authorization. Yggdrasil integration's separate permission/lifecycle gate
+remains.
