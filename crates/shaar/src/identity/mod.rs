@@ -4,19 +4,18 @@
 //! # Secret handling (threat model I3/I4)
 //!
 //! The seed lives in a private [`iroh_base::SecretKey`] (zeroize on
-//! drop). It leaves the type only through (a) the internal key-file write
-//! path and (b) [`Identity::seed_bytes`], a `pub(crate)` accessor returning
-//! `zeroize::Zeroizing<[u8; 32]>` for the storage layer. Zeroize is a
-//! best-effort in-memory erasure on drop — NOT an OS/swap/compiler-proof
-//! guarantee. `Debug`/`Display` of [`Identity`], the key types and
-//! [`IdentityError`] never render secret bytes.
+//! drop). Key-file writes use internal `zeroize::Zeroizing<[u8; 32]>`
+//! staging; no seed accessor is exposed. Zeroize is best-effort in-memory
+//! erasure on drop, not an OS/swap/compiler-proof guarantee. [`Identity`]
+//! has redacted Debug output. Storage errors do not attach key contents;
+//! underlying I/O error text is preserved and may contain paths.
 //!
 //! # Async discipline
 //!
 //! All blocking filesystem work runs in `tokio::task::spawn_blocking` with
-//! owned inputs; every `JoinHandle` is awaited. Aborting the future does
-//! NOT stop a running blocking task; failure cleanup still runs to
-//! completion inside the task.
+//! owned inputs. Normal completion awaits the worker; dropping the async
+//! waiter detaches it and does NOT stop running native I/O. Failure cleanup
+//! remains inside the worker.
 
 mod error;
 mod store;

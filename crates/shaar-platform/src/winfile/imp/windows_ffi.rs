@@ -257,13 +257,14 @@ pub(super) type DescriptorParts<'a> = (
     windows_sys::Win32::Security::SECURITY_DESCRIPTOR_CONTROL, // control flags
 );
 
-/// Extracts owner, DACL, and control flags from a self-relative
-/// descriptor. Returns Err on malformed input (fail closed).
+/// Extracts owner, DACL, and control flags, rejecting missing private-file
+/// components and spans outside the descriptor.
 ///
 /// # Safety
-/// `buf` must be a valid, pointer-aligned self-relative descriptor
-/// produced by `GetKernelObjectSecurity`, kept alive and unmodified
-/// throughout inspection and while the returned byte slices exist.
+/// `buf` must hold a valid, pointer-aligned self-relative descriptor with all
+/// referenced components contained in it, alive and unmodified while borrowed.
+/// Production callers use `GetKernelObjectSecurity`; arbitrary malformed bytes
+/// must never be sent to the Win32 descriptor getters.
 pub(super) unsafe fn parse_descriptor(buf: &[u8]) -> io::Result<DescriptorParts<'_>> {
     use windows_sys::Win32::Security::{
         GetSecurityDescriptorControl, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner,
@@ -383,7 +384,7 @@ fn sid_slice(sid: windows_sys::Win32::Security::PSID, buf: &[u8]) -> io::Result<
 /// inspects the CURRENT security descriptor of an already-opened
 /// file. See the outer safe wrapper for the documented contract.
 pub(super) fn validate_owner_only_raw(file: &File) -> io::Result<()> {
-    use windows_sys::Win32::Security::{INHERITED_ACE, SE_DACL_PROTECTED};
+    use windows_sys::Win32::Security::SE_DACL_PROTECTED;
 
     // The handle is borrowed from the File and never closed here.
     let handle: windows_sys::Win32::Foundation::HANDLE = file.as_raw_handle();
@@ -409,6 +410,20 @@ pub(super) fn validate_owner_only_raw(file: &File) -> io::Result<()> {
         ));
     }
 
+    validate_dacl(descriptor_bytes)
+}
+
+fn validate_dacl(descriptor_bytes: &[u8]) -> io::Result<()> {
+    use windows_sys::Win32::Security::INHERITED_ACE;
+    let header = descriptor_bytes
+        .get(..8)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "DACL header is truncated"))?;
+    if usize::from(u16::from_le_bytes([header[2], header[3]])) != descriptor_bytes.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "DACL size mismatch",
+        ));
+    }
     // ACE layout (verified against windows-sys 0.61.2 and
     // https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-access_allowed_ace):
     // `#[repr(C)] ACE_HEADER { AceType: u8, AceFlags: u8, AceSize: u16 }`
@@ -522,5 +537,57 @@ fn validate_sid_bytes(sid_bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+fn null_dacl_fixture_result() -> io::Result<()> {
+    use windows_sys::Win32::Security::{
+        IsValidSecurityDescriptor, SE_DACL_PRESENT, SE_DACL_PROTECTED, SE_SELF_RELATIVE,
+        SECURITY_DESCRIPTOR_RELATIVE,
+    };
+    #[repr(C, align(8))]
+    struct Descriptor {
+        header: SECURITY_DESCRIPTOR_RELATIVE,
+        owner: [u8; 12],
+    }
+    let mut descriptor = Descriptor {
+        header: SECURITY_DESCRIPTOR_RELATIVE {
+            Revision: 1,
+            Sbz1: 0,
+            Control: SE_SELF_RELATIVE | SE_DACL_PRESENT | SE_DACL_PROTECTED,
+            Owner: std::mem::offset_of!(Descriptor, owner) as u32,
+            Group: 0,
+            Sacl: 0,
+            Dacl: 0,
+        },
+        owner: [1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0], // Local System SID
+    };
+    let length = std::mem::size_of::<Descriptor>();
+    if length != std::mem::size_of::<SECURITY_DESCRIPTOR_RELATIVE>() + 12 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unexpected fixture padding",
+        ));
+    }
+    let pointer = std::ptr::from_mut(&mut descriptor).cast();
+    // SAFETY: pointer-aligned initialized C layout, owner offset contained in
+    // the allocation, null optional components. NULL DACL is valid Windows data.
+    let valid = unsafe { IsValidSecurityDescriptor(pointer) };
+    if valid == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "native fixture is invalid",
+        ));
+    }
+    // SAFETY: the size check excludes padding, all fields are initialized, and
+    // descriptor remains alive and immutable for the byte view and getters.
+    let bytes = unsafe { std::slice::from_raw_parts(pointer.cast::<u8>(), length) };
+    // SAFETY: the fixed self-relative fixture has bounded offsets and passed
+    // native validation; no dangling or deliberately malformed pointer is used.
+    unsafe { parse_descriptor(bytes).map(|_| ()) }
+}
+
+#[cfg(test)]
+mod anonymous;
+#[cfg(test)]
+mod authz;
 #[cfg(test)]
 mod tests;
