@@ -222,6 +222,23 @@ print('READ', len(data), data == b'readable')
         );
     }
 
+    fn shared_fixture_dir() -> FixtureDir {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        // Workspace ancestors may deny traversal to nobody. Create a fresh
+        // directory under the system temporary root; never chmod ancestors.
+        for _ in 0..64 {
+            let id = NEXT.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!("shaar-foreign-reader-{}-{id}", std::process::id()));
+            match std::fs::create_dir(&path) {
+                Ok(()) => return FixtureDir(path),
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(err) => panic!("foreign reader fixture directory: {err}"),
+            }
+        }
+        panic!("foreign reader fixture namespace exhausted");
+    }
+
     fn positive_control(dir: &FixtureDir) -> (PathBuf, u32) {
         let path = dir.0.join("positive-control");
         std::fs::write(&path, b"readable").expect("write positive control");
@@ -240,7 +257,7 @@ print('READ', len(data), data == b'readable')
     #[test]
     #[ignore = "SEC-KEY-02: requires passwordless sudo -u nobody; run explicitly by the Ubuntu CI step"]
     fn identity_unprivileged_uid_cannot_read_seed_file() {
-        let dir = FixtureDir::new();
+        let dir = shared_fixture_dir();
         // Only newly created fixture paths are chmodded, never ancestors.
         std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o755))
             .expect("chmod fixture dir");
