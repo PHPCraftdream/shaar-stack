@@ -6,10 +6,12 @@ on:
     branches: [develop]
     paths:
       - ".github/probes/iroh-paths/**"
+      - ".github/scripts/backend/**"
       - ".github/workflows/iroh-gate.yml"
   pull_request:
     paths:
       - ".github/probes/iroh-paths/**"
+      - ".github/scripts/backend/**"
       - ".github/workflows/iroh-gate.yml"
 
 permissions:
@@ -61,6 +63,19 @@ jobs:
             --archive target/iroh-gate/iroh-archive/iroh.crate \
             --probe .github/probes/iroh-paths \
             --noq-source target/iroh-gate/noq-source/noq-proto-1.3.0
+      - name: Verify clean production source preparation and runtime gate
+        run: |
+          set -euo pipefail
+          python3 -I .github/scripts/backend/checks.py \
+            --noq-archive target/iroh-gate/noq-archive/noq-proto.crate \
+            --iroh-archive target/iroh-gate/iroh-archive/iroh.crate \
+            --probe .github/probes/iroh-paths \
+            --gate-noq target/iroh-gate/noq-source/noq-proto-1.3.0 \
+            --destination target/iroh-gate/production -v
+          manifest=target/iroh-gate/production/probe/Cargo.toml
+          cargo fmt --manifest-path "$manifest" --all
+          cargo test --manifest-path "$manifest" --locked --lib
+          cargo test --manifest-path "$manifest" --locked --test calibration -- --nocapture
       - name: Check authored formatting and execute real iroh calibration
         run: |
           set -euo pipefail
@@ -99,4 +114,7 @@ jobs:
             target/iroh-gate/bridge/probe/target/iroh-paths/
             target/iroh-gate/process-normal/
             target/iroh-gate/process-fault/
+            target/iroh-gate/production/provenance.json
+            target/iroh-gate/production/probe/Cargo.lock
+            target/iroh-gate/production/probe/target/iroh-paths/
           if-no-files-found: warn

@@ -7,11 +7,13 @@ on:
     paths:
       - ".github/probes/nat-topology/**"
       - ".github/probes/iroh-paths/**"
+      - ".github/scripts/backend/**"
       - ".github/workflows/quic-nat.yml"
   pull_request:
     paths:
       - ".github/probes/nat-topology/**"
       - ".github/probes/iroh-paths/**"
+      - ".github/scripts/backend/**"
       - ".github/workflows/quic-nat.yml"
 
 permissions:

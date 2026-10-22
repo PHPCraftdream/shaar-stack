@@ -5,11 +5,13 @@ on:
     branches: [develop]
     paths:
       - ".github/probes/iroh-paths/gate/**"
+      - ".github/scripts/backend/**"
       - ".github/workflows/noq-gate.yml"
   workflow_dispatch:
   pull_request:
     paths:
       - ".github/probes/iroh-paths/gate/**"
+      - ".github/scripts/backend/**"
       - ".github/workflows/noq-gate.yml"
 
 permissions:

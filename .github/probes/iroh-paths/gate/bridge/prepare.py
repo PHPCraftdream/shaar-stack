@@ -10,6 +10,8 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
 from packet_identity import apply as add_packet_identity  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "scripts/backend"))
+from policy import forwarder, replace  # noqa: E402
 
 DIGEST = "885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833"
 
@@ -37,28 +39,16 @@ def main():
         archive.extractall(source, filter="data")
     iroh = source / "iroh-1.3.0"
     config = iroh / "src/endpoint/quic.rs"
-    text = config.read_text(encoding="utf-8")
-    anchor = "    pub fn send_fairness(mut self, value: bool) -> Self {"
-    if text.count(anchor) != 1:
-        raise ValueError("iroh forwarding anchor changed")
-    # Insert after the existing method, preserving its documentation association.
-    method = anchor + "\n        self.0.send_fairness(value);\n        self\n    }"
-    if text.count(method) != 1:
-        raise ValueError("iroh forwarding method changed")
+    text = forwarder(config.read_text(encoding="utf-8"))
+    anchor = "    pub fn application_data_filter(mut self, filter: fn(noq_proto::FourTuple) -> bool) -> Self {\n        self.0.application_data_filter(filter);\n        self\n    }"
     addition = """
-
-    /// Spike-only immutable application-payload policy; control remains enabled.
-    pub fn application_data_filter(mut self, filter: fn(noq_proto::FourTuple) -> bool) -> Self {
-        self.0.application_data_filter(filter);
-        self
-    }
 
     /// Fixture-only: withhold automatic address exchange until explicit route admission.
     pub fn spike_disable_nat_traversal(mut self) -> Self {
         self.0.max_remote_nat_traversal_addresses(0);
         self
     }"""
-    config.write_text(text.replace(method, method + addition), encoding="utf-8")
+    config.write_text(replace(text, anchor, anchor + addition), encoding="utf-8")
     connection = iroh / "src/endpoint/connection.rs"
     connection_text = connection.read_text(encoding="utf-8")
     connection_anchor = "        self.inner.send_datagram(data)\n    }"
