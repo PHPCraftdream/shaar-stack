@@ -158,3 +158,128 @@ fn read_not_found_is_an_error_not_permission_to_create() {
     assert!(matches!(err, IdentityError::Io(ref io) if io.kind() == io::ErrorKind::NotFound));
     assert_eq!(std::fs::read(path).unwrap(), [2; 32]);
 }
+
+// SEC-KEY-02 evidence: an actual unprivileged read attempt must fail with
+// EACCES both before the first seed byte and after the full 32-byte write.
+// Linux-only: relies on sudo -u nobody and Unix permission semantics.
+#[cfg(target_os = "linux")]
+mod unprivileged_reader {
+    use super::*;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::process::Command;
+
+    const READER_SCRIPT: &str = "\
+import os, sys
+euid = os.geteuid()
+owner = int(sys.argv[2])
+if euid == 0 or euid == owner:
+    print('BADUID')
+    sys.exit(3)
+try:
+    with open(sys.argv[1], 'rb') as f:
+        data = f.read(33)
+except PermissionError as exc:
+    if exc.errno == 13:
+        print('DENIED')
+        sys.exit(0)
+    print('UNEXPECTED-ERRNO', exc.errno)
+    sys.exit(4)
+print('READ', len(data), data == b'readable')
+";
+
+    /// Runs the fixed Python script as `nobody` under a hard timeout.
+    /// Any setup, script, or native failure (nonzero exit, stderr, timeout
+    /// exit code 124) is a test failure, never a skip or a pass.
+    fn run_as_nobody(path: &Path, owner_uid: u32, expect: &str) {
+        let output = Command::new("sudo")
+            .args([
+                "-n",
+                "-u",
+                "nobody",
+                "--",
+                "/usr/bin/timeout",
+                "15",
+                "/usr/bin/python3",
+                "-I",
+                "-c",
+                READER_SCRIPT,
+            ])
+            .arg(path)
+            .arg(owner_uid.to_string())
+            .output()
+            .expect("sudo -n -u nobody must be available in the CI job");
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            output.status.success(),
+            "child failed: status={:?} stderr={stderr}",
+            output.status.code()
+        );
+        assert!(stderr.is_empty(), "child wrote stderr: {stderr}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expect,
+            "unexpected reader protocol output"
+        );
+    }
+
+    fn positive_control(dir: &FixtureDir) -> (PathBuf, u32) {
+        let path = dir.0.join("positive-control");
+        std::fs::write(&path, b"readable").expect("write positive control");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("chmod positive control");
+        let uid = std::fs::metadata(&path)
+            .expect("stat positive control")
+            .uid();
+        (path, uid)
+    }
+
+    fn assert_positive(path: &Path, uid: u32) {
+        run_as_nobody(path, uid, "READ 8 True\n");
+    }
+
+    #[test]
+    #[ignore = "SEC-KEY-02: requires passwordless sudo -u nobody; run explicitly by the Ubuntu CI step"]
+    fn identity_unprivileged_uid_cannot_read_seed_file() {
+        let dir = FixtureDir::new();
+        // Only newly created fixture paths are chmodded, never ancestors.
+        std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod fixture dir");
+        let (control, uid) = positive_control(&dir);
+        assert_positive(&control, uid);
+
+        let key_path = dir.0.join("key");
+        let seed = zeroize::Zeroizing::new([7u8; 32]);
+        create_new_with_io(
+            &key_path,
+            &seed,
+            |file, bytes| {
+                let meta = file.metadata()?;
+                assert_eq!(meta.len(), 0, "file must be zero length before write");
+                assert_eq!(
+                    meta.permissions().mode() & 0o077,
+                    0,
+                    "no group/other permissions at open"
+                );
+                // Denied read BEFORE the first seed byte is written.
+                run_as_nobody(&key_path, uid, "DENIED\n");
+                file.write_all(bytes)?;
+                file.flush()?;
+                file.sync_all()?;
+                assert_eq!(file.metadata()?.len(), 32);
+                // Denied read AFTER the actual 32-byte write.
+                run_as_nobody(&key_path, uid, "DENIED\n");
+                Ok(())
+            },
+            File::sync_all,
+        )
+        .expect("key creation with reader probes must succeed");
+        assert_eq!(
+            std::fs::read(&key_path).expect("read back key"),
+            seed.as_ref(),
+            "seed content must be intact after probes"
+        );
+        // Positive control must still be readable in the exact same
+        // directory, so a traversal failure cannot masquerade as proof.
+        assert_positive(&control, uid);
+    }
+}

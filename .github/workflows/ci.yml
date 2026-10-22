@@ -45,6 +45,18 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test
         run: cargo test --workspace --locked
+      # SEC-KEY-02: explicit run of the ignored sudo probe. Fail-closed: the
+      # step passes only if the standard non-quiet harness prints the exact
+      # success line for the fully qualified test name, so a run selecting
+      # zero tests, or missing sudo/setup, can never false-pass.
+      - name: SEC-KEY-02 unprivileged reader probe (Ubuntu only)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          TEST_NAME: identity::store::tests::unprivileged_reader::identity_unprivileged_uid_cannot_read_seed_file
+        run: |
+          set -euo pipefail
+          cargo test -p shaar --lib --locked -- --ignored --exact "$TEST_NAME" --color never | tee "$RUNNER_TEMP/shaar-unprivileged-reader.log"
+          grep -Fx "test $TEST_NAME ... ok" "$RUNNER_TEMP/shaar-unprivileged-reader.log"
       - name: Record toolchain versions
         run: |
           rustc --version --verbose
