@@ -3,7 +3,7 @@
 //!
 //! # Secret handling (threat model I3/I4)
 //!
-//! The seed lives in a private [`iroh_base::key::SecretKey`] (zeroize on
+//! The seed lives in a private [`iroh_base::SecretKey`] (zeroize on
 //! drop). It leaves the type only through (a) the internal key-file write
 //! path and (b) [`Identity::seed_bytes`], a `pub(crate)` accessor returning
 //! `zeroize::Zeroizing<[u8; 32]>` for the storage layer. Zeroize is a
@@ -37,7 +37,7 @@ const PEER_ID_PREFIX: [u8; 6] = [0x00, 0x24, 0x08, 0x01, 0x12, 0x20];
 /// deliberately no serde derives. `Debug` is redacted.
 #[derive(Clone)]
 pub struct Identity {
-    secret: iroh_base::key::SecretKey,
+    secret: iroh_base::SecretKey,
 }
 
 impl Identity {
@@ -45,7 +45,7 @@ impl Identity {
     /// This is the production path.
     pub fn generate() -> Self {
         Self {
-            secret: iroh_base::key::SecretKey::generate(),
+            secret: iroh_base::SecretKey::generate(),
         }
     }
 
@@ -60,7 +60,7 @@ impl Identity {
     /// compiler-proof, and any copies the caller made of the buffer
     /// before this call are out of reach.
     pub fn from_seed(mut seed: [u8; 32]) -> Self {
-        let secret = iroh_base::key::SecretKey::from_bytes(&seed);
+        let secret = iroh_base::SecretKey::from_bytes(&seed);
         use zeroize::Zeroize;
         seed.zeroize();
         Self { secret }
@@ -68,7 +68,7 @@ impl Identity {
 
     /// The 32-byte Ed25519 public key (stable, config-compatible form).
     pub fn public_key_bytes(&self) -> [u8; 32] {
-        self.secret.public().to_bytes()
+        *self.secret.public().as_bytes()
     }
 
     /// The libp2p `PeerId` bytes: `00 24 08 01 12 20 || public_key`.
@@ -94,7 +94,7 @@ impl Identity {
     /// is dropped. Existing files are never overwritten.
     pub async fn create_new(path: impl Into<PathBuf>) -> Result<Self, IdentityError> {
         let path = path.into();
-        let secret = iroh_base::key::SecretKey::generate();
+        let secret = iroh_base::SecretKey::generate();
         let seed = zeroize::Zeroizing::new(secret.to_bytes());
         // Inputs are owned; normal completion joins the worker. Cancellation
         // drops this waiter but cannot abort the running blocking operation.
@@ -117,7 +117,7 @@ impl Identity {
             .await
             .map_err(|e| IdentityError::Io(std::io::Error::other(e)))??;
         Ok(Self {
-            secret: iroh_base::key::SecretKey::from_bytes(&seed),
+            secret: iroh_base::SecretKey::from_bytes(&seed),
         })
     }
 
@@ -136,7 +136,7 @@ impl Identity {
             .map_err(|err| IdentityError::Io(std::io::Error::other(err)))??;
         match seed {
             Some(seed) => Ok(Self {
-                secret: iroh_base::key::SecretKey::from_bytes(&seed),
+                secret: iroh_base::SecretKey::from_bytes(&seed),
             }),
             None => Self::create_new(path).await,
         }
