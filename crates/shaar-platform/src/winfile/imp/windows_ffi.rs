@@ -586,4 +586,6 @@ fn null_dacl_fixture_result() -> io::Result<()> {
 }
 
 #[cfg(test)]
+mod authz;
+#[cfg(test)]
 mod tests;

@@ -189,3 +189,18 @@ fn zero_mask_malformed_sid_and_unknown_ace_fail_closed() {
         io::ErrorKind::PermissionDenied
     );
 }
+
+#[test]
+fn world_sid_read_denial_has_a_native_positive_control() {
+    let dir = FixtureDir::new();
+    let private = create_private_new_raw(&dir.0.join("private")).expect("private creation");
+    assert_eq!(private.metadata().unwrap().len(), 0);
+    assert!(!authz::world_can_read(&private).expect("native private ACL decision"));
+    let broad: Vec<u16> = "D:P(A;;FA;;;WD)".encode_utf16().chain([0]).collect();
+    let control = create_new_with_sddl(&dir.0.join("control"), &broad).expect("control creation");
+    assert_eq!(control.metadata().unwrap().len(), 0);
+    assert!(authz::world_can_read(&control).expect("native positive ACL decision"));
+    // Both files have the same exclusive sharing mode; Authz evaluates the
+    // actual descriptors, not handle sharing or parent traversal restrictions.
+    // This is not a second-account logon/File::open test.
+}
