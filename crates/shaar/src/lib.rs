@@ -1,4 +1,7 @@
 #![forbid(unsafe_code)]
-//! Sha'ar Stack SDK: networking, identity, and public API.
+//! Identity and startup configuration primitives for Sha'ar Stack.
 //!
-//! Scaffold: implementation follows in the functional stages (P04+).
+//! Networking remains gated on the transport feasibility experiments.
+
+pub mod config;
+pub mod identity;
