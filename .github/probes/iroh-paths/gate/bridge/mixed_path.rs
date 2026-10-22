@@ -151,12 +151,13 @@ async fn scenario() {
             "custom control must continue"
         );
     }
-    // This adds reachability to the existing actor. No second connect or policy change occurs.
-    let (admitted_a, admitted_b) = tokio::join!(
-        a.spike_admit_remote_addr(EndpointAddr::from_parts(b.id(), [TransportAddr::Ip(b_ip)])),
-        b.spike_admit_remote_addr(EndpointAddr::from_parts(a.id(), [TransportAddr::Ip(a_ip)])),
+    // NAT discovery is disabled; candidate insertion alone cannot probe/open an IP path.
+    eprintln!("mixed-path: queues retained; opening native Backup {b_ip}");
+    assert!(
+        ca.spike_open_ip_path(b_ip).await,
+        "validate native Backup on original connection"
     );
-    assert!(admitted_a && admitted_b, "admit native reachability");
+    eprintln!("mixed-path: native Backup validated; draining original queues");
     for receiver in [&ca, &cb] {
         assert_eq!(
             receiver

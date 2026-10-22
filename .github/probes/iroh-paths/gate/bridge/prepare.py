@@ -54,19 +54,20 @@ def main():
         self
     }"""
     config.write_text(text.replace(method, method + addition), encoding="utf-8")
-    endpoint = iroh / "src/endpoint.rs"
-    endpoint_text = endpoint.read_text(encoding="utf-8")
-    endpoint_anchor = "        self.inner.add_external_addr(addr).await;\n    }"
-    if endpoint_text.count(endpoint_anchor) != 1:
-        raise ValueError("iroh endpoint fixture anchor changed")
-    endpoint_addition = """
+    connection = iroh / "src/endpoint/connection.rs"
+    connection_text = connection.read_text(encoding="utf-8")
+    connection_anchor = "        self.inner.send_datagram(data)\n    }"
+    if connection_text.count(connection_anchor) != 1:
+        raise ValueError("iroh connection fixture anchor changed")
+    connection_addition = """
 
-    /// Fixture-only route admission to the existing remote actor, without connecting again.
-    /// cancel-safe: NO — the fixture terminates rather than retrying address admission.
-    pub async fn spike_admit_remote_addr(&self, addr: EndpointAddr) -> bool {
-        matches!(self.inner.resolve_remote(addr).await, Ok(Ok(_)))
+    /// Fixture-only native Backup path on this connection; no NAT discovery or reconnect.
+    /// cancel-safe: NO — the fixture terminates rather than retrying path admission.
+    pub async fn spike_open_ip_path(&self, remote: SocketAddr) -> bool {
+        self.inner.open_path_ensure(noq::FourTuple::new(remote, None), noq::PathStatus::Backup)
+            .await.is_ok()
     }"""
-    endpoint.write_text(endpoint_text.replace(endpoint_anchor, endpoint_anchor + endpoint_addition), encoding="utf-8")
+    connection.write_text(connection_text.replace(connection_anchor, connection_anchor + connection_addition), encoding="utf-8")
     iroh_manifest = iroh / "Cargo.toml"
     iroh_manifest.write_text(iroh_manifest.read_text(encoding="utf-8") + "\n[workspace]\n", encoding="utf-8")
     project = args.destination / "probe"

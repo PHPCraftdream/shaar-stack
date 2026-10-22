@@ -38,16 +38,26 @@ including unknown subnets, and permits native IP tuples. This does not authorize
 any custom transport by prefix or authenticate a transport generation. The fixture
 starts with custom-only remote reachability while real loopback sockets are bound.
 It queues STREAM/FIN and DATAGRAM once in each direction and checks non-delivery
-while custom control continues. Only then is native reachability admitted to the
-existing remote actors; the original connection must deliver the queued bytes.
+while custom control continues. Only then does the client explicitly open a native
+Backup path on the original Noq connection; the original queues must drain.
 Qlog must attribute payload only to the exact peer loopback socket, with control
 but no payload on the non-native tuples. Runtime results are still pending.
 
 Two generated fixture hooks make the phases explicit: disable Noq NAT address
-exchange (the public iroh setter ignores zero), and submit new reachability to
-`Socket::resolve_remote` without another `connect` call. Neither hook changes the
-immutable payload callback. These hooks are not production APIs. This controlled
-admission is not autonomous discovery, hole punching, or physical path failure.
+exchange (the public iroh setter ignores zero), and call `open_path_ensure` on the
+existing connection with Backup status. Neither hook changes the immutable payload
+callback. These hooks are not production APIs. This controlled admission is not
+autonomous discovery, hole punching, or physical path failure.
+
+The first mixed-path run (`39818131770`) timed out on both OS. The qlog evidence
+showed successful custom control traffic but no native tuple or payload frames.
+The fixture had submitted an IP candidate to the remote actor while disabling NAT
+traversal; candidate insertion was not an explicit path-opening operation. The
+actor's connection checks rely on hole punching to discover/open an IP path
+(`remote_state.rs:753-787`), whereas its actual explicit open operation is
+`open_path_ensure` (`1051-1088`). The corrected hook uses that same Noq operation
+without reconnecting; all queue, payload-exclusion and exact-delivery assertions
+remain. The timeout is not increased. Runtime confirmation remains pending.
 
 Not proven: selective transport authorization, transport-instance/generation
 binding, real physical-egress correlation, multipath recovery, or QUIC traversal
