@@ -85,6 +85,22 @@ class CaptureChecks(unittest.TestCase):
 
 
 class TopologyChecks(unittest.TestCase):
+    def test_interrupt_hold_never_advances_and_restores_alarm_scope(self):
+        previous = object()
+        for outcome in [SystemExit(143), None]:
+            with patch.object(core.signal, "getsignal", return_value=previous), \
+                 patch.object(core.signal, "signal") as install, patch.object(core.signal, "alarm") as alarm, \
+                 patch.object(core.signal, "pause", side_effect=outcome):
+                if outcome is None:
+                    with self.assertRaisesRegex(RuntimeError, "without termination"):
+                        core.hold_ready_for_interrupt()
+                else:
+                    with self.assertRaises(SystemExit) as caught:
+                        core.hold_ready_for_interrupt()
+                    self.assertEqual(caught.exception.code, 143)
+                self.assertEqual([call.args[0] for call in alarm.call_args_list], [30, 0])
+                self.assertEqual(install.call_args_list[-1].args, (core.signal.SIGALRM, previous))
+
     def test_unsolicited_native_filter_is_router_local_not_a_forwarding_bypass(self):
         cfg = config()
         calls = []

@@ -227,6 +227,18 @@ ciphertext is already supported by the oracle. A drain/kernel-loss regression is
 added. No fixed sleep substitutes for capture completion, and the original strict
 raw-ciphertext/conntrack and payload assertions remain.
 
-All new two-NAT cases are authored but **not yet runtime accepted**. They do not
+Run `39859409624` passed positive traversal (36 WAN observations, both native
+frame types in each direction, zero custom payload), native-blocked and wrong-port
+controls, and setup/live-peer fault cleanup. Its final interruption check exposed
+a phase race: the fast case could close capture/peers before the supervisor sampled
+the published readiness marker. `FIXTURE_QUIC_HOLD_READY=1` now holds that exact
+live phase awaiting the supervisor's signal, with a 30-second alarm backstop.
+Normal traversal never uses this hold. Descendant PID/start-identity checks and
+SIGTERM exit/cleanup requirements remain unchanged; a regression pins the held
+phase and alarm-handler restoration. Package installation is separately bounded
+at 600 seconds after two 180-second mirror-download timeouts; native runtime
+deadlines are unchanged.
+
+The complete new two-NAT suite is **not yet runtime accepted**. They do not
 establish production libp2p/Yggdrasil deployment, autonomous discovery, selected
 custom-transport authorization, or P03 completion.

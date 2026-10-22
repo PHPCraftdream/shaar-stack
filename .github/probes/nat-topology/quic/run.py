@@ -66,6 +66,8 @@ def main():
         ev["controls"]["custom-bootstrap"] = {"status": "pass", "process_identities": identities}
         if os.environ.get("FIXTURE_FAULT_INJECT") == "1":
             raise RuntimeError("injected fixture failure after both real QUIC peers became ready")
+        if os.environ.get("FIXTURE_QUIC_HOLD_READY") == "1":
+            core.hold_ready_for_interrupt()
         (root / "GO").touch(exist_ok=False)
         observed = core.wait_files([root / f"peer-{side}-observed.json" for side in range(2)], children)
         if not all(report["native_delivered"] is (kind == "positive") for report in observed):

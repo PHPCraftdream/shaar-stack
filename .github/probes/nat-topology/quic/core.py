@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import time
 
@@ -14,6 +15,20 @@ def atomic(path, value):
     with temporary.open("x", encoding="utf-8") as stream:
         json.dump(value, stream)
     os.replace(temporary, path)
+
+
+def hold_ready_for_interrupt():
+    def expired(_signum, _frame):
+        raise TimeoutError("interrupt supervisor did not signal the held readiness phase")
+    previous = signal.getsignal(signal.SIGALRM)
+    try:
+        signal.signal(signal.SIGALRM, expired)
+        signal.alarm(30)
+        signal.pause()
+        raise RuntimeError("readiness hold resumed without termination")
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def namespace(cfg, key):
