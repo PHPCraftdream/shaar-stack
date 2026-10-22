@@ -55,6 +55,7 @@ async fn run_baseline(deadline: tokio::time::Instant) {
         mem_transport: Some(tb),
         custom_only: true,
         qlog: Some((qlog.clone(), "server".into())),
+        address_lookup: Some(lookup.clone()),
         ..harness::EndpointConfig::new(sb.clone())
     })
     .await
