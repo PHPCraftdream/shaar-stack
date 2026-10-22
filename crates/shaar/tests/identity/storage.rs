@@ -230,8 +230,15 @@ async fn completed_task_leaves_existing_file_untouched() {
 async fn error_values_do_not_leak_seed_bytes() {
     let seed_hex = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
 
-    // Sanity: the detection logic itself is non-vacuous.
-    assert!(seed_hex.contains(seed_hex));
+    use std::fmt::Write as _;
+    let mut fixture_hex = String::with_capacity(64);
+    for byte in common::TEST1_SEED {
+        write!(&mut fixture_hex, "{byte:02x}").unwrap();
+    }
+    assert_eq!(
+        fixture_hex, seed_hex,
+        "the sentinel must match the actual fixture bytes"
+    );
 
     // A 33-byte fixture built from the ACTUAL TEST1 seed bytes
     // (seed || 0xFF) via the private fixture helper, so the load
@@ -241,7 +248,9 @@ async fn error_values_do_not_leak_seed_bytes() {
     let mut leaky = Vec::new();
     leaky.extend_from_slice(&common::TEST1_SEED);
     leaky.push(0xFF);
-    let (_td, path) = common::write_private_fixture("errredact", &leaky).await;
+    let path_sentinel = "zz_private_path_zz";
+    let (_td, path) = common::write_private_fixture(path_sentinel, &leaky).await;
+    assert!(path.to_string_lossy().contains(path_sentinel));
 
     let err = Identity::load(&path).await.expect_err("33-byte file");
     let dbg = format!("{err:?}");
@@ -257,6 +266,16 @@ async fn error_values_do_not_leak_seed_bytes() {
         !disp.to_ascii_lowercase().contains(seed_hex),
         "Display of error contains seed hex: {disp}"
     );
-    // And the sentinel detection would have caught a leak (control).
-    assert!(format!("{seed_hex}").contains(seed_hex));
+    let decimal_seed = format!("{:?}", common::TEST1_SEED);
+    let decimal_prefix = decimal_seed.trim_end_matches(']');
+    for rendered in [&dbg, &disp] {
+        assert!(
+            !rendered.contains(decimal_prefix),
+            "error exposed seed bytes"
+        );
+        assert!(
+            !rendered.contains(path_sentinel),
+            "error exposed its input path"
+        );
+    }
 }

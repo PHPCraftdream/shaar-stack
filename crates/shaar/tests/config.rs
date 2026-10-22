@@ -73,7 +73,7 @@ fn all_overrides_win_over_file_values() {
         allowlist_path: Some(PathBuf::from("over.txt")),
         fallback: Some(Fallback::Standby),
     };
-    let cfg = ServerConfig::from_text(&file, &over).unwrap();
+    let cfg = ServerConfig::from_text(file, &over).unwrap();
     assert_eq!(cfg.target().port(), 9100);
     assert_eq!(cfg.key_file(), Path::new("over.key"));
     assert_eq!(cfg.allowlist_path(), Path::new("over.txt"));
