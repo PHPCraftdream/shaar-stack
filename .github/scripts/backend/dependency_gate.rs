@@ -3,7 +3,10 @@
 
 use std::time::Duration;
 
-use iroh::endpoint::{Connection, NetReportConfig, PortmapperConfig, QuicTransportConfig, presets};
+use iroh::endpoint::{
+    Connection, NetReportConfig, PortmapperConfig, QuicTransportConfig, ReadError, ReadToEndError,
+    presets,
+};
 use iroh::{Endpoint, EndpointAddr, SecretKey, TransportAddr};
 
 const PAYLOAD: &[u8] = b"product!";
@@ -92,17 +95,13 @@ async fn exercise(permitted: bool) {
                     .await
                     .is_err()
             );
-            let mut blocked = receiver.open_uni().await.expect("second STREAM");
-            assert!(
-                tokio::time::timeout(Duration::from_millis(100), blocked.write_all(b"x"))
-                    .await
-                    .is_err()
-            );
-            blocked
-                .reset(0u32.into())
-                .expect("reset empty blocked STREAM");
             assert!(receiver.stats().udp_tx.datagrams > before.udp_tx.datagrams);
         }
+    }
+    if !permitted {
+        // Reset control may expose lower stream IDs without carrying STREAM data.
+        reset_control(&outgoing, &incoming).await;
+        reset_control(&incoming, &outgoing).await;
     }
     for connection in [&outgoing, &incoming] {
         assert_frames(connection, permitted);
@@ -110,6 +109,36 @@ async fn exercise(permitted: bool) {
     outgoing.close(0u32.into(), b"fixture done");
     incoming.close(0u32.into(), b"fixture done");
     tokio::join!(a.close(), b.close());
+}
+
+/// cancel-safe: NO — terminal fixture deadline; no write/read is retried after cancellation.
+async fn reset_control(sender: &Connection, receiver: &Connection) {
+    let mut blocked = sender.open_uni().await.expect("second STREAM");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), blocked.write_all(b"x"))
+            .await
+            .is_err()
+    );
+    let reset_id = blocked.id();
+    blocked
+        .reset(0u32.into())
+        .expect("reset empty blocked STREAM");
+    let mut pending = receiver
+        .accept_uni()
+        .await
+        .expect("implicitly opened lower STREAM");
+    assert!(u64::from(pending.id()) < u64::from(reset_id));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), pending.read_to_end(8))
+            .await
+            .is_err()
+    );
+    let mut reset = receiver.accept_uni().await.expect("reset STREAM control");
+    assert_eq!(reset.id(), reset_id);
+    assert_eq!(
+        reset.read_to_end(8).await,
+        Err(ReadToEndError::Read(ReadError::Reset(0u32.into())))
+    );
 }
 
 fn assert_frames(connection: &Connection, permitted: bool) {
