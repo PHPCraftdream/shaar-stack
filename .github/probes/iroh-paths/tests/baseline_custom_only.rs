@@ -86,7 +86,11 @@ async fn run_baseline(deadline: tokio::time::Instant) {
     {
         Ok(Ok(connecting)) => connecting,
         Ok(Err(error)) => panic!("custom-only route resolution failed: {error:?}"),
-        Err(_) => panic!("deadline hit resolving custom-only route"),
+        Err(_) => {
+            let remote_info =
+                tokio::time::timeout(Duration::from_secs(1), ep_a.remote_info(sb.public())).await;
+            panic!("deadline hit resolving custom-only route; remote info={remote_info:?}");
+        }
     };
     let conn = match tokio::time::timeout_at(deadline, connecting).await {
         Ok(Ok(conn)) => conn,
