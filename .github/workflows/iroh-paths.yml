@@ -1,0 +1,89 @@
+# Workflow for the standalone iroh-paths probe package (narrow baseline substage).
+#
+# The probe is NOT a workspace member: it lives under .github/probes/iroh-paths/
+# with its own Cargo.toml. This workflow runs ONLY the baseline substage test:
+# custom-only authenticated bootstrap + stream echo + wire/delivered counters +
+# a positive qlog calibration of the client trace.
+#
+# IMPORTANT HONESTY NOTE: this workflow does NOT prove P03 strict
+# signaling-only. It only runs the baseline calibration. The strict
+# signaling-only requirement remains unproven and blocks dependent work.
+#
+# Pinned actions (full commit SHAs, verified via GitHub API):
+# - actions/checkout       fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+# - actions/upload-artifact cf430e030ddbb5b0abf93d22962f4752f3646cd9 (v7.0.2, main)
+#   verified via https://api.github.com/repos/actions/upload-artifact/commits/main
+#
+# No caches, no secrets, read-only repository access.
+
+name: "iroh paths probe"
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/probes/iroh-paths/**"
+      - ".github/workflows/iroh-paths.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline:
+    name: "baseline: custom-only bootstrap + qlog calibration"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: .github/probes/iroh-paths
+    steps:
+      - name: "Checkout (pinned SHA, no persisted credentials)"
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      - name: "Install Rust 1.99.1 (plain rustup, no third-party action)"
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          rustup override set 1.99.1
+          rustc --version
+          cargo --version
+
+      # ensure-lockfile.sh bootstraps Cargo.lock via resolution when it is
+      # missing (BOOTSTRAP mode) and otherwise runs `cargo test --locked`
+      # (LOCKED mode); it prints which mode was used. It also exports
+      # SSLKEYLOGFILE=$PWD/target/iroh-paths/sslkeylog.txt BEFORE cargo starts
+      # (test-only synthetic keys) so a future wire-decode oracle can consume it.
+      # After the parent commits the CI-produced Cargo.lock, the script runs
+      # LOCKED and reproducibility holds from then on.
+      - name: "Run baseline test (bootstrap or locked)"
+        run: bash ci/ensure-lockfile.sh
+
+      # The canonical text Cargo.lock is uploaded for parent review. With
+      # `if: always()` a failed run still yields the lock for diagnosis, so a
+      # hard `error` could abort the upload on early failure; `warn` is the
+      # sensible choice here (missing lock itself IS the failure signal).
+      - name: "Upload Cargo.lock artifact"
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: cargo-lock
+          path: .github/probes/iroh-paths/Cargo.lock
+          if-no-files-found: warn
+
+      # qlog traces + sslkeylog.txt live under target/iroh-paths/ (the probe
+      # writes to target/iroh-paths/<tag>-<pid>-<millis>/ with cwd = package
+      # dir). The sslkeylog.txt contains TEST-ONLY SYNTHETIC keys produced by
+      # the in-memory probe endpoints; it is not a real secret. `warn` so that
+      # an early bootstrap failure still completes the job with diagnostics.
+      - name: "Upload qlog traces (and test-only sslkeylog)"
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: qlog-traces
+          path: .github/probes/iroh-paths/target/iroh-paths/
+          if-no-files-found: warn
