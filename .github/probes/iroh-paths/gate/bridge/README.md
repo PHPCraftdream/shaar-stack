@@ -1,6 +1,6 @@
 # iroh wrapper propagation calibration
 
-Status: **CONSTANT AND MIXED-PATH REGRESSIONS PASSED; WIRE ORACLE UNVERIFIED; P03 NOT PASSED.**
+Status: **CONSTANT, MIXED-PATH AND SAME-HOST WIRE REGRESSIONS PASSED; P03 NOT PASSED.**
 
 [Run 39814987632](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39814987632)
 at `843e396` passed on each of Ubuntu and Windows: three preparation rejection
@@ -83,11 +83,25 @@ positive native captures for both types and both directions. Every captured byte
 must correlate. Constructed-but-unobserved packets are reported separately, with
 zero unobserved payload required. Capture buffers are capped at 256 datagrams per
 direction/boundary; trace input at 16 MiB and the identity index at 1024 packets.
-These new wire cases are authored but not yet runtime verified. The native
-forwarder is a same-host packet-observation fixture, not the controlled two-NAT
-proof, autonomous route discovery, or authorization of selected custom transports.
+[Run 39829606362](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39829606362)
+at `619fa79` passed on each of Windows and Ubuntu: three preparation checks,
+18 unit tests, one constant-policy calibration, two mixed-path tests, and seven
+wire tests, with no failures or ignored tests. Actual job logs were inspected.
 
-Not proven: selective transport authorization, transport-instance/generation
-binding, real physical-egress correlation, multipath recovery, or QUIC traversal
-through NAT. Those remain required before P03 acceptance. The wrapper forwarder
-is a spike API, not a production or published-library commitment.
+| OS | Direction | Custom packets / STREAM / DATAGRAM | Native packets / STREAM / DATAGRAM | Constructed but unobserved packets |
+|---|---|---|---|---|
+| Windows | 0 | 27 / 0 / 0 | 5 / 1 / 1 | 0 |
+| Windows | 1 | 23 / 0 / 0 | 6 / 1 / 1 | 0 |
+| Ubuntu | 0 | 28 / 0 / 0 | 5 / 1 / 1 | 0 |
+| Ubuntu | 1 | 23 / 0 / 0 | 5 / 1 / 1 | 0 |
+
+These are observed packet counts, not fixed expected counts. Complete captured
+ciphertext matched in both directions at both boundaries. The native forwarder
+is a same-host OS UDP packet-observation fixture; the custom boundary is a bounded
+in-memory sender. This does not prove real libp2p/Yggdrasil transport deployment,
+controlled two-NAT traversal, autonomous discovery or selected-custom authority.
+
+Still required before P03 acceptance: real QUIC traversal through the calibrated
+NAT topology, required loss/recovery proofs, and authorization/lifetime binding
+before permitting selected custom transports to carry payload. The wrapper
+forwarder remains a spike API, not a production or published-library commitment.
