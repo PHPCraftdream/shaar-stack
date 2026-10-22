@@ -96,3 +96,96 @@ fn broad_and_unprotected_dacls_are_rejected_on_real_files() {
         );
     }
 }
+
+fn owner_allow_acl() -> [u8; 28] {
+    // ACL header, one basic ALLOW ACE, READ_DATA mask, documented S-1-3-4 SID.
+    [
+        2, 0, 28, 0, 1, 0, 0, 0, 0, 0, 20, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 3, 4, 0, 0, 0,
+    ]
+}
+
+#[test]
+fn native_valid_null_dacl_is_a_privacy_error() {
+    assert_eq!(
+        null_dacl_fixture_result().unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+}
+
+#[test]
+fn empty_and_deny_only_dacls_are_rejected() {
+    validate_dacl(&owner_allow_acl()).expect("positive owner-only fixture");
+    let empty = [2u8, 0, 8, 0, 0, 0, 0, 0];
+    assert_eq!(
+        validate_dacl(&empty).unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+    let mut deny_only = owner_allow_acl();
+    deny_only[8] = 1;
+    assert_eq!(
+        validate_dacl(&deny_only).unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+}
+
+#[test]
+fn inherited_and_nonowner_allow_aces_are_rejected() {
+    validate_dacl(&owner_allow_acl()).expect("positive owner-only fixture");
+    let mut inherited = owner_allow_acl();
+    inherited[9] = 0x10;
+    assert_eq!(
+        validate_dacl(&inherited).unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+    let mut nonowner = owner_allow_acl();
+    nonowner[24] = 5;
+    assert_eq!(
+        validate_dacl(&nonowner).unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+}
+
+#[test]
+fn acl_and_ace_extents_are_checked_before_use() {
+    let acl = owner_allow_acl();
+    for len in 0..acl.len() {
+        assert_eq!(
+            validate_dacl(&acl[..len]).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+    let mut missing_ace = acl;
+    missing_ace[4] = 2;
+    assert_eq!(
+        validate_dacl(&missing_ace).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    let mut oversized_ace = acl;
+    oversized_ace[10] = 40;
+    assert_eq!(
+        validate_dacl(&oversized_ace).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+}
+
+#[test]
+fn zero_mask_malformed_sid_and_unknown_ace_fail_closed() {
+    let mut zero_mask = owner_allow_acl();
+    zero_mask[12..16].fill(0);
+    assert_eq!(
+        validate_dacl(&zero_mask).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    let mut bad_sid = owner_allow_acl();
+    bad_sid[17] = 2;
+    assert_eq!(
+        validate_dacl(&bad_sid).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    let mut unknown = owner_allow_acl();
+    unknown[8] = 0xff;
+    assert_eq!(
+        validate_dacl(&unknown).unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+}
