@@ -1,10 +1,10 @@
 # Noq application-payload gate: initial CI spike
 
 Status: **INITIAL REGRESSIONS PASSED; P03 NOT PASSED.**
-[CI run 39789064024](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39789064024)
-at `0a00df5` passed four initial policy tests (0 ignored) and the complete
-backend library suite: 431 tests, including those four, with 0 failures or
-ignored tests. This is an isolated proof-of-mechanism on checksum-pinned
+[CI run 39791470171](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39791470171)
+at `fb10e20` passed five policy tests, including the multipath scenario, and
+the complete backend library suite: 432 tests, including those five, with
+0 failures or ignored tests. This is an isolated proof-of-mechanism on checksum-pinned
 `noq-proto 1.3.0`, not a production fork or iroh integration. The production
 workspace and existing standalone baseline lock are unchanged.
 
@@ -50,7 +50,7 @@ runs our source transformation as a data operation; it does not execute the
 downloaded crate, its build scripts, tests or binaries. Local checks are limited
 to Python AST parsing and Rust formatting/syntax checks.
 
-## Authored multipath follow-up (runtime pending)
+## Confirmed simulated multipath scenario
 
 A new real-harness scenario keeps the initial signaling-only path Available
 and opens a permitted path with Backup status on both peers. It queues payload
@@ -62,13 +62,23 @@ counters distinguish these simulated paths. The address predicate is synthetic
 fixture classification, not authenticated production transport identification.
 This tests explicit close/reopen, not detection of physical network loss.
 
+## Authored early-data follow-up (runtime pending)
+
+Two additional tests each run allow and deny policies. A resumed client must
+have cached 0-RTT keys; frame counters are inspected before server processing
+and while the client is still handshaking. A fresh server queues payload after
+its first handshake flight but before the client consumes it or sends Finished;
+its counters are inspected while it is still handshaking. Both STREAM and
+DATAGRAM must obey policy, and control handshakes must still complete. These
+phase assertions and positive controls are required, not inferred from eventual
+application non-delivery.
+
 ## Explicitly not proven
 
-These initial tests are not physical-egress attribution. They do not prove
-multipath transitions, a direct Backup path becoming payload-eligible in practice,
-loss/retransmission onto another path, 0-RTT/server early data, DATAGRAM queue
-exhaustion, cancellation, direct-path loss/recovery, Windows behavior, or QUIC
-NAT traversal. Those remain mandatory follow-up proofs before P03 acceptance.
+These tests are not physical-egress attribution. They do not prove
+loss/retransmission onto another path, 0-RTT/server early data until the new
+phase tests actually pass, DATAGRAM queue exhaustion, cancellation,
+packet-loss-driven path recovery, Windows behavior, or QUIC NAT traversal. Those remain mandatory follow-up proofs before P03 acceptance.
 The policy is not dynamically toggled to release already prepared packets.
 
 The isolated backend uses its own published test dependency lock, separate from

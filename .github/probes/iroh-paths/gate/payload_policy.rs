@@ -3,7 +3,7 @@
 
 use bytes::Bytes;
 
-use std::net::IpAddr;
+use std::{net::IpAddr, time::Duration};
 
 use super::util::{ConnPair, ConnPairBuilder, ManyToManyRouting, Pair};
 use crate::{Dir, FourTuple, PathId, PathStatus, Side};
@@ -17,10 +17,17 @@ fn allow(_: FourTuple) -> bool {
 }
 
 fn enqueue(pair: &mut ConnPair, side: Side) {
-    let stream = pair.streams(side).open(Dir::Uni).expect("stream allowance");
-    assert_eq!(pair.send_stream(side, stream).write(b"payload").unwrap(), 7);
-    pair.send_stream(side, stream).finish().unwrap();
-    pair.conn_mut(side)
+    enqueue_connection(pair.conn_mut(side));
+}
+
+fn enqueue_connection(connection: &mut crate::Connection) {
+    let stream = connection
+        .streams()
+        .open(Dir::Uni)
+        .expect("stream allowance");
+    assert_eq!(connection.send_stream(stream).write(b"payload").unwrap(), 7);
+    connection.send_stream(stream).finish().unwrap();
+    connection
         .datagrams()
         .send(Bytes::from_static(b"payload-datagram"), false)
         .unwrap();
@@ -238,4 +245,96 @@ fn payload_policy_backup_preference_and_path_recovery() {
     assert_backup_payload(&mut pair, recovered);
     assert!(!pair.is_closed(Side::Client));
     assert!(!pair.is_closed(Side::Server));
+}
+
+#[test]
+fn payload_policy_resumed_client_zero_rtt() {
+    let cases: [(bool, fn(FourTuple) -> bool); 2] = [(true, allow), (false, deny)];
+    for (permitted, filter) in cases {
+        let mut builder = ConnPairBuilder::default()
+            .disable_mtud_discovery()
+            .with_latency(Duration::ZERO);
+        builder.client_transport_cfg.application_data_filter(filter);
+        builder.server_transport_cfg.application_data_filter(filter);
+        let (mut pair, config) = builder.build_pair();
+        let first = pair.begin_connect(config.clone());
+        assert!(!pair.drive_bounded(100));
+        pair.server.assert_accept();
+        assert!(!pair.client_conn_mut(first).is_handshaking());
+        let now = pair.time;
+        pair.client_conn_mut(first)
+            .close(now, 0u8.into(), Bytes::new());
+        assert!(!pair.drive_bounded(100));
+
+        let resumed = pair.begin_connect(config);
+        assert!(
+            pair.client_conn_mut(resumed).has_0rtt(),
+            "cached early keys required"
+        );
+        enqueue_connection(pair.client_conn_mut(resumed));
+        // No server processing yet: any payload sent now really is early data.
+        pair.drive_client();
+        assert!(pair.client_conn_mut(resumed).is_handshaking());
+        let early = pair.client_conn_mut(resumed).stats();
+        assert_eq!(early.frame_tx.stream > 0, permitted, "0-RTT STREAM policy");
+        assert_eq!(
+            early.frame_tx.datagram > 0,
+            permitted,
+            "0-RTT DATAGRAM policy"
+        );
+        assert!(
+            early.frame_tx.crypto > 0,
+            "ClientHello must still be transmitted"
+        );
+
+        assert!(!pair.drive_bounded(100));
+        assert!(!pair.client_conn_mut(resumed).is_handshaking());
+        assert!(pair.client_conn_mut(resumed).accepted_0rtt());
+        let server = pair.server.assert_accept();
+        let received = pair.server_conn_mut(server).stats();
+        assert_eq!(received.frame_rx.stream > 0, permitted);
+        assert_eq!(received.frame_rx.datagram > 0, permitted);
+    }
+}
+
+#[test]
+fn payload_policy_server_half_rtt_before_client_finished() {
+    let cases: [(bool, fn(FourTuple) -> bool); 2] = [(true, allow), (false, deny)];
+    for (permitted, filter) in cases {
+        let mut builder = ConnPairBuilder::default()
+            .disable_mtud_discovery()
+            .with_latency(Duration::ZERO);
+        builder.server_transport_cfg.application_data_filter(filter);
+        let (mut pair, config) = builder.build_pair();
+        let client = pair.begin_connect(config);
+        pair.drive_client();
+        pair.drive_server();
+        let server = pair.server.assert_accept();
+        assert!(pair.client_conn_mut(client).is_handshaking());
+        assert!(pair.server_conn_mut(server).is_handshaking());
+        enqueue_connection(pair.server_conn_mut(server));
+        pair.server_conn_mut(server).ping();
+        // Client has not consumed the server flight or sent Finished.
+        pair.drive_server();
+        assert!(pair.server_conn_mut(server).is_handshaking());
+        let early = pair.server_conn_mut(server).stats();
+        assert_eq!(
+            early.frame_tx.stream > 0,
+            permitted,
+            "server early STREAM policy"
+        );
+        assert_eq!(
+            early.frame_tx.datagram > 0,
+            permitted,
+            "server early DATAGRAM policy"
+        );
+        assert!(early.frame_tx.crypto > 0);
+
+        assert!(!pair.drive_bounded(100));
+        assert!(!pair.server_conn_mut(server).is_handshaking());
+        assert!(!pair.client_conn_mut(client).is_handshaking());
+        let received = pair.client_conn_mut(client).stats();
+        assert_eq!(received.frame_rx.stream > 0, permitted);
+        assert_eq!(received.frame_rx.datagram > 0, permitted);
+    }
 }
