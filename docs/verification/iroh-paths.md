@@ -201,7 +201,7 @@ Each item: what / where / why blocked.
 | What | Where | Why blocked |
 |---|---|---|
 | Direct UDP migration | probe package (removed `tests/migration_candidates.rs`) | depends on unproven strict signaling-only; removed rather than left broken |
-| Real NAT traversal | removed NAT netns stage | the old script did not establish observed address translation; a controlled NAT rig must prove translation, not merely separate namespaces |
+| Real NAT traversal | future QUIC traversal test using the calibrated `nat-topology` rig | UDP fixture translation is confirmed below; authenticated QUIC candidate exchange and direct traffic across both NATs are not yet tested |
 | Direct-loss phase | probe (future) | blocked on a verified strict signaling mechanism; neither direction A nor B has been selected |
 | Repunch phase | probe (future) | blocked on direction A or B; old-data/retransmission risk unsolved |
 | Hard signaling-only enforcement | probe / production transport | frame-type knowledge only inside noq pre-encryption; needs upstream design |
@@ -242,6 +242,47 @@ There are **no `#[ignore]` tests** and **no mock passes** anywhere.
   local validation was limited to formatting and syntax checks.
 - Passing this topology does not establish production shutdown safety,
   concurrent stream service, multipath attribution, or STREAM exclusion.
-- The parallel NAT topology calibration fixture is not yet accepted and is
-  not evidence for QUIC traversal.
+- The separate NAT topology calibration below is accepted only as a UDP
+  fixture, not as evidence for QUIC traversal.
 - Failures are investigated at root cause, **not rerun into luck**.
+
+## 9. Controlled NAT fixture calibration
+
+[Run 39781462112](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39781462112)
+at `733351a402c9f1acc3b53e1c89db7fdb375ee8d0` passed the CI selftests and
+all four fixture cases. The separate workspace
+[CI run 39781462125](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39781462125)
+passed at the same revision. The `nat-topology-out` artifact was downloaded
+into an isolated directory and inspected as JSON data without executing it.
+
+The normal case observed the following private-to-translated source tuples
+at the WAN responder and correlated them with exact original/reply UDP
+conntrack tuples (`unreplied: false`):
+
+| Peer | Private source | Receiver-observed translated source | Destination |
+|---|---|---|---|
+| A | `10.0.1.2:40001` | `203.0.113.1:41013` | `203.0.113.10:41000` |
+| B | `10.0.2.2:40002` | `203.0.113.2:41020` | `203.0.113.10:41000` |
+
+Both positive controls, wrong-token delivery/classification, wrong-tuple
+sink delivery/isolation, and forwarding-off controls passed. Case outcomes:
+
+- Normal: exit `0`, evidence status `pass`, no failed controls.
+- Setup fault: exit `1`, exact `setup-injected` phase after three namespaces;
+  the fixture did not start.
+- Fixture fault: exit `1`, exact injected exception recorded after responders
+  became ready; owned child cleanup succeeded.
+- SIGTERM: exit `143`, explicit `interrupted` control and signal reason
+  recorded; owned child cleanup succeeded.
+
+All four cleanup artifacts report `cleanup_failed: false`, zero remaining
+namespaces, no surviving owned namespace processes or host interfaces, and
+unchanged captured host firewall/forwarding state. No local fixture execution
+or tests were used. The initial run `39781007420` passed selftests but failed
+before topology setup on malformed shell-embedded Python; `733351a` fixed it
+and added an embedded-source syntax regression.
+
+This establishes a calibrated, bounded Linux CI topology only. It does not
+prove QUIC hole punching, peer-to-peer connectivity across both NATs,
+strict STREAM exclusion, migration, re-punching, Windows NAT behavior, or
+production root/TUN independence. P03 remains **NOT PASSED**.

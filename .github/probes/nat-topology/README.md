@@ -11,9 +11,12 @@ the CI job (via `sudo`) on a throwaway runner to build network namespaces.
 It never touches host firewall rules, routes, or `ip_forward`; host network
 state is captured before the run and verified unchanged after cleanup
 (any drift is a hard failure). Runtime verification happens ONLY in GitHub
-CI — nothing in this probe has been executed locally. Runtime acceptance is
-pending the first CI run. This does not test QUIC traversal, signaling-only
-STREAM exclusion, or migration, and does not close P03.
+CI — nothing in this probe has been executed locally. Calibration passed in
+[run 39781462112](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39781462112)
+at `733351a`, including normal, setup-failure, fixture-failure and SIGTERM
+cases. Downloaded JSON artifacts confirmed both observed NAT tuples and
+clean teardown with unchanged host state. This does not test QUIC traversal,
+signaling-only STREAM exclusion, or migration, and does not close P03.
 
 ## Files
 
