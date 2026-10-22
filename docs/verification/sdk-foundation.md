@@ -138,19 +138,46 @@ first so sharing cannot masquerade as denial.
 Scope of proof: the anonymous-reopen denial proves file-object denial under
 the anonymous identity; it does not prove full-path/ancestor-directory lookup
 enforcement, nor a second-account logon. The Authz check is a synthetic
-World-SID decision, not a real different-principal read. Actual Unix
-second-UID read testing is not implemented. Public API cancellation still
-cannot stop already-running blocking native I/O; existing cancellation tests
-only cover narrower waiter/backend cleanup. Full P04/security acceptance
-remains open.
+World-SID decision, not a real different-principal read. Public API
+cancellation cannot stop already-running blocking native I/O; cancellation
+coverage at this revision only establishes narrower waiter/backend cleanup.
+Full P04/security acceptance remains open pending the public-future tests
+and final acceptance audit.
+
+## Unix second-UID read evidence
+
+[Run 39730112320](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39730112320)
+passed on both operating systems at exact source revision
+`a4b13a290a9d8f60c400d4cb78454a5d7f03120b`. The explicit Ubuntu
+SEC-KEY-02 step logged `running 1 test` and the successful fully qualified
+`identity::store::tests::unprivileged_reader::identity_unprivileged_uid_cannot_read_seed_file`
+test. The ordinary Linux suite intentionally ignores this sudo-dependent
+test; the separate step runs it explicitly and requires its exact success
+line, so zero selected tests cannot pass the step.
+
+The production exclusive-create helper is held before its first write. A
+child Python interpreter, isolated with `-I` and run as `nobody`, checks its
+effective UID is neither zero nor the file owner's UID, then attempts a
+bounded read. The empty private file and the file after 32 synthetic seed
+bytes both yield exact `EACCES` (13). A readable 0644 control in the same
+fixture directory is read successfully before and after those denials.
+Only the newly created fixture directory and control file are chmodded;
+existing ancestors and the private file are not modified. No local native
+execution or tests were performed for this proof.
+
+The first run, 39729592357, correctly failed its positive control: the
+readable file itself returned `EACCES`, so no privacy proof was accepted.
+The corrected fixture uses a fresh directory under the system temporary
+root rather than workspace descendants, excluding inaccessible workspace
+ancestors without weakening either control. The exact offending ancestor
+was not identified. This run establishes actual second-UID reads on Linux;
+it does not add claims about every Unix platform or root/admin protection.
 
 ## Explicitly open acceptance
 
-- Real second-principal `File`-level read on Unix (second UID) is not
-  implemented; anonymous/other-principal coverage proves file-object denial
-  only, not full-path lookup or a second-account logon.
-- The Authz evidence is a synthetic SID decision, not a real
-  different-principal read.
+- Windows anonymous coverage proves file-object denial, not full-path lookup
+  or a second-account logon; the Authz evidence is a synthetic SID decision,
+  not a real different-principal read.
 - Whole-public-API cancellation/resource-lifecycle acceptance beyond the
   documented native-I/O limitations.
 - P03 strict signaling-only, direct migration, and real NAT traversal.
