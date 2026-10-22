@@ -165,11 +165,8 @@ async fn load_or_create_race_produces_single_identity() {
 /// 9. Write-failure safety: a missing parent directory and a
 /// directory-as-path both error and create nothing.
 ///
-/// Coverage note: this covers the OS-error mapping path of create_new
-/// (open failure before any bytes are written). The in-task
-/// write-failure cleanup branch (disk full / sync failure after a
-/// successful create_new) is not portably triggerable here and is
-/// documented in store.rs instead.
+/// This covers open-time failures. Private store unit tests separately inject
+/// partial-write and sync failures after real exclusive creation.
 #[tokio::test]
 async fn create_new_error_paths_create_nothing() {
     let td = TempDir::new("errpaths");
@@ -186,8 +183,17 @@ async fn create_new_error_paths_create_nothing() {
     let err = Identity::create_new(&as_dir)
         .await
         .expect_err("directory as path");
+    // Unix exclusive creation reports EEXIST for a directory entry; the
+    // Windows native file-only create reports an I/O failure instead.
+    #[cfg(unix)]
+    assert!(matches!(err, IdentityError::AlreadyExists), "got {err:?}");
+    #[cfg(windows)]
     assert!(matches!(err, IdentityError::Io(_)), "got {err:?}");
     assert!(as_dir.is_dir(), "directory must remain");
+    assert!(
+        std::fs::read_dir(&as_dir).unwrap().next().is_none(),
+        "no child may be created"
+    );
 }
 
 /// 11. A storage task that runs to COMPLETION over an existing key file
