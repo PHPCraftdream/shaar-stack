@@ -4,8 +4,10 @@ Status: **P03 NOT PASSED.** The narrowed custom-only baseline passed in
 [CI run 39764087035](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39764087035)
 at commit `7bd6bf7449426072c51536916a221e11e7abfd5c`: 13 unit tests and
 one integration test passed, with no ignored tests. The integration test
-completed in 0.05 seconds. This was bootstrap lock resolution; the generated
-lockfile has been inspected and added for a subsequent locked-mode CI run.
+completed in 0.05 seconds. The generated lockfile was inspected and committed
+in `b948555`. [Locked-mode run 39764775361](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39764775361)
+then passed the same 13 unit tests and integration test (0.06 seconds), with
+an explicit `LOCKED mode` log and clippy/tests using `--locked`.
 Strict signaling-only enforcement, migration, and real NAT traversal remain
 unproven; this result does not close P03.
 
@@ -223,8 +225,8 @@ There are **no `#[ignore]` tests** and **no mock passes** anywhere.
   yanked; its replacement was user-authorized. Exact Noq family constraints
   prevent the incompatible `noq 1.4.0` / `noq-udp 1.3.0` resolution observed
   during bootstrap.
-- Subsequent CI must print `LOCKED mode` and run clippy/tests with `--locked`;
-  that repeat is still pending when this report is updated.
+- Locked-mode repeat `39764775361` at `b948555` printed `LOCKED mode` and
+  passed clippy/tests with `--locked`; subsequent runs retain that contract.
 - No production Cargo/lock/CI files touched.
 - Rust **1.99.1**; `permissions: contents: read`; checkout
   `persist-credentials: false`.

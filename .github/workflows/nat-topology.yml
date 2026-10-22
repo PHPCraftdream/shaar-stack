@@ -1,0 +1,159 @@
+# P03 NAT topology calibration probe.
+#
+# HONESTY NOTE: this workflow runs a CI-only calibration fixture. It uses
+# sudo purely to create disposable network namespaces on a throwaway
+# GitHub-hosted runner; it makes NO production TUN/root capability claim.
+# Host firewall/ip_forward state is captured before and verified unchanged
+# after every run. Each fixture case invokes `run.sh RUN_DIR NONCE` with its
+# own unique per-case directory and random nonce, and verifies results via
+# the strict JSON validators in checks/selftest.py. Third-party actions are pinned
+# to commit SHAs (documented below, current as of authoring):
+#   actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+#   actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+name: nat-topology
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - ".github/probes/nat-topology/**"
+      - ".github/workflows/nat-topology.yml"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/probes/nat-topology/**"
+      - ".github/workflows/nat-topology.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nat-topology-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.x
+        with:
+          persist-credentials: false
+
+      - name: Install conntrack CLI (bounded, non-fatal)
+        run: |
+          set -u
+          timeout 120 sudo apt-get update -qq || true
+          if timeout 120 sudo apt-get install -y --no-install-recommends conntrack; then
+            echo "CONNTRACK_MODE=cli" >> "$GITHUB_ENV"
+          else
+            echo "::warning::conntrack CLI unavailable; fixture falls back to /proc/net/nf_conntrack"
+            echo "CONNTRACK_MODE=proc-fallback" >> "$GITHUB_ENV"
+          fi
+
+      - name: Parser/logic selftest (CI-only, must pass first)
+        working-directory: .github/probes/nat-topology
+        run: python3 checks/selftest.py -v
+
+      - name: Preflight (CI-only sudo elevation + tool assertions)
+        run: |
+          set -eu
+          sudo -n true || { echo "::error::passwordless sudo required on runner"; exit 1; }
+          command -v ip >/dev/null || { echo "::error::ip(8) missing"; exit 1; }
+          command -v python3 >/dev/null || { echo "::error::python3 missing"; exit 1; }
+          command -v iptables >/dev/null || command -v nft >/dev/null || { echo "::error::need iptables or nft"; exit 1; }
+          echo "host ip_forward: $(sysctl -n net.ipv4.ip_forward)"
+
+      # Case isolation: every fixture case invokes
+      # `run.sh [--fault-inject-*] RUN_DIR NONCE` with its OWN unique
+      # per-case directory (run.sh mkdir refuses reuse) and random hex
+      # nonce. All assertions go through the strict JSON validators /
+      # root supervisor in checks/selftest.py (python3 -I, run under sudo since
+      # artifacts are root-owned) — no textual grep, no pointer files.
+      - name: Run fixture as root (namespaced, CI-only)
+        working-directory: .github/probes/nat-topology
+        run: |
+          set -eu
+          casedir="out/case-normal-$(date +%s%N)"
+          nonce="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+          rc=0
+          if sudo -E env PATH="$PATH" bash run.sh "$casedir" "$nonce"; then rc=0; else rc=$?; fi
+          [ "$rc" -eq 0 ] || { echo "::error::normal run failed rc=$rc"; exit 1; }
+          sudo python3 -I checks/selftest.py validate-cleanup \
+            "$casedir/cleanup-evidence.json" --case normal --nonce "$nonce"
+          sudo python3 -I checks/selftest.py validate-evidence \
+            "$casedir/evidence.json" --expect-status pass --nonce "$nonce"
+
+      - name: Failure-injection check (late setup failure cleanup)
+        working-directory: .github/probes/nat-topology
+        run: |
+          set -eu
+          casedir="out/case-setup-fault-$(date +%s%N)"
+          nonce="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+          rc=0
+          if sudo -E env PATH="$PATH" bash run.sh --fault-inject-setup "$casedir" "$nonce"; then rc=0; else rc=$?; fi
+          # The injected late-setup fault must make the run fail loudly.
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::setup-fault run unexpectedly succeeded"; exit 1
+          fi
+          # Exact injected signature: phase setup-injected, exact reason,
+          # exactly wan/host-a/host-b created; teardown still clean.
+          sudo python3 -I checks/selftest.py validate-cleanup \
+            "$casedir/cleanup-evidence.json" --case setup-fault \
+            --nonce "$nonce"
+          # The fixture never started: no children phase marker, no evidence.
+          if sudo test -f "$casedir/records/children_started"; then
+            echo "::error::children_started present after setup fault"; exit 1
+          fi
+          if sudo test -f "$casedir/evidence.json"; then
+            echo "::error::evidence.json present after setup fault"; exit 1
+          fi
+
+      - name: Fixture-failure check (failure observed, teardown still clean)
+        working-directory: .github/probes/nat-topology
+        run: |
+          set -eu
+          casedir="out/case-fixture-fault-$(date +%s%N)"
+          nonce="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+          rc=0
+          if sudo -E env PATH="$PATH" bash run.sh --fault-inject-fixture "$casedir" "$nonce"; then rc=0; else rc=$?; fi
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::fixture-fault run unexpectedly succeeded"; exit 1
+          fi
+          # Children reached the ready phase of THIS run (nonce match).
+          sudo python3 -I checks/selftest.py validate-phase \
+            "$casedir/records/children_started" "$nonce"
+          # The injected failure was OBSERVED and recorded, not silent.
+          sudo python3 -I checks/selftest.py validate-evidence \
+            "$casedir/evidence.json" --expect-status fail \
+            --expect-exception-substr "injected fixture failure" \
+            --nonce "$nonce"
+          # And the subsequent teardown was still clean.
+          sudo python3 -I checks/selftest.py validate-cleanup \
+            "$casedir/cleanup-evidence.json" --case fixture-fault \
+            --nonce "$nonce"
+
+      - name: Interruption check (SIGTERM produces clean teardown)
+        working-directory: .github/probes/nat-topology
+        run: |
+          set -eu
+          # ROOT Python supervisor (checks/selftest.py supervise-interrupt): it
+          # owns the run.sh process via Popen, waits bounded for the
+          # nonce-tagged children phase marker, verifies the responder PIDs
+          # are live descendants of the owned run.sh, re-checks identity to
+          # exclude PID reuse, sends SIGTERM via Popen.send_signal, requires
+          # exit 143, always reaps in finally, then validates cleanup +
+          # evidence for THIS case. No shell background/pid-file loop.
+          casedir_abs="$(pwd)/out/case-interrupt-$(date +%s%N)"
+          nonce="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+          sudo python3 -I checks/selftest.py supervise-interrupt \
+            "$(pwd)/run.sh" "$casedir_abs" "$nonce"
+
+      - name: Upload evidence artifacts (always)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v4.x
+        with:
+          name: nat-topology-out
+          path: .github/probes/nat-topology/out
+          if-no-files-found: warn
