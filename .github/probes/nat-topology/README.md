@@ -217,6 +217,16 @@ that fixture state collision without changing backend scheduling, assertions,
 capture limits or deadlines. The existing positive NAT case is red before this
 fix; a pure regression also pins router-local DROP rather than FORWARD ACCEPT.
 
+Run `39855057799` confirmed native bytes/FIN/DATAGRAM delivery on both peers
+and the expected replied native conntrack entries after the INPUT fix, but the
+fast case stopped tcpdump before default libpcap buffering exposed any WAN rows.
+`-U` controls output flushing, not capture latency. The fixture now uses immediate
+mode and waits for fresh SIGUSR1 statistics to show captured == received and zero
+kernel drops before SIGINT. Both WAN observations are retained; exact duplicate
+ciphertext is already supported by the oracle. A drain/kernel-loss regression is
+added. No fixed sleep substitutes for capture completion, and the original strict
+raw-ciphertext/conntrack and payload assertions remain.
+
 All new two-NAT cases are authored but **not yet runtime accepted**. They do not
 establish production libp2p/Yggdrasil deployment, autonomous discovery, selected
 custom-transport authorization, or P03 completion.

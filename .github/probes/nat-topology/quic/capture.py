@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import time
@@ -32,6 +33,16 @@ def parse_rows(text, public_ips, mapped_ports):
     return packets, rows
 
 
+def parse_stats(text):
+    values = []
+    for suffix in (r"packets? captured", r"packets? received by filter", r"packets? dropped by kernel"):
+        matches = re.findall(r"(?m)^(\d+) " + suffix + r"$", text)
+        if not matches:
+            return None
+        values.append(int(matches[-1]))
+    return tuple(values)
+
+
 class Capture:
     def __init__(self, cfg, root, child_type):
         self.cfg, self.root = cfg, Path(root)
@@ -41,9 +52,11 @@ class Capture:
         expression = f"udp and ((src host {a} and dst host {b}) or (src host {b} and dst host {a}))"
         stderr = self.stderr.open("xb")
         try:
+            # Capture both WAN observations; the oracle handles exact duplicate packets.
+            # Immediate mode avoids libpcap block-retirement latency on fast cases.
             process = subprocess.Popen(
                 ["ip", "netns", "exec", cfg["ns"]["wan"], "tcpdump", "-i", "any",
-                 "-Q", "in", "-n", "-U", "-s", "0", "-c", "1024", "-Z", "root",
+                 "--immediate-mode", "-n", "-U", "-s", "0", "-c", "1024", "-Z", "root",
                  "-w", str(self.path), expression],
                 stdout=subprocess.DEVNULL, stderr=stderr,
                 env=os.environ.copy() | {"LC_ALL": "C"})
@@ -63,9 +76,33 @@ class Capture:
             time.sleep(0.05)
         raise TimeoutError("WAN capture readiness deadline")
 
+    def drain(self):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if self.child.proc.poll() is not None:
+                raise RuntimeError("WAN capture exited during drain")
+            offset = self.stderr.stat().st_size
+            self.child.proc.send_signal(signal.SIGUSR1)
+            stats = None
+            while stats is None and time.monotonic() < deadline:
+                stats = parse_stats(self.stderr.read_bytes()[offset:].decode("utf-8", errors="replace"))
+                if stats is None:
+                    time.sleep(0.01)
+            if stats is None:
+                break
+            captured, received, dropped = stats
+            if dropped:
+                raise RuntimeError("WAN capture dropped packets in kernel")
+            if captured == received:
+                (self.root / "capture-drain.json").write_text(json.dumps({"captured": captured, "received": received, "dropped": dropped}), encoding="utf-8")
+                return
+            time.sleep(0.01)
+        raise TimeoutError("WAN capture did not drain before stop")
+
     def finish(self):
         if self.child.proc.poll() is not None:
             raise RuntimeError("WAN capture exited without controlled stop (possibly capacity)")
+        self.drain()
         self.child.proc.send_signal(signal.SIGINT)
         if self.child.proc.wait(timeout=10) != 0:
             raise RuntimeError("WAN capture stop failed")

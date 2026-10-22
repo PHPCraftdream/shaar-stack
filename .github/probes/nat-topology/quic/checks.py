@@ -12,7 +12,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 import core  # noqa: E402
 import ctparse  # noqa: E402
-from capture import parse_rows  # noqa: E402
+from capture import Capture, parse_rows, parse_stats  # noqa: E402
 
 IPS = ["203.0.113.1", "203.0.113.2"]
 PORTS = [41010, 41020]
@@ -33,6 +33,34 @@ def entry(side, unreplied=False):
 
 
 class CaptureChecks(unittest.TestCase):
+    def test_capture_drains_before_stop_and_rejects_kernel_loss(self):
+        self.assertIsNone(parse_stats("1 packet captured\n"))
+        self.assertEqual(parse_stats("1 packet captured\n1 packet received by filter\n0 packets dropped by kernel\n"), (1, 1, 0))
+        for dropped in [0, 1]:
+            with tempfile.TemporaryDirectory() as temp:
+                capture = Capture.__new__(Capture)
+                capture.root = Path(temp)
+                capture.stderr = capture.root / "stderr"
+                capture.stderr.write_bytes(b"")
+                class Process:
+                    requests = 0
+                    def poll(self): return None
+                    def send_signal(self, _signal):
+                        self.requests += 1
+                        count = 1 if self.requests == 1 else 2
+                        with capture.stderr.open("a", encoding="utf-8") as stream:
+                            stream.write(f"{count} packets captured\n2 packets received by filter\n{dropped} packets dropped by kernel\n")
+                class Child:
+                    proc = Process()
+                capture.child = Child()
+                if dropped:
+                    with self.assertRaisesRegex(RuntimeError, "dropped packets"):
+                        capture.drain()
+                else:
+                    capture.drain()
+                    self.assertEqual(capture.child.proc.requests, 2)
+                    self.assertTrue((capture.root / "capture-drain.json").is_file())
+
     def test_both_directions_exact_bytes_and_ports(self):
         text = f"{IPS[0]},41010,{IPS[1]},41020,10:20\n{IPS[1]},41020,{IPS[0]},41010,3040\n"
         packets, rows = parse_rows(text, IPS, PORTS)
