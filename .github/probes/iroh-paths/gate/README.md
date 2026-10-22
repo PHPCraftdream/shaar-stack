@@ -1,8 +1,12 @@
 # Noq application-payload gate: initial CI spike
 
-Status: **UNVERIFIED; P03 NOT PASSED.** This is an isolated proof-of-mechanism
-on checksum-pinned `noq-proto 1.3.0`, not a production fork or iroh integration.
-The production workspace and existing standalone baseline lock are unchanged.
+Status: **INITIAL REGRESSIONS PASSED; P03 NOT PASSED.**
+[CI run 39789064024](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39789064024)
+at `0a00df5` passed four initial policy tests (0 ignored) and the complete
+backend library suite: 431 tests, including those four, with 0 failures or
+ignored tests. This is an isolated proof-of-mechanism on checksum-pinned
+`noq-proto 1.3.0`, not a production fork or iroh integration. The production
+workspace and existing standalone baseline lock are unchanged.
 
 ## Boundary
 
@@ -45,6 +49,18 @@ Compilation and every runtime test run **only in GitHub CI**. Local preparation
 runs our source transformation as a data operation; it does not execute the
 downloaded crate, its build scripts, tests or binaries. Local checks are limited
 to Python AST parsing and Rust formatting/syntax checks.
+
+## Authored multipath follow-up (runtime pending)
+
+A new real-harness scenario keeps the initial signaling-only path Available
+and opens a permitted path with Backup status on both peers. It queues payload
+before the permitted path exists, then checks delivery without requeueing;
+fresh STREAM/DATAGRAM data must also flow while that path is Backup. After
+explicit path abandonment, control-path PINGs must not carry queued payload;
+a fresh permitted Backup path must release the queue. Per-path backend frame
+counters distinguish these simulated paths. The address predicate is synthetic
+fixture classification, not authenticated production transport identification.
+This tests explicit close/reopen, not detection of physical network loss.
 
 ## Explicitly not proven
 
