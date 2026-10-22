@@ -1,0 +1,38 @@
+name: SDK lockfile preparation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_revision:
+        description: Reviewed candidate commit in this repository
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - name: Install the pinned resolver toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Record the source revision
+        run: git rev-parse HEAD
+      - name: Resolve the canonical workspace lockfile
+        id: resolve
+        run: cargo generate-lockfile
+      - name: Retain the successfully resolved text lockfile
+        if: ${{ success() && steps.resolve.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdk-cargo-lock
+          path: Cargo.lock
+          if-no-files-found: error
