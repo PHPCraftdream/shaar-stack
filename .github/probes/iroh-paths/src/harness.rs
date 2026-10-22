@@ -77,7 +77,9 @@ impl ProtocolHandler for Echo {
                 Err(_) => return Ok(()),
             };
             let Some(_permit) = self.try_acquire() else {
-                return Err(AcceptError::NotAllowed {});
+                return Err(AcceptError::NotAllowed {
+                    meta: n0_error::meta::meta(),
+                });
             };
             tokio::io::copy(&mut recv, &mut send).await?;
             send.finish()?;
@@ -134,7 +136,9 @@ impl EndpointConfig {
 /// Uses `presets::Minimal` (crypto provider only; no n0 relays or DNS, no
 /// network use beyond the in-memory pipe). `clear_ip_transports` is called
 /// ONLY when `custom_only` is set (the custom-only baseline).
-pub async fn build_endpoint(config: EndpointConfig) -> Result<Endpoint> {
+pub async fn build_endpoint(
+    config: EndpointConfig,
+) -> std::result::Result<Endpoint, iroh::endpoint::BindError> {
     let mut builder = Endpoint::builder(presets::Minimal)
         .secret_key(config.secret_key)
         .alpns(vec![ALPN.to_vec()]);
