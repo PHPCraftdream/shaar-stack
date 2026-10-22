@@ -1,0 +1,84 @@
+"""Prepare the pinned iroh wrapper bridge and detached calibration as data."""
+import argparse
+import hashlib
+from pathlib import Path
+import shutil
+import tarfile
+import tomllib
+
+DIGEST = "885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833"
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--archive", type=Path, required=True)
+    parser.add_argument("--probe", type=Path, required=True)
+    parser.add_argument("--noq-source", type=Path, required=True)
+    parser.add_argument("--destination", type=Path, required=True)
+    args = parser.parse_args()
+    lock_text = (args.probe / "Cargo.lock").read_text(encoding="utf-8")
+    lock = tomllib.loads(lock_text)
+    entry = next(p for p in lock["package"] if p["name"] == "iroh" and p["version"] == "1.3.0")
+    if args.archive.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError("reviewed iroh archive exceeds 2 MiB")
+    if entry["checksum"] != DIGEST or hashlib.sha256(args.archive.read_bytes()).hexdigest() != DIGEST:
+        raise ValueError("iroh archive does not match reviewed lock checksum")
+    if not (args.noq_source / "Cargo.toml").is_file():
+        raise ValueError("prepared Noq source is missing")
+    args.destination.mkdir(parents=True, exist_ok=False)
+    source = args.destination / "source"
+    source.mkdir()
+    with tarfile.open(args.archive) as archive:
+        archive.extractall(source, filter="data")
+    iroh = source / "iroh-1.3.0"
+    config = iroh / "src/endpoint/quic.rs"
+    text = config.read_text(encoding="utf-8")
+    anchor = "    pub fn send_fairness(mut self, value: bool) -> Self {"
+    if text.count(anchor) != 1:
+        raise ValueError("iroh forwarding anchor changed")
+    # Insert after the existing method, preserving its documentation association.
+    method = anchor + "\n        self.0.send_fairness(value);\n        self\n    }"
+    if text.count(method) != 1:
+        raise ValueError("iroh forwarding method changed")
+    addition = """
+
+    /// Spike-only immutable application-payload policy; control remains enabled.
+    pub fn application_data_filter(mut self, filter: fn(noq_proto::FourTuple) -> bool) -> Self {
+        self.0.application_data_filter(filter);
+        self
+    }"""
+    config.write_text(text.replace(method, method + addition), encoding="utf-8")
+    iroh_manifest = iroh / "Cargo.toml"
+    iroh_manifest.write_text(iroh_manifest.read_text(encoding="utf-8") + "\n[workspace]\n", encoding="utf-8")
+    project = args.destination / "probe"
+    project.mkdir()
+    shutil.copytree(args.probe / "src", project / "src")
+    (project / "tests").mkdir()
+    shutil.copyfile(Path(__file__).with_name("calibration.rs"), project / "tests/calibration.rs")
+    manifest = (args.probe / "Cargo.toml").read_text(encoding="utf-8")
+    # These are generated CI paths only, never maintained machine-specific paths.
+    import os
+    noq_path = Path(os.path.relpath(args.noq_source.resolve(), project.resolve())).as_posix()
+    manifest += '\n[patch.crates-io]\niroh = { path = "../source/iroh-1.3.0" }\n'
+    manifest += f'noq-proto = {{ path = "{noq_path}" }}\n'
+    (project / "Cargo.toml").write_text(manifest, encoding="utf-8")
+    # Only source identity changes for these exact same-version path replacements.
+    blocks = lock_text.split("[[package]]")
+    replaced = set()
+    for index, block in enumerate(blocks[1:], 1):
+        package = tomllib.loads("[[package]]" + block)["package"][0]
+        if package["name"] not in ("iroh", "noq-proto"):
+            continue
+        if package["version"] != "1.3.0" or package["name"] in replaced:
+            raise ValueError("unexpected patched package identity")
+        blocks[index] = "\n".join(line for line in block.split("\n")
+                                    if not line.startswith(("source = ", "checksum = ")))
+        replaced.add(package["name"])
+    if replaced != {"iroh", "noq-proto"}:
+        raise ValueError("missing patched lock entries")
+    (project / "Cargo.lock").write_text("[[package]]".join(blocks), encoding="utf-8")
+    print(f"Prepared wrapper bridge at {project}; downloaded code not executed")
+
+
+if __name__ == "__main__":
+    main()
