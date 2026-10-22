@@ -46,15 +46,35 @@ def main():
     pub fn application_data_filter(mut self, filter: fn(noq_proto::FourTuple) -> bool) -> Self {
         self.0.application_data_filter(filter);
         self
+    }
+
+    /// Fixture-only: withhold automatic address exchange until explicit route admission.
+    pub fn spike_disable_nat_traversal(mut self) -> Self {
+        self.0.max_remote_nat_traversal_addresses(0);
+        self
     }"""
     config.write_text(text.replace(method, method + addition), encoding="utf-8")
+    endpoint = iroh / "src/endpoint.rs"
+    endpoint_text = endpoint.read_text(encoding="utf-8")
+    endpoint_anchor = "        self.inner.add_external_addr(addr).await;\n    }"
+    if endpoint_text.count(endpoint_anchor) != 1:
+        raise ValueError("iroh endpoint fixture anchor changed")
+    endpoint_addition = """
+
+    /// Fixture-only route admission to the existing remote actor, without connecting again.
+    /// cancel-safe: NO — the fixture terminates rather than retrying address admission.
+    pub async fn spike_admit_remote_addr(&self, addr: EndpointAddr) -> bool {
+        matches!(self.inner.resolve_remote(addr).await, Ok(Ok(_)))
+    }"""
+    endpoint.write_text(endpoint_text.replace(endpoint_anchor, endpoint_anchor + endpoint_addition), encoding="utf-8")
     iroh_manifest = iroh / "Cargo.toml"
     iroh_manifest.write_text(iroh_manifest.read_text(encoding="utf-8") + "\n[workspace]\n", encoding="utf-8")
     project = args.destination / "probe"
     project.mkdir()
     shutil.copytree(args.probe / "src", project / "src")
     (project / "tests").mkdir()
-    shutil.copyfile(Path(__file__).with_name("calibration.rs"), project / "tests/calibration.rs")
+    for name in ("calibration.rs", "mixed_path.rs"):
+        shutil.copyfile(Path(__file__).with_name(name), project / "tests" / name)
     manifest = (args.probe / "Cargo.toml").read_text(encoding="utf-8")
     # These are generated CI paths only, never maintained machine-specific paths.
     import os

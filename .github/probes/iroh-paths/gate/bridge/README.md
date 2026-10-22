@@ -1,6 +1,11 @@
 # iroh wrapper propagation calibration
 
-Status: **AUTHORED; RUNTIME UNVERIFIED; P03 NOT PASSED.**
+Status: **CONSTANT-POLICY BRIDGE PASSED; MIXED-PATH FOLLOW-UP UNVERIFIED; P03 NOT PASSED.**
+
+[Run 39814987632](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39814987632)
+at `843e396` passed on each of Ubuntu and Windows: three preparation rejection
+controls, 16 unit tests, and the real iroh deny-all/allow-all calibration,
+with no failures or ignored Rust tests. Actual logs were inspected.
 
 This CI-only extension patches the published iroh 1.3.0 wrapper with one explicit
 forwarder for the existing Noq application-payload callback. Both archive digests
@@ -25,6 +30,24 @@ and preservation of an existing destination. The successful workflow preparation
 is the positive source-transformation path. No downloaded code is executed by the
 preparation script. The generated lock preserves every dependency version and
 changes source identity only for the two same-version local path replacements.
+
+## Authored mixed-path follow-up
+
+The new test conservatively denies the entire internal synthetic address fabric,
+including unknown subnets, and permits native IP tuples. This does not authorize
+any custom transport by prefix or authenticate a transport generation. The fixture
+starts with custom-only remote reachability while real loopback sockets are bound.
+It queues STREAM/FIN and DATAGRAM once in each direction and checks non-delivery
+while custom control continues. Only then is native reachability admitted to the
+existing remote actors; the original connection must deliver the queued bytes.
+Qlog must attribute payload only to the exact peer loopback socket, with control
+but no payload on the non-native tuples. Runtime results are still pending.
+
+Two generated fixture hooks make the phases explicit: disable Noq NAT address
+exchange (the public iroh setter ignores zero), and submit new reachability to
+`Socket::resolve_remote` without another `connect` call. Neither hook changes the
+immutable payload callback. These hooks are not production APIs. This controlled
+admission is not autonomous discovery, hole punching, or physical path failure.
 
 Not proven: selective transport authorization, transport-instance/generation
 binding, real physical-egress correlation, multipath recovery, or QUIC traversal
