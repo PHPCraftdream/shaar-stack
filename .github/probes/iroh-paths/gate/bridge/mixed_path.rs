@@ -1,26 +1,15 @@
 #![forbid(unsafe_code)]
 //! Conservative custom exclusion with a later native route on the original connection.
 
-use std::{
-    net::{IpAddr, SocketAddr},
-    path::Path,
-    sync::Arc,
-    time::Duration,
-};
+use std::{net::SocketAddr, time::Duration};
 
-use iroh::endpoint::{QuicTransportConfig, presets};
+#[path = "support/mixed_fixture.rs"]
+mod mixed_fixture;
 use iroh::{
     Endpoint, EndpointAddr, SecretKey, TransportAddr, address_lookup::memory::MemoryLookup,
 };
 use iroh_paths_probe::{MemTransport, harness, qlog_oracle};
-
-// Deny the entire reserved fabric, including unknown subnets. Never authorize custom by prefix.
-fn native_only(tuple: noq_proto::FourTuple) -> bool {
-    match tuple.remote().ip().to_canonical() {
-        IpAddr::V4(_) => true,
-        IpAddr::V6(ip) => ip.octets()[..6] != [0xfd, 0x15, 0x07, 0x0a, 0x51, 0x0b],
-    }
-}
+use mixed_fixture::{bind, native_only};
 
 #[test]
 fn reserved_fabric_is_denied_regardless_of_subnet_or_port() {
@@ -46,39 +35,6 @@ async fn queued_payload_waits_for_native_path_without_reconnecting() {
     tokio::time::timeout(Duration::from_secs(120), scenario())
         .await
         .expect("mixed-path deadline");
-}
-
-/// cancel-safe: NO — the whole fixture terminates on cancellation, without retry.
-async fn bind(
-    key: SecretKey,
-    transport: Arc<MemTransport>,
-    lookup: MemoryLookup,
-    directory: &Path,
-    prefix: &str,
-) -> Endpoint {
-    Endpoint::builder(presets::Minimal)
-        .secret_key(key)
-        .alpns(vec![harness::ALPN.to_vec()])
-        .address_lookup(lookup)
-        .clear_ip_transports()
-        .bind_addr("127.0.0.1:0")
-        .expect("loopback bind config")
-        .add_custom_transport(transport)
-        .transport_config(
-            QuicTransportConfig::builder()
-                .application_data_filter(native_only)
-                .spike_disable_nat_traversal()
-                .send_observed_address_reports(false)
-                .receive_observed_address_reports(false)
-                .send_window(8)
-                .datagram_send_buffer_size(8)
-                .keep_alive_interval(Duration::from_millis(40))
-                .qlog_from_path(directory, prefix)
-                .build(),
-        )
-        .bind()
-        .await
-        .expect("bind mixed endpoint")
 }
 
 /// cancel-safe: NO — queued test traffic is not retried after the outer deadline.

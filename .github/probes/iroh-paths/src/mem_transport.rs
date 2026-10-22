@@ -25,6 +25,7 @@ pub const TEST_TRANSPORT_ID: u64 = 0x20;
 pub const MAX_PACKET: usize = 1500;
 const QUEUE_CAP: usize = 64;
 const MAX_WAITERS: usize = 64;
+const CAPTURE_CAP: usize = 256;
 
 #[derive(Debug, Default)]
 pub struct DirectionStats {
@@ -73,6 +74,7 @@ struct State {
     lanes: [Lane; 2],
     bound: [bool; 2],
     closed: bool,
+    capture: Option<[Vec<Vec<u8>>; 2]>,
 }
 
 #[derive(Debug)]
@@ -90,6 +92,31 @@ impl MemNetwork {
 
     pub fn local_addr(&self, side: usize) -> CustomAddr {
         self.addresses[side % 2].clone()
+    }
+
+    /// Enable bounded ciphertext capture before either endpoint binds.
+    pub fn enable_capture(&self) -> io::Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| io::Error::other("memory link poisoned"))?;
+        if state.closed || state.bound.iter().any(|bound| *bound) || state.capture.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "capture must be enabled once before bind",
+            ));
+        }
+        state.capture = Some(Default::default());
+        Ok(())
+    }
+
+    /// Take at most 256 successfully enqueued datagrams per direction.
+    pub fn take_capture(&self) -> io::Result<Option<[Vec<Vec<u8>>; 2]>> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| io::Error::other("memory link poisoned"))?;
+        Ok(state.capture.take())
     }
 
     fn close(&self) {
@@ -285,6 +312,13 @@ impl Sender {
         if state.closed {
             return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
         }
+        if state
+            .capture
+            .as_ref()
+            .is_some_and(|capture| capture[self.side].len() == CAPTURE_CAP)
+        {
+            return Poll::Ready(Err(io::Error::other("ciphertext capture limit")));
+        }
         let lane = &mut state.lanes[1 - self.side];
         if lane.packets.len() == QUEUE_CAP {
             if !lane.writers.iter().any(|waker| waker.will_wake(cx.waker())) {
@@ -300,6 +334,9 @@ impl Sender {
         }
         lane.packets.push_back(packet.to_vec());
         let wake = lane.receiver.take();
+        if let Some(capture) = &mut state.capture {
+            capture[self.side].push(packet.to_vec());
+        }
         let stats = self.network.stats(self.side);
         stats
             .wire_bytes

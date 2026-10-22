@@ -5,6 +5,11 @@ from pathlib import Path
 import shutil
 import tarfile
 import tomllib
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from packet_identity import apply as add_packet_identity  # noqa: E402
 
 DIGEST = "885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833"
 
@@ -74,14 +79,18 @@ def main():
     project.mkdir()
     shutil.copytree(args.probe / "src", project / "src")
     (project / "tests").mkdir()
-    for name in ("calibration.rs", "mixed_path.rs"):
+    for name in ("calibration.rs", "mixed_path.rs", "wire.rs"):
         shutil.copyfile(Path(__file__).with_name(name), project / "tests" / name)
+    support = project / "tests/support"
+    support.mkdir()
+    for script in Path(__file__).with_name("support").glob("*.rs"):
+        shutil.copyfile(script, support / script.name)
+    noq = args.destination / "noq-source"
+    shutil.copytree(args.noq_source, noq)
+    add_packet_identity(noq)
     manifest = (args.probe / "Cargo.toml").read_text(encoding="utf-8")
-    # These are generated CI paths only, never maintained machine-specific paths.
-    import os
-    noq_path = Path(os.path.relpath(args.noq_source.resolve(), project.resolve())).as_posix()
     manifest += '\n[patch.crates-io]\niroh = { path = "../source/iroh-1.3.0" }\n'
-    manifest += f'noq-proto = {{ path = "{noq_path}" }}\n'
+    manifest += 'noq-proto = { path = "../noq-source" }\n'
     (project / "Cargo.toml").write_text(manifest, encoding="utf-8")
     # Only source identity changes for these exact same-version path replacements.
     blocks = lock_text.split("[[package]]")

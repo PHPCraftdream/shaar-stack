@@ -1,6 +1,6 @@
 # iroh wrapper propagation calibration
 
-Status: **CONSTANT-POLICY BRIDGE PASSED; MIXED-PATH FOLLOW-UP UNVERIFIED; P03 NOT PASSED.**
+Status: **CONSTANT AND MIXED-PATH REGRESSIONS PASSED; WIRE ORACLE UNVERIFIED; P03 NOT PASSED.**
 
 [Run 39814987632](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39814987632)
 at `843e396` passed on each of Ubuntu and Windows: three preparation rejection
@@ -41,7 +41,9 @@ It queues STREAM/FIN and DATAGRAM once in each direction and checks non-delivery
 while custom control continues. Only then does the client explicitly open a native
 Backup path on the original Noq connection; the original queues must drain.
 Qlog must attribute payload only to the exact peer loopback socket, with control
-but no payload on the non-native tuples. Runtime results are still pending.
+but no payload on the non-native tuples. Run `39825937164` at `fd54ba6` confirmed
+this on each of Linux and Windows: three preparation checks, 16 unit tests, one
+constant-policy test, and both mixed-path tests passed, with no failures/ignored.
 
 Two generated fixture hooks make the phases explicit: disable Noq NAT address
 exchange (the public iroh setter ignores zero), and call `open_path_ensure` on the
@@ -57,7 +59,33 @@ actor's connection checks rely on hole punching to discover/open an IP path
 (`remote_state.rs:753-787`), whereas its actual explicit open operation is
 `open_path_ensure` (`1051-1088`). The corrected hook uses that same Noq operation
 without reconnecting; all queue, payload-exclusion and exact-delivery assertions
-remain. The timeout is not increased. Runtime confirmation remains pending.
+remain. The timeout was not increased; the corrected run passed as reported above.
+
+## Authored exact-ciphertext wire oracle
+
+The generated Noq source additionally puts each finalized encrypted packet into
+`quic:packet_sent.data.raw.data`, alongside its decoded frame metadata. The source
+boundary is `packet_builder.rs:353-368`, after encryption and before qlog emission;
+`n0-qlog 0.2.0` defines `PacketSent.raw` and `RawInfo.data` (hex bytes). This logs
+publicly transmitted ciphertext, not keys or application plaintext. No production
+or original baseline dependency source is changed.
+
+A bounded custom enqueue capture records only successful sends. An independently
+owned loopback UDP forwarder records datagrams received through the OS socket API
+before forwarding to the peer. The oracle matches complete ciphertext bytes, not
+length, timing or PathId. Prefix-free packet identities allow every coalesced
+packet to be consumed in order; unknown bytes, partial/trailing packets, duplicate
+or ambiguous identities fail closed. Positive controls exercise corruption,
+truncation, coalescing, repeat capture and bounded admission.
+
+The real iroh test requires zero captured custom STREAM/DATAGRAM frames and
+positive native captures for both types and both directions. Every captured byte
+must correlate. Constructed-but-unobserved packets are reported separately, with
+zero unobserved payload required. Capture buffers are capped at 256 datagrams per
+direction/boundary; trace input at 16 MiB and the identity index at 1024 packets.
+These new wire cases are authored but not yet runtime verified. The native
+forwarder is a same-host packet-observation fixture, not the controlled two-NAT
+proof, autonomous route discovery, or authorization of selected custom transports.
 
 Not proven: selective transport authorization, transport-instance/generation
 binding, real physical-egress correlation, multipath recovery, or QUIC traversal

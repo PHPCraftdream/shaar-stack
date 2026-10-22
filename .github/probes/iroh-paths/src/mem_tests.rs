@@ -92,6 +92,72 @@ fn bound_endpoint_keeps_address_publisher_alive_without_factory() {
 }
 
 #[test]
+fn ciphertext_capture_is_opt_in_bounded_and_preserves_exact_bytes() {
+    let (left, right, network) = MemTransport::pair();
+    network.enable_capture().expect("enable before bind");
+    assert!(network.enable_capture().is_err());
+    let left = left.bind().expect("left bind");
+    let mut right = right.bind().expect("right bind");
+    assert!(network.enable_capture().is_err());
+    let sender = Sender {
+        side: 0,
+        network: network.clone(),
+    };
+    let (_, wake) = waker();
+    let mut cx = Context::from_waker(&wake);
+    for _ in 0..CAPTURE_CAP {
+        assert!(matches!(
+            sender.send_packet(&mut cx, &network.local_addr(1), &[1, 2, 3]),
+            Poll::Ready(Ok(()))
+        ));
+        let (result, bytes) = receive(right.as_mut(), &mut cx, 3);
+        assert!(matches!(result, Poll::Ready(Ok(1))));
+        assert_eq!(bytes, [1, 2, 3]);
+    }
+    assert!(matches!(
+        sender.send_packet(&mut cx, &network.local_addr(1), &[9]),
+        Poll::Ready(Err(_))
+    ));
+    assert_eq!(network.stats(0).wire_packets(), CAPTURE_CAP as u64);
+    drop(left);
+    drop(right);
+    let capture = network.take_capture().unwrap().unwrap();
+    assert_eq!(capture[0].len(), CAPTURE_CAP);
+    assert!(capture[0].iter().all(|bytes| bytes == &[1, 2, 3]));
+    assert!(capture[1].is_empty());
+    assert!(network.take_capture().unwrap().is_none());
+    assert!(network.enable_capture().is_err());
+}
+
+#[test]
+fn pending_send_is_not_captured_and_disabled_capture_retains_no_records() {
+    assert!(rig().network.take_capture().unwrap().is_none());
+    let (left, right, network) = MemTransport::pair();
+    network.enable_capture().unwrap();
+    let mut rig = Rig {
+        left: left.bind().unwrap(),
+        right: right.bind().unwrap(),
+        sender: Sender {
+            side: 0,
+            network: network.clone(),
+        },
+        network,
+    };
+    let (_, wake) = waker();
+    let mut cx = Context::from_waker(&wake);
+    fill(&rig, &mut cx);
+    assert!(
+        rig.sender
+            .send_packet(&mut cx, &rig.network.local_addr(1), &[8])
+            .is_pending()
+    );
+    let capture = rig.network.take_capture().unwrap().unwrap();
+    assert_eq!(capture[0], vec![vec![7]; QUEUE_CAP]);
+    let (result, _) = receive(rig.right.as_mut(), &mut cx, 1);
+    assert!(matches!(result, Poll::Ready(Ok(1))));
+}
+
+#[test]
 fn full_queue_registers_all_pollers_of_the_same_sender() {
     let mut rig = rig();
     let (a, wa) = waker();
