@@ -78,7 +78,7 @@ impl ProtocolHandler for Echo {
             };
             let Some(_permit) = self.try_acquire() else {
                 return Err(AcceptError::NotAllowed {
-                    meta: n0_error::meta::meta(),
+                    meta: n0_error::Meta::new(),
                 });
             };
             tokio::io::copy(&mut recv, &mut send).await?;
