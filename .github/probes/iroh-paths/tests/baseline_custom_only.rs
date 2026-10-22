@@ -24,11 +24,7 @@
 use std::time::Duration;
 
 use iroh::{EndpointAddr, SecretKey, TransportAddr, address_lookup::memory::MemoryLookup};
-use iroh_paths_probe::{
-    MemTransport, TEST_TRANSPORT_ID,
-    harness::{self},
-    qlog_oracle,
-};
+use iroh_paths_probe::{MemTransport, harness, qlog_oracle};
 
 /// Overall test deadline.
 const OVERALL_DEADLINE: Duration = Duration::from_secs(120);
