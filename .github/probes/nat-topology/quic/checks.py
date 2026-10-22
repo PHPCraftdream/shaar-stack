@@ -35,6 +35,7 @@ def entry(side, unreplied=False):
 class CaptureChecks(unittest.TestCase):
     def test_capture_drains_before_stop_and_rejects_kernel_loss(self):
         self.assertIsNone(parse_stats("1 packet captured\n"))
+        self.assertEqual(parse_stats("tcpdump: 36 packets captured, 36 packets received by filter, 0 packets dropped by kernel\n"), (36, 36, 0))
         self.assertEqual(parse_stats("1 packet captured\n1 packet received by filter\n0 packets dropped by kernel\n"), (1, 1, 0))
         for dropped in [0, 1]:
             with tempfile.TemporaryDirectory() as temp:
@@ -49,7 +50,7 @@ class CaptureChecks(unittest.TestCase):
                         self.requests += 1
                         count = 1 if self.requests == 1 else 2
                         with capture.stderr.open("a", encoding="utf-8") as stream:
-                            stream.write(f"{count} packets captured\n2 packets received by filter\n{dropped} packets dropped by kernel\n")
+                            stream.write(f"tcpdump: {count} packets captured, 2 packets received by filter, {dropped} packets dropped by kernel\n")
                 class Child:
                     proc = Process()
                 capture.child = Child()

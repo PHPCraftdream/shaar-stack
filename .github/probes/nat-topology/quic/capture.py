@@ -34,6 +34,10 @@ def parse_rows(text, public_ips, mapped_ports):
 
 
 def parse_stats(text):
+    # SIGUSR1 emits one prefixed line; SIGINT emits three unprefixed lines.
+    single = re.findall(r"(?m)^tcpdump: (\d+) packets? captured, (\d+) packets? received by filter, (\d+) packets? dropped by kernel$", text)
+    if single:
+        return tuple(map(int, single[-1]))
     values = []
     for suffix in (r"packets? captured", r"packets? received by filter", r"packets? dropped by kernel"):
         matches = re.findall(r"(?m)^(\d+) " + suffix + r"$", text)
