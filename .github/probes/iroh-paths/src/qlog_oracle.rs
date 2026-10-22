@@ -36,10 +36,17 @@
 //! by the echo helper; transport counters measure encrypted datagrams.
 //!
 //! JSON-SEQ records may be prefixed with the RS byte (0x1E); unknown events
-//! are counted (`unknown_events`) and skipped; memory stays bounded (one
-//! event parsed at a time).
+//! are counted (`unknown_events`) and skipped. Input is capped at 16 MiB;
+//! one event is decoded at a time and aggregate maps stay within that input.
 
-use std::{collections::BTreeMap, fs, io, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs,
+    io::{self, Read},
+    path::Path,
+};
+
+const MAX_TRACE_BYTES: usize = 16 * 1024 * 1024;
 
 /// One parsed connection trace (ONE .qlog file, never merged).
 #[derive(Debug, Default, Clone)]
@@ -48,6 +55,15 @@ pub struct ConnectionTrace {
     pub stream_frames_sent_by_path: BTreeMap<u64, u64>,
     /// Per-path STREAM frame counts on `packet_received` events.
     pub stream_frames_received_by_path: BTreeMap<u64, u64>,
+    /// Per-path DATAGRAM frame counts, including empty payloads.
+    pub datagram_frames_sent_by_path: BTreeMap<u64, u64>,
+    pub datagram_frames_received_by_path: BTreeMap<u64, u64>,
+    /// Packet envelope tuple labels; not proof of physical egress.
+    pub sent_by_tuple: BTreeMap<String, PacketCounts>,
+    pub received_by_tuple: BTreeMap<String, PacketCounts>,
+    /// Missing/invalid tuple labels remain unattributed, never path zero.
+    pub sent_without_tuple: PacketCounts,
+    pub received_without_tuple: PacketCounts,
     /// Per-path packet counts for `packet_sent`.
     pub packets_sent_by_path: BTreeMap<u64, u64>,
     /// Per-path packet counts for `packet_received`.
@@ -64,6 +80,22 @@ pub struct ConnectionTrace {
     pub events_parsed: u64,
     /// Records whose event name was not recognized.
     pub unknown_events: u64,
+}
+
+/// Decoded frame metadata for one direction and envelope tuple label.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct PacketCounts {
+    pub packets: u64,
+    pub stream_frames: u64,
+    pub datagram_frames: u64,
+}
+
+impl PacketCounts {
+    fn add(&mut self, stream_frames: u64, datagram_frames: u64) {
+        self.packets += 1;
+        self.stream_frames += stream_frames;
+        self.datagram_frames += datagram_frames;
+    }
 }
 
 impl ConnectionTrace {
@@ -133,7 +165,12 @@ impl std::error::Error for OracleError {}
 
 /// Parses one .qlog file into ONE connection trace. No merging.
 pub fn parse_file(path: &Path) -> Result<ConnectionTrace, OracleError> {
-    let bytes = fs::read(path).map_err(OracleError::Io)?;
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .map_err(OracleError::Io)?
+        .take((MAX_TRACE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(OracleError::Io)?;
     parse(&bytes)
 }
 
@@ -213,6 +250,11 @@ pub fn parse_dir_named(dir: &Path) -> Vec<NamedTrace> {
 
 /// Parses a raw JSON-SEQ byte stream (RS-separated, newline tolerated).
 pub fn parse(bytes: &[u8]) -> Result<ConnectionTrace, OracleError> {
+    if bytes.len() > MAX_TRACE_BYTES {
+        return Err(OracleError::InvalidRecord(
+            "trace exceeds 16 MiB limit".into(),
+        ));
+    }
     let mut trace = ConnectionTrace::default();
     for record in bytes.split(|b| *b == 0x1E) {
         let record = String::from_utf8_lossy(record);
@@ -238,12 +280,12 @@ fn apply_event(trace: &mut ConnectionTrace, value: &serde_json::Value) {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let data = obj.get("data").cloned().unwrap_or(serde_json::Value::Null);
+    let data = obj.get("data").unwrap_or(&serde_json::Value::Null);
     trace.events_parsed += 1;
     if name == "quic:tuple_assigned" {
         if let Some(tuple_id) = data.get("tuple_id").and_then(|v| v.as_str()) {
-            let remote = endpoint_info(&data, "tuple_remote");
-            let local = endpoint_info(&data, "tuple_local");
+            let remote = endpoint_info(data, "tuple_remote");
+            let local = endpoint_info(data, "tuple_local");
             trace
                 .tuple_map
                 .insert(tuple_id.to_string(), format!("{remote} | {local}"));
@@ -251,8 +293,8 @@ fn apply_event(trace: &mut ConnectionTrace, value: &serde_json::Value) {
         return;
     }
     match name.as_str() {
-        "quic:packet_sent" => apply_packet(trace, &data, Direction::Sent),
-        "quic:packet_received" => apply_packet(trace, &data, Direction::Received),
+        "quic:packet_sent" => apply_packet(trace, value, data, Direction::Sent),
+        "quic:packet_received" => apply_packet(trace, value, data, Direction::Received),
         _ => trace.unknown_events += 1,
     }
 }
@@ -262,38 +304,73 @@ enum Direction {
     Received,
 }
 
-fn apply_packet(trace: &mut ConnectionTrace, data: &serde_json::Value, dir: Direction) {
-    let frames = data
-        .get("frames")
-        .and_then(|v| v.as_array())
-        .map(|fs| {
-            fs.iter()
-                .filter(|f| {
-                    f.get("frame_type")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.eq_ignore_ascii_case("stream"))
-                        .unwrap_or(false)
-                })
-                .count() as u64
-        })
-        .unwrap_or(0);
-    // Absent path_id stays absent: accounted separately, never path 0.
-    let path_id = data.pointer("/header/path_id").and_then(|v| v.as_u64());
-    match (dir, path_id) {
-        (Direction::Sent, Some(p)) => {
-            *trace.packets_sent_by_path.entry(p).or_default() += 1;
-            if frames > 0 {
-                *trace.stream_frames_sent_by_path.entry(p).or_default() += frames;
+fn apply_packet(
+    trace: &mut ConnectionTrace,
+    event: &serde_json::Value,
+    data: &serde_json::Value,
+    dir: Direction,
+) {
+    let (mut streams, mut datagrams) = (0, 0);
+    if let Some(frames) = data.get("frames").and_then(|v| v.as_array()) {
+        for frame in frames {
+            let kind = frame.get("frame_type").and_then(|v| v.as_str());
+            if kind.is_some_and(|s| s.eq_ignore_ascii_case("stream")) {
+                streams += 1;
+            } else if kind.is_some_and(|s| s.eq_ignore_ascii_case("datagram")) {
+                datagrams += 1;
             }
         }
-        (Direction::Received, Some(p)) => {
-            *trace.packets_received_by_path.entry(p).or_default() += 1;
-            if frames > 0 {
-                *trace.stream_frames_received_by_path.entry(p).or_default() += frames;
+    }
+    let (packets, stream_counts, datagram_counts, unknown_path, tuples, unknown_tuple) = match dir {
+        Direction::Sent => (
+            &mut trace.packets_sent_by_path,
+            &mut trace.stream_frames_sent_by_path,
+            &mut trace.datagram_frames_sent_by_path,
+            &mut trace.unknown_path_packets_sent,
+            &mut trace.sent_by_tuple,
+            &mut trace.sent_without_tuple,
+        ),
+        Direction::Received => (
+            &mut trace.packets_received_by_path,
+            &mut trace.stream_frames_received_by_path,
+            &mut trace.datagram_frames_received_by_path,
+            &mut trace.unknown_path_packets_received,
+            &mut trace.received_by_tuple,
+            &mut trace.received_without_tuple,
+        ),
+    };
+    if let Some(path) = data.pointer("/header/path_id").and_then(|v| v.as_u64()) {
+        *packets.entry(path).or_default() += 1;
+        if streams > 0 {
+            *stream_counts.entry(path).or_default() += streams;
+        }
+        if datagrams > 0 {
+            *datagram_counts.entry(path).or_default() += datagrams;
+        }
+    } else {
+        *unknown_path += 1;
+    }
+    // Tuple identity comes from the event envelope, not path_id or packet data.
+    match event
+        .get("tuple")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        Some(tuple) => {
+            if let Some(counts) = tuples.get_mut(tuple) {
+                counts.add(streams, datagrams);
+            } else {
+                tuples.insert(
+                    tuple.to_owned(),
+                    PacketCounts {
+                        packets: 1,
+                        stream_frames: streams,
+                        datagram_frames: datagrams,
+                    },
+                );
             }
         }
-        (Direction::Sent, None) => trace.unknown_path_packets_sent += 1,
-        (Direction::Received, None) => trace.unknown_path_packets_received += 1,
+        None => unknown_tuple.add(streams, datagrams),
     }
 }
 
@@ -452,6 +529,90 @@ mod tests {
         // Frames stay separate per trace.
         assert_eq!(a.total_stream_frames_sent(), 1);
         assert_eq!(b.total_stream_frames_sent(), 0);
+    }
+
+    // Schema: pinned Noq qlog.rs emits Event.tuple separately from data.header.path_id.
+    #[test]
+    fn payload_frames_follow_envelope_tuple_and_direction() {
+        let bytes = b"\x1e{\"time\":1,\"name\":\"quic:packet_sent\",\"tuple\":\"p7\",\"data\":{\"header\":{\"path_id\":0},\"frames\":[{\"frame_type\":\"stream\"},{\"frame_type\":\"datagram\",\"raw\":{\"payload_length\":0}},{\"frame_type\":\"datagram\",\"raw\":{\"payload_length\":4}},{\"frame_type\":\"ping\"}]}}\n\
+\x1e{\"time\":2,\"name\":\"quic:packet_received\",\"tuple\":\"p8\",\"data\":{\"header\":{\"path_id\":0},\"frames\":[{\"frame_type\":\"datagram\"}]}}\n\
+\x1e{\"time\":3,\"name\":\"quic:packet_sent\",\"tuple\":\"p7\",\"data\":{\"header\":{\"path_id\":2},\"frames\":[{\"frame_type\":\"datagram\"}]}}\n";
+        let trace = parse(bytes).expect("parse payload metadata");
+        assert_eq!(
+            trace.sent_by_tuple.get("p7"),
+            Some(&PacketCounts {
+                packets: 2,
+                stream_frames: 1,
+                datagram_frames: 3,
+            })
+        );
+        assert_eq!(
+            trace.received_by_tuple.get("p8"),
+            Some(&PacketCounts {
+                packets: 1,
+                stream_frames: 0,
+                datagram_frames: 1,
+            })
+        );
+        assert_eq!(trace.sent_by_tuple.len(), 1);
+        assert_eq!(trace.received_by_tuple.len(), 1);
+        assert_eq!(trace.datagram_frames_sent_by_path.get(&0), Some(&2));
+        assert_eq!(trace.datagram_frames_sent_by_path.get(&2), Some(&1));
+        assert_eq!(trace.datagram_frames_received_by_path.get(&0), Some(&1));
+        assert_eq!(trace.sent_without_tuple, PacketCounts::default());
+        assert_eq!(trace.received_without_tuple, PacketCounts::default());
+    }
+
+    #[test]
+    fn missing_or_invalid_tuple_never_uses_path_or_nested_tuple() {
+        for label in ["", ",\"tuple\":null", ",\"tuple\":7", ",\"tuple\":\"\""] {
+            for direction in ["sent", "received"] {
+                let event = format!(
+                    "{{\"name\":\"quic:packet_{direction}\"{label},\"data\":{{\"tuple\":\"p0\",\"header\":{{\"path_id\":0}},\"frames\":[{{\"frame_type\":\"datagram\"}},{{\"frame_type\":\"stream\"}}]}}}}"
+                );
+                let trace = parse(event.as_bytes()).expect("parse missing tuple");
+                assert!(trace.sent_by_tuple.is_empty());
+                assert!(trace.received_by_tuple.is_empty());
+                let (counts, other) = if direction == "sent" {
+                    (trace.sent_without_tuple, trace.received_without_tuple)
+                } else {
+                    (trace.received_without_tuple, trace.sent_without_tuple)
+                };
+                assert_eq!(
+                    counts,
+                    PacketCounts {
+                        packets: 1,
+                        stream_frames: 1,
+                        datagram_frames: 1
+                    }
+                );
+                assert_eq!(other, PacketCounts::default());
+            }
+        }
+        let trace = parse(b"{\"name\":\"quic:packet_sent\",\"tuple\":\"p9\",\"data\":{\"frames\":[{\"frame_type\":\"datagram\"}]}}")
+            .expect("parse tuple without path");
+        assert_eq!(trace.unknown_path_packets_sent, 1);
+        assert!(trace.datagram_frames_sent_by_path.is_empty());
+        assert_eq!(trace.sent_by_tuple["p9"].datagram_frames, 1);
+    }
+
+    #[test]
+    fn trace_size_boundary_and_invalid_json_fail_closed() {
+        let mut bytes = vec![b' '; MAX_TRACE_BYTES];
+        assert_eq!(parse(&bytes).expect("exact size limit").events_parsed, 0);
+        bytes.push(b' ');
+        assert!(matches!(parse(&bytes), Err(OracleError::InvalidRecord(_))));
+        let dir = TraceDir::new();
+        let path = dir.0.join("oversized.qlog");
+        fs::write(&path, &bytes).expect("write oversized trace");
+        assert!(matches!(
+            parse_file(&path),
+            Err(OracleError::InvalidRecord(_))
+        ));
+        assert!(matches!(
+            parse(b"{broken"),
+            Err(OracleError::InvalidRecord(_))
+        ));
     }
 
     #[test]
