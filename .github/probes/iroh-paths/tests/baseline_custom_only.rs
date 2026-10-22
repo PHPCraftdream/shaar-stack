@@ -41,10 +41,15 @@ async fn baseline_echo_over_custom_only_path() {
 
 // Cancellation ends this fixture; it does not establish production shutdown safety.
 async fn run_baseline(deadline: tokio::time::Instant) {
+    let started = tokio::time::Instant::now();
     let (ta, tb, network) = MemTransport::pair();
     let sa = SecretKey::from([1u8; 32]);
     let sb = SecretKey::from([2u8; 32]);
     let lookup = MemoryLookup::new();
+    lookup.add_endpoint_info(EndpointAddr::from_parts(
+        sa.public(),
+        [TransportAddr::Custom(network.local_addr(0))],
+    ));
     lookup.add_endpoint_info(EndpointAddr::from_parts(
         sb.public(),
         [TransportAddr::Custom(network.local_addr(1))],
@@ -60,7 +65,9 @@ async fn run_baseline(deadline: tokio::time::Instant) {
     })
     .await
     .expect("bind endpoint b");
+    eprintln!("endpoint b bound after {:?}", started.elapsed());
     let router = harness::spawn_echo(&ep_b);
+    eprintln!("router started after {:?}", started.elapsed());
 
     let ep_a = harness::build_endpoint(harness::EndpointConfig {
         mem_transport: Some(ta),
@@ -71,6 +78,11 @@ async fn run_baseline(deadline: tokio::time::Instant) {
     })
     .await
     .expect("bind endpoint a");
+    eprintln!(
+        "endpoint a bound after {:?}; overall deadline remaining {:?}",
+        started.elapsed(),
+        deadline.saturating_duration_since(tokio::time::Instant::now())
+    );
 
     // Resolve only the custom path through the explicit in-memory lookup.
     eprintln!(
