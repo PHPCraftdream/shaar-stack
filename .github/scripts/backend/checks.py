@@ -118,6 +118,23 @@ class PreparationChecks(unittest.TestCase):
 
 
 class WorkspaceChecks(unittest.TestCase):
+    def test_metadata_requires_full_resolution_not_no_deps_output(self):
+        packages = [{"name": name, "version": prepare.VERSION, "id": name, "source": None}
+                    for name in ("iroh", "noq", "noq-proto", "noq-udp")]
+        resolved = {"nodes": [{"id": package["id"]} for package in packages]}
+        workspace.validate_resolution({"packages": packages, "resolve": resolved})
+        for graph in ({}, {"packages": packages, "resolve": None},
+                      {"packages": packages, "resolve": {"nodes": []}},
+                      {"packages": packages[:-1], "resolve": resolved},
+                      {"packages": packages, "resolve": {"nodes": resolved["nodes"][:-1]}}):
+            with self.subTest(graph=graph), self.assertRaises(ValueError):
+                workspace.validate_resolution(graph)
+        for package in packages:
+            if package["name"] in prepare.PACKAGES:
+                bad = [dict(p, source="registry+unpatched") if p is package else p for p in packages]
+                with self.assertRaises(ValueError):
+                    workspace.validate_resolution({"packages": bad, "resolve": resolved})
+
     def test_seed_lock_preserves_original_identities_and_pins_path_packages(self):
         repo = ARGS.probe.resolve().parents[2]
         original = (repo / "Cargo.lock").read_text(encoding="utf-8")

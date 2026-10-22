@@ -82,7 +82,7 @@ jobs:
           staged=target/iroh-gate/production/workspace
           python3 -I .github/scripts/backend/workspace.py --repo . --destination "$staged"
           manifest="$staged/Cargo.toml"
-          cargo metadata --manifest-path "$manifest" --format-version 1 --no-deps > target/iroh-gate/production/workspace-metadata.json
+          cargo metadata --manifest-path "$manifest" --format-version 1 > target/iroh-gate/production/workspace-metadata.json
           python3 -I .github/scripts/backend/workspace.py --repo . --destination "$staged" --validate-lock
           cargo fmt --manifest-path "$manifest" --all -- --check
           cargo clippy --manifest-path "$manifest" --workspace --all-targets --locked -- -D warnings

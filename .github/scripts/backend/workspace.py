@@ -1,5 +1,6 @@
 """Stage product Cargo wiring as data; only CI resolves and compiles the new graph."""
 import argparse
+import json
 from pathlib import Path
 import shutil
 import sys
@@ -58,6 +59,19 @@ def stage(repo, destination):
     shutil.copyfile(Path(__file__).with_name("dependency_gate.rs"), destination / "crates/shaar/tests/backend_gate.rs")
 
 
+def validate_resolution(metadata):
+    resolved = metadata.get("resolve")
+    if not isinstance(resolved, dict) or not resolved.get("nodes"):
+        raise ValueError("Cargo metadata did not resolve the dependency graph")
+    nodes = {node["id"] for node in resolved["nodes"]}
+    for name in ("iroh", "noq", "noq-proto", "noq-udp"):
+        packages = [p for p in metadata.get("packages", []) if p.get("name") == name]
+        if len(packages) != 1 or packages[0].get("version") != VERSION or packages[0].get("id") not in nodes:
+            raise ValueError("Cargo metadata lacks the resolved backend family")
+        if name in PACKAGES and packages[0].get("source") is not None:
+            raise ValueError("Cargo metadata did not select prepared path sources")
+
+
 def validate_lock(repo, destination):
     original = tomllib.loads((repo / "Cargo.lock").read_text(encoding="utf-8"))
     actual = tomllib.loads((destination / "Cargo.lock").read_text(encoding="utf-8"))
@@ -83,6 +97,8 @@ if __name__ == "__main__":
     parser.add_argument("--validate-lock", action="store_true")
     args = parser.parse_args()
     if args.validate_lock:
+        metadata = args.destination.parent / "workspace-metadata.json"
+        validate_resolution(json.loads(metadata.read_text(encoding="utf-8")))
         validate_lock(args.repo, args.destination)
     else:
         stage(args.repo, args.destination)
