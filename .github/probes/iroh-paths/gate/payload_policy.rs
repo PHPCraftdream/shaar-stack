@@ -338,3 +338,103 @@ fn payload_policy_server_half_rtt_before_client_finished() {
         assert_eq!(received.frame_rx.datagram > 0, permitted);
     }
 }
+
+#[test]
+fn payload_policy_lost_stream_retransmission_survives_path_change() {
+    const MESSAGE: &[u8] = b"lost-before-ack-payload";
+    for sender in [Side::Client, Side::Server] {
+        let receiver = match sender {
+            Side::Client => Side::Server,
+            Side::Server => Side::Client,
+        };
+        let clients = [
+            Pair::CLIENT_ADDR,
+            "[::1:2]:1".parse().unwrap(),
+            "[::1:3]:1".parse().unwrap(),
+        ];
+        let servers = [
+            Pair::SERVER_ADDR,
+            "[::2:2]:1".parse().unwrap(),
+            "[::2:3]:1".parse().unwrap(),
+        ];
+        let mut builder = ConnPair::builder()
+            .enable_multipath()
+            .disable_mtud_discovery()
+            .with_routes(ManyToManyRouting::simple_symmetric(clients, servers));
+        builder
+            .client_transport_cfg
+            .application_data_filter(allow_secondary_tuple);
+        builder
+            .server_transport_cfg
+            .application_data_filter(allow_secondary_tuple);
+        let mut pair = builder.connect();
+        let lost = open_backup(
+            &mut pair,
+            FourTuple {
+                remote: servers[1],
+                local_ip: Some(clients[1].ip()),
+            },
+        );
+
+        // Only the control route remains reachable; data packets are actually dropped.
+        pair.routes = ManyToManyRouting::simple_symmetric([clients[0]], [servers[0]]).into();
+        let stream = pair.streams(sender).open(Dir::Uni).unwrap();
+        assert_eq!(
+            pair.send_stream(sender, stream).write(MESSAGE).unwrap(),
+            MESSAGE.len()
+        );
+        pair.send_stream(sender, stream).finish().unwrap();
+        pair.drive_client();
+        pair.drive_server();
+        assert!(pair.path_stats(sender, lost).unwrap().frame_tx.stream > 0);
+        assert_eq!(pair.conn_mut(receiver).stats().frame_rx.stream, 0);
+
+        // No additional writes: a second STREAM serialization must come from loss recovery.
+        for _ in 0..100 {
+            if pair.path_stats(sender, lost).unwrap().frame_tx.stream > 1 {
+                break;
+            }
+            if !pair.step() {
+                break;
+            }
+        }
+        assert!(
+            pair.path_stats(sender, lost).unwrap().frame_tx.stream > 1,
+            "PTO must retransmit the unacknowledged STREAM on the failed route"
+        );
+        assert_eq!(pair.conn_mut(receiver).stats().frame_rx.stream, 0);
+        assert_control_only(&mut pair);
+
+        pair.close_path(sender, lost, 0u8.into()).unwrap();
+        assert!(!pair.drive_bounded(100));
+        pair.ping_path(sender, PathId::ZERO).unwrap();
+        assert!(!pair.drive_bounded(100));
+        assert_control_only(&mut pair);
+        assert!(pair.streams(receiver).accept(Dir::Uni).is_none());
+
+        pair.routes =
+            ManyToManyRouting::simple_symmetric([clients[0], clients[2]], [servers[0], servers[2]])
+                .into();
+        let recovered = open_backup(
+            &mut pair,
+            FourTuple {
+                remote: servers[2],
+                local_ip: Some(clients[2].ip()),
+            },
+        );
+        assert!(pair.path_stats(sender, recovered).unwrap().frame_tx.stream > 0);
+        assert_control_only(&mut pair);
+        assert_eq!(pair.streams(receiver).accept(Dir::Uni), Some(stream));
+        {
+            let mut recv = pair.recv_stream(receiver, stream);
+            let mut chunks = recv.read(false).unwrap();
+            let chunk = chunks.next(usize::MAX).unwrap().expect("original payload");
+            assert_eq!(chunk.offset, 0);
+            assert_eq!(chunk.bytes.as_ref(), MESSAGE);
+            assert!(chunks.next(usize::MAX).unwrap().is_none(), "FIN preserved");
+            let _ = chunks.finalize();
+        }
+        assert!(!pair.is_closed(sender));
+        assert!(!pair.is_closed(receiver));
+    }
+}
