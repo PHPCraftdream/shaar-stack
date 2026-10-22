@@ -32,8 +32,8 @@
 //! id. The custom-only CALIBRATION test uses topology (a single transport)
 //! to bind decoded SENT STREAM frames to the custom transport; it does NOT
 //! prove multipath egress attribution. Also: no payload bytes are logged
-//! (frames carry metadata-only `raw`), so byte-level echo verification is
-//! done at the transport counters, not here.
+//! (frames carry metadata-only `raw`), so plaintext equality is verified
+//! by the echo helper; transport counters measure encrypted datagrams.
 //!
 //! JSON-SEQ records may be prefixed with the RS byte (0x1E); unknown events
 //! are counted (`unknown_events`) and skipped; memory stays bounded (one

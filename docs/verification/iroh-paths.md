@@ -1,22 +1,27 @@
 # iroh paths probe (P03) — narrowed baseline substage report
 
-Status: **P03 NOT PASSED.** This file documents the **narrowed first
-substage** of the iroh-paths probe only. Every runtime claim below is
-**PENDING CI** — the workflow (`.github/workflows/iroh-paths.yml`) has not
-run yet; CI is the first execution of this code.
+Status: **P03 NOT PASSED.** The narrowed custom-only baseline passed in
+[CI run 39764087035](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39764087035)
+at commit `7bd6bf7449426072c51536916a221e11e7abfd5c`: 13 unit tests and
+one integration test passed, with no ignored tests. The integration test
+completed in 0.05 seconds. This was bootstrap lock resolution; the generated
+lockfile has been inspected and added for a subsequent locked-mode CI run.
+Strict signaling-only enforcement, migration, and real NAT traversal remain
+unproven; this result does not close P03.
 
 ## 1. Scope of the substage
 
 The reworked probe package (`.github/probes/iroh-paths/`) contains exactly:
 `src/{lib,mem_transport,mem_tests,harness,qlog_oracle}.rs`,
-`tests/baseline_custom_only.rs`, `ci/ensure-lockfile.sh`, and `Cargo.toml`
-(no `[[bin]]`). It has queue/oracle/admission unit tests and one network
+`tests/baseline_custom_only.rs`, `ci/ensure-lockfile.sh`, `Cargo.toml`, and
+`Cargo.lock` (no `[[bin]]`). It has queue/oracle/admission unit tests and one network
 integration test. The latter covers:
 
 - **Custom-only authenticated bootstrap** — a QUIC connection established
   exclusively over an in-memory custom transport, with authentication.
 - **Stream echo** — 4 echo roundtrips over a bidirectional stream
-  (real accept loop, capped at 8 concurrent, single Router consumer).
+  (real accept loop, sequential handling per connection, shared admission
+  cap of 8 active stream handlers, single Router consumer).
 - **Transport-level counters** — wire-level sent/received byte counters and
   delivered counters observed at the in-memory transport boundary.
 - **Scoped qlog positive calibration** — the client-side qlog trace must
@@ -49,8 +54,18 @@ This baseline is **not an acceptance badge**. P03 remains not passed.
 - Owned vs referenced `Waker` mismatch (fixed).
 - `MemTransport::new` vs `MemNetwork` constructor mismatch — transport
   creation now goes through `MemTransport::pair()`.
-- Single-stream echo stall — now a real accept loop (cap 8) with a single
-  Router consumer.
+- Single-stream echo stall — now a real accept loop with a single Router
+  consumer; streams are handled sequentially within each connection.
+- Address publisher lifetime — the memory transport factory previously
+  owned the only `Watchable`, while its bound endpoint retained just a
+  watcher. Dropping the factory disconnected the local-address watcher.
+  Run `39759803806` exposed repeated `local addr watcher stopped` warnings;
+  iroh 1.3.0's socket actor keeps polling that disconnected branch without
+  disabling it, creating a busy loop. Commit `7bd6bf7` retains the publisher
+  in the bound endpoint and adds a regression that drops both factories,
+  verifies a connected/pending watcher, then verifies disconnection only
+  after endpoint destruction. Both the regression and baseline passed in
+  run `39764087035`.
 - Silent full-queue drops — now bounded backpressure: packet capacity 64,
   at most 64 distinct waiting wakers per lane (deduplicated with `will_wake`),
   and registration under the same short mutex as dequeue. Draining wakes all
@@ -130,7 +145,8 @@ a valid non-`.qlog` file checks the extension filter.
 The entire baseline, including bind and shutdown, uses one absolute deadline.
 Connection handles are dropped and both endpoint/router drivers shut down
 before the trace directory is parsed once; there is no file-polling sleep loop.
-This ordering is based on pinned source, not yet runtime proof:
+This ordering is based on pinned source and was exercised successfully by
+the custom-only integration test in run `39764087035`:
 - [iroh socket close](https://github.com/n0-computer/iroh/blob/v1.3.0/iroh/src/socket.rs#L1129-L1188)
   waits for draining and then joins the endpoint/connection drivers.
 - [Router shutdown](https://github.com/n0-computer/iroh/blob/v1.3.0/iroh/src/protocol.rs#L427-L451)
@@ -198,17 +214,32 @@ There are **no `#[ignore]` tests** and **no mock passes** anywhere.
   lock job.
 - Artifact uploads (`cargo-lock`, `qlog-traces`) with `if: always()` so
   failures still yield evidence.
-- Bootstrap lock resolution only in CI; the canonical text `Cargo.lock` is
-  uploaded for parent review; final locked mode after the parent commits
-  the lock.
+- Bootstrap lock resolution ran only in CI. The `cargo-lock` artifact from
+  successful run `39764087035` was inspected as TOML data and added unchanged
+  as the standalone `Cargo.lock`. All external packages use crates.io
+  registry sources; there are no external path or Git dependencies.
+- Resolved pins: iroh/iroh-base `1.3.0`, noq/noq-proto/noq-udp `1.3.0`, Tokio
+  `1.54.1`, and diagnostic tracing-subscriber `0.3.20`. Tokio `1.54.0` was
+  yanked; its replacement was user-authorized. Exact Noq family constraints
+  prevent the incompatible `noq 1.4.0` / `noq-udp 1.3.0` resolution observed
+  during bootstrap.
+- Subsequent CI must print `LOCKED mode` and run clippy/tests with `--locked`;
+  that repeat is still pending when this report is updated.
 - No production Cargo/lock/CI files touched.
 - Rust **1.99.1**; `permissions: contents: read`; checkout
   `persist-credentials: false`.
 
-## 8. Limits of THIS CI run
+## 8. Limits of the baseline evidence
 
-- Everything is same-host (in-memory transports).
-- `cargo fmt` (syntax only) passed locally with exit 0.
-- **No local compilation/tests were run** per policy; CI is the first
-  execution.
-- Failures will be investigated at root cause, **not rerun into luck**.
+- Everything is same-host (in-memory transports), not a NAT topology.
+- Successful run `39764087035` exercised fmt, clippy, 13 unit tests and the
+  custom-only integration test. Assertions cover four exact plaintext echo
+  roundtrips, selected custom path, bidirectional encrypted datagram flow,
+  and client-trace sent STREAM positive calibration after shutdown.
+- No local compilation/tests were run for this baseline investigation;
+  local validation was limited to formatting and syntax checks.
+- Passing this topology does not establish production shutdown safety,
+  concurrent stream service, multipath attribution, or STREAM exclusion.
+- The parallel NAT topology calibration fixture is not yet accepted and is
+  not evidence for QUIC traversal.
+- Failures are investigated at root cause, **not rerun into luck**.
