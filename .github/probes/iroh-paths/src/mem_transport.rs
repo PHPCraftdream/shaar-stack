@@ -32,6 +32,9 @@ pub struct DirectionStats {
     wire_packets: AtomicU64,
     delivered_bytes: AtomicU64,
     delivered_packets: AtomicU64,
+    address_checks: AtomicU64,
+    valid_addresses: AtomicU64,
+    send_attempts: AtomicU64,
 }
 
 impl DirectionStats {
@@ -46,6 +49,15 @@ impl DirectionStats {
     }
     pub fn delivered_packets(&self) -> u64 {
         self.delivered_packets.load(Ordering::Relaxed)
+    }
+    pub fn address_checks(&self) -> u64 {
+        self.address_checks.load(Ordering::Relaxed)
+    }
+    pub fn valid_addresses(&self) -> u64 {
+        self.valid_addresses.load(Ordering::Relaxed)
+    }
+    pub fn send_attempts(&self) -> u64 {
+        self.send_attempts.load(Ordering::Relaxed)
     }
 }
 
@@ -302,7 +314,13 @@ impl Sender {
 
 impl CustomSender for Sender {
     fn is_valid_send_addr(&self, addr: &CustomAddr) -> bool {
-        addr == &self.network.local_addr(1 - self.side)
+        let stats = self.network.stats(self.side);
+        stats.address_checks.fetch_add(1, Ordering::Relaxed);
+        let valid = addr == &self.network.local_addr(1 - self.side);
+        if valid {
+            stats.valid_addresses.fetch_add(1, Ordering::Relaxed);
+        }
+        valid
     }
 
     fn poll_send(
@@ -312,6 +330,10 @@ impl CustomSender for Sender {
         src: Option<&CustomAddr>,
         transmit: &Transmit<'_>,
     ) -> Poll<io::Result<()>> {
+        self.network
+            .stats(self.side)
+            .send_attempts
+            .fetch_add(1, Ordering::Relaxed);
         if src.is_some_and(|addr| addr != &self.network.local_addr(self.side))
             || transmit
                 .segment_size

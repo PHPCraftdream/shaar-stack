@@ -80,9 +80,15 @@ async fn run_baseline(deadline: tokio::time::Instant) {
             let ab = network.stats(0);
             let ba = network.stats(1);
             panic!(
-                "overall deadline hit during connect; a->b wire/delivered packets={}/{}, b->a={}/{}",
+                "overall deadline hit during connect; a->b checks/matches/sends/wire/delivered={}/{}/{}/{}/{}, b->a={}/{}/{}/{}/{}",
+                ab.address_checks(),
+                ab.valid_addresses(),
+                ab.send_attempts(),
                 ab.wire_packets(),
                 ab.delivered_packets(),
+                ba.address_checks(),
+                ba.valid_addresses(),
+                ba.send_attempts(),
                 ba.wire_packets(),
                 ba.delivered_packets(),
             );
