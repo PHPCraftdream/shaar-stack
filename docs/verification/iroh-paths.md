@@ -1,6 +1,12 @@
-# iroh paths probe (P03) — narrowed baseline substage report
+# iroh paths probe (P03) — baseline, strict gate and recovery evidence
 
-Status: **P03 NOT PASSED.** The narrowed custom-only baseline passed in
+Status: **P03 experimental acceptance PASSED for the reviewed patched backend.**
+Section 13 records the accepted physical loss/re-punch proof. This is not acceptance
+of unmodified upstream dependencies, production SDK integration, selected-custom
+transport authority, or real home/mobile networks. Earlier sections preserve the
+chronology and the limits of each intermediate result.
+
+Historical baseline: the narrowed custom-only baseline passed in
 [CI run 39764087035](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39764087035)
 at commit `7bd6bf7449426072c51536916a221e11e7abfd5c`: 13 unit tests and
 one integration test passed, with no ignored tests. The integration test
@@ -8,8 +14,8 @@ completed in 0.05 seconds. The generated lockfile was inspected and committed
 in `b948555`. [Locked-mode run 39764775361](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39764775361)
 then passed the same 13 unit tests and integration test (0.06 seconds), with
 an explicit `LOCKED mode` log and clippy/tests using `--locked`.
-Strict signaling-only enforcement, migration, and real NAT traversal remain
-unproven; this result does not close P03.
+At that baseline stage, strict signaling-only enforcement, migration and real NAT
+traversal were unproven; that result alone did not close P03.
 
 ## 1. Scope of the substage
 
@@ -454,9 +460,76 @@ unsolicited INPUT drops, not a DNAT/port-forward rule. Public candidate addresse
 and translated-port choices remain controlled fixture inputs, not a proof of
 unassisted discovery or behavior of arbitrary home/mobile NATs.
 
-P03 remains **NOT PASSED**: section 4.2 of the development plan also requires
-physical direct-path loss and re-punch recovery while the original connection
-retains payload and no forbidden custom path carries application STREAM data.
-The sans-I/O loss test and initial successful NAT traversal do not substitute
-for that experiment. Production dependency adoption and selected-custom transport
-authority also remain unimplemented; the Yggdrasil integration denial is unchanged.
+At this stage P03 was **NOT PASSED**: section 4.2 also requires physical direct-path
+loss and re-punch recovery. The following experiment supplies that missing evidence.
+Production dependency adoption and selected-custom transport authority remain
+unimplemented; the Yggdrasil integration denial is unchanged.
+
+## 13. Accepted physical native loss and automatic re-punch
+
+Run [39867392149](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39867392149)
+at `7a628e5` passed all seven Linux topology cases. The completed job log confirms
+14 pure capture/recovery checks, 44 legacy fixture checks and five helper binary
+tests, with zero failed/ignored Rust tests. The source was compiled and executed
+only in GitHub CI. Downloaded evidence, qlogs, translated tuples and cleanup records
+were independently inspected; green workflow status alone is not the acceptance.
+
+After the initial native STREAM/FIN was ACKed, both owned routers dropped only
+post-DNAT native inbound traffic, after independent WAN capture. Each peer wrote one
+new eight-byte STREAM/FIN once, observed actual native-path disappearance and packet
+loss, retained the unacknowledged STREAM and proved continuing custom control with
+no payload delivery. DATAGRAM was queued only after native removal. The supervisor
+then removed those exact DROP rules. No explicit path open/close, candidate
+republish, application rewrite or reconnect was used. The unchanged upstream
+60-second upgrade timer caused normal iroh/Noq NAT re-punching.
+
+| Observation | Peer A | Peer B |
+|---|---:|---:|
+| Router inbound native packets dropped | 14 | 14 |
+| Original / recovered native PathId | 1 / 2 | 1 / 2 |
+| Recovery sent / received STREAM ID | 6 / 7 | 7 / 6 |
+| STREAM frames before loss / during loss / after recovery | 1 / 2 / 3 | 1 / 2 / 3 |
+| Connection lost-packet count before / after | 0 / 14 | 0 / 14 |
+| Custom captured packets | 148 | 143 |
+| Custom STREAM / DATAGRAM observations | 0 / 0 | 0 / 0 |
+| Native packet observations | 60 | 66 |
+| Native STREAM / DATAGRAM observations | 6 / 4 | 6 / 4 |
+| Constructed-but-unobserved control packets | 20 | 21 |
+
+Stable connection IDs were unchanged per process. The same STREAM ID, offset 0,
+length 8 and FIN appeared in the original path-1 send near 2.645 seconds and path-2
+retransmission near 60.004 seconds. Each exact encrypted STREAM packet was present
+twice in the WAN capture (the two bridge observations, not duplicate application
+writes). The bounded Rust oracle completely correlated all 126 native observations
+and both custom captures; unobserved application frames remained forbidden. Exact
+`recover!` bytes/FIN, queued DATAGRAM delivery and final STREAM ACK were verified.
+Both final native conntrack entries were replied/ASSURED with the same independently
+observed translated sockets as section 12.
+
+Positive, blocked, wrong-port, setup/live-peer fault and SIGTERM cases also passed.
+Every cleanup reported `cleanup_failed: false`, zero remaining namespaces/processes/
+interfaces, no child-cleanup errors and unchanged host firewall/forwarding state.
+All live networking helpers were observed at UID 1001 with CapEff zero. The other
+four workflows for this commit completed successfully: Linux/Windows workspace,
+Linux/Windows Noq gate, Linux/Windows iroh bridge, and legacy NAT regression.
+
+### Acceptance boundary and next integration gate
+
+This completes the minimal P03 feasibility experiment in development-plan section
+4.2: authenticated custom bootstrap, normal candidate exchange, real controlled
+NAT transition, physical direct loss/re-punch on the original connection and no
+forbidden application payload before/during/after those transitions. Earlier
+backend and bridge regressions cover all-denied control/quiescence, directional
+policy, early data, actual lost STREAM, Backup eligibility, bounded empty DATAGRAM
+queues, backpressure and explicit STREAM reset. Explicit reset is not a general
+Tokio future cancel-safety guarantee.
+
+Acceptance is for checksum-pinned Noq/iroh 1.3.0 with the reviewed source patches
+and conservative native-only application policy. It does not claim selected custom
+transport authorization, production libp2p/Yggdrasil deployment, NAT mapping expiry/
+rebinding, autonomous public-address discovery, arbitrary home/mobile networks, or
+production SDK readiness. Production dependency delivery must preserve the reviewed
+packetization/readiness mechanism without test hooks or qlog ciphertext logging;
+unmodified upstream libraries do not provide this gate. No public dependency fork
+or package publication has been created. Yggdrasil integration remains separately
+blocked by its existing permission/lifecycle gate.

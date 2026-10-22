@@ -272,13 +272,12 @@ namespace/process/interface, no child-cleanup errors, and unchanged host firewal
 and forwarding snapshots. The interruption supervisor retained its live-descendant
 and PID start-identity checks.
 
-Scope: controlled Linux NAT traversal and strict custom exclusion are accepted.
-This does not establish physical direct-path loss/re-punch recovery, production
-libp2p/Yggdrasil deployment, autonomous public-address discovery, authorization of
-selected custom transports, or P03 completion. Recovery remains a separate
-mandatory P03 experiment.
+Scope of that run: controlled Linux NAT traversal and strict custom exclusion,
+not physical recovery. The subsequent experiment below supplies recovery evidence.
+Neither run establishes production libp2p/Yggdrasil deployment, autonomous public-
+address discovery or authorization of selected custom transports.
 
-## Physical recovery case — awaiting CI acceptance
+## Accepted physical recovery case
 
 `recovery` first completes the ordinary native transfer and waits for the initial
 STREAM/FIN to be acknowledged. Both owned routers then drop only post-DNAT native
@@ -302,5 +301,25 @@ Only this case uses a three-second per-path idle timeout and one-second per-path
 and connection keepalives. Its recovery deadline is 90 seconds because upstream's
 unchanged automatic upgrade timer is 60 seconds. Existing cases keep their original
 timings. Conntrack state is observed, not flushed: this proves physical traffic
-loss and recovery, not NAT mapping expiration/rebinding. The new runtime case and
-pure rejection checks are authored but not yet accepted; P03 remains NOT PASSED.
+loss and recovery, not NAT mapping expiration/rebinding.
+
+[Run 39867392149](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39867392149)
+at `7a628e5` passed all seven cases. Actual recovery evidence shows router drops
+14/14, native PathId 1 -> 2 on both peers, unchanged stable connection IDs, sent/
+received STREAM IDs 6/7 and 7/6, STREAM transmission counters 1 -> 2 -> 3 and lost
+packets 0 -> 14 each. Qlogs retain the same recovery STREAM ID, offset 0, length 8
+and FIN before loss and after normal re-punch near 60 seconds. The original and
+retransmitted STREAM ciphertext packets were each observed twice on WAN.
+
+All 126 native observations were correlated exactly: native packets 60/66, STREAM
+6/6 and DATAGRAM 4/4 (duplicate observations included). Custom captures 148/143
+contained zero application frames. Constructed-but-unobserved control packets
+20/21 were reported separately; unobserved application frames remained forbidden.
+Both final native conntrack entries were replied/ASSURED. All live helpers were
+UID 1001, CapEff zero. Every case cleaned its owned resources with unchanged host
+firewall/forwarding; expected failure exits were 1/1/143 for setup/live/SIGTERM.
+
+P03 experimental acceptance is passed for the reviewed patched backend and the
+conservative native-only policy. Production dependency delivery, selected custom
+transport authority and actual libp2p/Yggdrasil integration are not implied. See
+[the consolidated acceptance boundary](../../../docs/verification/iroh-paths.md#13-accepted-physical-native-loss-and-automatic-re-punch).

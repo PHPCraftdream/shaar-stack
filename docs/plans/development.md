@@ -1,12 +1,14 @@
 # Sha'ar Stack — Development Plan
 
-Status: foundation CI (P02) and ktav configuration acceptance (P05) passed.
-The identity functional baseline passes on Linux/Windows; remaining Windows
-privacy cases keep full P04 acceptance open. P03 and the Yggdrasil adapter
-(P07) are not passed. See [the SDK evidence](../verification/sdk-foundation.md).
+Status: foundation CI (P02), identity (P04) and ktav configuration (P05) acceptance
+passed; see [the SDK evidence](../verification/sdk-foundation.md). P03 experimental
+acceptance passed for the reviewed patched backend, including physical direct loss
+and automatic re-punch; see [the proof boundary](../verification/iroh-paths.md#13-accepted-physical-native-loss-and-automatic-re-punch).
+Production dependency delivery must preserve that gate before SDK networking can
+claim the same contract. The Yggdrasil adapter (P07) remains unaccepted.
 P01 contract research is reconciled to the native Rust requirement.
-Date: 2026-10-21. Revised: 2026-10-22 — native Rust replaces Go/cgo in the
-intended architecture. Yggdrasil-ng (`yggdrasil` 0.3.1, source revision
+Date: 2026-10-21. Revised: 2026-10-23 — P03 controlled recovery accepted;
+native Rust replaces Go/cgo in the intended architecture. Yggdrasil-ng (`yggdrasil` 0.3.1, source revision
 c9a54f1587bb133a06072596484c972a336db0d2) is a candidate, not an integrated
 dependency. Its shutdown/ownership source gate is open; see
 [the investigation](../verification/rust-ygg.md). Preparation of actual
