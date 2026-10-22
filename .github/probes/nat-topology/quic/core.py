@@ -168,7 +168,7 @@ def snapshot(cfg, root, kind, ctparse, rows, conntrack):
         other = ("rtr_b_wan", "rtr_a_wan")[side]
         own = ("rtr_a_wan", "rtr_b_wan")[side]
         target = cfg["translated_ports"][1 - side]
-        if kind == "positive":
+        if kind in ("positive", "recovery"):
             entry = ctparse.find_translation(lines, cfg["ip"][("host_a", "host_b")[side]],
                 cfg["port"][("src_a", "src_b")[side]], cfg["ip"][other], target,
                 cfg["ip"][other], target, cfg["ip"][own], cfg["translated_ports"][side])

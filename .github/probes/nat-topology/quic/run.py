@@ -12,6 +12,7 @@ sys.path.insert(0, str(HERE.parent))
 import childman  # noqa: E402
 import ctparse  # noqa: E402
 import core  # noqa: E402
+import recovery  # noqa: E402
 from capture import Capture  # noqa: E402
 
 
@@ -24,8 +25,9 @@ def main():
     root = Path(cfg["out_dir"]).resolve(strict=True)
     binary = Path(cfg["quic_binary"]).resolve(strict=True)
     kind = cfg["quic_case"]
-    if not binary.is_file() or not os.access(binary, os.X_OK) or kind not in ("positive", "blocked", "wrong-tuple"):
+    if not binary.is_file() or not os.access(binary, os.X_OK) or kind not in ("positive", "blocked", "wrong-tuple", "recovery"):
         raise ValueError("invalid QUIC binary/case")
+    expected = kind in ("positive", "recovery")
     if len(cfg["nonce"]) != 32:
         raise ValueError("QUIC cases require a 32-hex-byte public nonce")
     cfg["helper_uid"] = int(os.environ.get("SUDO_UID", "0"))
@@ -55,7 +57,7 @@ def main():
                         bind=f'{host}:{cfg["port"][("src_wrong", "src_tuple")[side]]}',
                         native_bind=f'{host}:{cfg["port"][("src_a", "src_b")[side]]}',
                         external_addr=f'{cfg["ip"][("rtr_a_wan", "rtr_b_wan")[side]]}:{external_port}',
-                        expect_native=kind == "positive")
+                        expect_native=expected, recovery=kind == "recovery")
             peers.append(core.spawn(cfg, root, binary, ns, f"peer-{side}", peer, children, childman.Child))
         ready = core.wait_files([root / f"peer-{side}-ready.json" for side in range(2)], children)
         if not all(report["tls_complete"] is True and report["queued_bytes"] == 8 and report["premature_payload"] is False for report in ready):
@@ -70,8 +72,11 @@ def main():
             core.hold_ready_for_interrupt()
         (root / "GO").touch(exist_ok=False)
         observed = core.wait_files([root / f"peer-{side}-observed.json" for side in range(2)], children)
-        if not all(report["native_delivered"] is (kind == "positive") for report in observed):
+        if not all(report["native_delivered"] is expected for report in observed):
             raise ValueError("unexpected native observation")
+        if kind == "recovery":
+            core.atomic(root / "initial-conntrack.json", core.conntrack_snapshot(cfg, root))
+            ev["controls"]["physical-recovery"] = recovery.run(cfg, root, children, core)
         # Snapshot replied NAT state while both real peer sockets remain alive.
         conntrack = core.conntrack_snapshot(cfg, root)
         # Keep capture active until both endpoint drivers have closed and flushed qlogs.
@@ -85,7 +90,7 @@ def main():
         core.finish(relay)
         rows = capture.finish()
         translations = core.snapshot(cfg, root, kind, ctparse, rows, conntrack)
-        core.atomic(root / "native-expectation.json", {"expected": kind == "positive"})
+        core.atomic(root / "native-expectation.json", {"expected": expected})
         core.helper(cfg, binary, root, "verify", relay_address)
         proof = json.loads((root / "verified.json").read_text(encoding="utf-8"))
         if proof.get("status") != "pass" or len(proof.get("directions", [])) != 2:

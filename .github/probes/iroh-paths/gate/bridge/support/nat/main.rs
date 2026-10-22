@@ -260,6 +260,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     None => false,
                     Some(value) => value.as_bool().ok_or("invalid expect_native")?,
                 },
+                recovery: match config.get("recovery") {
+                    None => false,
+                    Some(value) => value.as_bool().ok_or("invalid recovery")?,
+                },
                 nonce,
                 qlog,
             };
@@ -273,11 +277,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
             runtime.block_on(wait_marker(&case.join("GO")))?;
             runtime.block_on(session.observe(&peer))?;
+            if peer.recovery {
+                runtime.block_on(session.ack_initial())?;
+            }
             atomic_json(
                 &case,
                 &format!("peer-{side}-observed.json"),
                 &json!({"side":side,"native_delivered":peer.expect_native}),
             )?;
+            if peer.recovery {
+                runtime.block_on(wait_marker(&case.join("LOSS")))?;
+                let recovery = runtime.block_on(session.lose_native())?;
+                atomic_json(
+                    &case,
+                    &format!("peer-{side}-lost.json"),
+                    &recovery.evidence(),
+                )?;
+                runtime.block_on(wait_marker(&case.join("RESTORE")))?;
+                let evidence = runtime.block_on(session.recover_native(recovery))?;
+                atomic_json(&case, &format!("peer-{side}-recovered.json"), &evidence)?;
+            }
             runtime.block_on(wait_marker(&case.join("STOP")))?;
             let (sent, received) = runtime.block_on(session.close());
             atomic_json(

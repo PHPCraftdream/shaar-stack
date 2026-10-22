@@ -176,7 +176,7 @@ artifacts.
 The separate `.github/workflows/quic-nat.yml` builds the reviewed, detached Rust
 `nat-peer` helper and opts into `quic/run.py` by setting `FIXTURE_QUIC_BINARY`.
 Without that explicit variable, `run.sh` still runs the accepted UDP calibration.
-`FIXTURE_QUIC_CASE` selects `positive`, `blocked`, or `wrong-tuple`. QUIC cases
+`FIXTURE_QUIC_CASE` selects `positive`, `blocked`, `wrong-tuple`, or `recovery`. QUIC cases
 require a 32-hex-byte nonce. Namespace creation, host-state checks, failure flags
 and cleanup remain owned by the same `run.sh`; no native fixture runs locally.
 
@@ -277,3 +277,30 @@ This does not establish physical direct-path loss/re-punch recovery, production
 libp2p/Yggdrasil deployment, autonomous public-address discovery, authorization of
 selected custom transports, or P03 completion. Recovery remains a separate
 mandatory P03 experiment.
+
+## Physical recovery case — awaiting CI acceptance
+
+`recovery` first completes the ordinary native transfer and waits for the initial
+STREAM/FIN to be acknowledged. Both owned routers then drop only post-DNAT native
+inbound FORWARD traffic to private ports 40001/40002, after WAN capture. Custom
+control ports remain untouched. Each peer writes one new eight-byte STREAM/FIN
+exactly once while the native path exists, then waits for real native-path removal,
+actual loss counters and STREAM transmission counters. Non-delivery, an unacknowledged
+STREAM and continuing custom control are mandatory. Only after native removal does
+it enqueue a DATAGRAM: delivery of an already-lost unreliable frame is not promised.
+
+The supervisor requires actual inbound-drop counters, removes only those owned
+rules, and leaves the unchanged automatic iroh/Noq recovery machinery to re-punch.
+No explicit path open/close, reconnect, candidate republish or second STREAM write
+is used. Recovery requires a fresh native PathId, unchanged stable connection ID,
+cross-peer equality of the original sent/received STREAM IDs, exact bytes/FIN,
+STREAM retransmission counter growth, full ACK and queued DATAGRAM delivery.
+The existing full ciphertext oracle still forbids every custom or unobserved
+application frame across the complete connection lifetime.
+
+Only this case uses a three-second per-path idle timeout and one-second per-path
+and connection keepalives. Its recovery deadline is 90 seconds because upstream's
+unchanged automatic upgrade timer is 60 seconds. Existing cases keep their original
+timings. Conntrack state is observed, not flushed: this proves physical traffic
+loss and recovery, not NAT mapping expiration/rebinding. The new runtime case and
+pure rejection checks are authored but not yet accepted; P03 remains NOT PASSED.

@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           binary="$(realpath ../../../target/quic-nat/bridge/probe/target/debug/nat-peer)"
-          for kind in positive blocked wrong-tuple; do
+          for kind in positive blocked wrong-tuple recovery; do
             casedir="out/quic-${kind}-$(date +%s%N)"
             nonce="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
             sudo -E env PATH="$PATH" FIXTURE_QUIC_BINARY="$binary" FIXTURE_QUIC_CASE="$kind" bash run.sh "$casedir" "$nonce"

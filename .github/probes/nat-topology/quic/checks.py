@@ -12,6 +12,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 import core  # noqa: E402
 import ctparse  # noqa: E402
+import recovery  # noqa: E402
 from capture import Capture, parse_rows, parse_stats  # noqa: E402
 
 IPS = ["203.0.113.1", "203.0.113.2"]
@@ -176,6 +177,71 @@ class TopologyChecks(unittest.TestCase):
                 core.snapshot(cfg, root, "wrong-tuple", ctparse, [], lines)
             rows = [{"side": 0, "dst": [IPS[1], 41021]}]
             self.assertEqual(core.snapshot(cfg, root, "wrong-tuple", ctparse, rows, lines), [])
+
+
+class RecoveryChecks(unittest.TestCase):
+    def test_loss_rule_only_drops_post_dnat_native_inbound(self):
+        cfg = config()
+        for side in range(2):
+            install = recovery.rule(cfg, side, True)
+            remove = recovery.rule(cfg, side, False)
+            self.assertEqual(install[:4], ["iptables", "-I", "FORWARD", "1"])
+            self.assertEqual(remove[:3], ["iptables", "-D", "FORWARD"])
+            self.assertEqual(install[4:], remove[3:])
+            self.assertEqual(install[install.index("-d") + 1], cfg["ip"][("host_a", "host_b")[side]])
+            self.assertEqual(install[install.index("--dport") + 1], cfg["port"][("src_a", "src_b")[side]])
+            self.assertEqual(install[-2:], ["-j", "DROP"])
+            self.assertNotIn("DNAT", install)
+            self.assertNotIn("ACCEPT", install)
+
+    def test_recovery_requires_same_connection_stream_loss_and_fresh_path(self):
+        lost = [{"stable_id": side + 100, "old_path": "1", "sent_stream": side + 6, "lost_before": 3,
+                 "stream_frames_before": 1, "stream_frames_lost": 2} for side in range(2)]
+        recovered = [dict(before, received_stream=lost[1 - side]["sent_stream"], new_path="2",
+                          lost_packets=4, stream_frames_recovered=3, payload="recover!")
+                     for side, before in enumerate(lost)]
+        recovery.validate(lost, recovered)
+        for field, value in [("stable_id", -1), ("old_path", "99"), ("new_path", "1"),
+                             ("sent_stream", 99), ("received_stream", 99), ("lost_packets", 3),
+                             ("stream_frames_recovered", 2), ("payload", "wrong")]:
+            for side in range(2):
+                bad = copy.deepcopy(recovered)
+                bad[side][field] = value
+                with self.subTest(field=field, side=side), self.assertRaises(ValueError):
+                    recovery.validate(lost, bad)
+        for side in range(2):
+            bad = copy.deepcopy(lost)
+            bad[side]["stream_frames_lost"] = bad[side]["stream_frames_before"]
+            with self.assertRaises(ValueError):
+                recovery.validate(bad, recovered)
+        for before, after in [(lost[:1], recovered), (lost, recovered[:1]), ([], [])]:
+            with self.assertRaises(ValueError):
+                recovery.validate(before, after)
+
+    def test_no_restore_without_actual_drops_and_both_loss_reports(self):
+        cfg = config()
+        for count in (0, 1):
+            calls = []
+            def run(_cfg, router, args, _path):
+                calls.append((router, args))
+                return f"[{count}:40] -A FORWARD --comment p03-recovery-inbound -j DROP"
+            with tempfile.TemporaryDirectory() as temp, patch.object(core, "run", side_effect=run), \
+                 patch.object(core, "wait_files", return_value=[{}, {}]), patch.object(recovery, "validate"):
+                root = Path(temp)
+                if count:
+                    recovery.run(cfg, root, [], core)
+                    self.assertTrue((root / "RESTORE").exists())
+                    self.assertEqual(sum(args[:2] == ["iptables", "-D"] for _, args in calls), 2)
+                else:
+                    with self.assertRaisesRegex(ValueError, "never dropped"):
+                        recovery.run(cfg, root, [], core)
+                    self.assertFalse((root / "RESTORE").exists())
+                    self.assertFalse(any(args[:2] == ["iptables", "-D"] for _, args in calls))
+        with tempfile.TemporaryDirectory() as temp, patch.object(core, "run") as run, \
+             patch.object(core, "wait_files", side_effect=TimeoutError("missing peer")):
+            with self.assertRaises(TimeoutError):
+                recovery.run(cfg, Path(temp), [], core)
+            self.assertEqual(run.call_count, 2)
 
 
 if __name__ == "__main__":
