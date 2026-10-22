@@ -1,12 +1,15 @@
 #![forbid(unsafe_code)]
 use super::*;
+use crate::identity::Identity;
 use std::{
     cell::Cell,
     future::Future,
     io::{self, Write},
     path::PathBuf,
     sync::atomic::{AtomicUsize, Ordering},
+    sync::mpsc,
     task::{Context, Waker},
+    time::Duration,
 };
 
 struct FixtureDir(PathBuf);
@@ -157,6 +160,115 @@ fn read_not_found_is_an_error_not_permission_to_create() {
     .unwrap_err();
     assert!(matches!(err, IdentityError::Io(ref io) if io.kind() == io::ErrorKind::NotFound));
     assert_eq!(std::fs::read(path).unwrap(), [2; 32]);
+}
+
+// P04: public-future cancellation through the real public APIs, no mocks.
+// Fixture assumption (pinned tokio 1.54.1 blocking-pool source, not a public
+// API promise): `max_blocking_threads(1)` drains the pool queue strictly
+// FIFO, so the sentinel below starts only after the cancelled future's
+// queued job has fully run. Runtime drop is not used as the completion
+// barrier: queued never-started blocking jobs may be dropped at shutdown.
+// Panic safety: dropping `release_tx` disconnects the channel and releases
+// the blocker even when an assert fails, so `Drop` for the runtime cannot
+// hang.
+// Observation bound for a blocked blocker/sentinel; failing fast beats hanging.
+const CANCELLATION_OBSERVE_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn cancel_public_future<F: Future>(make_future: impl FnOnce() -> F) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .max_blocking_threads(1)
+        .build()
+        .expect("test runtime");
+
+    let (started_tx, started_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let blocker = rt.spawn_blocking(move || {
+        started_tx.send(()).expect("blocker start signal");
+        // Channel disconnect is the intentional release signal; it must
+        // release normally, including on a test-panic unwind.
+        let _ = release_rx.recv();
+    });
+
+    started_rx
+        .recv_timeout(CANCELLATION_OBSERVE_TIMEOUT)
+        .expect("blocker started");
+    {
+        let _enter = rt.enter();
+        let mut fut = Box::pin(make_future());
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        assert!(
+            fut.as_mut().poll(&mut cx).is_pending(),
+            "public future should be pending behind the blocker"
+        );
+        drop(fut); // cancellation
+    }
+
+    let (future_done_tx, future_done_rx) = mpsc::channel::<()>();
+    let sentinel = rt.spawn_blocking(move || {
+        let _ = future_done_tx.send(());
+    });
+
+    drop(release_tx);
+    future_done_rx
+        .recv_timeout(CANCELLATION_OBSERVE_TIMEOUT)
+        .expect("sentinel ran after cancelled future's blocking job");
+
+    rt.block_on(sentinel).expect("sentinel join");
+    rt.block_on(blocker).expect("blocker join");
+    drop(rt); // shutdown barrier: queue is empty, nothing is dropped
+}
+
+#[test]
+fn cancelled_create_new_worker_still_completes_a_valid_private_file() {
+    let dir = FixtureDir::new();
+    let path = dir.0.join("cancelled-create");
+    cancel_public_future(|| Identity::create_new(path.clone()));
+    // The cancelled future itself yields no return value; its worker still
+    // completed a full 32-byte private seed file.
+    let mut seed = zeroize::Zeroizing::new([0u8; 32]);
+    use std::io::Read;
+    let mut file = std::fs::File::open(&path).expect("cancelled create_new wrote private file");
+    file.read_exact(seed.as_mut()).expect("full 32-byte seed");
+    // Stability: derive the expected public key from the actual on-disk
+    // seed and compare it with a fresh public load.
+    let expected = Identity::from_seed(*seed);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("load runtime");
+    let loaded = rt
+        .block_on(Identity::load(path.clone()))
+        .expect("stable load after cancelled create_new");
+    drop(rt);
+    assert_eq!(
+        loaded.public_key_bytes(),
+        expected.public_key_bytes(),
+        "loaded identity must match the seed written by the cancelled create_new"
+    );
+}
+
+#[test]
+fn cancelled_load_never_modifies_the_existing_private_file() {
+    let dir = FixtureDir::new();
+    let path = dir.0.join("cancelled-load-existing");
+    create_new_blocking(&path, &[6u8; 32]).expect("private fixture");
+    cancel_public_future(|| Identity::load(path.clone()));
+    assert_eq!(
+        std::fs::read(&path).expect("private file readable"),
+        [6u8; 32],
+        "cancelled load left the existing private file unchanged"
+    );
+}
+
+#[test]
+fn cancelled_load_or_create_on_absent_path_never_creates_the_file() {
+    let dir = FixtureDir::new();
+    let path = dir.0.join("cancelled-load-or-create");
+    cancel_public_future(|| Identity::load_or_create(path.clone()));
+    assert!(
+        !path.exists(), // creation cannot proceed after cancellation
+        "cancelled load_or_create must not create the private file"
+    );
 }
 
 // SEC-KEY-02 evidence: an actual unprivileged read attempt must fail with
