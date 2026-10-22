@@ -161,7 +161,7 @@ async fn actual_relay_preserves_datagrams_both_directions_and_publisher_lifetime
     let sb = eb.create_sender();
     let to_a = b.remote_addr();
     let to_b = a.remote_addr();
-    let watcher = ea.watch_local_addrs();
+    let mut watcher = ea.watch_local_addrs();
     assert_eq!(watcher.get(), vec![a.local_addr()]);
     drop(a);
     assert!(watcher.is_connected(), "bound endpoint retains publisher");
