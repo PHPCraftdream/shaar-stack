@@ -73,10 +73,21 @@ async fn run_baseline(deadline: tokio::time::Instant) {
     // Dial the custom address ONLY (CustomAddr::from_parts(u64, &[u8])).
     let peer_custom = CustomAddr::from_parts(TEST_TRANSPORT_ID, &[1]);
     let target = EndpointAddr::from_parts(sb.public(), [TransportAddr::Custom(peer_custom)]);
-    let conn = tokio::time::timeout_at(deadline, ep_a.connect(target, harness::ALPN))
-        .await
-        .expect("overall deadline hit during connect")
-        .expect("connect over custom-only path");
+    let conn = match tokio::time::timeout_at(deadline, ep_a.connect(target, harness::ALPN)).await {
+        Ok(Ok(conn)) => conn,
+        Ok(Err(error)) => panic!("connect over custom-only path failed: {error}"),
+        Err(_) => {
+            let ab = network.stats(0);
+            let ba = network.stats(1);
+            panic!(
+                "overall deadline hit during connect; a->b wire/delivered packets={}/{}, b->a={}/{}",
+                ab.wire_packets(),
+                ab.delivered_packets(),
+                ba.wire_packets(),
+                ba.delivered_packets(),
+            );
+        }
+    };
 
     assert!(
         harness::custom_path_selected(&conn),
