@@ -15,6 +15,7 @@ use std::{
 
 use iroh::{
     Endpoint,
+    address_lookup::memory::MemoryLookup,
     endpoint::{Connection, QuicTransportConfig, presets, transports::CustomTransport},
     protocol::{AcceptError, ProtocolHandler, Router},
 };
@@ -117,6 +118,8 @@ pub struct EndpointConfig {
     pub custom_only: bool,
     /// Qlog directory and file prefix (feature `qlog`).
     pub qlog: Option<(PathBuf, String)>,
+    /// Optional in-memory address discovery for custom-only test paths.
+    pub address_lookup: Option<MemoryLookup>,
 }
 
 impl EndpointConfig {
@@ -127,6 +130,7 @@ impl EndpointConfig {
             mem_transport: None,
             custom_only: false,
             qlog: None,
+            address_lookup: None,
         }
     }
 }
@@ -142,6 +146,9 @@ pub async fn build_endpoint(
     let mut builder = Endpoint::builder(presets::Minimal)
         .secret_key(config.secret_key)
         .alpns(vec![ALPN.to_vec()]);
+    if let Some(address_lookup) = config.address_lookup {
+        builder = builder.address_lookup(address_lookup);
+    }
     if let Some((dir, prefix)) = config.qlog {
         // Public qlog injection (iroh v1.3.0, endpoint/quic.rs, feature
         // "qlog"): `QuicTransportConfig::builder().qlog_from_path(dir, prefix)`.

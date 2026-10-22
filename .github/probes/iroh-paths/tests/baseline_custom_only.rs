@@ -23,8 +23,7 @@
 
 use std::time::Duration;
 
-use iroh::{EndpointAddr, SecretKey, TransportAddr};
-use iroh_base::CustomAddr;
+use iroh::{EndpointAddr, SecretKey, TransportAddr, address_lookup::memory::MemoryLookup};
 use iroh_paths_probe::{
     MemTransport, TEST_TRANSPORT_ID,
     harness::{self},
@@ -49,6 +48,11 @@ async fn run_baseline(deadline: tokio::time::Instant) {
     let (ta, tb, network) = MemTransport::pair();
     let sa = SecretKey::from([1u8; 32]);
     let sb = SecretKey::from([2u8; 32]);
+    let lookup = MemoryLookup::new();
+    lookup.add_endpoint_info(EndpointAddr::from_parts(
+        sb.public(),
+        [TransportAddr::Custom(network.local_addr(1))],
+    ));
     let qlog = harness::qlog_dir("baseline-custom-only");
 
     let ep_b = harness::build_endpoint(harness::EndpointConfig {
@@ -65,24 +69,24 @@ async fn run_baseline(deadline: tokio::time::Instant) {
         mem_transport: Some(ta),
         custom_only: true,
         qlog: Some((qlog.clone(), "client".into())),
+        address_lookup: Some(lookup),
         ..harness::EndpointConfig::new(sa.clone())
     })
     .await
     .expect("bind endpoint a");
 
-    // Dial the custom address ONLY (CustomAddr::from_parts(u64, &[u8])).
-    let peer_custom = CustomAddr::from_parts(TEST_TRANSPORT_ID, &[1]);
-    let target = EndpointAddr::from_parts(sb.public(), [TransportAddr::Custom(peer_custom)]);
+    // Resolve only the custom path through the explicit in-memory lookup.
     eprintln!(
-        "custom-only addresses: A={:?}, B={:?}, dial={target:?}",
+        "custom-only addresses: A={:?}, B={:?}, dial endpoint={:?}",
         ep_a.addr(),
-        ep_b.addr()
+        ep_b.addr(),
+        sb.public()
     );
     // Leave room before the whole-test deadline to query route state on failure.
     let route_deadline = deadline - Duration::from_secs(2);
     let connecting = match tokio::time::timeout_at(
         route_deadline,
-        ep_a.connect_with_opts(target, harness::ALPN, Default::default()),
+        ep_a.connect_with_opts(sb.public(), harness::ALPN, Default::default()),
     )
     .await
     {
