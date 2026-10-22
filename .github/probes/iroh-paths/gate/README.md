@@ -1,9 +1,11 @@
 # Noq application-payload gate: initial CI spike
 
 Status: **INITIAL REGRESSIONS PASSED; P03 NOT PASSED.**
-[CI run 39800044282](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39800044282)
-at `537412f` passed eight policy tests and the complete 435-test backend
-library suite on **both Ubuntu and Windows**, with 0 failures or ignored tests.
+[CI run 39807430165](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39807430165)
+at `1c681dc` passed 16 policy/resource tests and the complete 443-test backend
+library suite on **each of Ubuntu and Windows**, with 0 failures or ignored tests.
+The actual logs confirm all eight new queue/reset regressions in both the
+filtered run and the full suite on each OS.
 This includes multipath, client/server early data, and corrected lost-STREAM
 recovery. This is an isolated proof-of-mechanism on checksum-pinned
 `noq-proto 1.3.0`, not a production fork or iroh integration. The production
@@ -94,7 +96,7 @@ and `3496-3497` requeues their STREAM metadata. The corrected test distinguishes
 those mechanisms and retains exclusion, retransmission, exact-byte and FIN
 assertions; it does not modify backend recovery to satisfy the test.
 
-## Authored queue hardening and reset follow-up (runtime pending)
+## Confirmed queue hardening and explicit stream reset
 
 Published Noq counts raw payload lengths in DATAGRAM queues; empty records cost
 zero and can accumulate without bound. The new isolated patch charges at least
@@ -113,9 +115,9 @@ explicit protocol cancellation, not arbitrary async-future drop safety.
 
 ## Explicitly not proven
 
-These tests are not physical-egress attribution. The new queue/reset cases are
-unverified until CI runs them. Arbitrary async cancellation, autonomous
-path-failure detection/recovery, iroh integration and QUIC NAT traversal remain
+These tests are not physical-egress attribution. Queue/reset cases are confirmed
+only in the real backend's sans-I/O harness. Arbitrary async cancellation,
+autonomous path-failure detection/recovery, iroh integration and QUIC NAT traversal remain
 unproven. Those remain mandatory follow-up proofs before P03 acceptance.
 The policy is not dynamically toggled to release already prepared packets.
 
