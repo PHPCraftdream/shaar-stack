@@ -79,12 +79,20 @@ application non-delivery.
 A new scenario removes the simulated data route after validation, while the
 control route stays reachable. In each sender direction it writes one small
 STREAM message exactly once, verifies serialization with zero receiver STREAM
-frames, and advances the real backend's virtual timers until another STREAM
-serialization proves PTO recovery ran. It then explicitly abandons the failed
-path. PING-driven control traffic must not release the pending data onto the
+frames, and advances the real backend's virtual timers until a PING or
+IMMEDIATE_ACK proves PTO probing ran. It then explicitly abandons the failed
+path and requires an increase in actual lost-packet accounting before recovery. PING-driven control traffic must not release the pending data onto the
 forbidden path. A fresh permitted path must deliver the same stream ID, exact
 bytes, offset zero and FIN, without an additional application write. DATAGRAM
 is intentionally excluded: unreliable datagrams must not be retransmitted.
+
+The first loss test run (`39796120513`) failed because it incorrectly required
+PTO itself to resend STREAM. Pinned Noq `spaces.rs:97-134` queues control
+retransmits or a probe; `SentPacket::stream_frames` is separate from that queue.
+`connection/mod.rs:3399-3432` declares in-flight packets lost on path discard,
+and `3496-3497` requeues their STREAM metadata. The corrected test distinguishes
+those mechanisms and retains exclusion, retransmission, exact-byte and FIN
+assertions; it does not modify backend recovery to satisfy the test.
 
 ## Explicitly not proven
 

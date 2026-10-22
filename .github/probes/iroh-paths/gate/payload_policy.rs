@@ -389,24 +389,37 @@ fn payload_policy_lost_stream_retransmission_survives_path_change() {
         assert!(pair.path_stats(sender, lost).unwrap().frame_tx.stream > 0);
         assert_eq!(pair.conn_mut(receiver).stats().frame_rx.stream, 0);
 
-        // No additional writes: a second STREAM serialization must come from loss recovery.
+        // Noq PTO can send a control probe without declaring STREAM data lost.
+        let before_probe = pair.path_stats(sender, lost).unwrap().frame_tx;
+        let probe_count = before_probe.ping + before_probe.immediate_ack;
         for _ in 0..100 {
-            if pair.path_stats(sender, lost).unwrap().frame_tx.stream > 1 {
+            let frames = pair.path_stats(sender, lost).unwrap().frame_tx;
+            if frames.ping + frames.immediate_ack > probe_count {
                 break;
             }
             if !pair.step() {
                 break;
             }
         }
+        let probed = pair.path_stats(sender, lost).unwrap().frame_tx;
         assert!(
-            pair.path_stats(sender, lost).unwrap().frame_tx.stream > 1,
-            "PTO must retransmit the unacknowledged STREAM on the failed route"
+            probed.ping + probed.immediate_ack > probe_count,
+            "PTO must probe the unacknowledged data route"
         );
         assert_eq!(pair.conn_mut(receiver).stats().frame_rx.stream, 0);
         assert_control_only(&mut pair);
 
+        // Discarding the abandoned path declares its in-flight packets lost,
+        // then handle_lost_packets requeues their separate STREAM metadata.
+        let loss_before = pair.conn_mut(sender).stats().lost_packets;
         pair.close_path(sender, lost, 0u8.into()).unwrap();
         assert!(!pair.drive_bounded(100));
+        let accounted = pair.conn_mut(sender).stats();
+        assert!(
+            accounted.lost_packets > loss_before,
+            "actual loss accounting required"
+        );
+        assert!(accounted.lost_bytes >= MESSAGE.len() as u64);
         pair.ping_path(sender, PathId::ZERO).unwrap();
         assert!(!pair.drive_bounded(100));
         assert_control_only(&mut pair);
@@ -423,6 +436,10 @@ fn payload_policy_lost_stream_retransmission_survives_path_change() {
             },
         );
         assert!(pair.path_stats(sender, recovered).unwrap().frame_tx.stream > 0);
+        assert!(
+            pair.conn_mut(sender).stats().frame_tx.stream > 1,
+            "original application bytes must be serialized again after loss"
+        );
         assert_control_only(&mut pair);
         assert_eq!(pair.streams(receiver).accept(Dir::Uni), Some(stream));
         {
