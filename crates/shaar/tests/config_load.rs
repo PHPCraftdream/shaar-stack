@@ -132,7 +132,7 @@ async fn load_malformed_document_rejected_despite_complete_overrides() {
         target: Some("127.0.0.1:80".to_string()),
         ..Default::default()
     };
-    let p = temp_file("malformed", b"target:127.0.0.1:9000\n");
+    let p = temp_file("malformed", b"target: 127.0.0.1:9000\n}\n");
     let err = load_server(&p, &over).await.err().unwrap();
     match &err {
         ConfigError::Parsing { kind: "syntax", .. } => {}

@@ -144,19 +144,31 @@ fn invalid_file_fallback_is_repaired_by_valid_override() {
 
 #[test]
 fn malformed_document_rejected_even_with_complete_overrides() {
-    // Missing separator space is a syntax error at parse time and is
-    // never repairable by overrides.
+    // A stray closing brace is a structured parser error in ktav 0.8.0,
+    // unlike a bare root scalar, which instead fails schema validation.
     let over = ServerOverrides {
         target: Some("127.0.0.1:80".to_string()),
         ..Default::default()
     };
-    let err = ServerConfig::from_text("target:127.0.0.1:9000\n", &over)
+    let err = ServerConfig::from_text("target: 127.0.0.1:9000\n}\n", &over)
         .err()
         .unwrap();
     match &err {
         ConfigError::Parsing { kind: "syntax", .. } => {}
         other => panic!("unexpected error: {other:?}"),
     }
+    assert_eq!(err.line(), Some(2));
+    assert_redacted(&err, &["127.0.0.1", "target"]);
+}
+
+#[test]
+fn root_scalar_schema_error_is_not_repaired_by_overrides() {
+    let over = ServerOverrides {
+        target: Some("127.0.0.1:80".to_string()),
+        ..Default::default()
+    };
+    let err = ServerConfig::from_text("target:127.0.0.1:9000\n", &over).unwrap_err();
+    assert!(matches!(err, ConfigError::Parsing { kind: "schema", .. }));
     assert_redacted(&err, &["127.0.0.1", "target"]);
 }
 
@@ -444,7 +456,7 @@ fn loading_error_carries_numeric_location_only() {
     assert_redacted(&l, &["zz_secret_name", "/home/user"]);
 
     // The in-memory size bound reports an empty path.
-    let big = format!("{:width$}", "", width = MAX_CONFIG_BYTES + 1).replace(' ', "#");
+    let big = "#".repeat(MAX_CONFIG_BYTES + 1);
     let err = ServerConfig::from_text(&big, &ServerOverrides::default())
         .err()
         .unwrap();
