@@ -73,14 +73,29 @@ async fn run_baseline(deadline: tokio::time::Instant) {
     // Dial the custom address ONLY (CustomAddr::from_parts(u64, &[u8])).
     let peer_custom = CustomAddr::from_parts(TEST_TRANSPORT_ID, &[1]);
     let target = EndpointAddr::from_parts(sb.public(), [TransportAddr::Custom(peer_custom)]);
-    let conn = match tokio::time::timeout_at(deadline, ep_a.connect(target, harness::ALPN)).await {
+    eprintln!(
+        "custom-only addresses: A={:?}, B={:?}, dial={target:?}",
+        ep_a.addr(),
+        ep_b.addr()
+    );
+    let connecting = match tokio::time::timeout_at(
+        deadline,
+        ep_a.connect_with_opts(target, harness::ALPN, Default::default()),
+    )
+    .await
+    {
+        Ok(Ok(connecting)) => connecting,
+        Ok(Err(error)) => panic!("custom-only route resolution failed: {error:?}"),
+        Err(_) => panic!("deadline hit resolving custom-only route"),
+    };
+    let conn = match tokio::time::timeout_at(deadline, connecting).await {
         Ok(Ok(conn)) => conn,
-        Ok(Err(error)) => panic!("connect over custom-only path failed: {error}"),
+        Ok(Err(error)) => panic!("connect over custom-only path failed: {error:?}"),
         Err(_) => {
             let ab = network.stats(0);
             let ba = network.stats(1);
             panic!(
-                "overall deadline hit during connect; a->b checks/matches/sends/wire/delivered={}/{}/{}/{}/{}, b->a={}/{}/{}/{}/{}",
+                "overall deadline hit during handshake; a->b checks/matches/sends/wire/delivered={}/{}/{}/{}/{}, b->a={}/{}/{}/{}/{}",
                 ab.address_checks(),
                 ab.valid_addresses(),
                 ab.send_attempts(),
