@@ -85,12 +85,20 @@ def main():
     support.mkdir()
     for script in Path(__file__).with_name("support").glob("*.rs"):
         shutil.copyfile(script, support / script.name)
+    shutil.copytree(Path(__file__).with_name("support") / "nat", support / "nat",
+                    ignore=shutil.ignore_patterns("*.py", "__pycache__"))
+    (project / "tests/nat_control.rs").write_text(
+        '#![forbid(unsafe_code)]\n#[path = "support/nat/tests.rs"]\nmod suite;\n', encoding="utf-8")
     noq = args.destination / "noq-source"
     shutil.copytree(args.noq_source, noq)
     add_packet_identity(noq)
     manifest = (args.probe / "Cargo.toml").read_text(encoding="utf-8")
+    if manifest.count('    "net",\n') != 1:
+        raise ValueError("pinned Tokio feature anchor changed")
+    manifest = manifest.replace('    "net",\n', '    "net",\n    "fs",\n')
     manifest += '\n[patch.crates-io]\niroh = { path = "../source/iroh-1.3.0" }\n'
     manifest += 'noq-proto = { path = "../noq-source" }\n'
+    manifest += '\n[[bin]]\nname = "nat-peer"\npath = "tests/support/nat/main.rs"\n'
     (project / "Cargo.toml").write_text(manifest, encoding="utf-8")
     # Only source identity changes for these exact same-version path replacements.
     blocks = lock_text.split("[[package]]")

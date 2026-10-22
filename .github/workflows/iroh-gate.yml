@@ -65,12 +65,25 @@ jobs:
         run: |
           set -euo pipefail
           manifest=target/iroh-gate/bridge/probe/Cargo.toml
-          rustfmt --edition 2024 --check .github/probes/iroh-paths/gate/bridge/calibration.rs .github/probes/iroh-paths/gate/bridge/mixed_path.rs .github/probes/iroh-paths/gate/bridge/wire.rs
+          rustfmt --edition 2024 --check \
+            .github/probes/iroh-paths/gate/bridge/calibration.rs \
+            .github/probes/iroh-paths/gate/bridge/mixed_path.rs \
+            .github/probes/iroh-paths/gate/bridge/wire.rs \
+            .github/probes/iroh-paths/gate/bridge/support/nat/main.rs \
+            .github/probes/iroh-paths/gate/bridge/support/nat/tests.rs
           cargo fmt --manifest-path "$manifest" --all
           cargo test --manifest-path "$manifest" --locked --lib
           cargo test --manifest-path "$manifest" --locked --test calibration -- --nocapture
           cargo test --manifest-path "$manifest" --locked --test mixed_path -- --nocapture
           cargo test --manifest-path "$manifest" --locked --test wire -- --nocapture
+          cargo test --manifest-path "$manifest" --locked --test nat_control -- --nocapture
+          cargo build --manifest-path "$manifest" --locked --bin nat-peer
+          binary=target/iroh-gate/bridge/probe/target/debug/nat-peer
+          if [ "$RUNNER_OS" = Windows ]; then binary="$binary.exe"; fi
+          python3 -I .github/probes/iroh-paths/gate/bridge/support/nat/process_checks.py \
+            --binary "$binary" --out target/iroh-gate/process-normal
+          python3 -I .github/probes/iroh-paths/gate/bridge/support/nat/process_checks.py \
+            --binary "$binary" --out target/iroh-gate/process-fault --fault-after-ready
       - name: Upload bridge evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -83,4 +96,6 @@ jobs:
             target/iroh-gate/bridge/probe/tests/wire.rs
             target/iroh-gate/bridge/probe/tests/support/
             target/iroh-gate/bridge/probe/target/iroh-paths/
+            target/iroh-gate/process-normal/
+            target/iroh-gate/process-fault/
           if-no-files-found: warn

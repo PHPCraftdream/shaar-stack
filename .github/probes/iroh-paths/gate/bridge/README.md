@@ -105,3 +105,37 @@ Still required before P03 acceptance: real QUIC traversal through the calibrated
 NAT topology, required loss/recovery proofs, and authorization/lifetime binding
 before permitting selected custom transports to carry payload. The wrapper
 forwarder remains a spike API, not a production or published-library commitment.
+
+## Authored cross-process control fixture (runtime unverified)
+
+`support/nat/` supplies the next prerequisite: two Rust helper peers and one owned
+UDP relay can run in separate processes/network namespaces. Tokio UDP readiness
+backs the custom transport directly, without detached reader/writer tasks or an
+extra reliability protocol. The real QUIC handshake handles ordinary UDP loss.
+This is a disposable fixture, not a production relay or libp2p/Yggdrasil adapter.
+
+The `SN54` envelope carries kind, side and a public 32-hex-byte case marker before
+at most 1500 opaque QUIC bytes. The marker is not authentication; QUIC/TLS still
+checks the configured peer EndpointId. The relay has exactly two address slots,
+256 captured datagrams per side, a 4096-message limit and a 120-second lifetime.
+Registration has a 10-second deadline. A bound endpoint retains its address
+publisher; duplicate binds and sends after endpoint drop fail explicitly.
+
+The generated `nat-peer` binary has relay/peer/stop/control-verifier roles. Peer
+readiness requires real TLS completion, queued STREAM/FIN and DATAGRAM bytes,
+non-delivery before native address publication, and continuing custom traffic.
+Owned case-directory GO/STOP barriers prevent early peer shutdown from making
+negative observations pass. File publication is atomic and occurs outside the
+async runtime; metadata waits use the generated-only Tokio `fs` feature, at the
+same dependency version. This JSON is helper input, not a Server/Client schema.
+
+CI runs protocol limits/malformed input, real UDP round trips, publisher lifetime,
+wrong-source/layout, incomplete registration and capture-overflow controls. It
+also starts all three real processes, joins every child, and independently matches
+relay ciphertext to both peer qlogs with zero application frames. A separate exact
+after-readiness fault case verifies owned-child termination/reaping. All these
+new process cases are still unverified until their CI results are inspected.
+
+Optional native bind/address fields are authored for the subsequent NAT scenario;
+those branches are not accepted by the control-only process case. No two-NAT,
+autonomous hole-punching or production transport claim follows from this fixture.
