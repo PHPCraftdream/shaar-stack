@@ -348,3 +348,75 @@ bootstrap; all-denied quiescence/backpressure/cancellation; direct-path
 appearance, loss and recovery; and packet/frame-to-physical-egress
 correlation with positive and negative calibration. Neither the baseline nor
 the UDP NAT fixture supplies that proof.
+
+## 11. iroh configuration bridge and provenance limits
+
+This is source evidence from published iroh 1.3.0, not runtime acceptance.
+Two delegated drafts were rejected for unsupported security conclusions;
+only the independently checked findings below are retained.
+
+### Configuration installation
+
+- `src/endpoint/quic.rs:93,130,147-168`: the transport builder and config
+  wrap private Noq fields; `build()` stores the configured Noq value in an
+  `Arc`. Adding a Noq method does not expose it through iroh automatically.
+- `src/endpoint/quic.rs:262-265`: existing `send_fairness` demonstrates the
+  minimal forwarding-method pattern. A spike-only `application_data_filter`
+  forwarder can call the patched Noq setter and return `self`; that proposal
+  is not yet compiled or installed in the probe.
+- `src/endpoint.rs:1148-1168`: client connect selects an explicit per-connect
+  transport config or the endpoint default, constructs a Noq client config,
+  and calls `connect_with`.
+- `src/socket.rs:249-272`: `StaticConfig::create_server_config` installs the
+  endpoint transport config at line 257; `create_client_config` installs the
+  selected client transport config at line 270. The actual Noq endpoint
+  receives the server config at `src/socket.rs:1022-1027`.
+
+An unconditional deny-all callback is a useful next bridge calibration: it
+needs no address classification. It would prove configuration propagation
+and payload/control separation only, not selective transport enforcement.
+
+### Prefix, mapping membership, and transport authority are different
+
+- `src/socket/mapped_addrs.rs:95-112`: synthetic address classification is
+  syntactic. It does not establish local ownership or ingress provenance.
+- `src/socket/remote_map.rs:105-125`: custom paths receive locally generated
+  mapped tuples, but IP tuples pass through unchanged.
+- `src/socket/transports/ip.rs:205-225` and `src/socket.rs:626-632`: inspected
+  native receive branches retain arbitrary IPv6 source addresses; they do
+  not reject synthetic address ranges.
+- `src/socket/remote_map/remote_state.rs:1541-1555`: advertised IP and custom
+  addresses are accepted as reachability input. Rejecting synthetic ranges
+  only on native ingress does not address advertised IP routes.
+- `src/socket/mapped_addrs.rs:315-376`: mapping keys are addresses, not
+  transport-instance/generation capabilities. Existing keys reuse mappings;
+  the map exposes no revocation or removal. Reverse lookup is not authority.
+- `src/socket/transports.rs:1236-1255`: a custom mapped-address lookup miss
+  drops the transmit. This does not authenticate a matching prefix or prove
+  which transport generation owns an existing entry.
+- `src/socket/transports/custom.rs:90-105`: local senders validate address
+  applicability. A peer-supplied `CustomAddr` is not itself that validation.
+
+Therefore the existing stateless `fn(FourTuple) -> bool` spike does **not**
+supply an authenticated selective transport policy. A richer context naming
+only peer identity and a coarse transport enum would not repair the missing
+transport-instance/lifetime binding either. No secure classifier is adopted.
+A future design must bind authorization to a locally owned transport instance,
+address membership and lifetime; reject unknown/revoked bindings; cover native
+and advertised-IP paths; and preserve that binding through packet dispatch.
+Replacement or address reuse must not silently authorize queued ciphertext
+for a different transport. Dynamic replacement remains unimplemented.
+
+### Required evidence before selective adoption
+
+Keep invalid ciphertext, valid peer migration, unauthorized transport origin,
+and stale/reused mapping cases distinct. Changing receive address metadata
+alone does not imply QUIC decryption failure. Recovery must drain the original
+connection without a second application write; STREAM wire retransmission is
+allowed, while exact application bytes and FIN remain mandatory.
+
+Qlog tuple/frame metadata is not a physical-egress oracle. Correlation needs
+an independently observed send boundary and full packet decryption material
+or calibrated packet-identity instrumentation; header-protection keys alone
+cannot decrypt payload frames. Neither this source investigation nor the
+new oracle calibration closes P03.
