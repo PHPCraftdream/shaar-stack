@@ -112,7 +112,7 @@ impl MemNetwork {
 pub struct MemTransport {
     side: usize,
     network: Arc<MemNetwork>,
-    addresses: Watchable<Vec<CustomAddr>>,
+    addresses: Arc<Watchable<Vec<CustomAddr>>>,
 }
 
 impl MemTransport {
@@ -129,7 +129,7 @@ impl MemTransport {
             Arc::new(Self {
                 side,
                 network: network.clone(),
-                addresses: Watchable::new(vec![network.local_addr(side)]),
+                addresses: Arc::new(Watchable::new(vec![network.local_addr(side)])),
             })
         };
         (transport(0), transport(1), network)
@@ -153,7 +153,7 @@ impl iroh::endpoint::transports::CustomTransport for MemTransport {
         Ok(Box::new(Endpoint {
             side: self.side,
             network: self.network.clone(),
-            addresses: self.addresses.watch(),
+            addresses: self.addresses.clone(),
         }))
     }
 }
@@ -162,7 +162,8 @@ impl iroh::endpoint::transports::CustomTransport for MemTransport {
 struct Endpoint {
     side: usize,
     network: Arc<MemNetwork>,
-    addresses: n0_watcher::Direct<Vec<CustomAddr>>,
+    // Keep the publisher alive after the transport factory is dropped.
+    addresses: Arc<Watchable<Vec<CustomAddr>>>,
 }
 
 impl Drop for Endpoint {
@@ -174,7 +175,7 @@ impl Drop for Endpoint {
 
 impl CustomEndpoint for Endpoint {
     fn watch_local_addrs(&self) -> n0_watcher::Direct<Vec<CustomAddr>> {
-        self.addresses.clone()
+        self.addresses.watch()
     }
 
     fn create_sender(&self) -> Arc<dyn CustomSender> {

@@ -65,6 +65,33 @@ fn fill(rig: &Rig, cx: &mut Context<'_>) {
 }
 
 #[test]
+fn bound_endpoint_keeps_address_publisher_alive_without_factory() {
+    use n0_watcher::Watcher;
+
+    let (left, right, network) = MemTransport::pair();
+    let endpoint = left.bind().expect("left bind");
+    let mut addresses = endpoint.watch_local_addrs();
+    drop(left);
+    drop(right);
+
+    assert!(addresses.is_connected(), "bound endpoint owns publisher");
+    assert_eq!(addresses.get(), vec![network.local_addr(0)]);
+    let (_, wake) = waker();
+    let mut cx = Context::from_waker(&wake);
+    assert!(addresses.poll_updated(&mut cx).is_pending());
+
+    drop(endpoint);
+    assert!(
+        !addresses.is_connected(),
+        "endpoint drop releases publisher"
+    );
+    assert!(matches!(
+        addresses.poll_updated(&mut cx),
+        Poll::Ready(Err(n0_watcher::Disconnected))
+    ));
+}
+
+#[test]
 fn full_queue_registers_all_pollers_of_the_same_sender() {
     let mut rig = rig();
     let (a, wa) = waker();

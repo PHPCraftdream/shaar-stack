@@ -34,7 +34,7 @@ const ROUNTRIPS: usize = 4;
 #[tokio::test(flavor = "multi_thread")]
 async fn baseline_echo_over_custom_only_path() {
     tracing_subscriber::fmt()
-        .with_env_filter("warn,iroh::socket=debug,iroh::socket::remote_map=trace")
+        .with_env_filter("warn,iroh::socket=error,iroh::socket::remote_map=debug")
         .with_test_writer()
         .with_ansi(false)
         .try_init()
