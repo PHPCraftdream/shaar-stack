@@ -133,8 +133,16 @@ CI runs protocol limits/malformed input, real UDP round trips, publisher lifetim
 wrong-source/layout, incomplete registration and capture-overflow controls. It
 also starts all three real processes, joins every child, and independently matches
 relay ciphertext to both peer qlogs with zero application frames. A separate exact
-after-readiness fault case verifies owned-child termination/reaping. All these
-new process cases are still unverified until their CI results are inspected.
+after-readiness fault case verifies owned-child termination/reaping.
+[Run 39841831803](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39841831803)
+at `baba50d` confirmed seven component tests and both real-process cases on
+Windows and Ubuntu, alongside all earlier suites. Normal helper exits were all
+zero, with no forced cleanup. Windows relay captures contained 24/21 packets and
+Ubuntu 26/20, with zero STREAM/DATAGRAM or constructed-but-unobserved packets.
+The exact after-readiness fault reaped all three owned children on both systems;
+`cleanup_failed` was false. Initial compile errors required a mutable watcher
+binding and a generated-only `Transmit::spike_new` constructor; ECN stays private,
+and no assertions were removed.
 
 Optional native bind/address fields are authored for the subsequent NAT scenario;
 those branches are not accepted by the control-only process case. No two-NAT,

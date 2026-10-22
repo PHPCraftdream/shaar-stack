@@ -586,6 +586,7 @@ FIXTURE_CONFIG="$(RUN_DIR="$RUN_DIR" NONCE="$NONCE" PREFIX="$PREFIX" \
   NS_HOFF="$NS_HOFF" NS_ROFF="$NS_ROFF" \
   WAN_IP="$WAN_IP" RA_WAN="$RA_WAN" RB_WAN="$RB_WAN" RO_WAN="$RO_WAN" \
   A_IP="$A_IP" B_IP="$B_IP" OFF_IP="$OFF_IP" RUN_PID="$$" \
+  QUIC_BINARY="${FIXTURE_QUIC_BINARY:-}" QUIC_CASE="${FIXTURE_QUIC_CASE:-positive}" \
   python3 -I -c '
 import json, os
 e = os.environ
@@ -606,6 +607,8 @@ cfg = {
            "src_a": 40001, "src_b": 40002, "src_off": 40003,
            "src_wrong": 40011, "src_tuple": 40012},
   "translated_ports": [41010, 41020],
+  "quic_binary": e["QUIC_BINARY"],
+  "quic_case": e["QUIC_CASE"],
 }
 print(json.dumps(cfg))
 ')"
@@ -621,7 +624,13 @@ if [ "$FAULT_INJECT_SETUP" = "1" ]; then
   die "fault injection mode should have exited during setup"
 fi
 
-python3 "$HERE/fixture.py" orchestrator &
+PROGRAM="$HERE/fixture.py"
+PROGRAM_ARGS=(orchestrator)
+if [ -n "${FIXTURE_QUIC_BINARY:-}" ]; then
+  PROGRAM="$HERE/quic/run.py"
+  PROGRAM_ARGS=()
+fi
+python3 -I "$PROGRAM" "${PROGRAM_ARGS[@]}" &
 CHILD_PIDS+=("$!")
 RC=0
 wait "${CHILD_PIDS[0]}" || RC=$?  # -e must not abort before we record RC

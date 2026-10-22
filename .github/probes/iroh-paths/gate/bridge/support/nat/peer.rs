@@ -2,7 +2,9 @@
 //! Real iroh peer owned by one helper process; all keys are synthetic test fixtures.
 
 use super::{protocol::Nonce, transport::Factory};
-use iroh::endpoint::{Connection, QuicTransportConfig, SendStream, presets};
+use iroh::endpoint::{
+    Connection, NetReportConfig, PortmapperConfig, QuicTransportConfig, SendStream, presets,
+};
 use iroh::{Endpoint, EndpointAddr, SecretKey, TransportAddr};
 use iroh_paths_probe::harness;
 use std::{io, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -53,6 +55,8 @@ pub async fn start(config: &Config) -> io::Result<Session> {
         .alpns(vec![harness::ALPN.to_vec()])
         .add_custom_transport(transport.clone())
         .clear_ip_transports()
+        .portmapper_config(PortmapperConfig::Disabled)
+        .net_report_config(NetReportConfig::minimal())
         .transport_config(
             QuicTransportConfig::builder()
                 .application_data_filter(native_only)

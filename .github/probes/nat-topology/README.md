@@ -170,3 +170,40 @@ runs `python3 checks/selftest.py -v` first, then the fixture (normal,
 each in its own per-case directory), validating every case with the strict
 `checks/selftest.py` validators / supervisor, and always uploads `out/` as
 artifacts.
+
+## Authored real-QUIC extension (runtime unverified)
+
+The separate `.github/workflows/quic-nat.yml` builds the reviewed, detached Rust
+`nat-peer` helper and opts into `quic/run.py` by setting `FIXTURE_QUIC_BINARY`.
+Without that explicit variable, `run.sh` still runs the accepted UDP calibration.
+`FIXTURE_QUIC_CASE` selects `positive`, `blocked`, or `wrong-tuple`. QUIC cases
+require a 32-hex-byte nonce. Namespace creation, host-state checks, failure flags
+and cleanup remain owned by the same `run.sh`; no native fixture runs locally.
+
+Two real peer processes bind native UDP at private ports 40001/40002, while a
+separate custom UDP relay in the WAN namespace bootstraps authenticated QUIC.
+Both peers must prove queued payload non-delivery and live control before GO.
+Only then do they publish the configured public candidates through iroh's normal
+address-update API. No explicit `open_path` fixture hook is used. UPnP/PCP/NAT-PMP
+and optional public net-report probes are disabled. The candidate addresses and
+translated ports are controlled fixture inputs, not an address-discovery proof.
+
+Additional outbound-only MASQUERADE rules force native source ports to
+41010/41020. There is no DNAT/port-forward rule. A bounded WAN tcpdump capture
+records actual post-NAT UDP tuples and ciphertext; tshark extracts raw UDP payload,
+without decrypting QUIC. Segmentation/GRO is disabled only on owned veth devices.
+The existing exact-ciphertext oracle requires zero custom STREAM/DATAGRAM frames,
+positive native frames in each direction for the positive case, zero native app
+frames for negative cases, and no unobserved application payload. Replied conntrack
+entries must match the private and independently observed translated native tuples.
+
+`blocked` drops only native-source UDP on both owned routers, keeping custom
+control alive; nonzero drop counters are mandatory. `wrong-tuple` advertises a
+wrong native public port and requires observed attempts to that wrong port.
+Both peers must remain alive through every negative observation. Setup failure,
+live-peer fixture failure and owned-process SIGTERM/reaping cases are also wired
+into CI. Pure parser/rejection checks live in `quic/checks.py`.
+
+All new two-NAT cases are authored but **not yet runtime accepted**. They do not
+establish production libp2p/Yggdrasil deployment, autonomous discovery, selected
+custom-transport authorization, or P03 completion.

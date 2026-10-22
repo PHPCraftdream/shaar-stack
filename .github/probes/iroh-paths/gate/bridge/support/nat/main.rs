@@ -86,6 +86,29 @@ async fn wait_marker(path: &Path) -> io::Result<()> {
     .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "fixture barrier deadline"))?
 }
 
+fn validate_frames(
+    expected: bool,
+    custom: wire_oracle::Counts,
+    native: wire_oracle::Counts,
+    unobserved: wire_oracle::Counts,
+) -> io::Result<()> {
+    if custom.streams != 0
+        || custom.datagrams != 0
+        || unobserved.streams != 0
+        || unobserved.datagrams != 0
+    {
+        return Err(io::Error::other("custom or unobserved application payload"));
+    }
+    if expected {
+        if native.streams == 0 || native.datagrams == 0 {
+            return Err(io::Error::other("missing native positive calibration"));
+        }
+    } else if native.streams != 0 || native.datagrams != 0 {
+        return Err(io::Error::other("unexpected native application payload"));
+    }
+    Ok(())
+}
+
 fn verify(case: &Path) -> io::Result<Value> {
     let raw = read_json(&case.join("relay-captures.json"), FILE_MAX)?;
     let captures: relay::Captures = serde_json::from_value(raw).map_err(io::Error::other)?;
@@ -100,6 +123,29 @@ fn verify(case: &Path) -> io::Result<Value> {
             io::ErrorKind::InvalidData,
             "invalid bounded relay capture",
         ));
+    }
+    let native_path = case.join("native-captures.json");
+    let expectation_path = case.join("native-expectation.json");
+    if native_path.exists() != expectation_path.exists() {
+        return Err(io::Error::other("incomplete native capture evidence"));
+    }
+    let (native, expected): (relay::Captures, bool) = if native_path.exists() {
+        let expected = read_json(&expectation_path, 1024)?["expected"]
+            .as_bool()
+            .ok_or_else(|| io::Error::other("invalid native expectation"))?;
+        let packets =
+            serde_json::from_value(read_json(&native_path, FILE_MAX)?).map_err(io::Error::other)?;
+        (packets, expected)
+    } else {
+        (Default::default(), false)
+    };
+    if native.iter().any(|side| {
+        side.len() > 256
+            || side
+                .iter()
+                .any(|packet| packet.is_empty() || packet.len() > 65535)
+    }) {
+        return Err(io::Error::other("invalid bounded native capture"));
     }
     let mut evidence = Vec::new();
     for (side, captured) in captures.iter().enumerate() {
@@ -125,17 +171,15 @@ fn verify(case: &Path) -> io::Result<Value> {
         for packet in captured {
             counts.add(index.observe(packet, &mut seen).map_err(io::Error::other)?);
         }
-        let unobserved = index.unobserved(&seen);
-        if counts.streams != 0
-            || counts.datagrams != 0
-            || unobserved.streams != 0
-            || unobserved.datagrams != 0
-        {
-            return Err(io::Error::other(
-                "application payload found in control-only process case",
-            ));
+        let mut native_counts = wire_oracle::Counts::default();
+        for packet in &native[side] {
+            native_counts.add(index.observe(packet, &mut seen).map_err(io::Error::other)?);
         }
-        evidence.push(json!({"side":side,"captured_packets":counts.packets,"stream_frames":counts.streams,"datagram_frames":counts.datagrams,"constructed_not_observed":unobserved.packets}));
+        let unobserved = index.unobserved(&seen);
+        validate_frames(expected, counts, native_counts, unobserved)?;
+        evidence.push(json!({"side":side,"captured_packets":counts.packets,"stream_frames":counts.streams,"datagram_frames":counts.datagrams,
+            "native_packets":native_counts.packets,"native_streams":native_counts.streams,"native_datagrams":native_counts.datagrams,
+            "constructed_not_observed":unobserved.packets}));
     }
     Ok(json!({"status":"pass","directions":evidence}))
 }
@@ -236,4 +280,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("unknown fixture role".into()),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wire_oracle::Counts;
+
+    #[test]
+    fn native_expectation_never_weakens_custom_or_unobserved_exclusion() {
+        let zero = Counts::default();
+        let both = Counts {
+            packets: 1,
+            streams: 1,
+            datagrams: 1,
+        };
+        assert!(validate_frames(false, zero, zero, zero).is_ok());
+        assert!(validate_frames(true, zero, both, zero).is_ok());
+        assert!(validate_frames(true, zero, zero, zero).is_err());
+        assert!(validate_frames(false, zero, both, zero).is_err());
+        for expected in [false, true] {
+            assert!(validate_frames(expected, both, both, zero).is_err());
+            assert!(validate_frames(expected, zero, both, both).is_err());
+        }
+        for partial in [
+            Counts { streams: 1, ..zero },
+            Counts {
+                datagrams: 1,
+                ..zero
+            },
+        ] {
+            assert!(validate_frames(true, zero, partial, zero).is_err());
+        }
+    }
 }
