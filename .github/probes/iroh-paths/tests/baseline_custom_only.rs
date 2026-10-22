@@ -78,8 +78,10 @@ async fn run_baseline(deadline: tokio::time::Instant) {
         ep_a.addr(),
         ep_b.addr()
     );
+    // Leave room before the whole-test deadline to query route state on failure.
+    let route_deadline = deadline - Duration::from_secs(2);
     let connecting = match tokio::time::timeout_at(
-        deadline,
+        route_deadline,
         ep_a.connect_with_opts(target, harness::ALPN, Default::default()),
     )
     .await
