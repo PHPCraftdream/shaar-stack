@@ -73,6 +73,18 @@ def main():
             .await.is_ok()
     }"""
     connection.write_text(connection_text.replace(connection_anchor, connection_anchor + connection_addition), encoding="utf-8")
+    transports = iroh / "src/socket/transports.rs"
+    transports_text = transports.read_text(encoding="utf-8")
+    transmit_anchor = "impl<'a> Transmit<'a> {"
+    if transports_text.count(transmit_anchor) != 1:
+        raise ValueError("iroh transmit fixture anchor changed")
+    transmit_addition = """
+    /// Fixture-only constructor; ECN remains private and unset in these tests.
+    pub fn spike_new(contents: &'a [u8], segment_size: Option<usize>) -> Self {
+        Self { ecn: None, contents, segment_size }
+    }
+"""
+    transports.write_text(transports_text.replace(transmit_anchor, transmit_anchor + transmit_addition), encoding="utf-8")
     iroh_manifest = iroh / "Cargo.toml"
     iroh_manifest.write_text(iroh_manifest.read_text(encoding="utf-8") + "\n[workspace]\n", encoding="utf-8")
     project = args.destination / "probe"

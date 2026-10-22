@@ -63,19 +63,7 @@ async fn send(
     destination: &iroh_base::CustomAddr,
     payload: &[u8],
 ) -> io::Result<()> {
-    poll_fn(|cx| {
-        sender.poll_send(
-            cx,
-            destination,
-            None,
-            &Transmit {
-                contents: payload,
-                ecn: None,
-                segment_size: None,
-            },
-        )
-    })
-    .await
+    poll_fn(|cx| sender.poll_send(cx, destination, None, &Transmit::spike_new(payload, None))).await
 }
 
 async fn receive(endpoint: &mut dyn CustomEndpoint) -> io::Result<Vec<u8>> {
@@ -193,11 +181,7 @@ async fn wrong_send_address_source_and_layout_are_rejected() {
     let other = b.bind().unwrap();
     let sender = endpoint.create_sender();
     assert!(send(sender.as_ref(), &a.local_addr(), &[1]).await.is_err());
-    let bad = Transmit {
-        contents: &[1, 2],
-        ecn: None,
-        segment_size: Some(1),
-    };
+    let bad = Transmit::spike_new(&[1, 2], Some(1));
     assert!(
         poll_fn(|cx| sender.poll_send(cx, &a.remote_addr(), None, &bad))
             .await
@@ -213,11 +197,7 @@ async fn wrong_send_address_source_and_layout_are_rejected() {
         .await
         .is_err()
     );
-    let valid = Transmit {
-        contents: &[1],
-        ecn: None,
-        segment_size: None,
-    };
+    let valid = Transmit::spike_new(&[1], None);
     assert!(
         poll_fn(|cx| sender.poll_send(cx, &a.remote_addr(), Some(&a.remote_addr()), &valid))
             .await
