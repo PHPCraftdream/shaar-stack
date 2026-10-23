@@ -344,4 +344,18 @@ an explicit capture-memory/packet-capacity trade-off, not a longer wait or a ret
 of a lossy oracle. The 1024-packet and 8 MiB pcap caps, zero-kernel-drop requirement,
 complete-drain check and full ciphertext correlation are unchanged. Pure regression
 checks pin the capture arguments, reject unsupported MTUs and retain kernel-loss
-rejection. Fresh CI acceptance of this capture profile is still pending.
+rejection.
+
+[Run 39879270527](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39879270527)
+at `78a0097` accepted this profile after independent artifact inspection. All seven
+cases passed. Recovery captured 126/126 observations with zero kernel drops; the
+83830-byte pcap had snaplen 2048 and no truncated frame. Custom captures 138/133
+contained zero STREAM/DATAGRAM frames; native 60/66 observations contained STREAM
+6/6 and DATAGRAM 4/4. Constructed-but-unobserved control counts were 21/22, while
+unobserved application frames remained forbidden. Router loss counters were 14/14,
+original/recovered path IDs 1/2, and original STREAM IDs 6/7 delivered crosswise with
+unchanged stable connections and exact bytes/FIN. All live Rust helpers were UID
+1001/CapEff zero, with clean namespace/process/interface teardown and unchanged
+host firewall/forwarding in all normal/fault/signal cases. The completed job log
+also confirms 16 pure controls, 44 legacy checks and eight helper tests, including
+the three observer regressions. No runtime deadline or payload assertion was relaxed.

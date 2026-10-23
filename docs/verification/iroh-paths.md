@@ -533,3 +533,62 @@ packetization/readiness mechanism without test hooks or qlog ciphertext logging;
 unmodified upstream libraries do not provide this gate. No public dependency fork
 or package publication has been created. Yggdrasil integration remains separately
 blocked by its existing permission/lifecycle gate.
+
+## 14. Accepted product dependency delivery
+
+Commit `6a33fdf` adopts the reviewed backend in the actual Cargo workspace, rather
+than exposing a spike-only SDK mode. Exact iroh 1.3.0 is an SDK dependency with
+default features disabled; root Cargo patches select clean prepared iroh/noq-proto
+1.3.0 sources under ignored `target/backend/`. The shared production transformation
+contains no fixture path-open/disable-NAT/Transmit hooks or ciphertext logging.
+Preparation validates archive SHA256, pinned provenance, package/version/license,
+uses fresh separate source directories and never executes downloaded code. It is
+an explicit pre-Cargo stage, not network-dependent `build.rs` rewriting. Upstream
+licenses are preserved and no new public fork or package publication was created.
+
+The adopted lock was resolved and verified only in GitHub CI. Linux/Windows lock
+artifacts are byte-identical (SHA256
+`2a2ae5b3f1f02df6f767a348562034d14974d1b14cb874fc93332e336704080e`).
+Independent comparison retained all 120 previous registry identities/checksums;
+all 248 additional registry entries already appear in the reviewed standalone
+probe lock. The two patched path packages retain version 1.3.0; no existing project
+or dependency version was raised. The temporary workspace-copy/resolution tool was
+removed after adoption. Missing prepared sources fail rather than falling back to
+stock upstream. Main CI prepares sources before formatting and ordinary immutable
+`--locked` lint/test execution; preparation is also required before local formatting
+that resolves the workspace, without authorizing local compilation or tests.
+
+Actual-workspace
+[CI 39876917468](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39876917468)
+passed on Linux and Windows. Completed logs show the native UDP dependency gate
+at 1.20s/1.37s, full workspace tests/clippy/structure and the explicit Linux
+unprivileged key-reader check. The owned test is
+`crates/shaar/tests/backend_gate.rs`: synthetic Ed25519 fixtures, exact peer
+identity, control-only handshake, bounded queued STREAM/DATAGRAM and both-direction
+positive calibration, reset and shutdown. RESET_STREAM is control and can expose
+lower stream IDs without STREAM bytes; the regression verifies that distinction
+instead of treating every `accept_uni` completion as a payload escape. This does
+not claim general Tokio future cancel-safety.
+
+Subsequent NAT regressions exposed two fixture observation defects, fixed without
+changing the product payload policy: Noq application delivery can precede the iroh
+actor's path snapshot, and the capture's 262144-byte immediate snapshot profile
+lost four of 126 packets despite 1500-MTU links. Metadata is now awaited within the
+unchanged ACK/recovery deadlines. Capture requests a bounded 4 MiB buffer and full
+2048-byte frame snapshots, with an explicit MTU guard and unchanged zero-loss,
+complete-drain, packet/file limits and exact-ciphertext checks.
+
+[Run 39879270527](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39879270527)
+at `78a0097` passed all seven cases. Independent artifact inspection confirmed
+126/126 capture with zero kernel drops or truncated frames, original STREAM IDs
+6/7, stable connections, native path 1 -> 2, router drops 14/14 and exact recovered
+bytes/FIN/DATAGRAM. Custom captures 138/133 contained no application frames; all
+126 native observations were exactly correlated. Every case cleaned owned resources
+without host firewall/forwarding changes. The log confirms 16 pure controls,
+44 legacy checks and eight helper tests, including delayed metadata/error/cancellation
+regressions. Latest workspace and legacy NAT workflows also completed successfully.
+
+Production dependency delivery is accepted. This unblocks SDK implementation, not
+SDK completion: TCP forwarding, public lifecycle APIs, authenticated selected-custom
+transport authority and actual libp2p/Yggdrasil integration remain separate work.
+The existing Yggdrasil permission/lifecycle blocker is not lifted by this result.

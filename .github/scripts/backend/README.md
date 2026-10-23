@@ -86,7 +86,16 @@ The earlier failure was a fixture interleaving mistake, not a reason to weaken t
 payload gate. Full dependency graph resolution and immutable-identity guards also
 passed before adoption; `--no-deps` metadata alone was correctly rejected as proof.
 
-This actual-workspace adoption still needs its fresh CI run. Dependency integration
-is not a working public SDK networking API or selected-custom transport authority;
-those remain separate implementation tasks. Yggdrasil integration's permission/
-lifecycle gate is unchanged.
+Actual-workspace adoption at `6a33fdf` passed Linux/Windows
+[CI 39876917468](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39876917468):
+formatting, clippy, tests and structural checks, including the native/reset gate
+(1.20s/1.37s) and the explicit Linux unprivileged key-reader probe. Completed logs
+were inspected. The final
+[QUIC regression 39879270527](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39879270527)
+at `78a0097` passed all seven topology cases after observer/capture fixes: 126/126
+native observations, zero kernel drops, no truncated frame, full ciphertext
+correlation, zero custom payload and clean owned-resource teardown. Its artifacts
+were independently inspected; legacy NAT and current workspace CI also passed.
+Production dependency delivery is accepted. It is not a working public SDK
+networking API or selected-custom transport authority; those remain separate
+implementation tasks. Yggdrasil integration's permission/lifecycle gate is unchanged.

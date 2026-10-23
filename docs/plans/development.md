@@ -4,8 +4,9 @@ Status: foundation CI (P02), identity (P04) and ktav configuration (P05) accepta
 passed; see [the SDK evidence](../verification/sdk-foundation.md). P03 experimental
 acceptance passed for the reviewed patched backend, including physical direct loss
 and automatic re-punch; see [the proof boundary](../verification/iroh-paths.md#13-accepted-physical-native-loss-and-automatic-re-punch).
-Production dependency delivery must preserve that gate before SDK networking can
-claim the same contract. The Yggdrasil adapter (P07) remains unaccepted.
+[Production dependency delivery](../verification/iroh-paths.md#14-accepted-product-dependency-delivery)
+also passed; SDK networking implementation (P06) is now unblocked, not completed.
+The Yggdrasil adapter (P07) remains unaccepted.
 P01 contract research is reconciled to the native Rust requirement.
 Date: 2026-10-21. Revised: 2026-10-23 — P03 controlled recovery accepted;
 native Rust replaces Go/cgo in the intended architecture. Yggdrasil-ng (`yggdrasil` 0.3.1, source revision
