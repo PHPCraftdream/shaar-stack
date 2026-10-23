@@ -71,6 +71,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Verify actor abort joins native resource destruction
+        run: cargo test -p shaar --locked --test backend_gate actor_shutdown::tests
       - name: cargo test
         shell: bash
         run: |

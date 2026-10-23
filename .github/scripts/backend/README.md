@@ -115,6 +115,31 @@ The companion bridge and NAT watchers completed successfully; their latest detai
 logs and artifacts have not been re-inspected. CI remains the only compilation and
 runtime environment; this accepts the metadata prerequisite, not the SDK endpoint.
 
+## Joined actor shutdown — pending CI
+
+The later SDK matrix at `c20503d` again exposed an immediate UDP-rebind failure on
+Linux (40 library tests passed, one failed; Windows succeeded). The Noq sender
+release alone does not cover every native I/O owner. Inspection also found that
+iroh's 100 ms actor grace timeout consumed an AbortOnDropHandle: timeout aborted
+the actor but did not join its destructor. That is a definite shutdown gap and a
+candidate mechanism for the observed intermittent socket retention; its occurrence
+in that particular failed run was not logged, so it is not claimed as proven.
+
+The owned `actor_shutdown.rs` helper retains the handle across the same 100 ms
+grace, explicitly aborts on timeout and then awaits termination. Both production
+and instrumented bridge preparation install the identical module and call it
+outside the actor-task mutex. Source repeat/overwrite guards and provenance include
+the helper. No data-path policy, shutdown grace or native-port assertion is weakened.
+
+The SDK integration binary compiles this same helper with three authored tests:
+graceful completion, forced timeout/abort with immediate UDP rebinding, and panic
+propagation after resource drop. The timeout case runs on a current-thread runtime,
+so abort without join cannot be hidden by another executor thread. The test ports
+are dedicated ports outside the standard ephemeral ranges, not repeated retry binds.
+These additions await CI execution. An exact dev-only n0-future 0.3.2 dependency
+reuses the existing resolved package; the lock changes only the SDK edge,
+not any package version/source/checksum. No downloaded code ran locally.
+
 ## Explicit preparation, not a build script
 
 Run the script from the repository root, with Python isolated mode:

@@ -262,6 +262,39 @@ def connection_limit_bridge(root: Path):
     socket_path.write_text(socket, encoding="utf-8", newline="\n")
 
 
+def joined_actor_shutdown(root: Path):
+    library_path = root / "src/lib.rs"
+    socket_path = root / "src/socket.rs"
+    module = root / "src/actor_shutdown.rs"
+    if module.exists():
+        raise ValueError("actor shutdown module already exists")
+    library = replace(library_path.read_text(encoding="utf-8"), "pub(crate) mod runtime;", "mod actor_shutdown;\npub(crate) mod runtime;")
+    socket = replace(socket_path.read_text(encoding="utf-8"), """        if let Some(task) = task {
+            // give the tasks a moment to shutdown cleanly
+            let shutdown_done = time::timeout(Duration::from_millis(100), async move {
+                if let Err(err) = task.await {
+                    warn!("unexpected error in task shutdown: {:?}", err);
+                }
+            })
+            .await;
+            match shutdown_done {
+                Ok(_) => trace!("tasks finished in time, shutdown complete"),
+                Err(time::Elapsed { .. }) => {
+                    // Dropping the task will abort it
+                    warn!("tasks didn't finish in time, aborting");
+                }
+            }
+        }""", """        if let Some(task) = task {
+            if let Err(err) = crate::actor_shutdown::finish_actor(task).await {
+                warn!("actor joined after shutdown: {:?}", err);
+            }
+        }""")
+    owned = Path(__file__).with_name("actor_shutdown.rs").read_bytes()
+    library_path.write_text(library, encoding="utf-8", newline="\n")
+    socket_path.write_text(socket, encoding="utf-8", newline="\n")
+    module.write_bytes(owned)
+
+
 def apply(root: Path):
     edits = {
         "src/config/transport.rs": transport,

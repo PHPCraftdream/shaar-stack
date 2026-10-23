@@ -2574,6 +2574,7 @@ dependencies = [
  "iroh-base",
  "ktav",
  "libp2p-identity",
+ "n0-future",
  "serde",
  "shaar-p2p",
  "shaar-platform",

@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 //! Product dependency wiring: real native UDP, without probe transport or qlog hooks.
 
+#[path = "../../../.github/scripts/backend/actor_shutdown.rs"]
+mod actor_shutdown;
+
 use std::time::Duration;
 
 use iroh::endpoint::{

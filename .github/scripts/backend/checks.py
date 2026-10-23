@@ -122,6 +122,15 @@ class PreparationChecks(unittest.TestCase):
                 apply(root)
             self.assertEqual([path.read_bytes() for path in paths], before)
 
+    def test_actor_shutdown_module_is_owned_and_repeat_does_not_overwrite(self):
+        root = ROOTS["iroh"]
+        paths = [root / name for name in ("src/lib.rs", "src/socket.rs", "src/actor_shutdown.rs")]
+        before = [path.read_bytes() for path in paths]
+        self.assertEqual(before[2], Path(policy.__file__).with_name("actor_shutdown.rs").read_bytes())
+        with self.assertRaisesRegex(ValueError, "actor shutdown module already exists"):
+            policy.joined_actor_shutdown(root)
+        self.assertEqual([path.read_bytes() for path in paths], before)
+
     def test_runtime_ingress_transform_rejects_repeat_without_overwriting(self):
         root = ROOTS["noq"]
         paths = [root / name for name in ("src/lib.rs", "src/endpoint.rs", "src/connection.rs")]
