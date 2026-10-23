@@ -24,6 +24,29 @@ previous package name/version/source/checksum, and compiles the candidate crate
 with `--locked`. The product lock is not rewritten. Both OS artifacts must be
 reviewed before adoption. No local Cargo resolution, build or test is used.
 
+## Frozen graph compatibility correction — pending CI
+
+The first gate at `24840d3`, run `39950547435`, passed eight Python controls and
+four owned lease-boundary tests on both OSes. Full metadata then correctly rejected
+seven changed existing identities, before candidate compilation or adoption. The
+Linux/Windows rejected locks were byte-identical, SHA256
+`8132466bce47af15ccaae37ec5c2cafa07caec31a55d9c48614411b61bd932a9`.
+
+Swarm 0.48.0's target-specific manifest hard-pins wasm-bindgen-futures =0.4.58,
+which forced wasm-bindgen 0.2.129 ->0.2.108, wasm-bindgen-futures 0.4.79 ->0.4.58,
+and js-sys/web-sys 0.3.106 ->0.3.85 plus matching macro/shared package downgrades.
+Cargo's full lock includes these dependencies even for native compilation. They
+were not accepted; the existing identity-preservation guard is unchanged.
+
+No compatible newer Swarm patch release was available in the registry at review.
+The preparer now verifies the original Swarm archive and applies a manifest-only
+compatibility change to the already-resolved wasm-bindgen-futures =0.4.79. Its
+Swarm version and every upstream Rust source byte are unchanged. Provenance records
+the old/new requirement and native-source scope; metadata must resolve both this
+prepared Swarm and the bounded relay paths. This does not claim a WASM build or
+runtime acceptance. It preserves, rather than raises, existing product versions.
+A fresh CI gate must still verify all prior identities and compile the candidate.
+
 ## Rejected shortcuts and selected boundaries
 
 `libp2p-stream` 0.5.0-alpha was inspected, not adopted. Its `src/shared.rs:106-108`

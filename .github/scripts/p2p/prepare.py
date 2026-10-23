@@ -9,6 +9,7 @@ import tomllib
 VERSION = "0.22.0"
 DIGEST = "e5227b053db429996242c00f6c756fd9b5382b942a03eec34b465431df29697a"
 MAX_ARCHIVE = 2 * 1024 * 1024
+SWARM_DIGEST = "57ccbe1baeaef036ffde4b265871e11c64d29464036bba635378f356bcdca854"
 
 
 def replace(text, old, new):
@@ -76,12 +77,44 @@ def prepare(archive, destination):
     return root
 
 
+def prepare_swarm(archive, destination):
+    if archive.stat().st_size > MAX_ARCHIVE:
+        raise ValueError("swarm archive exceeds reviewed size bound")
+    if hashlib.sha256(archive.read_bytes()).hexdigest() != SWARM_DIGEST:
+        raise ValueError("swarm archive checksum mismatch")
+    destination.mkdir(parents=True, exist_ok=False)
+    with tarfile.open(archive) as source:
+        source.extractall(destination, filter="data")
+    root = destination / "libp2p-swarm-0.48.0"
+    path = root / "Cargo.toml"
+    original = path.read_text(encoding="utf-8")
+    manifest = tomllib.loads(original)
+    if manifest["package"]["name"] != "libp2p-swarm" or manifest["package"]["version"] != "0.48.0":
+        raise ValueError("unexpected swarm package identity")
+    notice = (root / "src/lib.rs").read_text(encoding="utf-8")[:1800]
+    if manifest["package"].get("license") != "MIT" or "Copyright 2019 Parity Technologies" not in notice:
+        raise ValueError("swarm license identity or embedded notice changed")
+    updated = replace(original, '''[target.'cfg(target_family="wasm")'.dependencies.wasm-bindgen-futures]
+version = "=0.4.58"''', '''[target.'cfg(target_family="wasm")'.dependencies.wasm-bindgen-futures]
+version = "=0.4.79"''')
+    path.write_text(updated + "\n[workspace]\n", encoding="utf-8", newline="\n")
+    receipt = {"package": "libp2p-swarm", "version": "0.48.0", "archive_sha256": SWARM_DIGEST,
+               "wasm_bindgen_futures_requirement": "=0.4.79", "previous_requirement": "=0.4.58",
+               "native_source_changed": False,
+               "patch_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+    (destination / "provenance.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    return root
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--destination", type=Path, required=True)
+    parser.add_argument("--swarm-archive", type=Path, required=True)
+    parser.add_argument("--swarm-destination", type=Path, required=True)
     args = parser.parse_args()
     print(prepare(args.archive, args.destination))
+    print(prepare_swarm(args.swarm_archive, args.swarm_destination))
 
 
 if __name__ == "__main__":

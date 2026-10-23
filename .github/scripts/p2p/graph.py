@@ -31,9 +31,13 @@ def replace(text, old, new):
     return text.replace(old, new)
 
 
-def create(repository, destination, relay_source):
+def create(repository, destination, relay_source, swarm_source):
     repository = repository.resolve()
     relay_source = relay_source.resolve()
+    swarm_source = swarm_source.resolve()
+    swarm = tomllib.loads((swarm_source / "Cargo.toml").read_text(encoding="utf-8"))
+    if swarm["target"]['cfg(target_family="wasm")']["dependencies"]["wasm-bindgen-futures"]["version"] != "=0.4.79":
+        raise ValueError("reviewed swarm compatibility manifest is missing")
     if not (relay_source / "src/bounded_lease.rs").is_file():
         raise ValueError("reviewed bounded relay source is missing")
     manifest = (repository / "Cargo.toml").read_text(encoding="utf-8")
@@ -43,7 +47,9 @@ def create(repository, destination, relay_source):
         if not (actual / "Cargo.toml").is_file():
             raise ValueError("production backend must be prepared before candidate resolution")
         manifest = replace(manifest, f'path = "{relative}"', f"path = {json.dumps(actual.as_posix())}")
-    manifest = replace(manifest, "[patch.crates-io]", f"[patch.crates-io]\nlibp2p-relay = {{ path = {json.dumps(relay_source.as_posix())} }}")
+    patches = "\n".join(f"{name} = {{ path = {json.dumps(path.as_posix())} }}" for name, path in
+                        (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source)))
+    manifest = replace(manifest, "[patch.crates-io]", "[patch.crates-io]\n" + patches)
     sdk = repository / "crates/shaar-p2p/Cargo.toml"
     if tomllib.loads(sdk.read_text(encoding="utf-8")).get("dependencies") != {}:
         raise ValueError("P08 graph staging expects the unchanged product scaffold")
@@ -61,11 +67,12 @@ def identities(lock):
     return {(p["name"], p["version"], p.get("source"), p.get("checksum")) for p in lock["package"]}
 
 
-def validate(old, new, metadata, relay_source):
+def validate(old, new, metadata, relay_source, swarm_source):
     previous = identities(old)
     current = identities(new)
     if not previous.issubset(current):
-        raise ValueError("candidate removed or changed an existing package identity")
+        missing = sorted((name, version) for name, version, _, _ in previous - current)
+        raise ValueError(f"candidate removed or changed an existing package identity: {missing}")
     nodes = metadata.get("resolve", {}).get("nodes") if metadata.get("resolve") else None
     if not nodes:
         raise ValueError("full resolved metadata is required; --no-deps is insufficient")
@@ -78,18 +85,19 @@ def validate(old, new, metadata, relay_source):
         matches = [p for p in packages if p["name"] == name]
         if len(matches) != 1 or matches[0]["version"] != version or matches[0]["id"] not in resolved:
             raise ValueError("candidate dependency family differs from reviewed source APIs")
-    relay = next(p for p in packages if p["name"] == "libp2p-relay")
-    if relay["source"] is not None or Path(relay["manifest_path"]).resolve() != (relay_source / "Cargo.toml").resolve():
-        raise ValueError("candidate did not resolve the prepared bounded relay")
+    for name, root in (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source)):
+        package = next(p for p in packages if p["name"] == name)
+        if package["source"] is not None or Path(package["manifest_path"]).resolve() != (root / "Cargo.toml").resolve():
+            raise ValueError(f"candidate did not resolve the prepared source: {name}")
     added = sorted((name, version, source or "path", checksum or "") for name, version, source, checksum in current - previous)
     return {"retained_package_identities": len(previous), "added_package_identities": added, "family": FAMILY}
 
 
-def verify(workspace, metadata_path, relay_source):
+def verify(workspace, metadata_path, relay_source, swarm_source):
     old_bytes = (workspace / "baseline.lock").read_bytes()
     new_bytes = (workspace / "Cargo.lock").read_bytes()
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    receipt = validate(tomllib.loads(old_bytes.decode()), tomllib.loads(new_bytes.decode()), metadata, relay_source)
+    receipt = validate(tomllib.loads(old_bytes.decode()), tomllib.loads(new_bytes.decode()), metadata, relay_source, swarm_source)
     receipt["baseline_lock_sha256"] = hashlib.sha256(old_bytes).hexdigest()
     receipt["candidate_lock_sha256"] = hashlib.sha256(new_bytes).hexdigest()
     (workspace / "graph-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
@@ -103,15 +111,17 @@ def main():
     prepare.add_argument("--repository", type=Path, required=True)
     prepare.add_argument("--destination", type=Path, required=True)
     prepare.add_argument("--relay-source", type=Path, required=True)
+    prepare.add_argument("--swarm-source", type=Path, required=True)
     check = sub.add_parser("verify")
     check.add_argument("--workspace", type=Path, required=True)
     check.add_argument("--metadata", type=Path, required=True)
     check.add_argument("--relay-source", type=Path, required=True)
+    check.add_argument("--swarm-source", type=Path, required=True)
     args = parser.parse_args()
     if args.mode == "create":
-        create(args.repository, args.destination, args.relay_source)
+        create(args.repository, args.destination, args.relay_source, args.swarm_source)
     else:
-        verify(args.workspace, args.metadata, args.relay_source)
+        verify(args.workspace, args.metadata, args.relay_source, args.swarm_source)
 
 
 if __name__ == "__main__":
