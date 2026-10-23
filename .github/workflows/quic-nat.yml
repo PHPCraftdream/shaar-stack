@@ -37,8 +37,16 @@ jobs:
       - name: Install bounded CI capture dependencies
         run: |
           set -euo pipefail
+          # Azure's progressing 44.4 kB/s transfer exhausted even the 600s install budget.
+          sudo python3 -I - <<'PY'
+          from pathlib import Path
+          mirrors = Path("/etc/apt/apt-mirrors.txt")
+          previous = mirrors.read_text(encoding="utf-8")
+          if "archive.ubuntu.com/ubuntu" not in previous:
+              raise SystemExit("unexpected runner apt mirror configuration")
+          mirrors.write_text("https://archive.ubuntu.com/ubuntu/\n", encoding="utf-8")
+          PY
           timeout 180 sudo apt-get update -qq
-          # The 23.7 MB Wireshark package exceeded 180s on the runner mirror twice.
           timeout 600 sudo env DEBIAN_FRONTEND=noninteractive apt-get \
             -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
             install -y --no-install-recommends conntrack tcpdump tshark ethtool iptables
