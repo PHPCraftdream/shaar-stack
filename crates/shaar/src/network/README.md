@@ -44,6 +44,15 @@ when Session handles still exist. Cancellation of close does not promise complet
 of drain. Handshake cancellation returns SDK slots via ownership, but consumed
 Initials are not replayed and backend metadata may persist until Drained.
 
+The first Windows run at `538f399` passed formatting, clippy and nine of the ten
+network tests, but immediate UDP rebinding failed with AddrInUse while Session
+handles remained alive. Absence of Endpoint clones alone is insufficient: Noq's
+retained connection State owns a UDP sender, which holds iroh's Socket and native
+senders. The shared runtime patch now makes that sender optional and releases it
+when the connection driver finishes or is cancelled, outside the connection state
+lock. Read-only closed connection handles no longer need native I/O ownership.
+The original immediate-rebinding regression is unchanged; this fix awaits CI proof.
+
 ## Verification scope
 
 The authored tests cover real loopback authentication, allowlist denial, wrong

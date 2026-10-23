@@ -22,6 +22,28 @@ def apply(root: Path):
                     self.inner.handle_event(queued.event);
                     // The remaining lease fields live through protocol processing.
                 }""")
+    conn = replace(conn, "    sender: Pin<Box<dyn UdpSender>>,\n    pub(crate) runtime:", "    sender: Option<Pin<Box<dyn UdpSender>>>,\n    pub(crate) runtime:")
+    conn = replace(conn, "            sender,\n            runtime,\n            send_buffer:", "            sender: Some(sender),\n            runtime,\n            send_buffer:")
+    conn = replace(conn, "impl Future for ConnectionDriver {", """impl Drop for ConnectionDriver {
+    fn drop(&mut self) {
+        // Handles may outlive the driver; release native I/O outside the state lock.
+        let sender = self.0.lock_without_waking("drop_driver").sender.take();
+        drop(sender);
+    }
+}
+
+impl Future for ConnectionDriver {""")
+    conn = replace(conn, """        let max_datagrams = self
+            .sender
+            .max_transmit_segments()
+            .min(MAX_TRANSMIT_SEGMENTS);""", """        let Some(sender) = self.sender.as_mut() else {
+            return Ok(false);
+        };
+        let max_datagrams = sender.max_transmit_segments().min(MAX_TRANSMIT_SEGMENTS);""")
+    conn = replace(conn, """            match self
+                .sender
+                .as_mut()
+                .poll_send""", """            match sender.as_mut().poll_send""")
     text = endpoint.read_text(encoding="utf-8")
     text = replace(text, "#[derive(Debug)]\nstruct ConnectionSet {", """use crate::ingress_budget::{Budget, BufferBatch, Queued};
 
