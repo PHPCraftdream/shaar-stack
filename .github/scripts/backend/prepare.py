@@ -10,10 +10,12 @@ import tomllib
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import policy  # noqa: E402
+import runtime  # noqa: E402
 
 PACKAGES = {
     "noq-proto": "7c1e5b6fe668491eca022f745a0a9402585626c73a7b839b3424ace15d6a9c8f",
     "iroh": "885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833",
+    "noq": "b78be567e796cfa74bb9bdc4117790af2d505eb887019cf8803244353eb09d89",
 }
 VERSION = "1.3.0"
 MAX_ARCHIVE = 2 * 1024 * 1024
@@ -30,7 +32,7 @@ def validate_archive(path, package, lock):
 
 def prepare(archives, lock_path, destination):
     lock = tomllib.loads(lock_path.read_text(encoding="utf-8"))
-    # Validate both inputs before creating any output. Never overwrite a prepared tree.
+    # Validate every input before creating any output. Never overwrite a prepared tree.
     for package in PACKAGES:
         validate_archive(archives[package], package, lock)
     destination.mkdir(parents=True, exist_ok=False)
@@ -47,6 +49,7 @@ def prepare(archives, lock_path, destination):
         if manifest["package"].get("license") != "MIT OR Apache-2.0":
             raise ValueError("backend license changed")
         roots[package] = root
+    runtime.apply(roots["noq"])
     policy.apply(roots["noq-proto"])
     policy.listener_limits(roots["iroh"])
     wrapper = roots["iroh"] / "src/endpoint/quic.rs"
@@ -56,6 +59,8 @@ def prepare(archives, lock_path, destination):
         manifest.write_text(manifest.read_text(encoding="utf-8") + "\n[workspace]\n", encoding="utf-8", newline="\n")
     provenance = {"version": VERSION, "archives": PACKAGES,
                   "patch_sha256": hashlib.sha256(Path(policy.__file__).read_bytes()).hexdigest(),
+                  "patch_sources": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                                    for name in ("policy.py", "runtime.py", "ingress_budget.rs")},
                   "fixture_instrumentation": False}
     (destination / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     return roots
@@ -65,10 +70,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--noq-archive", type=Path, required=True)
     parser.add_argument("--iroh-archive", type=Path, required=True)
+    parser.add_argument("--runtime-archive", type=Path, required=True)
     parser.add_argument("--lock", type=Path, required=True)
     parser.add_argument("--destination", type=Path, required=True)
     args = parser.parse_args()
-    roots = prepare({"noq-proto": args.noq_archive, "iroh": args.iroh_archive}, args.lock, args.destination)
+    roots = prepare({"noq-proto": args.noq_archive, "iroh": args.iroh_archive, "noq": args.runtime_archive}, args.lock, args.destination)
     print(json.dumps({name: str(path) for name, path in roots.items()}))
 
 

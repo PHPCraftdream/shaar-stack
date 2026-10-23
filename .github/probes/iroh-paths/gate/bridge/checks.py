@@ -14,6 +14,7 @@ class PreparationChecks(unittest.TestCase):
             [sys.executable, "-I", str(Path(__file__).with_name("prepare.py")),
              "--archive", str(archive), "--probe", str(probe),
              "--noq-source", str(self.args.noq_source),
+             "--runtime-source", str(self.args.runtime_source),
              "--destination", str(destination)],
             text=True, capture_output=True, timeout=30,
         )
@@ -59,5 +60,6 @@ if __name__ == "__main__":
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--probe", type=Path, required=True)
     parser.add_argument("--noq-source", type=Path, required=True)
+    parser.add_argument("--runtime-source", type=Path, required=True)
     PreparationChecks.args = parser.parse_args()
     unittest.main(argv=[sys.argv[0]])

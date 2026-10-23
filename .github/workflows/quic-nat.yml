@@ -50,13 +50,20 @@ jobs:
       - name: Prepare reviewed same-version source patches
         run: |
           set -euo pipefail
-          mkdir -p target/quic-nat/noq-archive target/quic-nat/iroh-archive
+          mkdir -p target/quic-nat/noq-archive target/quic-nat/iroh-archive target/quic-nat/runtime-archive
           curl --fail --location --max-time 120 https://static.crates.io/crates/noq-proto/noq-proto-1.3.0.crate --output target/quic-nat/noq-archive/noq.crate
           curl --fail --location --max-time 120 https://static.crates.io/crates/iroh/iroh-1.3.0.crate --output target/quic-nat/iroh-archive/iroh.crate
+          curl --fail --location --max-time 120 https://static.crates.io/crates/noq/noq-1.3.0.crate --output target/quic-nat/runtime-archive/noq.crate
+          python3 -I .github/scripts/backend/prepare.py \
+            --noq-archive target/quic-nat/noq-archive/noq.crate \
+            --iroh-archive target/quic-nat/iroh-archive/iroh.crate \
+            --runtime-archive target/quic-nat/runtime-archive/noq.crate \
+            --lock .github/probes/iroh-paths/Cargo.lock --destination target/quic-nat/production
           python3 -I .github/probes/iroh-paths/gate/prepare.py \
             --archive target/quic-nat/noq-archive/noq.crate --lock .github/probes/iroh-paths/Cargo.lock --destination target/quic-nat/noq-source
           python3 -I .github/probes/iroh-paths/gate/bridge/prepare.py \
             --archive target/quic-nat/iroh-archive/iroh.crate --probe .github/probes/iroh-paths \
+            --runtime-source target/quic-nat/production/noq/noq-1.3.0 \
             --noq-source target/quic-nat/noq-source/noq-proto-1.3.0 --destination target/quic-nat/bridge
       - name: Execute pure oracle and helper checks before privilege
         run: |

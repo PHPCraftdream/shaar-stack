@@ -23,7 +23,8 @@ def make_probe(destination, probe):
     for source in (probe / "tests/baseline_custom_only.rs", probe / "gate/bridge/calibration.rs"):
         shutil.copyfile(source, target / "tests" / source.name)
     manifest = (probe / "Cargo.toml").read_text(encoding="utf-8")
-    manifest += '\n[patch.crates-io]\nnoq-proto = { path = "../noq-proto/noq-proto-1.3.0" }\niroh = { path = "../iroh/iroh-1.3.0" }\n'
+    manifest += "\n[patch.crates-io]\n" + "".join(
+        f'{name} = {{ path = "../{name}/{name}-{prepare.VERSION}" }}\n' for name in prepare.PACKAGES)
     (target / "Cargo.toml").write_text(manifest, encoding="utf-8")
     lock = (probe / "Cargo.lock").read_text(encoding="utf-8")
     blocks = lock.split("[[package]]")
@@ -110,6 +111,14 @@ class PreparationChecks(unittest.TestCase):
             policy.listener_limits(root)
         self.assertEqual([path.read_bytes() for path in paths], before)
 
+    def test_runtime_ingress_transform_rejects_repeat_without_overwriting(self):
+        root = ROOTS["noq"]
+        paths = [root / name for name in ("src/lib.rs", "src/endpoint.rs", "src/connection.rs")]
+        before = [path.read_bytes() for path in paths]
+        with self.assertRaisesRegex(ValueError, "existing ingress budget module"):
+            prepare.runtime.apply(root)
+        self.assertEqual([path.read_bytes() for path in paths], before)
+
     def test_source_anchor_drift_and_repeat_patch_are_rejected(self):
         for source in ("", "unexpected source", "aa"):
             with self.assertRaises(ValueError):
@@ -156,11 +165,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--noq-archive", type=Path, required=True)
     parser.add_argument("--iroh-archive", type=Path, required=True)
+    parser.add_argument("--runtime-archive", type=Path, required=True)
     parser.add_argument("--probe", type=Path, required=True)
     parser.add_argument("--gate-noq", type=Path, required=True)
     parser.add_argument("--destination", type=Path, required=True)
     ARGS, remaining = parser.parse_known_args()
-    ARCHIVES = {"noq-proto": ARGS.noq_archive, "iroh": ARGS.iroh_archive}
+    ARCHIVES = {"noq-proto": ARGS.noq_archive, "iroh": ARGS.iroh_archive, "noq": ARGS.runtime_archive}
     ROOTS = prepare.prepare(ARCHIVES, ARGS.probe / "Cargo.lock", ARGS.destination)
     make_probe(ARGS.destination, ARGS.probe)
     unittest.main(argv=[sys.argv[0], *remaining])

@@ -43,35 +43,41 @@ jobs:
       - name: Prepare verified sources without executing them
         run: |
           set -euo pipefail
-          mkdir -p target/iroh-gate/noq-archive target/iroh-gate/iroh-archive
+          mkdir -p target/iroh-gate/noq-archive target/iroh-gate/iroh-archive target/iroh-gate/runtime-archive
           curl --fail --location --max-time 120 \
             https://static.crates.io/crates/noq-proto/noq-proto-1.3.0.crate \
             --output target/iroh-gate/noq-archive/noq-proto.crate
           curl --fail --location --max-time 120 \
             https://static.crates.io/crates/iroh/iroh-1.3.0.crate \
             --output target/iroh-gate/iroh-archive/iroh.crate
+          curl --fail --location --max-time 120 \
+            https://static.crates.io/crates/noq/noq-1.3.0.crate \
+            --output target/iroh-gate/runtime-archive/noq.crate
           python3 -I .github/probes/iroh-paths/gate/prepare.py \
             --archive target/iroh-gate/noq-archive/noq-proto.crate \
             --lock .github/probes/iroh-paths/Cargo.lock \
             --destination target/iroh-gate/noq-source
+          python3 -I .github/scripts/backend/checks.py \
+            --noq-archive target/iroh-gate/noq-archive/noq-proto.crate \
+            --iroh-archive target/iroh-gate/iroh-archive/iroh.crate \
+            --runtime-archive target/iroh-gate/runtime-archive/noq.crate \
+            --probe .github/probes/iroh-paths \
+            --gate-noq target/iroh-gate/noq-source/noq-proto-1.3.0 \
+            --destination target/iroh-gate/production -v
           python3 -I .github/probes/iroh-paths/gate/bridge/prepare.py \
             --archive target/iroh-gate/iroh-archive/iroh.crate \
             --probe .github/probes/iroh-paths \
+            --runtime-source target/iroh-gate/production/noq/noq-1.3.0 \
             --noq-source target/iroh-gate/noq-source/noq-proto-1.3.0 \
             --destination target/iroh-gate/bridge
           python3 -I .github/probes/iroh-paths/gate/bridge/checks.py \
             --archive target/iroh-gate/iroh-archive/iroh.crate \
             --probe .github/probes/iroh-paths \
+            --runtime-source target/iroh-gate/production/noq/noq-1.3.0 \
             --noq-source target/iroh-gate/noq-source/noq-proto-1.3.0
       - name: Verify clean production source preparation and runtime gate
         run: |
           set -euo pipefail
-          python3 -I .github/scripts/backend/checks.py \
-            --noq-archive target/iroh-gate/noq-archive/noq-proto.crate \
-            --iroh-archive target/iroh-gate/iroh-archive/iroh.crate \
-            --probe .github/probes/iroh-paths \
-            --gate-noq target/iroh-gate/noq-source/noq-proto-1.3.0 \
-            --destination target/iroh-gate/production -v
           manifest=target/iroh-gate/production/probe/Cargo.toml
           cargo fmt --manifest-path "$manifest" --all
           cargo test --manifest-path "$manifest" --locked --lib

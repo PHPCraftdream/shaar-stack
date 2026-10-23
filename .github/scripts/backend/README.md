@@ -5,7 +5,7 @@ minimal iroh 1.3.0 configuration forwarder. P03's isolated fixtures import the
 same functions, rather than maintaining a second production policy.
 
 `prepare.py` consumes separately downloaded, reviewed archives and the pinned
-probe lock as **data**. It checks both complete SHA256 values and lock identities
+probe lock as **data**. It checks all three complete SHA256 values and lock identities
 before creating a fresh output directory, extracts each package separately with
 the data filter, verifies package/version/license, and applies exact-count source
 edits. It preserves the upstream license files. Existing destinations are refused;
@@ -15,7 +15,8 @@ No archive code is imported or executed by preparation.
 
 The production source contains application readiness/eligibility, STREAM and
 DATAGRAM writer checks, bounded empty-DATAGRAM accounting, the iroh forwarder and
-an optional pre-accept incoming-budget bridge.
+an optional pre-accept incoming-budget bridge. The same-version Noq async wrapper
+also receives counted raw-datagram ingress admission.
 It does not add explicit path-open/disable-NAT hooks, a Transmit constructor,
 fixture tests, or encrypted packet logging. Normal upstream qlog behavior is not
 rewritten. Upstream versions and the original standalone lock remain unchanged.
@@ -34,7 +35,10 @@ Omission preserves upstream defaults. Saturated Initials may be silently dropped
 this is not an authenticated access-denial response. The SDK still needs separate
 handshake/active-connection/stream/task admission and lifecycle control.
 
-This P06 prerequisite is authored, not yet CI-accepted. The native test observes
+This P06 prerequisite passed [CI 39886131924](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39886131924)
+at `1b6506e` on Linux and Windows. Completed logs confirm both native tests passed
+(two tests, zero failures; suite 12.64s/12.83s), with all companion workflows also
+successful. The native test observes
 and forwards a real complete Initial and checks incoming count 0/1 before accept,
 both at bind and after an ALPN update. Positive admission with zero byte budgets
 pins the first-packet exclusion; the external Noq config factory also checks byte
@@ -42,12 +46,42 @@ limit propagation. Preparation refuses a second listener patch without overwriti
 source. Existing Noq queue-budget regressions remain part of backend CI. No new
 metrics feature, dependency version or public SDK networking API is introduced.
 
+## Raw datagram queue boundary — pending CI
+
+The async Noq wrapper used an unbounded channel to forward classified UDP events
+to each connection driver (`endpoint.rs:982-991`), before connection flow control.
+Its receive work limiter constrains scheduling work, not retained queue size. The
+separate protocol-control producer (`endpoint.rs:658-668`) must not be treated as
+raw datagram admission or have its lifecycle notifications silently discarded.
+
+The owned `ingress_budget.rs` module and exact `runtime.py` transform bound pending
+raw datagrams to 256 per connection and shared retained receive allocations to
+8 MiB per endpoint. Metadata is separately bounded by the event-count cap. This
+is not a claim about total RSS, kernel buffers, decoded stream windows, pre-accept
+storage or all active/draining connections. SDK admission must cover those other
+boundaries too. The Noq endpoint receive payload default is 1472 bytes, not 65527.
+
+Admission charges `BytesMut.capacity()` for each actual receive allocation. GRO
+slices share one memory lease until the last queued owner drops. Non-GRO packets
+move a lease without an additional shared-owner allocation. Record and byte leases
+return on processing, failed send, receiver drop and cancellation. Relaxed atomics
+are accounting only; channel ownership transfer publishes packet data. Local and
+protocol-control messages retain their existing reliable delivery path. Overload
+drops whole UDP input, not selected STREAM frames: the original pre-encryption
+payload gate is unchanged and still supplies signaling-only enforcement.
+
+This extends source preparation to the already-used `noq` 1.3.0 archive, verified
+against its immutable registry digest. Only its Cargo source identity changes to a
+prepared path; no version is raised. Provenance records every owned patch source.
+Budget/ownership/concurrency tests and normal QUIC regressions execute only in CI;
+this runtime change is authored, not yet verified.
+
 ## Explicit preparation, not a build script
 
 Run the script from the repository root, with Python isolated mode:
 
 ```text
-python -I .github/scripts/backend/prepare.py --noq-archive <archive-dir>/noq-proto.crate --iroh-archive <other-archive-dir>/iroh.crate --lock .github/probes/iroh-paths/Cargo.lock --destination target/backend
+python -I .github/scripts/backend/prepare.py --noq-archive <archive-dir>/noq-proto.crate --iroh-archive <other-archive-dir>/iroh.crate --runtime-archive <runtime-archive-dir>/noq.crate --lock .github/probes/iroh-paths/Cargo.lock --destination target/backend
 ```
 
 Archive acquisition is a separate bounded HTTPS operation; the script does not
@@ -119,6 +153,7 @@ at `78a0097` passed all seven topology cases after observer/capture fixes: 126/1
 native observations, zero kernel drops, no truncated frame, full ciphertext
 correlation, zero custom payload and clean owned-resource teardown. Its artifacts
 were independently inspected; legacy NAT and current workspace CI also passed.
-Production dependency delivery is accepted. It is not a working public SDK
+That production dependency delivery baseline is accepted; the subsequent raw-ingress
+hardening above still needs its fresh CI proof. Neither is a working public SDK
 networking API or selected-custom transport authority; those remain separate
 implementation tasks. Yggdrasil integration's permission/lifecycle gate is unchanged.

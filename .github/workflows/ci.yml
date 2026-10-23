@@ -41,17 +41,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p target/backend-archives/noq target/backend-archives/iroh
+          mkdir -p target/backend-archives/noq target/backend-archives/iroh target/backend-archives/runtime
           curl --fail --location --max-time 120 \
             https://static.crates.io/crates/noq-proto/noq-proto-1.3.0.crate \
             --output target/backend-archives/noq/noq-proto.crate
           curl --fail --location --max-time 120 \
             https://static.crates.io/crates/iroh/iroh-1.3.0.crate \
             --output target/backend-archives/iroh/iroh.crate
+          curl --fail --location --max-time 120 \
+            https://static.crates.io/crates/noq/noq-1.3.0.crate \
+            --output target/backend-archives/runtime/noq.crate
           python -I .github/scripts/backend/prepare.py \
             --noq-archive target/backend-archives/noq/noq-proto.crate \
             --iroh-archive target/backend-archives/iroh/iroh.crate \
+            --runtime-archive target/backend-archives/runtime/noq.crate \
             --lock .github/probes/iroh-paths/Cargo.lock --destination target/backend
+      - name: Verify ingress ownership and budget boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/ingress-budget-tests
+          rustc --edition 2024 --test -D warnings .github/scripts/backend/ingress_budget.rs --out-dir target/ingress-budget-tests
+          binary=target/ingress-budget-tests/ingress_budget
+          if [ "$RUNNER_OS" = Windows ]; then binary="$binary.exe"; fi
+          "$binary"
       # --locked rejects mismatches with the lock graph without regenerating it.
       # Full test runs are executed only in CI.
       - name: cargo fmt

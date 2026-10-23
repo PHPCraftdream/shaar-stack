@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--probe", type=Path, required=True)
     parser.add_argument("--noq-source", type=Path, required=True)
+    parser.add_argument("--runtime-source", type=Path, required=True)
     parser.add_argument("--destination", type=Path, required=True)
     args = parser.parse_args()
     lock_text = (args.probe / "Cargo.lock").read_text(encoding="utf-8")
@@ -32,6 +33,9 @@ def main():
         raise ValueError("iroh archive does not match reviewed lock checksum")
     if not (args.noq_source / "Cargo.toml").is_file():
         raise ValueError("prepared Noq source is missing")
+    owned_budget = Path(__file__).resolve().parents[4] / "scripts/backend/ingress_budget.rs"
+    if (args.runtime_source / "src/ingress_budget.rs").read_bytes() != owned_budget.read_bytes():
+        raise ValueError("prepared Noq runtime budget mismatch")
     args.destination.mkdir(parents=True, exist_ok=False)
     source = args.destination / "source"
     source.mkdir()
@@ -95,12 +99,14 @@ def main():
     noq = args.destination / "noq-source"
     shutil.copytree(args.noq_source, noq)
     add_packet_identity(noq)
+    shutil.copytree(args.runtime_source, args.destination / "runtime-source")
     manifest = (args.probe / "Cargo.toml").read_text(encoding="utf-8")
     if manifest.count('    "net",\n') != 1:
         raise ValueError("pinned Tokio feature anchor changed")
     manifest = manifest.replace('    "net",\n', '    "net",\n    "fs",\n')
     manifest += '\n[patch.crates-io]\niroh = { path = "../source/iroh-1.3.0" }\n'
     manifest += 'noq-proto = { path = "../noq-source" }\n'
+    manifest += 'noq = { path = "../runtime-source" }\n'
     manifest += '\n[[bin]]\nname = "nat-peer"\npath = "tests/support/nat/main.rs"\n'
     (project / "Cargo.toml").write_text(manifest, encoding="utf-8")
     # Only source identity changes for these exact same-version path replacements.
@@ -108,14 +114,14 @@ def main():
     replaced = set()
     for index, block in enumerate(blocks[1:], 1):
         package = tomllib.loads("[[package]]" + block)["package"][0]
-        if package["name"] not in ("iroh", "noq-proto"):
+        if package["name"] not in ("iroh", "noq-proto", "noq"):
             continue
         if package["version"] != "1.3.0" or package["name"] in replaced:
             raise ValueError("unexpected patched package identity")
         blocks[index] = "\n".join(line for line in block.split("\n")
                                     if not line.startswith(("source = ", "checksum = ")))
         replaced.add(package["name"])
-    if replaced != {"iroh", "noq-proto"}:
+    if replaced != {"iroh", "noq-proto", "noq"}:
         raise ValueError("missing patched lock entries")
     (project / "Cargo.lock").write_text("[[package]]".join(blocks), encoding="utf-8")
     print(f"Prepared wrapper bridge at {project}; downloaded code not executed")
