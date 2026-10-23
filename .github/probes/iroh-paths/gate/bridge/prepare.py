@@ -11,7 +11,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
 from packet_identity import apply as add_packet_identity  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "scripts/backend"))
-from policy import forwarder, replace  # noqa: E402
+from policy import forwarder, listener_limits, replace  # noqa: E402
 
 DIGEST = "885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833"
 
@@ -38,6 +38,7 @@ def main():
     with tarfile.open(args.archive) as archive:
         archive.extractall(source, filter="data")
     iroh = source / "iroh-1.3.0"
+    listener_limits(iroh)
     config = iroh / "src/endpoint/quic.rs"
     text = forwarder(config.read_text(encoding="utf-8"))
     anchor = "    pub fn application_data_filter(mut self, filter: fn(noq_proto::FourTuple) -> bool) -> Self {\n        self.0.application_data_filter(filter);\n        self\n    }"

@@ -148,6 +148,38 @@ def forwarder(text):
     }""")
 
 
+def listener_limits(root: Path):
+    endpoint = root / "src/endpoint.rs"
+    socket = root / "src/socket.rs"
+    text = endpoint.read_text(encoding="utf-8")
+    if "incoming_limits:" in text or "pub fn incoming_limits(" in text:
+        raise ValueError("listener limits source already modified")
+    text = replace(text, "    configured_addrs: BTreeSet<SocketAddr>,", "    configured_addrs: BTreeSet<SocketAddr>,\n    incoming_limits: Option<(usize, u64, u64)>,")
+    text = replace(text, "            configured_addrs: Default::default(),", "            configured_addrs: Default::default(),\n            incoming_limits: None,")
+    text = replace(text, "            transport_config: self.transport_config.clone(),", "            transport_config: self.transport_config.clone(),\n            incoming_limits: self.incoming_limits,")
+    text = replace(text, "    // # The final constructor that everyone needs.", """    /// Sets queued incoming count and per-incoming/total buffered-byte limits.
+    /// Byte limits exclude the first packet, whose storage is bounded by count.
+    /// Excess Initials or buffered packets may be dropped. Omission preserves defaults.
+    pub fn incoming_limits(mut self, count: usize, per_incoming: u64, total: u64) -> Self {
+        self.incoming_limits = Some((count, per_incoming, total));
+        self
+    }
+
+    // # The final constructor that everyone needs.""")
+    shared = socket.read_text(encoding="utf-8")
+    shared = replace(shared, "    pub(crate) transport_config: QuicTransportConfig,", "    pub(crate) transport_config: QuicTransportConfig,\n    pub(crate) incoming_limits: Option<(usize, u64, u64)>,")
+    shared = replace(shared, "        inner.transport_config(self.transport_config.to_inner_arc());", """        inner.transport_config(self.transport_config.to_inner_arc());
+        if let Some((count, per_incoming, total)) = self.incoming_limits {
+            inner.max_incoming(count);
+            inner.incoming_buffer_size(per_incoming);
+            inner.incoming_buffer_size_total(total);
+        }""")
+    shared = replace(shared, "            transport_config: QuicTransportConfig::default(),", "            transport_config: QuicTransportConfig::default(),\n            incoming_limits: None,", count=2)
+    # Validate both complete transforms before writing either source file.
+    endpoint.write_text(text, encoding="utf-8", newline="\n")
+    socket.write_text(shared, encoding="utf-8", newline="\n")
+
+
 def apply(root: Path):
     edits = {
         "src/config/transport.rs": transport,

@@ -102,6 +102,14 @@ class PreparationChecks(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 prepare.prepare(ARCHIVES, ARGS.probe / "Cargo.lock", directory)
 
+    def test_listener_bridge_rejects_repeat_preparation_without_overwriting(self):
+        root = ROOTS["iroh"]
+        paths = [root / "src/endpoint.rs", root / "src/socket.rs"]
+        before = [path.read_bytes() for path in paths]
+        with self.assertRaisesRegex(ValueError, "listener limits source already modified"):
+            policy.listener_limits(root)
+        self.assertEqual([path.read_bytes() for path in paths], before)
+
     def test_source_anchor_drift_and_repeat_patch_are_rejected(self):
         for source in ("", "unexpected source", "aa"):
             with self.assertRaises(ValueError):

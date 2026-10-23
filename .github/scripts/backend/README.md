@@ -13,11 +13,34 @@ preparation never overwrites a previous source tree. A failed preparation is not
 usable; `provenance.json` is emitted only after all edits finish successfully.
 No archive code is imported or executed by preparation.
 
-The production source contains only application readiness/eligibility, STREAM and
-DATAGRAM writer checks, bounded empty-DATAGRAM accounting and the iroh forwarder.
+The production source contains application readiness/eligibility, STREAM and
+DATAGRAM writer checks, bounded empty-DATAGRAM accounting, the iroh forwarder and
+an optional pre-accept incoming-budget bridge.
 It does not add explicit path-open/disable-NAT hooks, a Transmit constructor,
 fixture tests, or encrypted packet logging. Normal upstream qlog behavior is not
 rewritten. Upstream versions and the original standalone lock remain unchanged.
+
+## Pre-accept budgets for SDK endpoint work
+
+Noq's incoming count and per-incoming/aggregate buffered-byte limits belong to its
+listener configuration, before the SDK accepts a connection. The byte limits do
+not include the first packet; count bounds that separate storage. An application
+semaphore alone does not configure this earlier boundary. Noq defaults are 65536
+pending entries, 10 MiB per-entry buffering and 100 MiB aggregate buffering.
+
+The shared patch adds `Builder::incoming_limits(count, per_incoming, total)` and
+stores the optional values in iroh's StaticConfig factory, including ALPN updates.
+Omission preserves upstream defaults. Saturated Initials may be silently dropped;
+this is not an authenticated access-denial response. The SDK still needs separate
+handshake/active-connection/stream/task admission and lifecycle control.
+
+This P06 prerequisite is authored, not yet CI-accepted. The native test observes
+and forwards a real complete Initial and checks incoming count 0/1 before accept,
+both at bind and after an ALPN update. Positive admission with zero byte budgets
+pins the first-packet exclusion; the external Noq config factory also checks byte
+limit propagation. Preparation refuses a second listener patch without overwriting
+source. Existing Noq queue-budget regressions remain part of backend CI. No new
+metrics feature, dependency version or public SDK networking API is introduced.
 
 ## Explicit preparation, not a build script
 

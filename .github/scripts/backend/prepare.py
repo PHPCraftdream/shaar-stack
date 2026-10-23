@@ -48,6 +48,7 @@ def prepare(archives, lock_path, destination):
             raise ValueError("backend license changed")
         roots[package] = root
     policy.apply(roots["noq-proto"])
+    policy.listener_limits(roots["iroh"])
     wrapper = roots["iroh"] / "src/endpoint/quic.rs"
     wrapper.write_text(policy.forwarder(wrapper.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
     for root in roots.values():
