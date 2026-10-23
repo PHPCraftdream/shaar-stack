@@ -161,6 +161,19 @@ pub async fn start(config: &Config) -> io::Result<Session> {
     })
 }
 
+/// cancel-safe: yes — only metadata snapshots and timer waits; caller owns the deadline.
+async fn observe_native_path(
+    mut snapshot: impl FnMut() -> io::Result<Option<noq_proto::PathId>>,
+) -> io::Result<noq_proto::PathId> {
+    loop {
+        if let Some(path) = snapshot()? {
+            return Ok(path);
+        }
+        // The iroh actor may publish Established after Noq wakes application reads.
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 impl Session {
     /// cancel-safe: NO — frame reads are terminal on deadline, never resumed after cancellation.
     pub async fn observe(&self, config: &Config) -> io::Result<()> {
@@ -217,32 +230,41 @@ impl Session {
 
     /// cancel-safe: yes — stopped only observes acknowledgement or peer STOP_SENDING.
     pub async fn ack_initial(&self) -> io::Result<()> {
-        let stopped = tokio::time::timeout(Duration::from_secs(10), self.stream.stopped())
-            .await
-            .map_err(|_| io::Error::other("initial STREAM ACK deadline"))?
-            .map_err(io::Error::other)?;
-        if stopped.is_some() {
-            return Err(io::Error::other("initial STREAM was stopped, not ACKed"));
-        }
-        Ok(())
+        tokio::time::timeout(Duration::from_secs(10), async {
+            if self
+                .stream
+                .stopped()
+                .await
+                .map_err(io::Error::other)?
+                .is_some()
+            {
+                return Err(io::Error::other("initial STREAM was stopped, not ACKed"));
+            }
+            observe_native_path(|| self.native_path()).await?;
+            Ok(())
+        })
+        .await
+        .map_err(|_| io::Error::other("initial STREAM ACK/path observation deadline"))?
     }
 
-    fn native_path(&self) -> io::Result<noq_proto::PathId> {
+    fn native_path(&self) -> io::Result<Option<noq_proto::PathId>> {
         let paths = self.connection.paths();
         let mut native = paths.iter().filter(|path| path.is_ip());
-        let path = native
-            .next()
-            .ok_or_else(|| io::Error::other("no native path"))?;
+        let Some(path) = native.next() else {
+            return Ok(None);
+        };
         if native.next().is_some() {
             return Err(io::Error::other("expected exactly one native path"));
         }
-        Ok(path.id())
+        Ok(Some(path.id()))
     }
 
     /// cancel-safe: NO — terminal deadline; the single application write is never retried.
     pub async fn lose_native(&self) -> io::Result<Recovery> {
         tokio::time::timeout(Duration::from_secs(20), async {
-            let old_path = self.native_path()?;
+            let old_path = self
+                .native_path()?
+                .ok_or_else(|| io::Error::other("no native path before loss"))?;
             let stats = self.connection.stats();
             let lost_before = stats.lost_packets;
             let stream_frames_before = stats.frame_tx.stream;
@@ -337,7 +359,7 @@ impl Session {
             {
                 return Err(io::Error::other("recovery STREAM was stopped, not ACKed"));
             }
-            let new_path = self.native_path()?;
+            let new_path = observe_native_path(|| self.native_path()).await?;
             let control_after = self.transport.stats();
             if new_path == recovery.old_path
                 || self.connection.stable_id() != recovery.stable_id
@@ -367,5 +389,66 @@ impl Session {
         drop(self.connection);
         self.endpoint.close().await;
         self.transport.stats()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn native_observation_accepts_current_or_later_actor_snapshot() {
+        for pending in [0, 2] {
+            let mut calls = 0;
+            let path = tokio::time::timeout(
+                Duration::from_secs(5),
+                observe_native_path(|| {
+                    calls += 1;
+                    Ok((calls > pending).then_some(2u32.into()))
+                }),
+            )
+            .await
+            .expect("observation deadline")
+            .expect("published path");
+            assert_eq!(path, 2u32.into());
+            assert_eq!(calls, pending + 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn native_observation_preserves_terminal_snapshot_errors() {
+        let mut calls = 0;
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            observe_native_path(|| {
+                calls += 1;
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "ambiguous path snapshot",
+                ))
+            }),
+        )
+        .await
+        .expect("error must not be retried")
+        .expect_err("snapshot error");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn native_observation_can_be_cancelled_without_fabricating_readiness() {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1), observe_native_path(|| Ok(None)))
+                .await
+                .is_err()
+        );
+        let path = tokio::time::timeout(
+            Duration::from_secs(5),
+            observe_native_path(|| Ok(Some(3u32.into()))),
+        )
+        .await
+        .expect("fresh observation deadline")
+        .expect("fresh path");
+        assert_eq!(path, 3u32.into());
     }
 }
