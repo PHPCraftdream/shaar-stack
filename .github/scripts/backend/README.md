@@ -81,7 +81,7 @@ The companion Noq, clean-source/bridge and full NAT workflows also succeeded. Ru
 error exposed by the first run. This verifies the ingress layer, not every SDK
 resource contract.
 
-## Allocated connection metadata — pending CI
+## Allocated connection metadata
 
 Protocol Draining does not release a Noq endpoint's ConnectionMeta entry; only
 Drained removes it. Releasing an SDK active-session permit on `closed()` therefore
@@ -98,11 +98,22 @@ standard CONNECTION_REFUSED if capacity changes after Initial admission. The loc
 error variant is an intentional extension of the workspace-only patched Noq API;
 no wire format, package version or public SDK API changes.
 
-Authored tests use the real sans-I/O harness to hold a one-connection quota through
+Tests use the real sans-I/O harness to hold a one-connection quota through
 Draining and prove allocation becomes possible after Drained, plus a native zero-
 quota dial requiring the exact typed error and no emitted Initial. Source-repeat
-and clean/gate parity controls cover the same implementation. These additions are
-not yet executed; CI is the only compilation/runtime environment.
+and clean/gate parity controls cover the same implementation.
+
+Completed logs at `020d386` were inspected. On both Linux and Windows,
+[Noq CI 39910571447](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39910571447)
+passed 17 gate tests and the full 444-test suite, including the Draining/Drained
+regression. [Workspace CI 39910571177](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39910571177)
+passed five ingress-budget tests and all three native dependency tests per OS;
+the native suites took 12.64s/12.83s. The exact local quota error/no-Initial test
+passed on both OSes. The corrected bridge reads the local StaticConfig owner
+before it moves into EndpointInner, without widening visibility or changing limits.
+The companion bridge and NAT watchers completed successfully; their latest detailed
+logs and artifacts have not been re-inspected. CI remains the only compilation and
+runtime environment; this accepts the metadata prerequisite, not the SDK endpoint.
 
 ## Explicit preparation, not a build script
 
@@ -126,7 +137,7 @@ maintained patch scripts and tests remain subject to both limits.
 
 ## Verification and current integration boundary
 
-`checks.py` runs only in CI. It compares all four patched Noq runtime files with
+`checks.py` runs only in CI. It compares all six patched Noq runtime files with
 the spike's output, requires original bytes for the packet builder/qlog and other
 untouched iroh files, checks absence of fixture hooks, and exercises checksum,
 size, lock, source-anchor and existing-destination failures. It also prepares a
@@ -181,7 +192,7 @@ at `78a0097` passed all seven topology cases after observer/capture fixes: 126/1
 native observations, zero kernel drops, no truncated frame, full ciphertext
 correlation, zero custom payload and clean owned-resource teardown. Its artifacts
 were independently inspected; legacy NAT and current workspace CI also passed.
-That production dependency delivery baseline and raw-ingress hardening are accepted;
-the allocated-connection extension still needs its fresh CI proof. None is a working public SDK
-networking API or selected-custom transport authority; those remain separate
+The production dependency delivery baseline, raw-ingress hardening and allocated-
+connection metadata quota are accepted. None is a working public SDK networking API
+or selected-custom transport authority; those remain separate
 implementation tasks. Yggdrasil integration's permission/lifecycle gate is unchanged.
