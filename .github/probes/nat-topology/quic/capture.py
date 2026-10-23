@@ -57,10 +57,11 @@ class Capture:
         stderr = self.stderr.open("xb")
         try:
             # Capture both WAN observations; the oracle handles exact duplicate packets.
-            # Immediate mode avoids libpcap block-retirement latency on fast cases.
+            # Immediate mode avoids block-retirement latency; jumbo snapshots waste ring slots.
+            # MTU <=1500 plus cooked header fits 2048; request a bounded 4 MiB buffer.
             process = subprocess.Popen(
                 ["ip", "netns", "exec", cfg["ns"]["wan"], "tcpdump", "-i", "any",
-                 "--immediate-mode", "-n", "-U", "-s", "0", "-c", "1024", "-Z", "root",
+                 "--immediate-mode", "-n", "-U", "-s", "2048", "-B", "4096", "-c", "1024", "-Z", "root",
                  "-w", str(self.path), expression],
                 stdout=subprocess.DEVNULL, stderr=stderr,
                 env=os.environ.copy() | {"LC_ALL": "C"})

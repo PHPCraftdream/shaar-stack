@@ -1,5 +1,6 @@
 """CI-only pure capture/tuple rejection controls; never executes namespace commands."""
 import copy
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -34,6 +35,19 @@ def entry(side, unreplied=False):
 
 
 class CaptureChecks(unittest.TestCase):
+    def test_capture_uses_full_owned_link_snapshots_and_a_bounded_burst_buffer(self):
+        cfg = config()
+        cfg["ns"]["wan"] = "snabc123-wan"
+        with tempfile.TemporaryDirectory() as temporary, patch("capture.subprocess.Popen") as spawn:
+            Capture(cfg, Path(temporary), lambda _name, _process, stderr, *_rest: stderr.close())
+            command = spawn.call_args.args[0]
+            self.assertEqual(command[:4], ["ip", "netns", "exec", cfg["ns"]["wan"]])
+            self.assertIn("--immediate-mode", command)
+            self.assertEqual(command[command.index("-s") + 1], "2048")
+            self.assertGreaterEqual(int(command[command.index("-s") + 1]), 1500 + 20)
+            self.assertEqual(command[command.index("-B") + 1], "4096")
+            self.assertEqual(command[command.index("-c") + 1], "1024")
+
     def test_capture_drains_before_stop_and_rejects_kernel_loss(self):
         self.assertIsNone(parse_stats("1 packet captured\n"))
         self.assertEqual(parse_stats("tcpdump: 36 packets captured, 36 packets received by filter, 0 packets dropped by kernel\n"), (36, 36, 0))
@@ -86,6 +100,25 @@ class CaptureChecks(unittest.TestCase):
 
 
 class TopologyChecks(unittest.TestCase):
+    def test_link_mtu_bound_is_checked_before_altering_that_link(self):
+        for mtu in (0, 1500, 1501, 9000):
+            calls = []
+            def observe(_cfg, _key, args, _path):
+                calls.append(args)
+                if args[0] == "ip":
+                    return json.dumps([{"ifname": "snabc123-veth", "mtu": mtu,
+                                        "linkinfo": {"info_kind": "veth"}}])
+                return ""
+            with self.subTest(mtu=mtu), tempfile.TemporaryDirectory() as temporary, \
+                 patch.object(core, "run", side_effect=observe):
+                if mtu == 1500:
+                    core.configure(config(), Path(temporary), "positive")
+                    self.assertTrue(any(args[0] == "ethtool" for args in calls))
+                else:
+                    with self.assertRaisesRegex(ValueError, "MTU"):
+                        core.configure(config(), Path(temporary), "positive")
+                    self.assertEqual(len(calls), 1)
+
     def test_interrupt_hold_never_advances_and_restores_alarm_scope(self):
         previous = object()
         for outcome in [SystemExit(143), None]:

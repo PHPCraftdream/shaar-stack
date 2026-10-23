@@ -323,3 +323,25 @@ P03 experimental acceptance is passed for the reviewed patched backend and the
 conservative native-only policy. Production dependency delivery, selected custom
 transport authority and actual libp2p/Yggdrasil integration are not implied. See
 [the consolidated acceptance boundary](../../../docs/verification/iroh-paths.md#13-accepted-physical-native-loss-and-automatic-re-punch).
+
+### Subsequent observer/capture regressions
+
+Run `39876917407` exposed a fixture observation race: both Noq qlogs already showed
+recovery payload on native path 2, but one peer inspected the iroh actor's path
+snapshot before its Established event was published. The fixture now waits for
+that metadata inside the original ACK/recovery deadlines; it does not reopen a
+path, rewrite data or extend the deadlines. Immediate/delayed observation,
+terminal-error and cancellation controls cover this boundary.
+
+Run `39878061700` then produced both successful recovery reports, but its independent
+capture correctly failed: 122 packets captured, 126 received, four dropped in the
+kernel. The pcap had a 262144-byte snapshot profile despite a maximum observed
+1500-byte frame and owned WAN MTUs of 1500. Immediate capture now requests a bounded
+4 MiB buffer and 2048-byte snapshots; configuration rejects non-loopback link MTUs
+above 1500 before capture starts. The snapshot includes the entire owned
+link frame and cooked header, rather than truncating application payload. This is
+an explicit capture-memory/packet-capacity trade-off, not a longer wait or a retry
+of a lossy oracle. The 1024-packet and 8 MiB pcap caps, zero-kernel-drop requirement,
+complete-drain check and full ciphertext correlation are unchanged. Pure regression
+checks pin the capture arguments, reject unsupported MTUs and retain kernel-loss
+rejection. Fresh CI acceptance of this capture profile is still pending.

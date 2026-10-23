@@ -61,7 +61,11 @@ def configure(cfg, root, kind):
         links = json.loads(run(cfg, key, ["ip", "-j", "-d", "link", "show"], root / f"links-{key}.json"))
         for link in links:
             name = link["ifname"]
-            if name == "lo" or link.get("linkinfo", {}).get("info_kind") == "bridge":
+            if name == "lo":
+                continue
+            if not 1 <= link["mtu"] <= 1500:
+                raise ValueError("owned QUIC link MTU exceeds the complete-capture bound")
+            if link.get("linkinfo", {}).get("info_kind") == "bridge":
                 continue
             if not name.startswith(cfg["prefix"]) or link.get("linkinfo", {}).get("info_kind") != "veth":
                 raise ValueError("refusing to alter a non-owned/non-veth interface")
