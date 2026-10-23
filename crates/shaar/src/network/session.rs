@@ -12,6 +12,7 @@ pub(crate) const ACCESS_DENIED: u32 = 1;
 /// The endpoint owns the separate drain/UDP shutdown boundary.
 pub struct Session {
     pub(super) connection: Connection,
+    pub(super) streams: tokio::sync::Semaphore,
     pub(super) _admission: OwnedSemaphorePermit,
 }
 

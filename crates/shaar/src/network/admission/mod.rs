@@ -7,7 +7,10 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::identity::Identity;
 
-use super::{ALPN, Allowlist, Limits, NetworkError, Session, policy, session::ACCESS_DENIED};
+use super::{ALPN, NetworkError, STREAM_LIMIT, Session, session::ACCESS_DENIED};
+
+mod policy;
+pub use policy::{Allowlist, Limits};
 
 #[cfg(test)]
 #[path = "tests.rs"]
@@ -38,7 +41,7 @@ impl Endpoint {
         }
         let transport = QuicTransportConfig::builder()
             .application_data_filter(|path| policy::native_ip(path.remote().ip()))
-            .max_concurrent_bidi_streams(VarInt::from_u32(16))
+            .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_LIMIT)))
             .max_concurrent_uni_streams(VarInt::from_u32(0))
             .stream_receive_window(VarInt::from_u32(256 * 1024))
             .receive_window(VarInt::from_u32(1024 * 1024))
@@ -151,6 +154,7 @@ impl Endpoint {
         }
         Ok(Session {
             connection,
+            streams: Semaphore::new(usize::from(STREAM_LIMIT)),
             _admission: admission,
         })
     }

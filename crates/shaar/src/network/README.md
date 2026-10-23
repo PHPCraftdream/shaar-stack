@@ -51,7 +51,8 @@ retained connection State owns a UDP sender, which holds iroh's Socket and nativ
 senders. The shared runtime patch now makes that sender optional and releases it
 when the connection driver finishes or is cancelled, outside the connection state
 lock. Read-only closed connection handles no longer need native I/O ownership.
-The original immediate-rebinding regression is unchanged; this fix awaits CI proof.
+The original immediate-rebinding regression is unchanged. After correcting the
+Rebind event's optional-sender assignment, `a0c9098` passed the real test on both OSes.
 
 ## Verification scope
 
@@ -59,6 +60,41 @@ The authored tests cover real loopback authentication, allowlist denial, wrong
 pinned key, admission saturation without a new Initial, observed-Initial outbound
 cancellation, stalled inbound handshake deadline, invalid address/policy bounds,
 and explicit close/UDP rebinding while Session handles remain alive. They run in
-GitHub CI only. Until its results are inspected, this implementation is not accepted.
-TCP pumps, target status, multiplexed stream lifecycle and end-to-end cancellation
-are separate P06 leaves; this admission layer does not claim to implement them.
+GitHub CI only. Completed job logs for
+[CI 39921459207](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39921459207)
+at `a0c9098` were inspected: all ten admission tests passed on Linux and Windows;
+library suites passed 24 tests with zero failures in 13.55s/13.30s, respectively.
+All three native dependency tests and five ingress-budget tests also passed per OS.
+This accepts endpoint admission, not the entire P06 stage.
+
+## Fixed-target forwarding
+
+`Session::forward(tcp)` owns one local TCP socket and one bidirectional QUIC stream.
+It admits at most 16 calls without queued admission. Under `shaar/tcp/1`, the client
+writes request byte 1; the server reads it before opening its locally configured,
+validated nonzero loopback target. No peer supplies a host or port. Server status
+0 means target connected, 1 means target unavailable, 2 means invalid request.
+Unknown request/status values fail closed. Setup is bounded by ten seconds. No
+TCP application bytes are read by the client pump before a successful status.
+
+`Session::serve(target, stop)` owns at most 16 tasks in a JoinSet and never accepts
+another stream while full. Each task owns its stream and TCP socket. The two copy
+futures run concurrently with fixed Tokio copy buffers, no application data queue
+and borrowed TCP halves, not additional per-half Arc allocations. EOF finishes only
+the corresponding write direction; a completed QUIC send also awaits its final ACK
+or peer stop. Stream failure/cancellation resets the affected pair, not the session.
+Typed error mapping inspects actual backend error variants, never peer text.
+
+On `stop`, serve closes the session, aborts outstanding workers and awaits every
+terminal result. Per-stream I/O failures are counted and isolated; worker panic is
+reported as TaskFailure after cleanup. Report counters saturate at u64::MAX. Dropping
+the serve future is only an abort fallback and cannot promise joined shutdown;
+callers use the stop future and await serve for that guarantee. Whole-connection
+loss terminates its TCP sessions; it does not promise TCP survival across reconnect.
+
+Admission lives under `admission/`, forwarding under `forwarding/`; the public
+admission API is unchanged. Forwarding tests are authored alongside implementation,
+including both half-close orders, four-way concurrent streams, malformed request,
+target failure, stream reset/cancellation isolation, setup timeout, status ordering,
+capacity and joined shutdown. This forwarding layer awaits its own CI proof;
+consolidated P06 acceptance remains a separate leaf.
