@@ -255,7 +255,7 @@ def connection_limit_bridge(root: Path):
     socket = replace(socket, "    pub(crate) incoming_limits: Option<(usize, u64, u64)>,", "    pub(crate) incoming_limits: Option<(usize, u64, u64)>,\n    pub(crate) connection_limit: Option<usize>,")
     socket = replace(socket, "            incoming_limits: None,", "            incoming_limits: None,\n            connection_limit: None,", count=2)
     socket = replace(socket, "        endpoint_config.grease_quic_bit(false);", """        endpoint_config.grease_quic_bit(false);
-        if let Some(limit) = sock.static_config.connection_limit {
+        if let Some(limit) = static_config.connection_limit {
             endpoint_config.max_connections(limit);
         }""")
     endpoint_path.write_text(endpoint, encoding="utf-8", newline="\n")
