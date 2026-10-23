@@ -24,7 +24,7 @@ impl Budget {
         let amount = amount.max(1);
         // Relaxed is accounting only; ownership transfer uses the channel's ordering.
         self.used
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
                 used.checked_add(amount)
                     .filter(|total| *total <= self.capacity)
             })
