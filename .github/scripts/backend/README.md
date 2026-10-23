@@ -55,25 +55,38 @@ at `3bcd2f6` passed on Linux and Windows. Each OS ran five preparation checks,
 completed job logs were inspected. The instrumented bridge matrix, Noq regression,
 workspace CI and physical loss/re-punch regression also completed successfully.
 
-### Product workspace staging before lock adoption
+### Verified product lock and dependency test
 
-`workspace.py` stages the real product crates and proposed Cargo dependency wiring
-in a fresh CI directory, without modifying the repository's manifests or lock.
-Its seed graph uses the existing product lock plus already pinned probe entries;
-the resolver runs only in CI. A post-resolution guard rejects any change to an
-existing production registry package/version/checksum or the exact Noq/iroh family.
-Prepared iroh/noq-proto must resolve as path dependencies. The workflow then runs
-formatting, clippy and product workspace tests with `--locked`, including the owned
-`dependency_gate.rs` test copied into the staged SDK integration tests. That test
-uses real loopback UDP and synthetic Ed25519 fixtures, checks peer identity,
-control-only handshake, both payload directions, bounded backpressure, explicit
-reset and shutdown, with constant deny/allow positive calibration. It uses neither
-probe transport nor qlog/ciphertext instrumentation.
+[Run 39875127492](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39875127492)
+at `043b222` passed the staged product workspace on Linux and Windows, including
+formatting, clippy and the real native dependency test. Completed logs and both
+lock artifacts were inspected. The Linux/Windows locks are byte-identical (SHA256
+`2a2ae5b3f1f02df6f767a348562034d14974d1b14cb874fc93332e336704080e`).
+All 120 previous registry package identities/checksums are retained; the additional
+network dependency closure comes from the reviewed pinned graph. No project or
+existing dependency version was raised. The backend family remains exactly 1.3.0.
 
-This staging step is temporary: after the resolved lock and runtime proof are
-accepted, the actual workspace can adopt those same dependencies and the test.
-The new staging checks and product-native test are authored, not yet run. Workspace
-Cargo dependency wiring and production SDK integration are not yet installed.
-This stage must not be reported as a working production SDK or as selected-custom
-transport authorization. Yggdrasil integration's separate permission/lifecycle gate
-remains.
+The actual workspace now adopts that verified lock and the same iroh dependency.
+Its root `[patch.crates-io]` entries point to the prepared sources under
+`target/backend/{iroh,noq-proto}/`. Preparation is mandatory **before any Cargo
+command that resolves the workspace**, including formatting or clippy. A missing
+prepared source fails; there is no silent fallback to stock upstream. Main CI
+prepares fresh sources before its ordinary `--locked` checks. The temporary
+workspace-copy/resolution tool has been removed; normal CI does not regenerate
+the committed lock.
+
+The owned test is now `crates/shaar/tests/backend_gate.rs`. It uses real loopback
+UDP and public synthetic Ed25519 fixtures, verifies peer identity, control-only
+handshake, both payload directions, bounded backpressure, reset and shutdown,
+with constant deny/allow calibration. It uses no probe transport or qlog hooks.
+RESET_STREAM is allowed control: it can expose lower stream IDs without STREAM
+bytes. The test first checks both no-delivery directions, then verifies lower-ID
+non-delivery and the exact peer reset code while STREAM/DATAGRAM counters stay zero.
+The earlier failure was a fixture interleaving mistake, not a reason to weaken the
+payload gate. Full dependency graph resolution and immutable-identity guards also
+passed before adoption; `--no-deps` metadata alone was correctly rejected as proof.
+
+This actual-workspace adoption still needs its fresh CI run. Dependency integration
+is not a working public SDK networking API or selected-custom transport authority;
+those remain separate implementation tasks. Yggdrasil integration's permission/
+lifecycle gate is unchanged.

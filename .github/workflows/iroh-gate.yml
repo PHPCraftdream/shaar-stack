@@ -38,7 +38,7 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust
         run: |
-          rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt
           rustup override set 1.99.1
       - name: Prepare verified sources without executing them
         run: |
@@ -76,21 +76,6 @@ jobs:
           cargo fmt --manifest-path "$manifest" --all
           cargo test --manifest-path "$manifest" --locked --lib
           cargo test --manifest-path "$manifest" --locked --test calibration -- --nocapture
-      - name: Resolve and verify staged product workspace without changing its source lock
-        run: |
-          set -euo pipefail
-          staged=target/iroh-gate/production/workspace
-          python3 -I .github/scripts/backend/workspace.py --repo . --destination "$staged"
-          manifest="$staged/Cargo.toml"
-          cargo metadata --manifest-path "$manifest" --format-version 1 > target/iroh-gate/production/workspace-metadata.json
-          python3 -I .github/scripts/backend/workspace.py --repo . --destination "$staged" --validate-lock
-          cargo fmt --manifest-path "$manifest" --all -- --check
-          cargo clippy --manifest-path "$manifest" --workspace --all-targets --locked -- -D warnings
-          log=target/iroh-gate/production/workspace-test.log
-          if cargo test --manifest-path "$manifest" --workspace --locked >"$log" 2>&1; then status=0; else status=$?; fi
-          python3 -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-          cat "$log"
-          exit "$status"
       - name: Check authored formatting and execute real iroh calibration
         run: |
           set -euo pipefail
@@ -132,9 +117,4 @@ jobs:
             target/iroh-gate/production/provenance.json
             target/iroh-gate/production/probe/Cargo.lock
             target/iroh-gate/production/probe/target/iroh-paths/
-            target/iroh-gate/production/workspace/Cargo.toml
-            target/iroh-gate/production/workspace/Cargo.lock
-            target/iroh-gate/production/workspace/crates/shaar/Cargo.toml
-            target/iroh-gate/production/workspace/crates/shaar/tests/backend_gate.rs
-            target/iroh-gate/production/workspace-test.log
           if-no-files-found: warn

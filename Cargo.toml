@@ -14,3 +14,7 @@ members = [
 version = "0.1.0"
 edition = "2024"
 publish = false
+
+[patch.crates-io]
+noq-proto = { path = "target/backend/noq-proto/noq-proto-1.3.0" }
+iroh = { path = "target/backend/iroh/iroh-1.3.0" }

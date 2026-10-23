@@ -37,6 +37,21 @@ jobs:
           python-version: "3.11"
       - name: Install Rust 1.99.1
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+      - name: Prepare reviewed production backend sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/backend-archives/noq target/backend-archives/iroh
+          curl --fail --location --max-time 120 \
+            https://static.crates.io/crates/noq-proto/noq-proto-1.3.0.crate \
+            --output target/backend-archives/noq/noq-proto.crate
+          curl --fail --location --max-time 120 \
+            https://static.crates.io/crates/iroh/iroh-1.3.0.crate \
+            --output target/backend-archives/iroh/iroh.crate
+          python -I .github/scripts/backend/prepare.py \
+            --noq-archive target/backend-archives/noq/noq-proto.crate \
+            --iroh-archive target/backend-archives/iroh/iroh.crate \
+            --lock .github/probes/iroh-paths/Cargo.lock --destination target/backend
       # --locked rejects mismatches with the lock graph without regenerating it.
       # Full test runs are executed only in CI.
       - name: cargo fmt

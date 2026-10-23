@@ -13,7 +13,6 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import policy  # noqa: E402
 import prepare  # noqa: E402
-import workspace  # noqa: E402
 
 
 def make_probe(destination, probe):
@@ -117,58 +116,32 @@ class PreparationChecks(unittest.TestCase):
         self.assertIn("application_data_filter", wrapper)
 
 
-class WorkspaceChecks(unittest.TestCase):
-    def test_metadata_requires_full_resolution_not_no_deps_output(self):
-        packages = [{"name": name, "version": prepare.VERSION, "id": name, "source": None}
-                    for name in ("iroh", "noq", "noq-proto", "noq-udp")]
-        resolved = {"nodes": [{"id": package["id"]} for package in packages]}
-        workspace.validate_resolution({"packages": packages, "resolve": resolved})
-        for graph in ({}, {"packages": packages, "resolve": None},
-                      {"packages": packages, "resolve": {"nodes": []}},
-                      {"packages": packages[:-1], "resolve": resolved},
-                      {"packages": packages, "resolve": {"nodes": resolved["nodes"][:-1]}}):
-            with self.subTest(graph=graph), self.assertRaises(ValueError):
-                workspace.validate_resolution(graph)
-        for package in packages:
-            if package["name"] in prepare.PACKAGES:
-                bad = [dict(p, source="registry+unpatched") if p is package else p for p in packages]
-                with self.assertRaises(ValueError):
-                    workspace.validate_resolution({"packages": bad, "resolve": resolved})
-
-    def test_seed_lock_preserves_original_identities_and_pins_path_packages(self):
+class ProductWorkspaceChecks(unittest.TestCase):
+    def test_product_manifest_uses_prepared_backend_without_qlog(self):
         repo = ARGS.probe.resolve().parents[2]
-        original = (repo / "Cargo.lock").read_text(encoding="utf-8")
-        seed = workspace.seed_lock(original, (ARGS.probe / "Cargo.lock").read_text(encoding="utf-8"))
-        packages = tomllib.loads(seed)["package"]
-        self.assertFalse(any(p["name"] == "iroh-paths-probe" for p in packages))
+        root = tomllib.loads((repo / "Cargo.toml").read_text(encoding="utf-8"))
         for name in prepare.PACKAGES:
-            matches = [p for p in packages if p["name"] == name]
+            expected = f"target/backend/{name}/{name}-{prepare.VERSION}"
+            self.assertEqual(root["patch"]["crates-io"][name], {"path": expected})
+        sdk = tomllib.loads((repo / "crates/shaar/Cargo.toml").read_text(encoding="utf-8"))
+        self.assertEqual(sdk["dependencies"]["iroh"]["version"], "=1.3.0")
+        self.assertFalse(sdk["dependencies"]["iroh"]["default-features"])
+        self.assertNotIn("qlog", sdk["dependencies"]["iroh"]["features"])
+        self.assertTrue((repo / "crates/shaar/tests/backend_gate.rs").is_file())
+
+    def test_product_lock_pins_the_reviewed_backend_family(self):
+        repo = ARGS.probe.resolve().parents[2]
+        actual = tomllib.loads((repo / "Cargo.lock").read_text(encoding="utf-8"))["package"]
+        baseline = tomllib.loads((ARGS.probe / "Cargo.lock").read_text(encoding="utf-8"))["package"]
+        for name in ("iroh", "iroh-base", "noq", "noq-proto", "noq-udp"):
+            matches = [package for package in actual if package["name"] == name]
             self.assertEqual(len(matches), 1)
             self.assertEqual(matches[0]["version"], prepare.VERSION)
-            self.assertNotIn("source", matches[0])
-        with self.assertRaisesRegex(ValueError, "SDK lock entry missing"):
-            workspace.seed_lock('version = 4\n[[package]]\nname = "other"\nversion = "0.1.0"\n', "")
-
-    def test_staged_workspace_never_mutates_or_overwrites_original(self):
-        repo = ARGS.probe.resolve().parents[2]
-        sdk_before = (repo / "crates/shaar/Cargo.toml").read_bytes()
-        lock_before = (repo / "Cargo.lock").read_bytes()
-        with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
-            destination = Path(temporary) / "workspace"
-            workspace.stage(repo, destination)
-            manifest = tomllib.loads((destination / "crates/shaar/Cargo.toml").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["dependencies"]["iroh"]["version"], "=1.3.0")
-            self.assertFalse(manifest["dependencies"]["iroh"]["default-features"])
-            self.assertTrue((destination / "crates/shaar/tests/backend_gate.rs").is_file())
-            workspace.validate_lock(repo, destination)
-            with self.assertRaises(FileExistsError):
-                workspace.stage(repo, destination)
-            path = destination / "Cargo.lock"
-            path.write_text(path.read_text(encoding="utf-8").replace('version = "1.3.0"', 'version = "9.9.9"'), encoding="utf-8")
-            with self.assertRaises(ValueError):
-                workspace.validate_lock(repo, destination)
-        self.assertEqual((repo / "crates/shaar/Cargo.toml").read_bytes(), sdk_before)
-        self.assertEqual((repo / "Cargo.lock").read_bytes(), lock_before)
+            if name in prepare.PACKAGES:
+                self.assertNotIn("source", matches[0])
+            else:
+                reviewed = next(package for package in baseline if package["name"] == name)
+                self.assertEqual(matches[0]["checksum"], reviewed["checksum"])
 
 
 if __name__ == "__main__":
