@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
-//! Identity and startup configuration primitives for Sha'ar Stack.
-//!
-//! Networking remains gated on the transport feasibility experiments.
+//! Identity, startup configuration and bounded native endpoints for Sha'ar Stack.
 
 pub mod config;
 pub mod identity;
+pub mod network;

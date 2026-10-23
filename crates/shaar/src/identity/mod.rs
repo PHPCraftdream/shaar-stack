@@ -65,6 +65,10 @@ impl Identity {
         Self { secret }
     }
 
+    pub(crate) fn transport_key(&self) -> iroh_base::SecretKey {
+        self.secret.clone()
+    }
+
     /// The 32-byte Ed25519 public key (stable, config-compatible form).
     pub fn public_key_bytes(&self) -> [u8; 32] {
         *self.secret.public().as_bytes()
