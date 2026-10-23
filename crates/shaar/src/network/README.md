@@ -96,8 +96,12 @@ Admission lives under `admission/`, forwarding under `forwarding/`; the public
 admission API is unchanged. Forwarding tests are authored alongside implementation,
 including both half-close orders, four-way concurrent streams, malformed request,
 target failure, stream reset/cancellation isolation, setup timeout, status ordering,
-capacity and joined shutdown. This forwarding layer awaits its own CI proof;
-consolidated P06 acceptance remains a separate leaf.
+capacity and joined shutdown. Completed Linux/Windows logs for
+[CI 39927766167](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39927766167)
+at `de90779` were inspected: all 13 forwarding tests passed per OS, with library
+suites of 37 passed and zero failures (13.16s/13.30s). The three native dependency
+and five ingress-budget tests also passed per OS. This accepts the forwarding
+leaf; consolidated P06 acceptance remains separate.
 
 The first forwarding run at `417e3c6` passed on Windows but exposed a Linux test
 ordering error: client exchange completion does not guarantee that the server
@@ -115,3 +119,29 @@ buffers. The pinned write future is retained, reading is released, all remaining
 bytes are checked and both FIN/ACK directions complete. Production continues using
 borrowed TCP halves without an extra shared split allocation. The duplex's internal
 synchronization belongs only to the test fixture; this is not a kernel/RSS claim.
+
+## Consolidated acceptance additions — pending CI
+
+`tests/sdk_network.rs` uses only the public SDK API for real target counters:
+unauthorized and wrong-pinned peers must open zero TCP targets, authorized traffic
+opens exactly two connections with exact request/response bytes, and sixteen live
+forward calls saturate admission without creating a seventeenth target. All client
+workers are joined; both UDP ports and the TCP listener port are rebound after
+shutdown while Session handles still exist. No raw backend handle or mock target
+is the success oracle in these integration cases.
+
+Additional same-copy-loop tests exercise reverse-direction backpressure and cancel
+an already blocked partial write, requiring peer RESET_STREAM code 3 rather than
+successful partial FIN. Truncated request/status fields are protocol failures;
+only EOF inside the setup frame is mapped this way, not ordinary application EOF.
+Authenticated access denial arriving during connect is classified by its real
+backend close-code variant, not left as a generic connection error. Actual Noq
+metadata exhaustion is similarly classified as Capacity; a zero-backend-quota
+fixture checks it before any Initial while an SDK slot is still available.
+
+The bounded output scanner now includes the SDK/dependency fixture seeds as well
+as the earlier identity fixtures. Independent scanner tests cover the same raw,
+hexadecimal and Debug representations. The all-space fixture is checked only in
+hexadecimal/Debug form: raw spaces are indistinguishable from normal indentation.
+This checks listed fixtures, not all possible secrets or unknown generated keys. All additions await their CI results;
+no local build/test or performance load is used as acceptance evidence.

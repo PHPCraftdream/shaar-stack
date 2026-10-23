@@ -159,3 +159,149 @@ async fn the_same_copy_loop_propagates_quic_backpressure_and_resumes_exactly_onc
         tokio::join!(server.close(), client.close());
     }).await.expect("bounded pump backpressure/release deadline");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reverse_copy_backpressure_preserves_all_peer_bytes_after_release() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (server, client, accepted, connected) = sessions().await;
+        let (mut app, local) = tokio::io::duplex(32);
+        let (read, write) = tokio::io::split(local);
+        let payload = vec![0x6b; 2 * 1024 * 1024];
+        let (ready, observed) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let peer = async {
+            let (mut send, mut recv) = accepted.connection.accept_bi().await.unwrap();
+            let mut request = [0];
+            recv.read_exact(&mut request).await.unwrap();
+            assert_eq!(request, [1]);
+            send.write_all(&[0]).await.unwrap();
+            assert!(recv.read_to_end(32).await.unwrap().is_empty());
+            let mut pending = Box::pin(send.write_all(&payload));
+            tokio::select! {
+                result = &mut pending => panic!("peer write exceeded bounded queues: {result:?}"),
+                result = observed => result.unwrap(),
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), &mut pending)
+                    .await
+                    .is_err()
+            );
+            release.send(()).unwrap();
+            pending.await.unwrap();
+            send.finish().unwrap();
+            assert_eq!(send.stopped().await.unwrap(), None);
+        };
+        let application = async {
+            app.shutdown().await.unwrap();
+            let mut first = [0];
+            app.read_exact(&mut first).await.unwrap();
+            assert_eq!(first, [0x6b]);
+            ready.send(()).unwrap();
+            released.await.unwrap();
+            let mut rest = Vec::new();
+            app.read_to_end(&mut rest).await.unwrap();
+            assert_eq!(rest.as_slice(), &payload[1..]);
+        };
+        let forwarding = async {
+            let stream = super::protocol::open(&connected.connection).await.unwrap();
+            super::pump::copy_halves(stream, read, write).await.unwrap()
+        };
+        let (stats, (), ()) = tokio::join!(forwarding, application, peer);
+        assert_eq!(
+            stats,
+            super::ForwardStats {
+                to_peer: 0,
+                from_peer: 2 * 1024 * 1024
+            }
+        );
+        tokio::join!(server.close(), client.close());
+    })
+    .await
+    .expect("reverse pump backpressure deadline");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_blocked_copy_resets_partial_data_instead_of_finishing_it() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (server, client, accepted, connected) = sessions().await;
+        let (mut app, local) = tokio::io::duplex(32);
+        let (read, write) = tokio::io::split(local);
+        let payload = vec![0x7c; 2 * 1024 * 1024];
+        let (ready, observed) = oneshot::channel();
+        let (cancel, cancelled) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let peer = async {
+            let (mut send, mut recv) = accepted.connection.accept_bi().await.unwrap();
+            let mut byte = [0];
+            recv.read_exact(&mut byte).await.unwrap();
+            assert_eq!(byte, [1]);
+            send.write_all(&[0]).await.unwrap();
+            recv.read_exact(&mut byte).await.unwrap();
+            assert_eq!(byte, [0x7c]);
+            ready.send(()).unwrap();
+            released.await.unwrap();
+            assert!(matches!(recv.read_to_end(payload.len()).await, Err(iroh::endpoint::ReadToEndError::Read(ReadError::Reset(code))) if code == VarInt::from_u32(3)));
+        };
+        let application = async {
+            let mut pending = Box::pin(app.write_all(&payload));
+            tokio::select! {
+                result = &mut pending => panic!("copy was not backpressured before cancellation: {result:?}"),
+                result = observed => result.unwrap(),
+            }
+            assert!(tokio::time::timeout(Duration::from_millis(100), &mut pending).await.is_err());
+            cancel.send(()).unwrap();
+            release.send(()).unwrap();
+            assert!(pending.await.is_err());
+        };
+        let forwarding = async {
+            let stream = super::protocol::open(&connected.connection).await.unwrap();
+            let copy = super::pump::copy_halves(stream, read, write);
+            tokio::pin!(copy);
+            tokio::select! {
+                result = &mut copy => panic!("copy ended before requested cancellation: {result:?}"),
+                result = cancelled => result.unwrap(),
+            }
+        };
+        tokio::join!(forwarding, application, peer);
+        tokio::join!(server.close(), client.close());
+    }).await.expect("blocked-copy cancellation/reset deadline");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn truncated_request_or_status_is_protocol_failure_not_generic_io() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        for truncated_request in [false, true] {
+            let (server, client, accepted, connected) = sessions().await;
+            if truncated_request {
+                let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let address = target.local_addr().unwrap();
+                let peer = async {
+                    let (mut send, mut recv) = connected.connection.open_bi().await.unwrap();
+                    send.finish().unwrap();
+                    assert!(matches!(recv.read_to_end(32).await, Err(iroh::endpoint::ReadToEndError::Read(ReadError::Reset(code))) if code == VarInt::from_u32(3)));
+                };
+                let handler = async {
+                    let pair = accepted.connection.accept_bi().await.unwrap();
+                    let mut stream = super::pump::Stream::new(pair);
+                    assert!(matches!(super::protocol::target(&mut stream, address).await, Err(ForwardError::Protocol)));
+                    assert!(tokio::time::timeout(Duration::from_millis(100), target.accept()).await.is_err());
+                };
+                tokio::join!(handler, peer);
+            } else {
+                let (_app, bridge) = tcp_pair().await;
+                let peer = async {
+                    let (mut send, mut recv) = accepted.connection.accept_bi().await.unwrap();
+                    let mut request = [0];
+                    recv.read_exact(&mut request).await.unwrap();
+                    assert_eq!(request, [1]);
+                    send.finish().unwrap();
+                    assert!(matches!(recv.read_to_end(32).await, Err(iroh::endpoint::ReadToEndError::Read(ReadError::Reset(code))) if code == VarInt::from_u32(3)));
+                };
+                let (result, ()) = tokio::join!(connected.forward(bridge), peer);
+                assert!(matches!(result, Err(ForwardError::Protocol)));
+                assert_eq!(connected.streams.available_permits(), usize::from(STREAM_LIMIT));
+            }
+            tokio::join!(server.close(), client.close());
+        }
+    }).await.expect("truncated protocol fields deadline");
+}

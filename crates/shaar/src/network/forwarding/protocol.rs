@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{io, net::SocketAddr, time::Duration};
 
 use iroh::endpoint::Connection;
 use tokio::{
@@ -14,6 +14,14 @@ const READY: u8 = 0;
 const TARGET_FAILED: u8 = 1;
 const BAD_REQUEST: u8 = 2;
 
+fn frame_error(error: io::Error) -> ForwardError {
+    if error.kind() == io::ErrorKind::UnexpectedEof {
+        ForwardError::Protocol
+    } else {
+        ForwardError::from_io(error)
+    }
+}
+
 /// cancel-safe: NO — any allocated stream is reset by its ownership guard.
 pub(super) async fn open(connection: &Connection) -> Result<Stream, ForwardError> {
     tokio::time::timeout(SETUP_TIMEOUT, async {
@@ -28,7 +36,7 @@ pub(super) async fn open(connection: &Connection) -> Result<Stream, ForwardError
         let mut status = [0];
         AsyncReadExt::read_exact(&mut stream.recv, &mut status)
             .await
-            .map_err(ForwardError::from_io)?;
+            .map_err(frame_error)?;
         match status[0] {
             READY => Ok(stream),
             TARGET_FAILED => Err(ForwardError::TargetUnavailable),
@@ -49,7 +57,7 @@ pub(super) async fn target(
         let mut request = [0];
         AsyncReadExt::read_exact(&mut stream.recv, &mut request)
             .await
-            .map_err(ForwardError::from_io)?;
+            .map_err(frame_error)?;
         if request != [OPEN] {
             reject(stream, BAD_REQUEST).await?;
             return Err(ForwardError::Protocol);

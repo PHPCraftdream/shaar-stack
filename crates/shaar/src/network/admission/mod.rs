@@ -112,7 +112,7 @@ impl Endpoint {
         let connection = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.connect(remote, ALPN))
             .await
             .map_err(|_| NetworkError::Deadline)?
-            .map_err(|error| NetworkError::Connect(Box::new(error)))?;
+            .map_err(NetworkError::from_connect)?;
         if connection.remote_id() != peer {
             connection.close(VarInt::from_u32(2), b"");
             return Err(NetworkError::PeerMismatch);

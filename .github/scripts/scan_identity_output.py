@@ -3,7 +3,8 @@
 
 Scans a bounded cargo-test log for known raw, hexadecimal, and Rust Debug
 representations. This is a regression check for listed fixtures, not for
-unknown or runtime-generated seeds.
+unknown or runtime-generated seeds. The all-space fixture is checked only
+as hexadecimal/Debug data; raw spaces cannot be distinguished from indentation.
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ def seeds() -> Tuple[bytes, ...]:
         bytes([0xCD]) * 32,
         bytes([9]) * 32,
         bytes([11]) * 32,
+        *(bytes([value]) * 32 for value in (31, 32, 67, 68, 69, 71, 72, 81, 82, 83, 84)),
         bytes([3, 10, 17, 24, 31, 38, 45, 52, 59, 66, 73, 80, 87, 94, 101, 108, 115, 122, 129, 136, 143, 150, 157, 164, 171, 178, 185, 192, 199, 206, 213, 220]),
     )
 
@@ -95,7 +97,9 @@ def scan_bytes(data: bytes) -> bool:
     lowered = data.lower()
     for seed in seeds():
         hex_seed = seed.hex().encode("ascii")
-        if seed in data or hex_seed in lowered or contains_debug_array(data, seed):
+        # Raw all-space bytes are indistinguishable from ordinary log indentation.
+        raw_match = seed != b" " * 32 and seed in data
+        if raw_match or hex_seed in lowered or contains_debug_array(data, seed):
             return True
     return False
 

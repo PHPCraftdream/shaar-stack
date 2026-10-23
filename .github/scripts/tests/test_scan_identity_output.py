@@ -46,6 +46,7 @@ REPEATED_SEEDS = [
     bytes([0xCD]) * 32,
     bytes([9]) * 32,
     bytes([11]) * 32,
+    *[bytes([value]) * 32 for value in (31, 32, 67, 68, 69, 71, 72, 81, 82, 83, 84)],
     bytes([3, 10, 17, 24, 31, 38, 45, 52, 59, 66, 73, 80, 87, 94, 101, 108, 115, 122, 129, 136, 143, 150, 157, 164, 171, 178, 185, 192, 199, 206, 213, 220]),
 ]
 
@@ -94,9 +95,16 @@ class DetectionTest(unittest.TestCase):
 
     def test_raw_bytes_embedded(self) -> None:
         for seed in ALL_SEEDS:
+            if seed == b" " * 32:
+                continue
             self._assert_detected(
                 b"some log line\nnoise " + seed + b" more noise\n"
             )
+
+    def test_all_space_fixture_uses_hex_and_debug_not_ordinary_indentation(self) -> None:
+        self.assertFalse(scanner.scan_bytes(b" " * 64 + b"normal log line"))
+        self.assertTrue(scanner.scan_bytes(b"20" * 32))
+        self.assertTrue(scanner.scan_bytes(debug_array(bytes([32]) * 32).encode()))
 
     def test_raw_hex_collision_is_detected(self) -> None:
         self.assertTrue(scanner.scan_bytes(b"3" * 40))

@@ -313,3 +313,45 @@ async fn invalid_addresses_fail_before_admission_or_socket_binding() {
     assert_eq!(client.slots.available_permits(), 1);
     client.close().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn backend_metadata_exhaustion_is_capacity_not_a_generic_connect_failure() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        // Force the actual lower-layer boundary while one SDK slot is available.
+        let inner = iroh::Endpoint::builder(presets::Minimal)
+            .secret_key(identity(68).transport_key())
+            .clear_ip_transports()
+            .bind_addr("127.0.0.1:0")
+            .unwrap()
+            .portmapper_config(PortmapperConfig::Disabled)
+            .net_report_config(NetReportConfig::minimal())
+            .connection_limit(0)
+            .bind()
+            .await
+            .unwrap();
+        let address = inner.bound_sockets()[0];
+        let client = Endpoint {
+            inner,
+            address,
+            allowlist: Allowlist::default(),
+            slots: Arc::new(Semaphore::new(1)),
+        };
+        let observer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        assert!(matches!(
+            client
+                .connect(key(67), observer.local_addr().unwrap())
+                .await,
+            Err(NetworkError::Capacity)
+        ));
+        assert_eq!(client.slots.available_permits(), 1);
+        let mut bytes = [0u8; 2048];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), observer.recv_from(&mut bytes))
+                .await
+                .is_err()
+        );
+        client.close().await;
+    })
+    .await
+    .expect("SDK metadata capacity mapping deadline");
+}

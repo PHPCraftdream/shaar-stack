@@ -17,6 +17,35 @@ pub enum NetworkError {
     Handshake(Box<iroh::endpoint::ConnectingError>),
 }
 
+impl NetworkError {
+    pub(super) fn from_connect(error: iroh::endpoint::ConnectError) -> Self {
+        use iroh::endpoint::{
+            ConnectError, ConnectWithOptsError, ConnectingError, ConnectionError, QuicConnectError,
+            VarInt,
+        };
+        if matches!(&error,
+            ConnectError::Connection { source: ConnectionError::ApplicationClosed(close), .. }
+            | ConnectError::Connecting { source: ConnectingError::ConnectionError { source: ConnectionError::ApplicationClosed(close), .. }, .. }
+            if close.error_code == VarInt::from_u32(super::session::ACCESS_DENIED))
+        {
+            return Self::AccessDenied;
+        }
+        if matches!(
+            &error,
+            ConnectError::Connect {
+                source: ConnectWithOptsError::Noq {
+                    source: QuicConnectError::TooManyConnections,
+                    ..
+                },
+                ..
+            }
+        ) {
+            return Self::Capacity;
+        }
+        Self::Connect(Box::new(error))
+    }
+}
+
 impl fmt::Display for NetworkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
