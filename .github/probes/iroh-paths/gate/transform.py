@@ -4,7 +4,7 @@ import sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts/backend"))
-from policy import connection, datagrams as production_datagrams, replace, spaces, transport  # noqa: E402
+from policy import connection, datagrams as production_datagrams, endpoint_capacity, replace, spaces, transport  # noqa: E402
 
 
 def datagrams(text):
@@ -30,6 +30,7 @@ def apply(root: Path, test_source: Path):
     test_bytes = test_source.read_bytes()
     budget_bytes = test_source.with_name("payload_policy_bounds.rs").read_bytes()
     resource_bytes = test_source.with_name("payload_policy_resources.rs").read_bytes()
+    endpoint_capacity(root)
     for name, text in outputs.items():
         (root / name).write_text(text, encoding="utf-8", newline="\n")
     payload_tests.write_bytes(test_bytes)

@@ -180,6 +180,88 @@ def listener_limits(root: Path):
     socket.write_text(shared, encoding="utf-8", newline="\n")
 
 
+def endpoint_capacity(root: Path):
+    config_path = root / "src/config/mod.rs"
+    endpoint_path = root / "src/endpoint.rs"
+    config = config_path.read_text(encoding="utf-8")
+    if "max_connections:" in config:
+        raise ValueError("endpoint capacity source already modified")
+    config = replace(config, "    pub(crate) max_udp_payload_size: VarInt,", "    pub(crate) max_udp_payload_size: VarInt,\n    pub(crate) max_connections: Option<usize>,")
+    config = replace(config, "            reset_key,\n            max_udp_payload_size:", "            reset_key,\n            max_connections: None,\n            max_udp_payload_size:")
+    config = replace(config, "    /// Supply a custom connection ID generator factory", """    /// Bounds allocated connection metadata, including closing/draining entries.
+    /// Capacity is returned only on Drained. Pending Incoming storage has separate limits.
+    /// Zero disables new connections; omission preserves the upstream allocation policy.
+    pub fn max_connections(&mut self, limit: usize) -> &mut Self {
+        self.max_connections = Some(limit);
+        self
+    }
+
+    /// Supply a custom connection ID generator factory""")
+    endpoint = endpoint_path.read_text(encoding="utf-8")
+    endpoint = replace(endpoint, """    ) -> Result<(ConnectionHandle, Connection), ConnectError> {
+        if self.cids_exhausted() {""", """    ) -> Result<(ConnectionHandle, Connection), ConnectError> {
+        if self.connection_limit_reached() {
+            return Err(ConnectError::TooManyConnections);
+        }
+        if self.cids_exhausted() {""")
+    endpoint = replace(endpoint, "if self.cids_exhausted() || self.incoming_buffers.len() >= server_config.max_incoming {", "if self.connection_limit_reached() || self.cids_exhausted() || self.incoming_buffers.len() >= server_config.max_incoming {")
+    endpoint = replace(endpoint, '        if self.cids_exhausted() {\n            debug!("refusing connection");', """        if self.connection_limit_reached() {
+            self.index.remove_initial(dst_cid);
+            return Err(Box::new(AcceptError {
+                cause: TransportError::CONNECTION_REFUSED("connection limit reached").into(),
+                response: Some(self.initial_close(
+                    version,
+                    incoming.network_path,
+                    &incoming.crypto,
+                    src_cid,
+                    TransportError::CONNECTION_REFUSED("connection limit reached"),
+                    buf,
+                )),
+            }));
+        }
+        if self.cids_exhausted() {
+            debug!("refusing connection");""")
+    endpoint = replace(endpoint, "    /// Whether we've used up 3/4 of the available CID space", """    fn connection_limit_reached(&self) -> bool {
+        self.config.max_connections.is_some_and(|limit| self.connections.len() >= limit)
+    }
+
+    /// Whether we've used up 3/4 of the available CID space""")
+    endpoint = replace(endpoint, "pub enum ConnectError {", """pub enum ConnectError {
+    /// The configured allocated-connection metadata limit was reached.
+    #[error("connection limit reached")]
+    TooManyConnections,""")
+    config_path.write_text(config, encoding="utf-8", newline="\n")
+    endpoint_path.write_text(endpoint, encoding="utf-8", newline="\n")
+
+
+def connection_limit_bridge(root: Path):
+    endpoint_path = root / "src/endpoint.rs"
+    socket_path = root / "src/socket.rs"
+    endpoint = endpoint_path.read_text(encoding="utf-8")
+    if "connection_limit:" in endpoint:
+        raise ValueError("connection limit bridge already modified")
+    endpoint = replace(endpoint, "    incoming_limits: Option<(usize, u64, u64)>,", "    incoming_limits: Option<(usize, u64, u64)>,\n    connection_limit: Option<usize>,")
+    endpoint = replace(endpoint, "            incoming_limits: None,", "            incoming_limits: None,\n            connection_limit: None,")
+    endpoint = replace(endpoint, "            incoming_limits: self.incoming_limits,", "            incoming_limits: self.incoming_limits,\n            connection_limit: self.connection_limit,")
+    endpoint = replace(endpoint, "    // # The final constructor that everyone needs.", """    /// Bounds all allocated connections, including closing/draining metadata.
+    /// Pending Incoming count/byte storage is configured separately with incoming_limits.
+    pub fn connection_limit(mut self, limit: usize) -> Self {
+        self.connection_limit = Some(limit);
+        self
+    }
+
+    // # The final constructor that everyone needs.""")
+    socket = socket_path.read_text(encoding="utf-8")
+    socket = replace(socket, "    pub(crate) incoming_limits: Option<(usize, u64, u64)>,", "    pub(crate) incoming_limits: Option<(usize, u64, u64)>,\n    pub(crate) connection_limit: Option<usize>,")
+    socket = replace(socket, "            incoming_limits: None,", "            incoming_limits: None,\n            connection_limit: None,", count=2)
+    socket = replace(socket, "        endpoint_config.grease_quic_bit(false);", """        endpoint_config.grease_quic_bit(false);
+        if let Some(limit) = sock.static_config.connection_limit {
+            endpoint_config.max_connections(limit);
+        }""")
+    endpoint_path.write_text(endpoint, encoding="utf-8", newline="\n")
+    socket_path.write_text(socket, encoding="utf-8", newline="\n")
+
+
 def apply(root: Path):
     edits = {
         "src/config/transport.rs": transport,

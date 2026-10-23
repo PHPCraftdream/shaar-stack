@@ -46,7 +46,7 @@ limit propagation. Preparation refuses a second listener patch without overwriti
 source. Existing Noq queue-budget regressions remain part of backend CI. No new
 metrics feature, dependency version or public SDK networking API is introduced.
 
-## Raw datagram queue boundary — pending CI
+## Raw datagram queue boundary
 
 The async Noq wrapper used an unbounded channel to forward classified UDP events
 to each connection driver (`endpoint.rs:982-991`), before connection flow control.
@@ -73,8 +73,36 @@ payload gate is unchanged and still supplies signaling-only enforcement.
 This extends source preparation to the already-used `noq` 1.3.0 archive, verified
 against its immutable registry digest. Only its Cargo source identity changes to a
 prepared path; no version is raised. Provenance records every owned patch source.
-Budget/ownership/concurrency tests and normal QUIC regressions execute only in CI;
-this runtime change is authored, not yet verified.
+[CI 39905452421](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39905452421)
+at `a001d2e` passed on both OSes: five ownership/budget/concurrency tests and two
+native dependency tests passed, with strict warnings. Completed logs were inspected.
+The companion Noq, clean-source/bridge and full NAT workflows also succeeded. Rust
+1.99.1's renamed `try_update` API is used without suppressing the deprecated-method
+error exposed by the first run. This verifies the ingress layer, not every SDK
+resource contract.
+
+## Allocated connection metadata — pending CI
+
+Protocol Draining does not release a Noq endpoint's ConnectionMeta entry; only
+Drained removes it. Releasing an SDK active-session permit on `closed()` therefore
+does not itself cap metadata retained during teardown. CID-space exhaustion is
+also not a useful application bound for ordinary long connection IDs.
+
+The patch adds optional `EndpointConfig::max_connections` at the actual Noq table,
+with an iroh `Builder::connection_limit` bridge before bind. Omission preserves
+upstream behavior. Capacity includes accepted, closing and draining connections
+until Drained, but not the separately limited pending Incoming queue. Local dials
+fail before I/O with a dedicated `ConnectError::TooManyConnections`, not an invented
+CID/authentication failure. Excess incoming attempts are dropped early or receive
+standard CONNECTION_REFUSED if capacity changes after Initial admission. The local
+error variant is an intentional extension of the workspace-only patched Noq API;
+no wire format, package version or public SDK API changes.
+
+Authored tests use the real sans-I/O harness to hold a one-connection quota through
+Draining and prove allocation becomes possible after Drained, plus a native zero-
+quota dial requiring the exact typed error and no emitted Initial. Source-repeat
+and clean/gate parity controls cover the same implementation. These additions are
+not yet executed; CI is the only compilation/runtime environment.
 
 ## Explicit preparation, not a build script
 
@@ -153,7 +181,7 @@ at `78a0097` passed all seven topology cases after observer/capture fixes: 126/1
 native observations, zero kernel drops, no truncated frame, full ciphertext
 correlation, zero custom payload and clean owned-resource teardown. Its artifacts
 were independently inspected; legacy NAT and current workspace CI also passed.
-That production dependency delivery baseline is accepted; the subsequent raw-ingress
-hardening above still needs its fresh CI proof. Neither is a working public SDK
+That production dependency delivery baseline and raw-ingress hardening are accepted;
+the allocated-connection extension still needs its fresh CI proof. None is a working public SDK
 networking API or selected-custom transport authority; those remain separate
 implementation tasks. Yggdrasil integration's permission/lifecycle gate is unchanged.

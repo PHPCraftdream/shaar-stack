@@ -45,7 +45,7 @@ def make_probe(destination, probe):
 class PreparationChecks(unittest.TestCase):
     def test_shared_policy_is_exactly_the_runtime_policy_used_by_gate(self):
         for relative in ("src/config/transport.rs", "src/connection/spaces.rs", "src/connection/mod.rs",
-                         "src/connection/datagrams.rs"):
+                         "src/connection/datagrams.rs", "src/config/mod.rs", "src/endpoint.rs"):
             production = (ROOTS["noq-proto"] / relative).read_text(encoding="utf-8")
             gate = (ARGS.gate_noq / relative).read_text(encoding="utf-8")
             suffix = '\n#[cfg(test)]\n#[path = "payload_policy_bounds.rs"]\nmod payload_policy_bounds;\n'
@@ -110,6 +110,17 @@ class PreparationChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "listener limits source already modified"):
             policy.listener_limits(root)
         self.assertEqual([path.read_bytes() for path in paths], before)
+
+    def test_connection_limits_reject_repeat_preparation_without_overwriting(self):
+        for root, apply, files in [
+            (ROOTS["noq-proto"], policy.endpoint_capacity, ("src/config/mod.rs", "src/endpoint.rs")),
+            (ROOTS["iroh"], policy.connection_limit_bridge, ("src/endpoint.rs", "src/socket.rs")),
+        ]:
+            paths = [root / name for name in files]
+            before = [path.read_bytes() for path in paths]
+            with self.assertRaisesRegex(ValueError, "already modified"):
+                apply(root)
+            self.assertEqual([path.read_bytes() for path in paths], before)
 
     def test_runtime_ingress_transform_rejects_repeat_without_overwriting(self):
         root = ROOTS["noq"]

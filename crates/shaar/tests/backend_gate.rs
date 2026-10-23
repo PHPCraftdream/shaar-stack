@@ -4,8 +4,8 @@
 use std::time::Duration;
 
 use iroh::endpoint::{
-    Builder, Connection, NetReportConfig, PortmapperConfig, QuicTransportConfig, ReadError,
-    ReadToEndError, presets,
+    Builder, ConnectError, ConnectWithOptsError, Connection, NetReportConfig, PortmapperConfig,
+    QuicConnectError, QuicTransportConfig, ReadError, ReadToEndError, presets,
 };
 use iroh::{Endpoint, EndpointAddr, SecretKey, TransportAddr};
 
@@ -31,6 +31,48 @@ fn native_builder(seed: u8) -> Builder {
         .expect("loopback bind configuration")
         .portmapper_config(PortmapperConfig::Disabled)
         .net_report_config(NetReportConfig::minimal())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn local_connection_limit_rejects_before_any_initial_is_sent() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let endpoint = native_builder(32)
+            .connection_limit(0)
+            .bind()
+            .await
+            .expect("bind limited endpoint");
+        endpoint.set_alpns(vec![ALPN.to_vec()]);
+        let observer = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind UDP observer");
+        let peer = SecretKey::from([31; 32]).public();
+        let remote =
+            EndpointAddr::from_parts(peer, [TransportAddr::Ip(observer.local_addr().unwrap())]);
+        let error = endpoint
+            .connect(remote, ALPN)
+            .await
+            .expect_err("zero allocation budget");
+        assert!(matches!(
+            error,
+            ConnectError::Connect {
+                source: ConnectWithOptsError::Noq {
+                    source: QuicConnectError::TooManyConnections,
+                    ..
+                },
+                ..
+            }
+        ));
+        let mut packet = [0u8; 2048];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), observer.recv_from(&mut packet))
+                .await
+                .is_err()
+        );
+        assert!(!endpoint.is_closed());
+        endpoint.close().await;
+    })
+    .await
+    .expect("local connection budget deadline");
 }
 
 #[tokio::test(flavor = "multi_thread")]

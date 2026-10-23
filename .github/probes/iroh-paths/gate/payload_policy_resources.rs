@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 //! Public-API queue and cancellation contracts through the real Noq harness.
 
-use super::util::{ConnPair, ConnPairBuilder};
+use super::util::{ConnPair, ConnPairBuilder, client_config};
 use crate::{Dir, FourTuple, SendDatagramError, Side, WriteError};
 use bytes::Bytes;
 
@@ -156,4 +156,43 @@ fn cancelling_queued_stream_restores_window_without_stream_egress() {
             Err(WriteError::Blocked)
         ));
     }
+}
+
+#[test]
+fn allocated_connection_budget_is_held_until_drained_not_just_closed() {
+    let mut builder = ConnPairBuilder::default().disable_mtud_discovery();
+    builder.client_endpoint_cfg.max_connections(1);
+    builder.server_endpoint_cfg.max_connections(1);
+    let mut pair = builder.connect();
+    let client = *pair.client.connections.keys().next().unwrap();
+    let remote = pair.routes.public_server_addr();
+    let now = pair.time;
+    assert!(matches!(
+        pair.client
+            .endpoint
+            .connect(now, client_config(), remote, "localhost"),
+        Err(crate::ConnectError::TooManyConnections)
+    ));
+    pair.close(Side::Server, 0, b"finish allocation");
+    pair.drive_server();
+    pair.drive_client();
+    assert!(pair.client.draining_connections.contains(&client));
+    let now = pair.time;
+    assert!(matches!(
+        pair.client
+            .endpoint
+            .connect(now, client_config(), remote, "localhost"),
+        Err(crate::ConnectError::TooManyConnections)
+    ));
+    pair.drive();
+    assert!(pair.is_drained(Side::Client));
+    assert!(pair.is_drained(Side::Server));
+    // A fresh allocation requires the protocol's Drained release, not app-level close.
+    let now = pair.time;
+    assert!(
+        pair.client
+            .endpoint
+            .connect(now, client_config(), remote, "localhost")
+            .is_ok()
+    );
 }
