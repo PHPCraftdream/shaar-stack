@@ -115,7 +115,7 @@ The companion bridge and NAT watchers completed successfully; their latest detai
 logs and artifacts have not been re-inspected. CI remains the only compilation and
 runtime environment; this accepts the metadata prerequisite, not the SDK endpoint.
 
-## Joined actor shutdown — pending CI
+## Joined actor shutdown
 
 The later SDK matrix at `c20503d` again exposed an immediate UDP-rebind failure on
 Linux (40 library tests passed, one failed; Windows succeeded). The Noq sender
@@ -131,14 +131,25 @@ and instrumented bridge preparation install the identical module and call it
 outside the actor-task mutex. Source repeat/overwrite guards and provenance include
 the helper. No data-path policy, shutdown grace or native-port assertion is weakened.
 
-The SDK integration binary compiles this same helper with three authored tests:
+The SDK integration binary compiles this same helper with three tests:
 graceful completion, forced timeout/abort with immediate UDP rebinding, and panic
 propagation after resource drop. The timeout case runs on a current-thread runtime,
 so abort without join cannot be hidden by another executor thread. The test ports
 are dedicated ports outside the standard ephemeral ranges, not repeated retry binds.
-These additions await CI execution. An exact dev-only n0-future 0.3.2 dependency
-reuses the existing resolved package; the lock changes only the SDK edge,
-not any package version/source/checksum. No downloaded code ran locally.
+[CI 39936878051](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39936878051)
+at `4259f43` passed on both OSes; completed logs were inspected. The three actor
+cases passed in the dedicated preflight (0.10s/0.11s), and again in the six-test
+backend binary (three native dependency cases plus those three actor cases).
+The unchanged immediate SDK UDP rebind, 41 library tests, three public SDK matrix
+cases, five ingress tests and 88 Python guards also passed per OS. Known-fixture
+output scans were clean. Companion Noq/bridge/NAT watchers succeeded; their latest
+detailed artifacts were not re-inspected. See the
+[SDK acceptance boundary](../../../crates/shaar/src/network/README.md#consolidated-p06-acceptance).
+
+An exact dev-only n0-future 0.3.2 dependency reuses the existing resolved package;
+the lock changes only the SDK edge, not any package version/source/checksum.
+Its current SHA256 is `87f2ac01c1077ee86901e05ad5883ddd39f38c0eff5c04d7ef9b3a2e55b18632`.
+No downloaded code ran locally.
 
 ## Explicit preparation, not a build script
 

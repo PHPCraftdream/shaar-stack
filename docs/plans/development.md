@@ -5,10 +5,11 @@ passed; see [the SDK evidence](../verification/sdk-foundation.md). P03 experimen
 acceptance passed for the reviewed patched backend, including physical direct loss
 and automatic re-punch; see [the proof boundary](../verification/iroh-paths.md#13-accepted-physical-native-loss-and-automatic-re-punch).
 [Production dependency delivery](../verification/iroh-paths.md#14-accepted-product-dependency-delivery)
-also passed; SDK networking implementation (P06) is now unblocked, not completed.
-The Yggdrasil adapter (P07) remains unaccepted.
+also passed. Native SDK networking (P06) is accepted on Linux and Windows at
+`4259f43`; see [the API, bounds and acceptance matrix](../../crates/shaar/src/network/README.md#consolidated-p06-acceptance).
+The Yggdrasil adapter (P07) remains unaccepted and externally gated.
 P01 contract research is reconciled to the native Rust requirement.
-Date: 2026-10-21. Revised: 2026-10-23 — P03 controlled recovery accepted;
+Date: 2026-10-21. Revised: 2026-10-23 — P03 controlled recovery and P06 native SDK accepted;
 native Rust replaces Go/cgo in the intended architecture. Yggdrasil-ng (`yggdrasil` 0.3.1, source revision
 c9a54f1587bb133a06072596484c972a336db0d2) is a candidate, not an integrated
 dependency. Its shutdown/ownership source gate is open; see
@@ -232,6 +233,17 @@ Acceptance: direct connection, parallel streams, half-close, stream reset,
 cancellation, and endpoint shutdown lose no resources. Failure of an individual stream
 does not abort the others. Established TCP sessions make no promise to survive
 closing of the whole QUIC connection; new connections may establish a new one.
+
+P06 accepted: [CI 39936878051](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39936878051)
+at `4259f43`, with completed Linux/Windows job logs inspected. Each OS passed
+41 SDK library tests, six backend/resource tests, three public API integration
+cases, five ingress-budget tests and 88 Python guard/scanner tests. The public
+cases verify zero target connections for denied/wrong-pinned peers, exact authorized
+bytes, 16-stream admission and joined shutdown with socket-port reuse. Forced actor
+abort/join tests additionally passed before the full matrix. This is native SDK
+acceptance, not completed Server/Client programs, selected-custom fallback, general
+cancel/retry safety, total RSS/performance proof, home/mobile deployment or release
+readiness. P07's external permission/lifecycle gate remains unchanged.
 
 ### P07. Implement the Yggdrasil transport as an isolated adapter over the native Rust core
 

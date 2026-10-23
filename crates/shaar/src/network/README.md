@@ -120,7 +120,7 @@ bytes are checked and both FIN/ACK directions complete. Production continues usi
 borrowed TCP halves without an extra shared split allocation. The duplex's internal
 synchronization belongs only to the test fixture; this is not a kernel/RSS claim.
 
-## Consolidated acceptance additions — pending CI
+## Consolidated P06 acceptance
 
 `tests/sdk_network.rs` uses only the public SDK API for real target counters:
 unauthorized and wrong-pinned peers must open zero TCP targets, authorized traffic
@@ -143,5 +143,43 @@ The bounded output scanner now includes the SDK/dependency fixture seeds as well
 as the earlier identity fixtures. Independent scanner tests cover the same raw,
 hexadecimal and Debug representations. The all-space fixture is checked only in
 hexadecimal/Debug form: raw spaces are indistinguishable from normal indentation.
-This checks listed fixtures, not all possible secrets or unknown generated keys. All additions await their CI results;
-no local build/test or performance load is used as acceptance evidence.
+This checks listed fixtures, not all possible secrets or unknown generated keys.
+
+### Inspected acceptance result
+
+[CI 39936878051](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39936878051)
+at `4259f43` passed on Linux and Windows. Completed job logs were inspected, not
+just workflow status. The same code also passed the Noq, bridge and full NAT
+companion watchers; their latest detailed artifacts were not re-inspected.
+
+| Check | Linux | Windows |
+| --- | --- | --- |
+| Actor forced-boundary preflight | 3 passed, 0.10s | 3 passed, 0.11s |
+| SDK library | 41 passed, zero failed, 13.21s; one Unix reader case separately run | 41 passed, zero failed, 15.75s |
+| Native backend/resource binary | 6 passed, 12.63s | 6 passed, 12.81s |
+| Public SDK target/admission matrix | 3 passed, 0.24s | 3 passed, 0.37s |
+| Raw ingress budgets | 5 passed | 5 passed |
+| Python structural/scanner guards | 88 passed | 88 passed |
+| Known-fixture test-output scan | clean | clean |
+
+The actor preflight repeats the three actor tests also present in the six-test
+backend/resource binary; they are not nine distinct tests. The Linux ignored Unix
+reader case additionally passed when run with its explicit unprivileged UID probe.
+
+The matrix reopened an earlier UDP-rebind regression before acceptance: releasing
+Noq's sender did not address iroh's abort-without-join actor timeout. The shared
+owned helper in `4259f43` retains the handle during the unchanged 100 ms grace,
+then aborts and joins before returning. Its deterministic current-thread native
+resource test, graceful/panic cases and the **unchanged** immediate SDK UDP rebind
+all passed on both OSes. The exact old failed run did not log actor-timeout entry,
+so this is not a claim that its sole historical cause was traced conclusively.
+
+This accepts P06 native SDK authentication, fixed-target forwarding and the stated
+bounded lifecycle contracts. It does not accept Server/Client command programs,
+selected-custom transport authority or Yggdrasil fallback, libp2p signaling,
+Mainline discovery, arbitrary cancel/retry safety, total RSS/performance bounds,
+home/mobile deployment or release readiness. Explicit stop/close must be awaited;
+Drop remains an abort fallback. No local build, test, native fixture or performance
+load was used as acceptance evidence. Package versions and registry identities
+are unchanged; the new dev-only edge to the existing n0-future 0.3.2 package is a
+test utility, not use of n0 infrastructure.
