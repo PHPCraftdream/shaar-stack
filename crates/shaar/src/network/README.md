@@ -98,3 +98,20 @@ including both half-close orders, four-way concurrent streams, malformed request
 target failure, stream reset/cancellation isolation, setup timeout, status ordering,
 capacity and joined shutdown. This forwarding layer awaits its own CI proof;
 consolidated P06 acceptance remains a separate leaf.
+
+The first forwarding run at `417e3c6` passed on Windows but exposed a Linux test
+ordering error: client exchange completion does not guarantee that the server
+worker has observed its own final FIN ACK. Immediate stop may legitimately count
+that worker as failed or cancelled, even after exact client bytes were delivered.
+Tests require successful exact-byte exchanges and a live connection **before**
+stop, then complete accounting of all workers, not an unsupported exact shutdown
+failure count. The intentionally reset/cancelled worker cannot count as completed.
+
+A separate backpressure test calls the same private copy loop as production,
+with real QUIC but a 32-byte local duplex instead of OS-dependent TCP buffer sizes.
+After observing an actual data byte, the peer stops reading. A 2 MiB write must
+remain pending beyond the 1 MiB send window plus 256 KiB receive window and copy
+buffers. The pinned write future is retained, reading is released, all remaining
+bytes are checked and both FIN/ACK directions complete. Production continues using
+borrowed TCP halves without an extra shared split allocation. The duplex's internal
+synchronization belongs only to the test fixture; this is not a kernel/RSS claim.

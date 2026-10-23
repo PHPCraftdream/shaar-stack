@@ -1,5 +1,8 @@
 use iroh::endpoint::{RecvStream, SendStream, VarInt};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tokio::{
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt},
+    net::TcpStream,
+};
 
 use super::ForwardError;
 
@@ -38,11 +41,21 @@ impl Drop for Stream {
 
 /// cancel-safe: NO — terminal cancellation resets both QUIC directions and drops
 /// the owned TCP stream. Partially copied data must never be replayed on this pair.
-pub(super) async fn pump(
+pub(super) async fn pump(stream: Stream, mut tcp: TcpStream) -> Result<ForwardStats, ForwardError> {
+    let (read, write) = tcp.split();
+    copy_halves(stream, read, write).await
+}
+
+/// cancel-safe: NO — both owned QUIC directions are reset; neither copy is replayed.
+pub(super) async fn copy_halves<R, W>(
     mut stream: Stream,
-    mut tcp: TcpStream,
-) -> Result<ForwardStats, ForwardError> {
-    let (mut read, mut write) = tcp.split();
+    mut read: R,
+    mut write: W,
+) -> Result<ForwardStats, ForwardError>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
     let (send, recv) = (&mut stream.send, &mut stream.recv);
     let up = async {
         let bytes = tokio::io::copy(&mut read, &mut *send)
