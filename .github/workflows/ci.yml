@@ -8,6 +8,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      p08_graph:
+        description: Resolve and compile the reviewed P08 candidate graph without changing the product lock
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -115,3 +121,32 @@ jobs:
         run: python -I -X utf8 .github/scripts/check_structure.py
       - name: Structural guard tests
         run: python -I -X utf8 -m unittest discover -s .github/scripts/tests
+      - name: Resolve reviewed P08 candidate graph and verify relay expiry boundary
+        if: github.event_name == 'workflow_dispatch' && inputs.p08_graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/p08/relay-archive
+          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-relay/libp2p-relay-0.22.0.crate --output target/p08/relay-archive/relay.crate
+          python -I .github/scripts/p2p/prepare.py --archive target/p08/relay-archive/relay.crate --destination target/p08/relay
+          python -I .github/scripts/p2p/checks.py
+          if [[ "$RUNNER_OS" == Windows ]]; then binary="$RUNNER_TEMP/p08-lease.exe"; else binary="$RUNNER_TEMP/p08-lease"; fi
+          rustc --edition 2024 --test -D warnings .github/scripts/p2p/lease.rs -o "$binary"
+          "$binary"
+          relay=target/p08/relay/libp2p-relay-0.22.0
+          python -I .github/scripts/p2p/graph.py create --repository . --destination target/p08/workspace --relay-source "$relay"
+          cargo metadata --manifest-path target/p08/workspace/Cargo.toml --format-version 1 > target/p08/metadata.json
+          python -I .github/scripts/p2p/graph.py verify --workspace target/p08/workspace --metadata target/p08/metadata.json --relay-source "$relay"
+          cargo test --manifest-path target/p08/workspace/Cargo.toml -p shaar-p2p --locked --lib
+          python -I .github/scripts/p2p/graph.py verify --workspace target/p08/workspace --metadata target/p08/metadata.json --relay-source "$relay"
+      - name: Preserve reviewed P08 candidate lock and provenance
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.p08_graph
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: p08-graph-${{ matrix.os }}
+          path: |
+            target/p08/workspace/Cargo.lock
+            target/p08/workspace/crates/shaar-p2p/Cargo.toml
+            target/p08/workspace/graph-receipt.json
+            target/p08/relay/provenance.json
+          if-no-files-found: warn
