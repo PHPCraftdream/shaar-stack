@@ -62,6 +62,18 @@ jobs:
             --iroh-archive target/backend-archives/iroh/iroh.crate \
             --runtime-archive target/backend-archives/runtime/noq.crate \
             --lock .github/probes/iroh-paths/Cargo.lock --destination target/backend
+      - name: Prepare reviewed signaling dependencies and expiry controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/p2p/relay-archive target/p2p/swarm-archive
+          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-relay/libp2p-relay-0.22.0.crate --output target/p2p/relay-archive/relay.crate
+          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-swarm/libp2p-swarm-0.48.0.crate --output target/p2p/swarm-archive/swarm.crate
+          python -I .github/scripts/p2p/prepare.py --archive target/p2p/relay-archive/relay.crate --destination target/p2p/relay --swarm-archive target/p2p/swarm-archive/swarm.crate --swarm-destination target/p2p/swarm
+          python -I .github/scripts/p2p/checks.py
+          if [[ "$RUNNER_OS" == Windows ]]; then binary="$RUNNER_TEMP/p2p-lease.exe"; else binary="$RUNNER_TEMP/p2p-lease"; fi
+          rustc --edition 2024 --test -D warnings .github/scripts/p2p/lease.rs -o "$binary"
+          "$binary"
       - name: Verify ingress ownership and budget boundaries
         shell: bash
         run: |

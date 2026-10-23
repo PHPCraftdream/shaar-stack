@@ -47,13 +47,26 @@ def create(repository, destination, relay_source, swarm_source):
         if not (actual / "Cargo.toml").is_file():
             raise ValueError("production backend must be prepared before candidate resolution")
         manifest = replace(manifest, f'path = "{relative}"', f"path = {json.dumps(actual.as_posix())}")
-    patches = "\n".join(f"{name} = {{ path = {json.dumps(path.as_posix())} }}" for name, path in
-                        (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source)))
-    manifest = replace(manifest, "[patch.crates-io]", "[patch.crates-io]\n" + patches)
+    root_patches = tomllib.loads(manifest)["patch"]["crates-io"]
+    for name, path in (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source)):
+        if name in root_patches:
+            previous = root_patches[name]["path"]
+            manifest = replace(manifest, f'path = "{previous}"', f"path = {json.dumps(path.as_posix())}")
+        else:
+            addition = f"{name} = {{ path = {json.dumps(path.as_posix())} }}"
+            manifest = replace(manifest, "[patch.crates-io]", "[patch.crates-io]\n" + addition)
     sdk = repository / "crates/shaar-p2p/Cargo.toml"
-    if tomllib.loads(sdk.read_text(encoding="utf-8")).get("dependencies") != {}:
-        raise ValueError("P08 graph staging expects the unchanged product scaffold")
-    candidate = replace(sdk.read_text(encoding="utf-8"), "[dependencies]", DEPENDENCIES.rstrip())
+    original = sdk.read_text(encoding="utf-8")
+    dependencies = tomllib.loads(original).get("dependencies", {})
+    if not dependencies:
+        candidate = replace(original, "[dependencies]", DEPENDENCIES.rstrip())
+    else:
+        for name, version in FAMILY.items():
+            dependency = dependencies.get(name)
+            declared = dependency.get("version") if isinstance(dependency, dict) else dependency
+            if declared != "=" + version:
+                raise ValueError("product dependency family differs from reviewed candidate")
+        candidate = original
     destination.mkdir(parents=True, exist_ok=False)
     shutil.copytree(repository / "crates", destination / "crates", ignore=shutil.ignore_patterns("target", "__pycache__"))
     (destination / "Cargo.toml").write_text(manifest, encoding="utf-8", newline="\n")

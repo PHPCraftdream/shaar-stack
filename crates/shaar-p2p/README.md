@@ -1,8 +1,9 @@
 # P08 source/API gate — implementation not accepted
 
-The product crate is still a scaffold. Dependency resolution and compilation of
-an isolated candidate workspace are CI gates, not proof of a working transport.
-No candidate dependency is adopted into the product manifest/lock by this gate.
+The dependency/source gate is accepted; carrier implementation is in progress.
+The product now adopts the byte-reviewed CI graph and bounded source preparation.
+Framing and managed-executor primitives have authored tests, but are not a claim
+of a working Amino/relay/Iroh transport or complete P08 acceptance.
 
 ## Reviewed candidate family
 
@@ -21,10 +22,21 @@ graph is not assumed compatible until the CI identity guard passes.
 The gate stages the full candidate workspace, runs real `cargo metadata` without
 `--no-deps`, checks nonempty resolved nodes and the reviewed family, preserves every
 previous package name/version/source/checksum, and compiles the candidate crate
-with `--locked`. The product lock is not rewritten. Both OS artifacts must be
-reviewed before adoption. No local Cargo resolution, build or test is used.
+with `--locked`. [CI 39954741915](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39954741915)
+at `bdda8c1` passed on both OSes; completed logs and both artifact sets were inspected.
+Eight Python controls, four std-only lease tests and actual candidate compilation
+passed per OS. The scaffold had zero behavior tests; no transport success is inferred.
+Both candidate locks were byte-identical, SHA256
+`9359c11d87070869f2f9d3076ace7805343645612ac7572abe2da8bc4e96e43e`:
+all 376 earlier identities were retained, 125 added, zero removed or changed.
+Source/helper provenance matched the maintained files. That reviewed lock and
+manifest are now adopted; normal CI prepares both source overrides **before any
+Cargo resolution**. Missing source fails, not silent stock-upstream fallback.
+Optional candidate re-verification supports both the old scaffold and the adopted
+manifest without duplicate patch entries. No local Cargo resolution, build or test
+was used as evidence.
 
-## Frozen graph compatibility correction — pending CI
+## Frozen graph compatibility correction
 
 The first gate at `24840d3`, run `39950547435`, passed eight Python controls and
 four owned lease-boundary tests on both OSes. Full metadata then correctly rejected
@@ -45,7 +57,36 @@ Swarm version and every upstream Rust source byte are unchanged. Provenance reco
 the old/new requirement and native-source scope; metadata must resolve both this
 prepared Swarm and the bounded relay paths. This does not claim a WASM build or
 runtime acceptance. It preserves, rather than raises, existing product versions.
-A fresh CI gate must still verify all prior identities and compile the candidate.
+The corrected CI gate cited above verified all prior identities and compiled the
+candidate on both OSes before this graph was adopted.
+
+## Carrier primitives — authored, pending CI
+
+`Datagram` accepts 1..=1500 bytes in a fixed inline buffer. Its Debug output contains
+only the length. The request codec writes a big-endian u16 length, exact payload
+and EOF; the response is byte zero and EOF. Zero/oversized lengths, truncation,
+trailing bytes and nonzero acknowledgements fail closed. No bytes are allocated
+according to an unchecked peer length. A partial read/write is terminal and must
+not be replayed on the same substream. This framing budget is not a claim that an
+opaque datagram contains only signaling: trusted Noq enforcement remains mandatory.
+
+`OwnedExecutor` owns at most 64 background tasks, including completed results not
+yet observed. Cloneable handles permit submission but not shutdown ownership.
+Admission is checked before spawning; exhaustion or missing runtime is reported
+to the sole completion observer rather than spawning unbounded work or panicking.
+A short mutex is required by the synchronous `Executor::exec(&self, ...)` contract
+and mutable JoinSet; it is never held across an await, I/O or future destruction.
+An AtomicWaker plus registration-before-check handles empty-to-nonempty transitions.
+`shutdown(self)` closes admission, takes the JoinSet out of the mutex, aborts and
+joins every result, including after state poison. Drop is an abort fallback only.
+Retained submission handles cannot keep native task I/O alive after joined shutdown.
+
+Authored tests cover exact min/max framing with one-byte partial I/O, malformed
+lengths/EOF/trailing data/acknowledgements and underlying errors; executor capacity,
+normal/panic/poison/runtime failures, cancelled completion observation and physical
+UDP rebinding while submission handles remain alive. These are primitives, not
+live carrier/relay interoperability tests. The actual Swarm owner, peer ledger and
+request admission/reconnect work still belongs to the in-progress carrier leaf.
 
 ## Rejected shortcuts and selected boundaries
 

@@ -84,6 +84,53 @@ class GraphChecks(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     replace(source, "anchor", "new")
 
+    def repository_fixture(self, adopted):
+        repository = Path(self.temporary.name) / ("adopted" if adopted else "scaffold")
+        sdk = repository / "crates/shaar-p2p"
+        sdk.mkdir(parents=True)
+        root = '[workspace]\nmembers = ["crates/shaar-p2p"]\n[patch.crates-io]\n'
+        for name in ("iroh", "noq-proto", "noq"):
+            relative = f"target/backend/{name}/{name}-1.3.0"
+            source = repository / relative
+            source.mkdir(parents=True)
+            (source / "Cargo.toml").write_text("source fixture", encoding="utf-8")
+            root += f'{name} = {{ path = "{relative}" }}\n'
+        if adopted:
+            root += 'libp2p-relay = { path = "target/p2p/relay/libp2p-relay-0.22.0" }\n'
+            root += 'libp2p-swarm = { path = "target/p2p/swarm/libp2p-swarm-0.48.0" }\n'
+        (repository / "Cargo.toml").write_text(root, encoding="utf-8")
+        (repository / "Cargo.lock").write_text("version = 4\n", encoding="utf-8")
+        dependencies = graph.DEPENDENCIES if adopted else "[dependencies]\n"
+        (sdk / "Cargo.toml").write_text('[package]\nname = "shaar-p2p"\nversion = "0.1.0"\n' + dependencies, encoding="utf-8")
+        (self.relay / "src").mkdir(parents=True, exist_ok=True)
+        (self.relay / "src/bounded_lease.rs").write_text("owned lease fixture", encoding="utf-8")
+        self.swarm.mkdir(parents=True, exist_ok=True)
+        (self.swarm / "Cargo.toml").write_text('''[target.'cfg(target_family="wasm")'.dependencies.wasm-bindgen-futures]
+version = "=0.4.79"\n''', encoding="utf-8")
+        return repository
+
+    def test_staging_works_before_and_after_product_adoption_without_duplicate_patches(self):
+        for adopted in (False, True):
+            repository = self.repository_fixture(adopted)
+            original = (repository / "Cargo.toml").read_bytes()
+            destination = repository / "candidate"
+            graph.create(repository, destination, self.relay, self.swarm)
+            import tomllib
+            staged = tomllib.loads((destination / "Cargo.toml").read_text())
+            self.assertEqual(staged["patch"]["crates-io"]["libp2p-relay"]["path"], self.relay.resolve().as_posix())
+            self.assertEqual(staged["patch"]["crates-io"]["libp2p-swarm"]["path"], self.swarm.resolve().as_posix())
+            self.assertEqual((repository / "Cargo.toml").read_bytes(), original)
+            self.assertEqual((destination / "baseline.lock").read_bytes(), (repository / "Cargo.lock").read_bytes())
+
+    def test_wrong_product_family_is_rejected_before_candidate_is_created(self):
+        repository = self.repository_fixture(True)
+        manifest = repository / "crates/shaar-p2p/Cargo.toml"
+        manifest.write_text(manifest.read_text().replace("=0.57.1", "=0.57.0"), encoding="utf-8")
+        destination = repository / "candidate"
+        with self.assertRaisesRegex(ValueError, "product dependency family"):
+            graph.create(repository, destination, self.relay, self.swarm)
+        self.assertFalse(destination.exists())
+
     def test_invalid_archive_never_creates_destination(self):
         archive = Path(self.temporary.name) / "wrong.crate"
         archive.write_bytes(b"not a reviewed archive")

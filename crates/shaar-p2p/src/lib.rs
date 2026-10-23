@@ -1,4 +1,11 @@
 #![forbid(unsafe_code)]
-//! libp2p transport adapter: connection signaling, not application data.
+//! Bounded libp2p carrier building blocks; no application data routing policy here.
 //!
-//! Scaffold: implementation follows in P08.
+//! Encrypted QUIC datagrams are opaque. Signaling-only enforcement belongs to the
+//! trusted Noq packetization boundary, not inspection of this codec's payload.
+
+mod executor;
+mod packet;
+
+pub use executor::{ExecutorHandle, OwnedExecutor};
+pub use packet::{CONTROL_PROTOCOL, Datagram, DatagramCodec, MAX_DATAGRAM};
