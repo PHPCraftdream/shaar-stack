@@ -39,8 +39,19 @@ struct Core {
     incoming: mpsc::Sender<Received>,
     listening: watch::Sender<Option<SocketAddr>>,
     pending: HashMap<ConnectionId, (PeerId, Reply<ConnectionId>)>,
-    requests: HashMap<rpc::OutboundRequestId, (PeerId, Reply<()>)>,
-    closing: HashMap<PeerId, (tokio::time::Instant, Reply<()>)>,
+    requests: HashMap<rpc::OutboundRequestId, Request>,
+    closing: HashMap<PeerId, Closing>,
+}
+
+struct Request {
+    peer: PeerId,
+    deadline: tokio::time::Instant,
+    reply: Option<Reply<()>>,
+}
+
+struct Closing {
+    deadline: tokio::time::Instant,
+    reply: Option<Reply<()>>,
 }
 
 impl Carrier {
@@ -135,6 +146,10 @@ impl Carrier {
 #[path = "tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "fault_tests.rs"]
+mod fault_tests;
+
 impl Core {
     async fn drive(
         &mut self,
@@ -143,8 +158,18 @@ impl Core {
     ) -> io::Result<()> {
         tokio::pin!(stop);
         loop {
-            // At most 16 entries: no heap-allocated timer queue or per-packet timer.
-            let deadline = self.closing.values().map(|(deadline, _)| *deadline).min();
+            // At most 48 entries: a bounded scan avoids a separately allocated timer queue.
+            let deadline = self
+                .closing
+                .values()
+                .map(|closing| closing.deadline)
+                .chain(
+                    self.requests
+                        .values()
+                        .filter(|request| request.reply.is_some())
+                        .map(|request| request.deadline),
+                )
+                .min();
             let closing_deadline = async {
                 match deadline {
                     Some(deadline) => tokio::time::sleep_until(deadline).await,
@@ -152,7 +177,7 @@ impl Core {
                 }
             };
             tokio::select! {
-                _ = closing_deadline => return Err(io::Error::new(io::ErrorKind::TimedOut, "carrier disconnect deadline")),
+                _ = closing_deadline => self.expire(tokio::time::Instant::now())?,
                 _ = &mut stop => return Ok(()),
                 _ = self.incoming.closed() => return Ok(()),
                 command = self.commands.recv() => match command {
@@ -163,6 +188,38 @@ impl Core {
                 result = executor.next_result() => result?,
             }
         }
+    }
+
+    fn expire(&mut self, now: tokio::time::Instant) -> io::Result<()> {
+        if self.closing.values().any(|closing| closing.deadline <= now) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "carrier disconnect deadline",
+            ));
+        }
+        for request in self.requests.values_mut() {
+            if request.deadline > now {
+                continue;
+            }
+            let Some(reply) = request.reply.take() else {
+                continue;
+            };
+            let _ = reply.send(Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "carrier request deadline",
+            )));
+            // Keep the ID charged until the dependency emits its terminal event.
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                self.closing.entry(request.peer)
+            {
+                let _ = self.swarm.disconnect_peer_id(request.peer);
+                entry.insert(Closing {
+                    deadline: now + DEADLINE,
+                    reply: None,
+                });
+            }
+        }
+        Ok(())
     }
 
     fn command(&mut self, command: Command) {
@@ -193,8 +250,10 @@ impl Core {
                 {
                     let _ = reply.send(Err(capacity()));
                 } else {
+                    // Signaling uses explicit TCP dials, not listener-port hole punching.
                     let options = DialOpts::peer_id(peer)
                         .addresses(vec![multiaddr(address)])
+                        .allocate_new_port()
                         .build();
                     let id = options.connection_id();
                     match self.swarm.dial(options) {
@@ -227,7 +286,14 @@ impl Core {
                         .behaviour_mut()
                         .packets
                         .send_request(&peer, packet);
-                    self.requests.insert(id, (peer, reply));
+                    self.requests.insert(
+                        id,
+                        Request {
+                            peer,
+                            deadline: tokio::time::Instant::now() + DEADLINE,
+                            reply: Some(reply),
+                        },
+                    );
                 }
             }
             Command::Disconnect(peer, reply) => {
@@ -236,8 +302,13 @@ impl Core {
                 {
                     let _ = reply.send(Err(capacity()));
                 } else if self.swarm.disconnect_peer_id(peer).is_ok() {
-                    self.closing
-                        .insert(peer, (tokio::time::Instant::now() + DEADLINE, reply));
+                    self.closing.insert(
+                        peer,
+                        Closing {
+                            deadline: tokio::time::Instant::now() + DEADLINE,
+                            reply: Some(reply),
+                        },
+                    );
                 } else {
                     let _ = reply.send(Ok(()));
                 }
@@ -277,7 +348,10 @@ impl Core {
                 num_established: 0,
                 ..
             } => {
-                if let Some((_, reply)) = self.closing.remove(&peer_id) {
+                if let Some(Closing {
+                    reply: Some(reply), ..
+                }) = self.closing.remove(&peer_id)
+                {
                     let _ = reply.send(Ok(()));
                 }
                 // Request-response emits the terminal failure for each outstanding ID.
@@ -320,14 +394,20 @@ impl Core {
                 message: rpc::Message::Response { request_id, .. },
                 ..
             } => {
-                if let Some((_, reply)) = self.requests.remove(&request_id) {
+                if let Some(Request {
+                    reply: Some(reply), ..
+                }) = self.requests.remove(&request_id)
+                {
                     let _ = reply.send(Ok(()));
                 }
             }
             rpc::Event::OutboundFailure {
                 request_id, error, ..
             } => {
-                if let Some((_, reply)) = self.requests.remove(&request_id) {
+                if let Some(Request {
+                    reply: Some(reply), ..
+                }) = self.requests.remove(&request_id)
+                {
                     let _ = reply.send(Err(io::Error::other(error)));
                 }
             }

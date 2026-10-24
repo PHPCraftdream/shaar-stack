@@ -115,9 +115,14 @@ each capped at two per connection. Swarm background tasks retain the existing
 
 Connect reuses a live connection; disconnect waits for its close event; another
 explicit connect reopens on demand. Transport negotiation, whole RPC and pending
-disconnect have ten-second deadlines. A stuck disconnect fails the driver and
-joins all managed I/O instead of hanging indefinitely. There are no automatic
-retries or hidden delivery replays; cancellation after admission may be ambiguous.
+disconnect have ten-second deadlines. The adapter starts its own RPC deadline at
+ID admission: request-response's worker timeout starts only after substream
+negotiation and does not bound the preceding queues. Expiry reports TimedOut and
+closes that peer, retaining each ID's charge until the dependency's terminal event.
+Dropping a waiter does not release a still-retained request slot. A stuck disconnect
+fails the driver and joins all managed I/O instead of hanging indefinitely.
+There are no automatic retries or hidden delivery replays; cancellation after
+admission may be ambiguous.
 Amino discovery, address TTLs, retry/backoff and relay lifecycle belong to the next
 integration leaf, not a new retry mode in this carrier.
 
@@ -132,9 +137,23 @@ Authored tests cover real TCP/Noise exact bidirectional min/max payloads, connec
 reuse and reopen, source provenance, denied/wrong-pinned peers, full incoming queue
 and resumption, bounded command cancellation, pending admission reclamation, silent
 Noise timeout and native listener rebind after joined shutdown with handles alive.
-Their CI outcomes are pending. The global in-flight ledger cap and hostile live
-RPC deadline still require dedicated behavioural controls before leaf acceptance.
-No Amino/relay/Iroh bridge or signaling-only frame proof is claimed by this API.
+At `a79c36a`, [CI 40114098040](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40114098040)
+passed all nine native cases plus six executor cases on Ubuntu. Windows passed 14
+and failed the connection-reuse/reopen case with TCP AddrInUse (10048). The exact
+initial-versus-reopened call was not logged separately. Pinned libp2p-tcp 0.45.0
+reuses the listener address by default (`src/lib.rs:379-413`); its fresh-port retry
+handles AddrNotAvailable, not Windows AddrInUse. The corrected adapter explicitly
+uses Swarm DialOpts::allocate_new_port(), not a test sleep or blind retry. Signaling
+dials need no listener-port hole punching; QUIC direct-path NAT policy is unchanged.
+The original reuse/reopen assertions are retained. Corrected both-OS proof is pending.
+
+Additional authored fault controls fill the actual request ledger before submission
+33, cancel a waiter without returning its slot, invoke the production expiry action
+and require all charged IDs to survive until terminal dependency events. A real
+Noise peer deliberately withholds acknowledgements; further controls cover fatal
+close deadline, incoming-consumer drop and last-handle drop with listener rebind.
+These new outcomes are pending too. No Amino/relay/Iroh bridge or signaling-only
+frame proof is claimed by this API.
 
 ## Rejected shortcuts and selected boundaries
 

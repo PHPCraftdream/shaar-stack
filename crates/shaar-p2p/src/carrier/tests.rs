@@ -95,6 +95,80 @@ fn constructing_without_a_runtime_fails_without_panicking() {
 }
 
 #[test]
+fn authenticated_admission_bounds_peers_rejects_duplicates_and_forgets_closed_links() {
+    use libp2p::core::ConnectedPoint;
+    use libp2p::swarm::behaviour::{ConnectionClosed, ConnectionEstablished};
+    let peers: Vec<_> = (0..super::super::PEER_LIMIT)
+        .map(|_| key().public().to_peer_id())
+        .collect();
+    let mut admission = Admission::new(peers.clone()).unwrap();
+    let address = multiaddr(loopback());
+    let endpoint = ConnectedPoint::Listener {
+        local_addr: address.clone(),
+        send_back_addr: address.clone(),
+    };
+    for (index, peer) in peers.iter().enumerate() {
+        let id = ConnectionId::new_unchecked(index);
+        admission
+            .handle_pending_inbound_connection(id, &address, &address)
+            .unwrap();
+        admission
+            .handle_established_inbound_connection(id, *peer, &address, &address)
+            .unwrap();
+        admission.on_swarm_event(FromSwarm::ConnectionEstablished(ConnectionEstablished {
+            peer_id: *peer,
+            connection_id: id,
+            endpoint: &endpoint,
+            failed_addresses: &[],
+            other_established: 0,
+        }));
+        assert_eq!(admission.connection(peer), Some(id));
+    }
+    let extra = ConnectionId::new_unchecked(100);
+    assert!(
+        admission
+            .handle_established_inbound_connection(extra, peers[0], &address, &address)
+            .is_err()
+    );
+    assert!(
+        admission
+            .handle_established_inbound_connection(
+                extra,
+                key().public().to_peer_id(),
+                &address,
+                &address
+            )
+            .is_err()
+    );
+    admission.on_swarm_event(FromSwarm::ConnectionClosed(ConnectionClosed {
+        peer_id: peers[0],
+        connection_id: ConnectionId::new_unchecked(0),
+        endpoint: &endpoint,
+        cause: None,
+        remaining_established: 0,
+    }));
+    assert!(admission.connection(&peers[0]).is_none());
+    admission
+        .handle_established_inbound_connection(extra, peers[0], &address, &address)
+        .unwrap();
+    // A later composed behaviour may still reject: only the final established event registers a link.
+    assert!(admission.connection(&peers[0]).is_none());
+    admission.on_swarm_event(FromSwarm::DialFailure(DialFailure {
+        peer_id: Some(peers[0]),
+        error: &DialError::NoAddresses,
+        connection_id: extra,
+    }));
+    admission
+        .handle_established_inbound_connection(
+            ConnectionId::new_unchecked(101),
+            peers[0],
+            &address,
+            &address,
+        )
+        .unwrap();
+}
+
+#[test]
 fn pending_noise_admission_is_bounded_and_failure_reclaims_the_slot() {
     let peer = key().public().to_peer_id();
     let mut admission = Admission::new(vec![peer]).unwrap();
