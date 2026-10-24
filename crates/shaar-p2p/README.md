@@ -2,8 +2,9 @@
 
 The dependency/source gate is accepted; carrier implementation is in progress.
 The product now adopts the byte-reviewed CI graph and bounded source preparation.
-Framing and managed-executor primitives have authored tests, but are not a claim
-of a working Amino/relay/Iroh transport or complete P08 acceptance.
+Framing and managed-executor primitives have verified CI tests; the newly authored
+native carrier is pending CI. Neither is a claim of a working Amino/relay/Iroh
+transport or complete P08 acceptance.
 
 ## Reviewed candidate family
 
@@ -60,7 +61,7 @@ runtime acceptance. It preserves, rather than raises, existing product versions.
 The corrected CI gate cited above verified all prior identities and compiled the
 candidate on both OSes before this graph was adopted.
 
-## Carrier primitives — authored, pending CI
+## Verified carrier primitives
 
 `Datagram` accepts 1..=1500 bytes in a fixed inline buffer. Its Debug output contains
 only the length. The request codec writes a big-endian u16 length, exact payload
@@ -84,9 +85,56 @@ Retained submission handles cannot keep native task I/O alive after joined shutd
 Authored tests cover exact min/max framing with one-byte partial I/O, malformed
 lengths/EOF/trailing data/acknowledgements and underlying errors; executor capacity,
 normal/panic/poison/runtime failures, cancelled completion observation and physical
-UDP rebinding while submission handles remain alive. These are primitives, not
-live carrier/relay interoperability tests. The actual Swarm owner, peer ledger and
-request admission/reconnect work still belongs to the in-progress carrier leaf.
+UDP rebinding while submission handles remain alive. Completed logs of
+[CI 40112714369](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40112714369)
+at `ae16803` confirm all six executor and six codec tests passed on Linux/Windows.
+These are primitives, not live carrier/relay interoperability acceptance.
+
+## Native carrier — authored, pending CI
+
+`Carrier::bind` consumes a libp2p identity, one native TCP listen address and an
+immutable allowlist of at most 16 input entries, checked before deduplication.
+It requires an active Tokio runtime and returns a sole driver, cloneable submission
+handle and bounded incoming receiver. The caller drives `run(stop)` and awaits it;
+there is no detached root task. Dropping the run future aborts but cannot join.
+
+An admission behaviour runs before the request-response behaviour: at most eight
+pending Noise negotiations and one authenticated connection per allowed peer.
+Unknown authenticated peers and duplicate connections are rejected before protocol
+handler creation. There is no attacker-extendable peer/address history. An address
+is one typed SocketAddr on an explicit connect command, not an unbounded cache.
+Noise authenticates the configured PeerId; packet bodies never declare the source.
+Received packets carry the real local Swarm ConnectionId and authenticated peer.
+
+Command and incoming queues each hold at most 32 records. Submission uses try_send,
+not queued channel waiters. The request ledger is capped at 32 **before** calling
+request-response's ID-allocating send method, and sends require a live authenticated
+connection. Negotiating inbound streams and request-response active streams are
+each capped at two per connection. Swarm background tasks retain the existing
+64-task executor cap. These are separate bounds, not a total RSS claim.
+
+Connect reuses a live connection; disconnect waits for its close event; another
+explicit connect reopens on demand. Transport negotiation, whole RPC and pending
+disconnect have ten-second deadlines. A stuck disconnect fails the driver and
+joins all managed I/O instead of hanging indefinitely. There are no automatic
+retries or hidden delivery replays; cancellation after admission may be ambiguous.
+Amino discovery, address TTLs, retry/backoff and relay lifecycle belong to the next
+integration leaf, not a new retry mode in this carrier.
+
+A successful acknowledgement means admission to the remote bounded queue, not
+application consumption. A full queue omits the acknowledgement and discards that
+packet; callers must not assume every failure proves non-delivery. Consuming the
+queue permits subsequent admission. On explicit stop, last-handle drop, incoming
+consumer drop or fatal error, Swarm is dropped before executor abort/join. Retained
+handles and received records do not retain native listener or connection sockets.
+
+Authored tests cover real TCP/Noise exact bidirectional min/max payloads, connection
+reuse and reopen, source provenance, denied/wrong-pinned peers, full incoming queue
+and resumption, bounded command cancellation, pending admission reclamation, silent
+Noise timeout and native listener rebind after joined shutdown with handles alive.
+Their CI outcomes are pending. The global in-flight ledger cap and hostile live
+RPC deadline still require dedicated behavioural controls before leaf acceptance.
+No Amino/relay/Iroh bridge or signaling-only frame proof is claimed by this API.
 
 ## Rejected shortcuts and selected boundaries
 

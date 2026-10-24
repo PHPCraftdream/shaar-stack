@@ -171,9 +171,16 @@ The identical owned `track_child` helper is compiled in the SDK regression binar
 Two added tests cover unpolled/pending child leases and parent graceful exit,
 forced abort and panic with immediate native rebind. A pending tracker-wait check
 is a deterministic negative control against removing the child lease. Original
-public SDK rebind assertions remain unchanged. These tests are authored; corrected
-CI evidence is pending. The dev-only tokio-util 0.7.20 edge reuses the already
-resolved reviewed package; no package version, source or checksum changes.
+public SDK rebind assertions remain unchanged. At `ae16803`, actual completed
+[CI 40112714369](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40112714369)
+logs confirm both OSes passed five actor preflight cases (0.10s/0.11s), eight backend
+cases (five actor plus three native), all three public SDK cases including the
+original immediate rebind, and all 41 SDK library cases. The P08 executor/codec
+primitives each passed six tests per OS; these are not live carrier acceptance.
+Ten P08 Python controls, four lease tests, five ingress tests and 88 structural
+controls passed; fixture output scans were clean. All companion watchers succeeded.
+The dev-only tokio-util 0.7.20 edge reuses the already resolved reviewed package;
+no package version, source or checksum changes.
 
 ## Explicit preparation, not a build script
 
