@@ -59,6 +59,7 @@ class PreparationChecks(unittest.TestCase):
             self.assertEqual(tomllib.loads((root / "Cargo.toml").read_text())["package"]["license"], "MIT OR Apache-2.0")
             self.assertTrue(list(root.glob("LICENSE*")))
         for package, relative in [("iroh", "src/endpoint/connection.rs"), ("iroh", "src/socket/transports.rs"),
+                                  ("iroh", "src/socket/transports/ip.rs"),
                                   ("iroh", "src/endpoint/quic.rs"), ("noq-proto", "src/connection/packet_builder.rs")]:
             text = (ROOTS[package] / relative).read_text(encoding="utf-8")
             for forbidden in ("spike_open_ip_path", "spike_disable_nat_traversal", "spike_new", "raw.data ="):
@@ -70,10 +71,16 @@ class PreparationChecks(unittest.TestCase):
         provenance = ARGS.destination / "provenance.json"
         self.assertEqual(json.loads(provenance.read_text())["fixture_instrumentation"], False)
         for package, relative in [("iroh", "src/endpoint/connection.rs"), ("iroh", "src/socket/transports.rs"),
+                                  ("iroh", "src/socket/transports/ip.rs"),
                                   ("noq-proto", "src/connection/packet_builder.rs"), ("noq-proto", "src/connection/qlog.rs")]:
             with tarfile.open(ARCHIVES[package]) as archive:
                 with archive.extractfile(f"{package}-{prepare.VERSION}/{relative}") as original:
-                    self.assertEqual((ROOTS[package] / relative).read_bytes(), original.read())
+                    actual = (ROOTS[package] / relative).read_bytes()
+                    if package == "iroh" and relative == "src/socket/transports.rs":
+                        actual = policy.replace(actual.decode("utf-8"), policy.NATIVE_SOCKET_HANDLES, "").encode("utf-8")
+                    elif package == "iroh" and relative == "src/socket/transports/ip.rs":
+                        actual = policy.replace(actual.decode("utf-8"), policy.NATIVE_SOCKET_HANDLE, "").encode("utf-8")
+                    self.assertEqual(actual, original.read())
 
     def test_checksum_failure_never_creates_output(self):
         with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
@@ -126,7 +133,8 @@ class PreparationChecks(unittest.TestCase):
         root = ROOTS["iroh"]
         paths = [root / name for name in ("src/lib.rs", "src/socket.rs", "src/actor_shutdown.rs",
                                           "src/runtime.rs", "src/socket/remote_map.rs",
-                                          "src/socket/remote_map/remote_state.rs")]
+                                          "src/socket/remote_map/remote_state.rs", "src/socket/transports.rs",
+                                          "src/socket/transports/ip.rs")]
         before = [path.read_bytes() for path in paths]
         self.assertEqual(before[2], Path(policy.__file__).with_name("actor_shutdown.rs").read_bytes())
         with self.assertRaisesRegex(ValueError, "actor shutdown module already exists"):
@@ -146,6 +154,16 @@ class PreparationChecks(unittest.TestCase):
         self.assertIn("crate::actor_shutdown::track_child(&self.tasks, future)", runtime)
         self.assertIn("self.tasks.wait().await", runtime)
         self.assertLess(socket.index("finish_actor(task).await"), socket.index("self.runtime.shutdown().await"))
+
+    def test_native_kernel_close_follows_all_task_barriers(self):
+        socket = (ROOTS["iroh"] / "src/socket.rs").read_text(encoding="utf-8")
+        self.assertLess(socket.index("let native_sockets = transports.native_socket_handles()"),
+                        socket.index("let endpoint = noq::Endpoint::new_with_abstract_socket"))
+        self.assertIn("            native_sockets,", socket)
+        self.assertLess(socket.index("self.runtime.shutdown().await"),
+                        socket.index("close_native_sockets(&self.native_sockets).await"))
+        self.assertLess(socket.index("close_native_sockets(&self.native_sockets).await"),
+                        socket.index("self.sock.shutdown.closed.store"))
 
     def test_runtime_ingress_transform_rejects_repeat_without_overwriting(self):
         root = ROOTS["noq"]

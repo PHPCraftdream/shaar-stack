@@ -20,6 +20,7 @@ shaar-platform = { path = "../shaar-platform" }
 
 [dev-dependencies]
 n0-future = "=0.3.2"
+netwatch = "=0.19.3"
 tokio-util = { version = "=0.7.20", features = ["rt"] }
 libp2p-identity = { version = "=0.3.0", default-features = false, features = ["ed25519", "peerid"] }
 # Multi-thread execution and deterministic test coordination only.

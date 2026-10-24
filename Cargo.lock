@@ -3959,6 +3959,7 @@ dependencies = [
  "ktav",
  "libp2p-identity",
  "n0-future",
+ "netwatch",
  "serde",
  "shaar-p2p",
  "shaar-platform",

@@ -1,6 +1,18 @@
 """Reviewed Noq 1.3.0 payload policy; no fixture instrumentation."""
 from pathlib import Path
 
+NATIVE_SOCKET_HANDLE = """    pub(super) fn native_socket_handle(&self) -> Arc<UdpSocket> {
+        self.socket.clone()
+    }
+
+"""
+NATIVE_SOCKET_HANDLES = """    #[cfg(not(wasm_browser))]
+    pub(crate) fn native_socket_handles(&self) -> Vec<Arc<netwatch::UdpSocket>> {
+        self.ip.iter().map(|transport| transport.native_socket_handle()).collect()
+    }
+
+"""
+
 
 def replace(text, old, new, count=1):
     actual = text.count(old)
@@ -316,8 +328,23 @@ def joined_actor_shutdown(root: Path):
     child = replace(child_path.read_text(encoding="utf-8"), "        tasks: &mut JoinSet<(EndpointId, Vec<RemoteStateMessage>)>,", "        tasks: &mut JoinSet<(EndpointId, Vec<RemoteStateMessage>)>,\n        runtime: &crate::runtime::Runtime,")
     child = replace(child, "        tasks.spawn(\n            self.run(initial_msgs, rx, shutdown_token)", "        tasks.spawn(runtime.track_child(\n            self.run(initial_msgs, rx, shutdown_token)")
     child = replace(child, "                    remote = %endpoint_id.fmt_short(),\n                )),\n        );", "                    remote = %endpoint_id.fmt_short(),\n                )),\n        ));")
+    transports_path = root / "src/socket/transports.rs"
+    ip_path = root / "src/socket/transports/ip.rs"
+    transports = replace(transports_path.read_text(encoding="utf-8"),
+                         "    pub(crate) fn create_sender(&self) -> TransportsSender {",
+                         NATIVE_SOCKET_HANDLES + "    pub(crate) fn create_sender(&self) -> TransportsSender {")
+    ip = replace(ip_path.read_text(encoding="utf-8"), "impl IpTransport {\n", "impl IpTransport {\n" + NATIVE_SOCKET_HANDLE)
+    socket = replace(socket, "    // Runtime used by noq\n    runtime: Arc<Runtime>,",
+                     "    // Runtime used by noq\n    runtime: Arc<Runtime>,\n    #[cfg(not(wasm_browser))]\n    native_sockets: Vec<Arc<netwatch::UdpSocket>>,")
+    socket = replace(socket, "        let local_addrs_watch = transports.local_addrs_watch();",
+                     "        #[cfg(not(wasm_browser))]\n        let native_sockets = transports.native_socket_handles();\n\n        let local_addrs_watch = transports.local_addrs_watch();")
+    socket = replace(socket, "            runtime,\n            static_config,",
+                     "            runtime,\n            #[cfg(not(wasm_browser))]\n            native_sockets,\n            static_config,")
+    socket = replace(socket, "        self.runtime.shutdown().await;",
+                     "        self.runtime.shutdown().await;\n        #[cfg(not(wasm_browser))]\n        crate::actor_shutdown::close_native_sockets(&self.native_sockets).await;")
     owned = Path(__file__).with_name("actor_shutdown.rs").read_bytes()
-    for path, text in ((runtime_path, runtime), (remote_path, remote), (child_path, child)):
+    for path, text in ((runtime_path, runtime), (remote_path, remote), (child_path, child),
+                       (transports_path, transports), (ip_path, ip)):
         path.write_text(text, encoding="utf-8", newline="\n")
     library_path.write_text(library, encoding="utf-8", newline="\n")
     socket_path.write_text(socket, encoding="utf-8", newline="\n")

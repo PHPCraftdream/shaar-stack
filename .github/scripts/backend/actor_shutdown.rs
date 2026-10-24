@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! Shared actor shutdown boundary, compiled by iroh and the SDK regression tests.
+//! Shared endpoint shutdown boundaries, compiled by iroh and SDK regression tests.
 
 use n0_future::{
     task::{AbortOnDropHandle, JoinError},
@@ -27,10 +27,99 @@ pub(crate) async fn finish_actor(mut task: AbortOnDropHandle<()>) -> Result<(), 
     }
 }
 
+/// Closes kernel sockets explicitly; netwatch's Drop detaches its blocking close task.
+/// cancel-safe: NO — cancellation cannot join the remaining sockets' kernel closes.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+pub(crate) async fn close_native_sockets(sockets: &[std::sync::Arc<netwatch::UdpSocket>]) {
+    for socket in sockets {
+        socket.close().await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::{net::UdpSocket, sync::oneshot};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn explicit_native_close_releases_sockets_with_sender_aliases_alive() {
+        close_native_sockets(&[]).await;
+        let first = std::sync::Arc::new(netwatch::UdpSocket::bind_local_v4(20041).unwrap());
+        let second = std::sync::Arc::new(netwatch::UdpSocket::bind_local_v4(20042).unwrap());
+        let first_sender = first.clone().create_sender();
+        let second_sender = second.clone().create_sender();
+        let sockets = [first.clone(), second.clone()];
+        close_native_sockets(&sockets).await;
+        assert!(first.is_closed() && second.is_closed());
+        let _first_rebound = UdpSocket::bind("127.0.0.1:20041").await.unwrap();
+        let _second_rebound = UdpSocket::bind("127.0.0.1:20042").await.unwrap();
+        close_native_sockets(&sockets).await;
+        drop((first_sender, second_sender));
+    }
+
+    #[test]
+    fn native_drop_can_finish_before_its_detached_kernel_close() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        let (entered, observed) = std::sync::mpsc::sync_channel(1);
+        let (release, released) = std::sync::mpsc::sync_channel(1);
+        let blocker = runtime.spawn_blocking(move || {
+            entered.send(()).unwrap();
+            // Sender disappearance also releases this fixture during unwinding.
+            let _ = released.recv();
+        });
+        observed.recv_timeout(Duration::from_secs(5)).unwrap();
+        runtime.block_on(async {
+            let socket = netwatch::UdpSocket::bind_local_v4(20043).unwrap();
+            drop(socket);
+            let error = UdpSocket::bind("127.0.0.1:20043").await.unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
+        });
+        release.send(()).unwrap();
+        runtime.block_on(blocker).unwrap();
+        // Runtime Drop joins the foreign blocking close, unlike socket/actor Drop.
+        drop(runtime);
+        let _rebound = std::net::UdpSocket::bind("127.0.0.1:20043").unwrap();
+    }
+
+    #[test]
+    fn explicit_native_close_waits_until_the_blocking_pool_executes_kernel_close() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        let (entered, observed) = std::sync::mpsc::sync_channel(1);
+        let (release, released) = std::sync::mpsc::sync_channel(1);
+        let blocker = runtime.spawn_blocking(move || {
+            entered.send(()).unwrap();
+            let _ = released.recv();
+        });
+        observed.recv_timeout(Duration::from_secs(5)).unwrap();
+        runtime.block_on(async {
+            let socket = std::sync::Arc::new(netwatch::UdpSocket::bind_local_v4(20044).unwrap());
+            let sockets = [socket.clone()];
+            let close = close_native_sockets(&sockets);
+            tokio::pin!(close);
+            std::future::poll_fn(|cx| {
+                assert!(close.as_mut().poll(cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            assert!(socket.is_closed());
+            assert_eq!(
+                UdpSocket::bind("127.0.0.1:20044").await.unwrap_err().kind(),
+                std::io::ErrorKind::AddrInUse
+            );
+            release.send(()).unwrap();
+            blocker.await.unwrap();
+            close.await;
+            let _rebound = UdpSocket::bind("127.0.0.1:20044").await.unwrap();
+        });
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn timed_out_actor_releases_udp_before_shutdown_returns() {

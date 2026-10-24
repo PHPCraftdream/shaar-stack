@@ -182,6 +182,44 @@ controls passed; fixture output scans were clean. All companion watchers succeed
 The dev-only tokio-util 0.7.20 edge reuses the already resolved reviewed package;
 no package version, source or checksum changes.
 
+### Joined native kernel close — authored, pending CI
+
+At `6e2c84e`, [CI 40120036739](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40120036739)
+passed Ubuntu but failed the Windows public authorized-forwarding case at its
+immediate **client** UDP rebind (`sdk_network.rs:123`, AddrInUse 10048). The server
+rebind and sixteen-stream case passed. No relay-wire failure is inferred: Windows
+stopped before that binary; all three HOP wire/fixture tests passed on Ubuntu.
+
+Inspection of the existing pinned netwatch 0.19.3 archive found another concrete
+ownership boundary. `src/udp.rs:902-914` moves the native socket into spawn_blocking
+from UdpSocket::drop and discards the JoinHandle. Therefore joining every async
+actor/driver does not join the later kernel close. The same dependency's explicit
+`UdpSocket::close().await` (`192-207`) awaits that blocking task. The particular old
+failing run did not trace the close task, so a sole historical-cause claim is not
+made from source alone.
+
+The shared preparation now retains native IP socket handles at bind, then calls
+the owned close_native_sockets helper **after** the actor and runtime destruction
+barriers and before publishing closed. This uses netwatch's safe API, not new FFI,
+unsafe or a dependency-version change. Retained sender aliases can observe closed
+state but cannot retain the kernel socket after the awaited explicit close. The
+extra vector and Arc clones are per configured native bind, not per packet. The
+same kernel-close task that Drop would detach is awaited; no shutdown sleep, extra
+worker pool, queue or hot-path lock is introduced. Cancellation/Drop still does not
+promise joined shutdown. This boundary concerns native IP transport sockets, not
+an acceptance claim for relay/custom transports or every upstream probe resource.
+
+Three authored regressions compile the same helper in the SDK binary: close with
+live sender aliases, a negative calibration proving native Drop leaves the port
+busy while the only blocking thread is held by a channel barrier, and explicit
+close remaining pending until that barrier releases the kernel-close task. The
+fixtures use bounded channels and joins, not sleeps or timed success assumptions.
+Original SDK ports and immediate rebind assertions remain unchanged. Source guards
+reverse only the two exact private socket-handle accessors before comparing every
+other byte with the reviewed archive; packetization/ciphertext policy is untouched.
+An exact dev-only netwatch 0.19.3 edge reuses the existing locked package. These new
+runtime outcomes are pending CI; no downloaded code or test ran locally.
+
 ## Explicit preparation, not a build script
 
 Run the script from the repository root, with Python isolated mode:
