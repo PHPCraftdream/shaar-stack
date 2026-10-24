@@ -139,6 +139,7 @@ version = "=0.4.79"\n''', encoding="utf-8")
         root = destination / "libp2p-relay-0.22.0"
         receipt = json.loads((destination / "provenance.json").read_text(encoding="utf-8"))
         self.assertEqual(receipt["reservation_expiry_api"], "validated-monotonic-instant")
+        self.assertTrue(receipt["authenticated_relay_connection_context"])
         owned = Path(__file__).with_name("lease.rs").read_bytes()
         self.assertEqual((root / "src/bounded_lease.rs").read_bytes(), owned)
         self.assertEqual(receipt["lease_source_sha256"], hashlib.sha256(owned).hexdigest())
@@ -151,6 +152,14 @@ version = "=0.4.79"\n''', encoding="utf-8")
             text = (root / "src" / name).read_text(encoding="utf-8")
             self.assertIn("expires_at: web_time::Instant", text)
             self.assertIn("renewal, limit, expires_at", text)
+
+    def test_relay_events_preserve_the_authenticated_control_connection(self):
+        repository = Path(__file__).resolve().parents[3]
+        client = (repository / "target/p2p/relay/libp2p-relay-0.22.0/src/priv_client.rs").read_text(encoding="utf-8")
+        events = client[client.index("pub enum Event {"):client.index("enum ReservationStatus")]
+        self.assertEqual(events.count("connection_id: ConnectionId"), 3)
+        self.assertEqual(client.count("connection_id: connection,"), 3)
+        self.assertIn("relay_peer_id: event_source, connection_id: connection, src_peer_id", client)
 
     def test_existing_prepared_expiry_source_is_never_overwritten(self):
         import hashlib

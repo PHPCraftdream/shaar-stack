@@ -263,6 +263,24 @@ circuit lifecycle, authenticated stale-generation handling, Amino discovery,
 common SDK/Iroh identity and full signaling-only relay frame proof remain separate
 implementation and acceptance work.
 
+### Authenticated relay connection context — authored, pending CI
+
+A PeerId alone does not identify a physical connection generation. A queued
+acceptance must not be reassigned to a newer connection if the peer reconnects
+before consumption; looking up only the newest connection cannot prove its origin. The
+prepared public reservation and inbound/outbound circuit events now carry the
+actual authenticated relay control ConnectionId from on_connection_handler_event.
+Inbound events also identify the authenticated relay; their src_peer_id remains a
+relay-announced claim until end-to-end Noise authentication succeeds.
+
+The strengthened real HOP fixture compares the event's ConnectionId with the actual
+Swarm connection-established event, rather than trusting an address or packet body.
+Source/provenance controls require all three public event paths to copy that exact
+context. Wire messages and package versions are unchanged. This is an authored
+source/API prerequisite for the owned reservation/circuit state machine, not proof
+that stale-event rejection or a working relay carrier is already implemented.
+Runtime results for this additional context boundary are pending CI.
+
 ## Remaining implementation and acceptance
 
 P08 is decomposed into dependency/safety gate, bounded carrier and owned executor,

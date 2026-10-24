@@ -85,6 +85,7 @@ async fn exercise(
     let mut expiry_lower = None;
     let mut accepted = false;
     let mut advertised = false;
+    let mut relay_connection = None;
     loop {
         tokio::select! {
             result = server_tasks.next_result() => result?,
@@ -124,10 +125,15 @@ async fn exercise(
                 _ => {} // Closed fixture world: one authenticated connection, one request.
             },
             event = client.select_next_some() => match event {
-                SwarmEvent::Behaviour(relay::client::Event::ReservationReqAccepted { relay_peer_id, renewal, limit, expires_at }) => {
+                SwarmEvent::ConnectionEstablished { peer_id, connection_id, .. } => {
+                    assert_eq!(peer_id, server_id);
+                    relay_connection = Some(connection_id);
+                }
+                SwarmEvent::Behaviour(relay::client::Event::ReservationReqAccepted { relay_peer_id, connection_id, renewal, limit, expires_at }) => {
                     assert!(matches!(case, Case::Valid), "hostile reservation accepted: {case:?}");
                     assert_eq!(requests, 1);
                     assert_eq!(relay_peer_id, server_id);
+                    assert_eq!(Some(connection_id), relay_connection);
                     assert!(!renewal);
                     assert_eq!(limit.unwrap().duration(), Some(Duration::from_secs(1)));
                     assert!(expires_at > expiry_lower.unwrap());
