@@ -124,12 +124,28 @@ class PreparationChecks(unittest.TestCase):
 
     def test_actor_shutdown_module_is_owned_and_repeat_does_not_overwrite(self):
         root = ROOTS["iroh"]
-        paths = [root / name for name in ("src/lib.rs", "src/socket.rs", "src/actor_shutdown.rs")]
+        paths = [root / name for name in ("src/lib.rs", "src/socket.rs", "src/actor_shutdown.rs",
+                                          "src/runtime.rs", "src/socket/remote_map.rs",
+                                          "src/socket/remote_map/remote_state.rs")]
         before = [path.read_bytes() for path in paths]
         self.assertEqual(before[2], Path(policy.__file__).with_name("actor_shutdown.rs").read_bytes())
         with self.assertRaisesRegex(ValueError, "actor shutdown module already exists"):
             policy.joined_actor_shutdown(root)
         self.assertEqual([path.read_bytes() for path in paths], before)
+
+    def test_peer_actor_children_share_the_runtime_destruction_barrier(self):
+        root = ROOTS["iroh"]
+        socket = (root / "src/socket.rs").read_text(encoding="utf-8")
+        runtime = (root / "src/runtime.rs").read_text(encoding="utf-8")
+        remote = (root / "src/socket/remote_map.rs").read_text(encoding="utf-8")
+        child = (root / "src/socket/remote_map/remote_state.rs").read_text(encoding="utf-8")
+        self.assertLess(socket.index("let runtime = Arc::new"), socket.index("RemoteMap::new("))
+        self.assertIn("                runtime.clone(),", socket)
+        self.assertIn("            &self.runtime,", remote)
+        self.assertIn("tasks.spawn(runtime.track_child(", child)
+        self.assertIn("crate::actor_shutdown::track_child(&self.tasks, future)", runtime)
+        self.assertIn("self.tasks.wait().await", runtime)
+        self.assertLess(socket.index("finish_actor(task).await"), socket.index("self.runtime.shutdown().await"))
 
     def test_runtime_ingress_transform_rejects_repeat_without_overwriting(self):
         root = ROOTS["noq"]

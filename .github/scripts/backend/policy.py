@@ -289,7 +289,36 @@ def joined_actor_shutdown(root: Path):
                 warn!("actor joined after shutdown: {:?}", err);
             }
         }""")
+    runtime_path = root / "src/runtime.rs"
+    remote_path = root / "src/socket/remote_map.rs"
+    child_path = root / "src/socket/remote_map/remote_state.rs"
+    runtime = replace(runtime_path.read_text(encoding="utf-8"), "impl Runtime {", """impl Runtime {
+    /// Tracks child destruction even when its parent JoinSet is aborted.
+    pub(crate) fn track_child<F: Future>(
+        &self,
+        future: F,
+    ) -> impl Future<Output = F::Output> + use<F> {
+        #[cfg(not(wasm_browser))]
+        { crate::actor_shutdown::track_child(&self.tasks, future) }
+        #[cfg(wasm_browser)]
+        { future }
+    }
+""")
+    # Construct the runtime before RemoteMap, whose child leases share its tracker.
+    socket = replace(socket, "        let remote_map = {", "        let runtime = Arc::new(Runtime::new(secret_key.public()));\n\n        let remote_map = {")
+    socket = replace(socket, "                path_selector,\n                span.clone(),", "                path_selector,\n                runtime.clone(),\n                span.clone(),")
+    socket = replace(socket, "        let runtime = Arc::new(Runtime::new(secret_key.public()));\n\n        let endpoint =", "        let endpoint =")
+    remote = replace(remote_path.read_text(encoding="utf-8"), "    tasks: JoinSet<(EndpointId, Vec<RemoteStateMessage>)>,", "    tasks: JoinSet<(EndpointId, Vec<RemoteStateMessage>)>,\n    runtime: Arc<crate::runtime::Runtime>,")
+    remote = replace(remote, "        path_selector: Arc<dyn PathSelector>,\n        span: Span,", "        path_selector: Arc<dyn PathSelector>,\n        runtime: Arc<crate::runtime::Runtime>,\n        span: Span,")
+    remote = replace(remote, "                tasks: Default::default(),", "                tasks: Default::default(),\n                runtime,")
+    remote = replace(remote, "            &mut self.tasks,\n            self.shutdown_token.clone(),", "            &mut self.tasks,\n            &self.runtime,\n            self.shutdown_token.clone(),")
+    remote = replace(remote, "            Arc::new(BiasedRttPathSelector::default()),\n            Span::none(),", "            Arc::new(BiasedRttPathSelector::default()),\n            Arc::new(crate::runtime::Runtime::new(crate::SecretKey::from_bytes(&[0; 32]).public())),\n            Span::none(),")
+    child = replace(child_path.read_text(encoding="utf-8"), "        tasks: &mut JoinSet<(EndpointId, Vec<RemoteStateMessage>)>,", "        tasks: &mut JoinSet<(EndpointId, Vec<RemoteStateMessage>)>,\n        runtime: &crate::runtime::Runtime,")
+    child = replace(child, "        tasks.spawn(\n            self.run(initial_msgs, rx, shutdown_token)", "        tasks.spawn(runtime.track_child(\n            self.run(initial_msgs, rx, shutdown_token)")
+    child = replace(child, "                    remote = %endpoint_id.fmt_short(),\n                )),\n        );", "                    remote = %endpoint_id.fmt_short(),\n                )),\n        ));")
     owned = Path(__file__).with_name("actor_shutdown.rs").read_bytes()
+    for path, text in ((runtime_path, runtime), (remote_path, remote), (child_path, child)):
+        path.write_text(text, encoding="utf-8", newline="\n")
     library_path.write_text(library, encoding="utf-8", newline="\n")
     socket_path.write_text(socket, encoding="utf-8", newline="\n")
     module.write_bytes(owned)

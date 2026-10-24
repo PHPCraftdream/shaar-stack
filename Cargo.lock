@@ -3964,6 +3964,7 @@ dependencies = [
  "shaar-platform",
  "shaar-ygg",
  "tokio",
+ "tokio-util",
  "zeroize",
 ]
 

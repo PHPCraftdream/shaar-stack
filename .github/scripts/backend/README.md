@@ -151,6 +151,30 @@ the lock changes only the SDK edge, not any package version/source/checksum.
 Its current SHA256 is `87f2ac01c1077ee86901e05ad5883ddd39f38c0eff5c04d7ef9b3a2e55b18632`.
 No downloaded code ran locally.
 
+### Nested peer actor destruction
+
+The later `e907c04` [workspace run 39962623899](https://github.com/PHPCraftdream/shaar-stack/actions/runs/39962623899)
+failed the public sixteen-stream server UDP rebind on Ubuntu (`AddrInUse`, line
+234); Windows passed. Joining the parent actor is not sufficient: its RemoteMap
+owns a JoinSet whose drop requests child abort without waiting for child future
+destruction. Peer inboxes and pending SendDatagram futures can own native senders.
+This is a confirmed source ownership gap, not a traced sole cause of that run.
+
+Preparation now shares the existing native Runtime TaskTracker with peer actors.
+A child is tracked **before spawn**; its lease survives until its entire future
+is destroyed, including queued messages and pending sends. Parent shutdown still
+uses the same 100 ms grace and abort/join; the existing runtime shutdown then waits
+for child destruction too. No extra task, channel, per-packet allocation, lock or
+shutdown sleep is added. Browser behavior is unchanged and is not newly accepted.
+
+The identical owned `track_child` helper is compiled in the SDK regression binary.
+Two added tests cover unpolled/pending child leases and parent graceful exit,
+forced abort and panic with immediate native rebind. A pending tracker-wait check
+is a deterministic negative control against removing the child lease. Original
+public SDK rebind assertions remain unchanged. These tests are authored; corrected
+CI evidence is pending. The dev-only tokio-util 0.7.20 edge reuses the already
+resolved reviewed package; no package version, source or checksum changes.
+
 ## Explicit preparation, not a build script
 
 Run the script from the repository root, with Python isolated mode:
