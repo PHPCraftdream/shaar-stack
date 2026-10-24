@@ -161,6 +161,20 @@ version = "=0.4.79"\n''', encoding="utf-8")
         self.assertEqual(client.count("connection_id: connection,"), 3)
         self.assertIn("relay_peer_id: event_source, connection_id: connection, src_peer_id", client)
 
+    def test_cancelled_relay_requests_are_checked_before_pending_admission(self):
+        repository = Path(__file__).resolve().parents[3]
+        root = repository / "target/p2p/relay/libp2p-relay-0.22.0/src"
+        client = (root / "priv_client.rs").read_text(encoding="utf-8")
+        dispatch = client[client.index("let action = match ready!(self.from_transport.poll_next_unpin(cx))"):]
+        self.assertLess(dispatch.index("if to_listener.is_closed()"), dispatch.index(".insert(listener_id"))
+        self.assertLess(dispatch.index("if send_back.is_canceled()"), dispatch.index(".insert(listener_id"))
+        transport = (root / "priv_client/transport.rs").read_text(encoding="utf-8")
+        close = transport[transport.index("fn close(&mut self, reason: Result<(), Error>)"):]
+        self.assertLess(close.index("self.from_behaviour.close()"), close.index("TransportEvent::ListenerClosed"))
+        handler = (root / "priv_client/handler.rs").read_text(encoding="utf-8")
+        self.assertIn("if !to_listener.is_closed() { self.make_new_reservation", handler)
+        self.assertIn("if !to_dial.is_canceled() { self.establish_new_circuit", handler)
+
     def test_existing_prepared_expiry_source_is_never_overwritten(self):
         import hashlib
         repository = Path(__file__).resolve().parents[3]

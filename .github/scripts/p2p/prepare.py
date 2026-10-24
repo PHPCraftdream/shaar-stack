@@ -88,6 +88,26 @@ def prepare(archive, destination):
                      "                    relay_peer_id: event_source,\n                    connection_id: connection,\n                    limit,")
     client = replace(client, "                Event::InboundCircuitEstablished { src_peer_id, limit }",
                      "                Event::InboundCircuitEstablished { relay_peer_id: event_source, connection_id: connection, src_peer_id, limit }")
+    client = replace(client, "        let action = match ready!(self.from_transport.poll_next_unpin(cx)) {", """        let action = match ready!(self.from_transport.poll_next_unpin(cx)) {
+            Some(transport::TransportToBehaviourMsg::ListenReq { to_listener, .. })
+                if to_listener.is_closed() => {
+                    // One cancelled message was consumed; yield before draining the next.
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
+                }
+            Some(transport::TransportToBehaviourMsg::DialReq { send_back, .. })
+                if send_back.is_canceled() => {
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
+                }""")
+    handler = replace(handler, "In::Reserve { to_listener } => {\n                self.make_new_reservation(to_listener);\n            }",
+                      "In::Reserve { to_listener } => {\n                if !to_listener.is_closed() { self.make_new_reservation(to_listener); }\n            }")
+    handler = replace(handler, "                self.establish_new_circuit(to_dial, dst_peer_id);",
+                      "                if !to_dial.is_canceled() { self.establish_new_circuit(to_dial, dst_peer_id); }")
+    transport_path = root / "src/priv_client/transport.rs"
+    transport = replace(transport_path.read_text(encoding="utf-8"),
+                        "    fn close(&mut self, reason: Result<(), Error>) {\n        self.queued_events",
+                        "    fn close(&mut self, reason: Result<(), Error>) {\n        self.from_behaviour.close();\n        self.queued_events")
     owned = Path(__file__).with_name("lease.rs").read_bytes()
     module = root / "src/bounded_lease.rs"
     if module.exists():
@@ -97,6 +117,7 @@ def prepare(archive, destination):
     protocol_path.write_text(protocol, encoding="utf-8", newline="\n")
     handler_path.write_text(handler, encoding="utf-8", newline="\n")
     client_path.write_text(client, encoding="utf-8", newline="\n")
+    transport_path.write_text(transport, encoding="utf-8", newline="\n")
     module.write_bytes(owned)
     manifest_path.write_text(original_manifest + "\n[workspace]\n", encoding="utf-8", newline="\n")
     receipt = {
@@ -106,10 +127,12 @@ def prepare(archive, destination):
         "max_lease_seconds": 86400, "fixture_instrumentation": False,
         "reservation_expiry_api": "validated-monotonic-instant",
         "authenticated_relay_connection_context": True,
+        "cancelled_transport_requests_rejected_before_admission": True,
         "prepared_source_sha256": {name: hashlib.sha256(text.encode("utf-8")).hexdigest()
                                    for name, text in (("protocol/outbound_hop.rs", protocol),
                                                       ("priv_client/handler.rs", handler),
-                                                      ("priv_client.rs", client))},
+                                                      ("priv_client.rs", client),
+                                                      ("priv_client/transport.rs", transport))},
     }
     (destination / "provenance.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     return root

@@ -263,7 +263,7 @@ circuit lifecycle, authenticated stale-generation handling, Amino discovery,
 common SDK/Iroh identity and full signaling-only relay frame proof remain separate
 implementation and acceptance work.
 
-### Authenticated relay connection context — authored, pending CI
+### Authenticated relay connection context — verified API prerequisite
 
 A PeerId alone does not identify a physical connection generation. A queued
 acceptance must not be reassigned to a newer connection if the peer reconnects
@@ -279,7 +279,29 @@ Source/provenance controls require all three public event paths to copy that exa
 context. Wire messages and package versions are unchanged. This is an authored
 source/API prerequisite for the owned reservation/circuit state machine, not proof
 that stale-event rejection or a working relay carrier is already implemented.
-Runtime results for this additional context boundary are pending CI.
+At `4791003`, actual completed [CI 40125792125](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40125792125)
+logs confirm both OSes passed 13 source/graph controls and the three real HOP/fixture
+cases, including the new reservation-to-connection assertion. Native carrier,
+codec and SDK/kernel-close regressions also passed. The live circuit-event paths
+and owned stale-generation policy remain part of the pending lifecycle integration.
+
+### Cancelled relay transport work — authored, pending CI
+
+The upstream listener close path reported ListenerClosed before closing its
+from-behaviour receiver. A ListenReq already queued to the behaviour could therefore
+be processed after the close callback and insert a dead listener into pending maps
+or start an unwanted dial. Discarding only the eventual transport object is too late.
+Prepared source now closes that receiver before enqueueing ListenerClosed, rejects
+closed ListenReq or cancelled DialReq before any map/dial admission, and rechecks
+cancellation before the handler allocates a reservation or circuit request.
+
+Each skipped message makes progress and yields with a wake for remaining work;
+there is no recursive drain or unbounded per-poll loop. Four authored controls use
+the actual relay transport/behaviour APIs: live reservation/circuit requests must
+reach dial admission, while 64 listener-close and 64 circuit-future cancellations
+must never produce a dial or handler action. These deterministic controls do not
+need network timing or a success-by-nondelivery timeout. Their runtime outcomes are
+pending CI; complete reservation/circuit ownership is still not accepted.
 
 ## Remaining implementation and acceptance
 
