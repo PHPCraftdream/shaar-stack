@@ -216,7 +216,7 @@ lease is an explicit resource/compatibility trade-off, not a claim about all pub
 relay policies. Source anchors and provenance fail closed; no archive code runs
 during preparation.
 
-### Actual reservation expiry boundary — authored, pending CI
+### Actual reservation expiry boundary — accepted prerequisite
 
 The relay client's public acceptance event originally exposed `renewal` and circuit
 `limit`, but not reservation expiry. Circuit duration is not a reservation lease.
@@ -245,8 +245,23 @@ abort/join on success and rejection; a task panic cannot count as valid rejectio
 This exercises reservation parsing/events, not a complete relay server or circuits.
 The [circuit-v2 reference](https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md)
 defines UTC UNIX expiry and separate circuit limits; the stricter maximum-lease
-policy is local. These source/helper/wire changes are not accepted until actual
-Linux/Windows CI results are inspected.
+policy is local.
+
+Implementation `6e2c84e` initially passed the full Ubuntu matrix; Windows stopped
+before HOP tests on a separate pre-existing SDK client UDP rebind failure. That
+failure was corrected by awaiting netwatch's kernel close in `5395a6a`, without
+changing this relay implementation or its rejection oracles. Actual completed
+[CI 40122403791](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40122403791)
+logs confirm both OSes passed all five shared lease cases, all 12 P08 source/graph
+controls and all three HOP wire/fixture tests (0.14s/0.10s). The native positive
+response distinguishes the real 60-second reservation from its one-second circuit
+limit; every hostile reply reaches the exact typed expiry rejection without
+advertisement or a task panic. Both managed task groups are joined after each case.
+
+This accepts only the reservation parsing/expiry boundary. Relay reservation and
+circuit lifecycle, authenticated stale-generation handling, Amino discovery,
+common SDK/Iroh identity and full signaling-only relay frame proof remain separate
+implementation and acceptance work.
 
 ## Remaining implementation and acceptance
 

@@ -182,7 +182,7 @@ controls passed; fixture output scans were clean. All companion watchers succeed
 The dev-only tokio-util 0.7.20 edge reuses the already resolved reviewed package;
 no package version, source or checksum changes.
 
-### Joined native kernel close — authored, pending CI
+### Joined native kernel close — verified on Linux and Windows
 
 At `6e2c84e`, [CI 40120036739](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40120036739)
 passed Ubuntu but failed the Windows public authorized-forwarding case at its
@@ -217,8 +217,19 @@ fixtures use bounded channels and joins, not sleeps or timed success assumptions
 Original SDK ports and immediate rebind assertions remain unchanged. Source guards
 reverse only the two exact private socket-handle accessors before comparing every
 other byte with the reviewed archive; packetization/ciphertext policy is untouched.
-An exact dev-only netwatch 0.19.3 edge reuses the existing locked package. These new
-runtime outcomes are pending CI; no downloaded code or test ran locally.
+An exact dev-only netwatch 0.19.3 edge reuses the existing locked package.
+
+At `5395a6a`, actual completed [CI 40122403791](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40122403791)
+logs were inspected for both OSes. All three kernel-close regressions passed in the
+eight-case shutdown preflight and again in the eleven-case backend binary (eight
+shutdown cases plus three native dependency cases, not nineteen unique cases).
+The original public SDK matrix passed all three cases, including both unchanged
+immediate native rebind assertions. Each OS also passed 41 SDK library cases,
+19 carrier/executor cases, six codec cases, three HOP wire/fixture cases, five lease
+cases, 12 P08 source/graph controls, five ingress cases and 88 structural/scanner
+controls; known-fixture output scans were clean. The separate Linux unprivileged
+reader probe passed. Companion results are recorded separately rather than inferred
+from the main run. No downloaded code, compilation or test ran locally.
 
 ## Explicit preparation, not a build script
 
