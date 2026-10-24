@@ -210,13 +210,43 @@ expired zero-duration reply can also cause immediate renewal attempts.
 
 The source-data preparer validates the original archive/package/license, preserves
 licenses, and installs the exact owned `lease.rs` helper before constructing the
-timer. It accepts only future leases of 1..=86400 seconds, preserving the existing
-three-quarter renewal rule, and rejects expired, oversized or unrepresentable local
-clock inputs. Rejecting a valid but longer-than-one-day offered lease is an explicit
-resource/compatibility trade-off, not an assertion about all public relay policies.
-The same std-only helper has authored boundary tests in CI. Source anchors and
-provenance fail closed; no archive code runs during preparation. Real malformed
-reservation-wire tests remain required in the owned relay integration phase.
+timer. It rejects expired, oversized or unrepresentable local clock inputs and
+requires an epoch-second difference of 1..=86400. Rejecting a valid longer offered
+lease is an explicit resource/compatibility trade-off, not a claim about all public
+relay policies. Source anchors and provenance fail closed; no archive code runs
+during preparation.
+
+### Actual reservation expiry boundary — authored, pending CI
+
+The relay client's public acceptance event originally exposed `renewal` and circuit
+`limit`, but not reservation expiry. Circuit duration is not a reservation lease.
+The prepared source now carries the validated `expires_at: web_time::Instant` from
+HOP response parsing through the private reservation/handler to
+`client::Event::ReservationReqAccepted`. The deadline is not recomputed at event
+receipt. Upstream package versions, wire messages and Swarm Rust source stay unchanged.
+
+The owned helper returns both remaining and renewal durations. Fractional UTC time
+is retained: rounding it down to whole seconds could extend a lease by almost one
+second. A monotonic sample is taken **before** the wall-clock sample, then remaining
+time is added with checked arithmetic before any timer construction. Scheduler
+delay between those samples can shorten the local lease, not extend it. Renewal is
+three quarters of the actual remaining duration; a full one-second lease renews at
+750 ms rather than the earlier whole-second rounding to one second. Five authored
+std-only cases cover normal/min/max/fractional/invalid-clock or expiry boundaries.
+
+An authored real TCP/Noise fixture serves circuit-v2 HOP protobuf replies using
+already-resolved prost 0.14.4, prost-codec 0.4.0 and asynchronous-codec 0.7.0 as
+exact dev-only edges. Their published archive bytes were checked against the
+existing lock; package identities/versions do not change. The fixture checks a
+golden STATUS encoding, valid-response sensitivity, and typed rejection of omitted,
+zero, expired, two-day and u64::MAX expiry. Its valid lease is deliberately distinct
+from its one-second circuit limit. Both Swarms are dropped before managed task
+abort/join on success and rejection; a task panic cannot count as valid rejection.
+This exercises reservation parsing/events, not a complete relay server or circuits.
+The [circuit-v2 reference](https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md)
+defines UTC UNIX expiry and separate circuit limits; the stricter maximum-lease
+policy is local. These source/helper/wire changes are not accepted until actual
+Linux/Windows CI results are inspected.
 
 ## Remaining implementation and acceptance
 

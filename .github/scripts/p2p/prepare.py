@@ -51,13 +51,31 @@ def prepare(archive, destination):
         // Renew the reservation after 3/4 of the reservation expiration timestamp.
         .and_then(|duration| duration.checked_sub(duration / 4))
         .map(Duration::from_secs)
-        .map(Delay::new)""", """    let now = SystemTime::now()
+        .map(Delay::new)
+        .ok_or(ReserveError::Protocol(
+            ProtocolViolation::InvalidReservationExpiration,
+        ))?;""", """    let received_at = web_time::Instant::now();
+    let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()
-        .map(|elapsed| elapsed.as_secs());
-    let renewal_timeout = crate::bounded_lease::renewal_delay(reservation.expire, now)
-        .map(Delay::new)""")
+        .ok();
+    let lease = crate::bounded_lease::lease(reservation.expire, now)
+        .ok_or(ReserveError::Protocol(ProtocolViolation::InvalidReservationExpiration))?;
+    let expires_at = received_at.checked_add(lease.expires_after)
+        .ok_or(ReserveError::Protocol(ProtocolViolation::InvalidReservationExpiration))?;
+    let renewal_timeout = Delay::new(lease.renew_after);""")
     protocol = replace(protocol, "use std::{io, time::Duration};", "use std::io;")
+    protocol = replace(protocol, "    pub(crate) renewal_timeout: Delay,", "    pub(crate) renewal_timeout: Delay,\n    pub(crate) expires_at: web_time::Instant,")
+    protocol = replace(protocol, "    Ok(Reservation {\n        renewal_timeout,", "    Ok(Reservation {\n        renewal_timeout,\n        expires_at,")
+    handler_path = root / "src/priv_client/handler.rs"
+    client_path = root / "src/priv_client.rs"
+    handler = replace(handler_path.read_text(encoding="utf-8"), "        renewal: bool,\n        limit: Option<protocol::Limit>,", "        renewal: bool,\n        limit: Option<protocol::Limit>,\n        expires_at: web_time::Instant,")
+    handler = replace(handler, "                        renewal_timeout,\n                        addrs,", "                        renewal_timeout,\n                        expires_at,\n                        addrs,")
+    handler = replace(handler, "                            renewal_timeout,\n                            addrs,", "                            renewal_timeout,\n                            expires_at,\n                            addrs,")
+    handler = replace(handler, "        renewal_timeout: Delay,\n        addrs: Vec<Multiaddr>,", "        renewal_timeout: Delay,\n        expires_at: web_time::Instant,\n        addrs: Vec<Multiaddr>,")
+    handler = replace(handler, "Event::ReservationReqAccepted { renewal, limit }", "Event::ReservationReqAccepted { renewal, limit, expires_at }")
+    client = replace(client_path.read_text(encoding="utf-8"), "        renewal: bool,\n        limit: Option<protocol::Limit>,", "        renewal: bool,\n        limit: Option<protocol::Limit>,\n        /// Validated monotonic reservation expiry, captured when the response was parsed.\n        expires_at: web_time::Instant,")
+    client = replace(client, "handler::Event::ReservationReqAccepted { renewal, limit }", "handler::Event::ReservationReqAccepted { renewal, limit, expires_at }")
+    client = replace(client, "                    relay_peer_id: event_source,\n                    renewal,\n                    limit,", "                    relay_peer_id: event_source,\n                    renewal,\n                    limit,\n                    expires_at,")
     owned = Path(__file__).with_name("lease.rs").read_bytes()
     module = root / "src/bounded_lease.rs"
     if module.exists():
@@ -65,6 +83,8 @@ def prepare(archive, destination):
     # Check every anchor and input before changing extracted source files.
     library_path.write_text(library, encoding="utf-8", newline="\n")
     protocol_path.write_text(protocol, encoding="utf-8", newline="\n")
+    handler_path.write_text(handler, encoding="utf-8", newline="\n")
+    client_path.write_text(client, encoding="utf-8", newline="\n")
     module.write_bytes(owned)
     manifest_path.write_text(original_manifest + "\n[workspace]\n", encoding="utf-8", newline="\n")
     receipt = {
@@ -72,6 +92,11 @@ def prepare(archive, destination):
         "lease_source_sha256": hashlib.sha256(owned).hexdigest(),
         "patch_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "max_lease_seconds": 86400, "fixture_instrumentation": False,
+        "reservation_expiry_api": "validated-monotonic-instant",
+        "prepared_source_sha256": {name: hashlib.sha256(text.encode("utf-8")).hexdigest()
+                                   for name, text in (("protocol/outbound_hop.rs", protocol),
+                                                      ("priv_client/handler.rs", handler),
+                                                      ("priv_client.rs", client))},
     }
     (destination / "provenance.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     return root

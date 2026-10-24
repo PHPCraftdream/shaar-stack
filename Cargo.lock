@@ -3979,6 +3979,7 @@ dependencies = [
 name = "shaar-p2p"
 version = "0.1.0"
 dependencies = [
+ "asynchronous-codec",
  "futures",
  "iroh",
  "libp2p",
@@ -3987,6 +3988,8 @@ dependencies = [
  "libp2p-swarm",
  "n0-watcher",
  "noq-udp",
+ "prost",
+ "prost-codec",
  "tokio",
 ]
 

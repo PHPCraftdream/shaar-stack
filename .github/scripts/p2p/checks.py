@@ -131,6 +131,40 @@ version = "=0.4.79"\n''', encoding="utf-8")
             graph.create(repository, destination, self.relay, self.swarm)
         self.assertFalse(destination.exists())
 
+    def test_prepared_lease_and_monotonic_expiry_provenance_are_exact(self):
+        import hashlib
+        import json
+        repository = Path(__file__).resolve().parents[3]
+        destination = repository / "target/p2p/relay"
+        root = destination / "libp2p-relay-0.22.0"
+        receipt = json.loads((destination / "provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(receipt["reservation_expiry_api"], "validated-monotonic-instant")
+        owned = Path(__file__).with_name("lease.rs").read_bytes()
+        self.assertEqual((root / "src/bounded_lease.rs").read_bytes(), owned)
+        self.assertEqual(receipt["lease_source_sha256"], hashlib.sha256(owned).hexdigest())
+        for name, digest in receipt["prepared_source_sha256"].items():
+            self.assertEqual(hashlib.sha256((root / "src" / name).read_bytes()).hexdigest(), digest)
+        protocol = (root / "src/protocol/outbound_hop.rs").read_text(encoding="utf-8")
+        self.assertLess(protocol.index("checked_add(lease.expires_after)"), protocol.index("Delay::new(lease.renew_after)"))
+        self.assertIn("        expires_at,", protocol)
+        for name in ("priv_client/handler.rs", "priv_client.rs"):
+            text = (root / "src" / name).read_text(encoding="utf-8")
+            self.assertIn("expires_at: web_time::Instant", text)
+            self.assertIn("renewal, limit, expires_at", text)
+
+    def test_existing_prepared_expiry_source_is_never_overwritten(self):
+        import hashlib
+        repository = Path(__file__).resolve().parents[3]
+        destination = repository / "target/p2p/relay"
+        before = {str(path.relative_to(destination)): hashlib.sha256(path.read_bytes()).hexdigest()
+                  for path in destination.rglob("*") if path.is_file()}
+        archive = repository / "target/p2p/relay-archive/relay.crate"
+        with self.assertRaises(FileExistsError):
+            prepare.prepare(archive, destination)
+        after = {str(path.relative_to(destination)): hashlib.sha256(path.read_bytes()).hexdigest()
+                 for path in destination.rglob("*") if path.is_file()}
+        self.assertEqual(after, before)
+
     def test_invalid_archive_never_creates_destination(self):
         archive = Path(self.temporary.name) / "wrong.crate"
         archive.write_bytes(b"not a reviewed archive")

@@ -1,15 +1,26 @@
 #![forbid(unsafe_code)]
-//! Bounded relay expiry validation, shared with the prepared dependency.
+//! Bounded relay lease validation, shared with the prepared dependency.
 
 use std::time::Duration;
 
-/// Reject expired, immediate or excessively distant leases before constructing a timer.
-pub(crate) fn renewal_delay(expire: u64, now_epoch_seconds: Option<u64>) -> Option<Duration> {
-    let remaining = expire.checked_sub(now_epoch_seconds?)?;
-    if !(1..=86_400).contains(&remaining) {
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Lease {
+    pub(crate) renew_after: Duration,
+    pub(crate) expires_after: Duration,
+}
+
+/// Validate both lifetimes before constructing any timer or monotonic deadline.
+pub(crate) fn lease(expire: u64, now_since_epoch: Option<Duration>) -> Option<Lease> {
+    let now = now_since_epoch?;
+    let remaining_seconds = expire.checked_sub(now.as_secs())?;
+    if !(1..=86_400).contains(&remaining_seconds) {
         return None;
     }
-    Some(Duration::from_secs(remaining - remaining / 4))
+    let expires_after = Duration::from_secs(expire).checked_sub(now)?;
+    Some(Lease {
+        renew_after: expires_after - expires_after / 4,
+        expires_after,
+    })
 }
 
 #[cfg(test)]
@@ -17,32 +28,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normal_lease_renews_at_three_quarters() {
-        let now = Some(100);
-        assert_eq!(renewal_delay(104, now), Some(Duration::from_secs(3)));
-        assert_eq!(renewal_delay(3700, now), Some(Duration::from_secs(2700)));
-    }
-
-    #[test]
-    fn minimum_and_maximum_accepted_durations_are_exact() {
-        let now = Some(100);
-        assert_eq!(renewal_delay(101, now), Some(Duration::from_secs(1)));
-        assert_eq!(
-            renewal_delay(86_500, now),
-            Some(Duration::from_secs(64_800))
-        );
-    }
-
-    #[test]
-    fn expired_zero_and_huge_peer_expiry_never_reach_timer_arithmetic() {
-        let now = Some(100);
-        for expire in [0, 99, 100, 86_501, u64::MAX] {
-            assert_eq!(renewal_delay(expire, now), None);
+    fn normal_lease_renews_at_three_quarters_without_losing_expiry() {
+        for (expire, renew, remaining) in [(104, 3, 4), (3700, 2700, 3600)] {
+            assert_eq!(
+                lease(expire, Some(Duration::from_secs(100))),
+                Some(Lease {
+                    renew_after: Duration::from_secs(renew),
+                    expires_after: Duration::from_secs(remaining),
+                })
+            );
         }
     }
 
     #[test]
+    fn minimum_and_maximum_accepted_durations_are_exact() {
+        for (expire, renew, remaining) in [(101, 750, 1), (86_500, 64_800_000, 86_400)] {
+            assert_eq!(
+                lease(expire, Some(Duration::from_secs(100))),
+                Some(Lease {
+                    renew_after: Duration::from_millis(renew),
+                    expires_after: Duration::from_secs(remaining),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn expired_zero_and_huge_peer_expiry_never_reach_timer_arithmetic() {
+        for expire in [0, 99, 100, 86_501, u64::MAX] {
+            assert_eq!(lease(expire, Some(Duration::from_secs(100))), None);
+        }
+    }
+
+    #[test]
+    fn fractional_epoch_time_does_not_extend_the_offered_lease() {
+        assert_eq!(
+            lease(101, Some(Duration::from_millis(100_900))),
+            Some(Lease {
+                renew_after: Duration::from_millis(75),
+                expires_after: Duration::from_millis(100),
+            })
+        );
+    }
+
+    #[test]
     fn local_clock_before_epoch_fails_without_panicking() {
-        assert_eq!(renewal_delay(3600, None), None);
+        assert_eq!(lease(3600, None), None);
     }
 }
