@@ -1,10 +1,10 @@
-# P08 source/API gate — implementation not accepted
+# P08 — native carrier accepted; relay/Iroh integration pending
 
-The dependency/source gate is accepted; carrier implementation is in progress.
-The product now adopts the byte-reviewed CI graph and bounded source preparation.
-Framing and managed-executor primitives have verified CI tests; the newly authored
-native carrier is pending CI. Neither is a claim of a working Amino/relay/Iroh
-transport or complete P08 acceptance.
+The dependency/source gate and native carrier prerequisite are accepted.
+The product adopts the byte-reviewed CI graph and bounded source preparation.
+Framing, managed-executor and native TCP/Noise/Yamux carrier contracts have verified
+Linux/Windows CI tests. This is not a working Amino/relay/Iroh transport or complete
+P08 acceptance.
 
 ## Reviewed candidate family
 
@@ -90,7 +90,7 @@ UDP rebinding while submission handles remain alive. Completed logs of
 at `ae16803` confirm all six executor and six codec tests passed on Linux/Windows.
 These are primitives, not live carrier/relay interoperability acceptance.
 
-## Native carrier — authored, pending CI
+## Native carrier — accepted prerequisite
 
 `Carrier::bind` consumes a libp2p identity, one native TCP listen address and an
 immutable allowlist of at most 16 input entries, checked before deduplication.
@@ -145,15 +145,36 @@ reuses the listener address by default (`src/lib.rs:379-413`); its fresh-port re
 handles AddrNotAvailable, not Windows AddrInUse. The corrected adapter explicitly
 uses Swarm DialOpts::allocate_new_port(), not a test sleep or blind retry. Signaling
 dials need no listener-port hole punching; QUIC direct-path NAT policy is unchanged.
-The original reuse/reopen assertions are retained. Corrected both-OS proof is pending.
+The original reuse/reopen assertions are retained. The corrected both-OS proof is
+recorded below.
 
 Additional authored fault controls fill the actual request ledger before submission
 33, cancel a waiter without returning its slot, invoke the production expiry action
 and require all charged IDs to survive until terminal dependency events. A real
 Noise peer deliberately withholds acknowledgements; further controls cover fatal
 close deadline, incoming-consumer drop and last-handle drop with listener rebind.
-These new outcomes are pending too. No Amino/relay/Iroh bridge or signaling-only
-frame proof is claimed by this API.
+At `c13a93e`, [CI 40115045999](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40115045999)
+completed successfully on Linux and Windows. Actual completed job logs were read,
+not inferred from watcher exit codes. Each OS passed:
+
+- 19 library tests: 13 native carrier/admission/fault cases plus six executor cases;
+  library suites took 10.04s/10.06s.
+- Six codec integration tests, including fragmented min/max frames and rejection controls.
+- Ten P08 source/graph Python controls, four relay lease cases and five ingress cases.
+- Existing SDK: 41 library, eight backend (five actor plus three native), and three
+  public API cases, including the unchanged sixteen-stream immediate UDP rebind.
+- 88 structural/scanner controls, formatting and clippy; fixture output scans clean.
+  The separate Linux unprivileged-reader probe also passed.
+
+GitHub jobs metadata repeatedly returned HTTP 502, empty or stale step arrays;
+watchers failed because of those API errors. Direct bounded job-log downloads and
+the final run conclusion independently supplied acceptance evidence. No test or
+workflow was rerun to obtain the result. The service-side reporting delay's cause
+is unknown; it is not attributed to a test, runtime or product-code defect.
+
+This accepts the native carrier prerequisite only. No Amino/relay/Iroh bridge,
+common SDK identity binding, signaling-only decoded-frame proof, public-network
+availability, total RSS/performance or arbitrary cancel/retry safety is claimed.
 
 ## Rejected shortcuts and selected boundaries
 
