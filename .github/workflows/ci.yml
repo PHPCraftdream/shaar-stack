@@ -193,6 +193,24 @@ jobs:
             if [[ "$status" -ne 0 ]]; then exit "$status"; fi
             grep -Fx "test $test_name ... ok" "$log"
           done
+      - name: Diagnose unreachable native lifecycle under SDK parallelism (Windows only)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for trial in {1..3}; do
+            printf 'Parallel SDK lifecycle trial %s/3\n' "$trial"
+            log="$RUNNER_TEMP/shaar-sdk-lifecycle-$trial.log"
+            if cargo test -p shaar --lib --locked -- --color never >"$log" 2>&1; then
+              status=0
+            else
+              status=$?
+            fi
+            if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
+            cat "$log"
+            if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+            grep -E '^test result: ok\. 53 passed; 0 failed;' "$log"
+          done
       - name: cargo test
         shell: bash
         run: |
