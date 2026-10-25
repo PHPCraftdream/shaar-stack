@@ -61,31 +61,6 @@ fn shutdown_result(shared: &Shared, result: io::Result<()>) -> io::Result<()> {
     result
 }
 
-#[cfg(test)]
-mod shutdown_tests {
-    use super::*;
-
-    #[test]
-    fn only_an_already_closed_pipe_is_normalized_before_local_cleanup() {
-        let shared = Shared::new().unwrap();
-        assert!(shutdown_result(&shared, Err(io::ErrorKind::BrokenPipe.into())).is_err());
-        assert!(shared.is_closed());
-        assert!(shutdown_result(&shared, Err(io::ErrorKind::BrokenPipe.into())).is_ok());
-        assert_eq!(
-            shutdown_result(&shared, Err(io::ErrorKind::InvalidData.into()))
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::InvalidData
-        );
-        assert_eq!(
-            shutdown_result(&shared, Err(io::ErrorKind::PermissionDenied.into()))
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::PermissionDenied
-        );
-    }
-}
-
 /// cancel-safe: NO — dropping an admitted RPC waiter cannot undo remote admission.
 async fn send_worker(shared: Arc<Shared>, handle: CarrierHandle) -> io::Result<()> {
     while let Some(frame) = shared.next().await? {
@@ -140,5 +115,30 @@ async fn receive_loop(
                 permit.send(Inbound { received, source });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+
+    #[test]
+    fn only_an_already_closed_pipe_is_normalized_before_local_cleanup() {
+        let shared = Shared::new().unwrap();
+        assert!(shutdown_result(&shared, Err(io::ErrorKind::BrokenPipe.into())).is_err());
+        assert!(shared.is_closed());
+        assert!(shutdown_result(&shared, Err(io::ErrorKind::BrokenPipe.into())).is_ok());
+        assert_eq!(
+            shutdown_result(&shared, Err(io::ErrorKind::InvalidData.into()))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            shutdown_result(&shared, Err(io::ErrorKind::PermissionDenied.into()))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::PermissionDenied
+        );
     }
 }
