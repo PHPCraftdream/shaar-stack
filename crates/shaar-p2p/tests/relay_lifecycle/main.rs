@@ -45,6 +45,11 @@ async fn actual_relay_packets_are_pinned_exact_bounded_reused_and_reopened() {
         group.b.disconnect(group.a.peer_id()).await.unwrap();
         let reopened = group.a.connect_via(group.b.peer_id(), group.relay).await.unwrap();
         assert_ne!(reopened, connection);
+        // Local dial completion is not the remote driver's connection-established barrier.
+        group.a.send(group.b.peer_id(), Datagram::new(b"reopened readiness").unwrap()).await.unwrap();
+        let ready = group.b_in.recv().await.unwrap();
+        assert_eq!(ready.peer, group.a.peer_id());
+        assert_eq!(ready.packet.as_bytes(), b"reopened readiness");
         group.b.send(group.a.peer_id(), Datagram::new(b"new generation").unwrap()).await.unwrap();
         let received = group.a_in.recv().await.unwrap();
         assert_eq!(received.packet.as_bytes(), b"new generation");
