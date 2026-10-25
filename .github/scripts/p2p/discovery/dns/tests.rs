@@ -78,12 +78,14 @@ fn retention_numeric_fanout_is_capped_before_collection_and_dial() {
                 "dns4" => Protocol::Dns4("owned.example".into()),
                 _ => Protocol::Dns6("owned.example".into()),
             };
-            let result = resolve::<io::Error, _>(&proto, &resolver).await.unwrap();
-            let Resolved::Many(ips) = result else {
-                panic!("expected multiple addresses")
-            };
-            assert_eq!(ips.len(), 4);
-            assert!(!ips.spilled(), "numeric alternatives must remain inline");
+            {
+                let result = resolve::<io::Error, _>(&proto, &resolver).await.unwrap();
+                let Resolved::Many(ips) = result else {
+                    panic!("expected multiple addresses")
+                };
+                assert_eq!(ips.len(), 4);
+                assert!(!ips.spilled(), "numeric alternatives must remain inline");
+            }
             let inner = FakeTransport::new(Mode::Fail);
             let mut transport = Transport::with_resolver(inner.clone(), resolver);
             assert_eq!(
