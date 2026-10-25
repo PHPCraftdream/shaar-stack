@@ -61,6 +61,84 @@ async fn terminal_driver_paths_join_and_release_listeners_with_external_handles(
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_send_queued_before_reopen_cannot_allocate_an_id_on_the_successor() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let ka = key();
+        let kb = key();
+        let pa = ka.public().to_peer_id();
+        let pb = kb.public().to_peer_id();
+        let (mut a, ah, _ar) = Carrier::bind(ka, bind(), vec![pb]).unwrap();
+        let (b, bh, mut br) = Carrier::bind(kb, bind(), vec![pa]).unwrap();
+        let (stop, stopped) = oneshot::channel();
+        let mut tasks = JoinSet::new();
+        tasks.spawn(b.run(async {
+            let _ = stopped.await;
+        }));
+        let address = bh.local_addr().await.unwrap();
+        let (reply, connected) = oneshot::channel();
+        a.core.command(Command::Connect(pb, address, reply));
+        while !a.core.pending.is_empty() {
+            let event = a.core.swarm.select_next_some().await;
+            a.core.event(event).unwrap();
+        }
+        connected.await.unwrap().unwrap();
+        let old = a.core.links.borrow()[0];
+        let (reply, stale) = oneshot::channel();
+        ah.submit(Command::SendOn(
+            old,
+            Datagram::new(b"old queued packet").unwrap(),
+            reply,
+        ))
+        .unwrap();
+        let (reply, closed) = oneshot::channel();
+        a.core.command(Command::Disconnect(pb, reply));
+        while !a.core.closing.is_empty() {
+            let event = a.core.swarm.select_next_some().await;
+            a.core.event(event).unwrap();
+        }
+        closed.await.unwrap().unwrap();
+        // Observe remote close before redial; this is not a sleep/retry readiness oracle.
+        bh.disconnect(pa).await.unwrap();
+        let (reply, connected) = oneshot::channel();
+        a.core.command(Command::Connect(pb, address, reply));
+        while !a.core.pending.is_empty() {
+            let event = a.core.swarm.select_next_some().await;
+            a.core.event(event).unwrap();
+        }
+        connected.await.unwrap().unwrap();
+        let current = a.core.links.borrow()[0];
+        assert_ne!(old.connection, current.connection);
+        let queued = a.core.commands.recv().await.unwrap();
+        a.core.command(queued);
+        assert_eq!(
+            stale.await.unwrap().unwrap_err().kind(),
+            io::ErrorKind::NotConnected
+        );
+        assert!(a.core.requests.is_empty());
+        let (reply, delivered) = oneshot::channel();
+        a.core.command(Command::SendOn(
+            current,
+            Datagram::new(b"successor packet").unwrap(),
+            reply,
+        ));
+        while !a.core.requests.is_empty() {
+            let event = a.core.swarm.select_next_some().await;
+            a.core.event(event).unwrap();
+        }
+        delivered.await.unwrap().unwrap();
+        assert_eq!(
+            br.recv().await.unwrap().packet.as_bytes(),
+            b"successor packet"
+        );
+        a.run(async {}).await.unwrap();
+        stop.send(()).unwrap();
+        tasks.join_next().await.unwrap().unwrap().unwrap();
+    })
+    .await
+    .expect("queued generation-bound send deadline");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn ledger_caps_before_submission_and_expired_ids_remain_charged_until_terminal() {
     tokio::time::timeout(Duration::from_secs(15), async {
         let ka = key();

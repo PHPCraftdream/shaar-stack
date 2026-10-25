@@ -92,8 +92,9 @@ async fn current_link_observations_revoke_queued_packets_across_reopen_and_shutd
                 route: Route::Direct
             }]
         );
+        let first_link = a_links.borrow()[0];
         pair.a
-            .send(pair.b.peer_id(), Datagram::new(b"first").unwrap())
+            .send_on(first_link, Datagram::new(b"first").unwrap())
             .await
             .unwrap();
         let old = pair.b_in.recv().await.unwrap();
@@ -122,8 +123,32 @@ async fn current_link_observations_revoke_queued_packets_across_reopen_and_shutd
         assert!(!pair.b.is_current(&old));
         let next = pair.connect().await;
         assert_ne!(next, first);
+        assert_eq!(
+            pair.a
+                .send_on(first_link, Datagram::new(b"stale").unwrap())
+                .await
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotConnected
+        );
+        let next_link = a_links.borrow()[0];
+        let wrong_route = Link {
+            route: Route::Relayed {
+                relay: None,
+                generation: 1,
+            },
+            ..next_link
+        };
+        assert_eq!(
+            pair.a
+                .send_on(wrong_route, Datagram::new(b"wrong route").unwrap())
+                .await
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotConnected
+        );
         pair.a
-            .send(pair.b.peer_id(), Datagram::new(b"next").unwrap())
+            .send_on(next_link, Datagram::new(b"next").unwrap())
             .await
             .unwrap();
         let current = pair.b_in.recv().await.unwrap();

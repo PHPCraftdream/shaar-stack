@@ -399,7 +399,7 @@ logs confirm Linux and Windows passed all 32 P2P library tests, seven real relay
 scenarios, 14 source controls and the full regression matrix. This prerequisite is
 not the full Iroh adapter or the common SDK identity bridge.
 
-## Common SDK identity construction — authored, pending CI
+## Common SDK identity construction — accepted prerequisite
 
 `shaar::network::bind_signaling` constructs the existing caller-driven carrier from
 an SDK Identity, one TCP bind address and at most 16 public peer keys before
@@ -421,9 +421,38 @@ reject wrong keys and modified messages, reuse all three existing P04 RFC vector
 through the production constructor, and check bounds/runtime/error behavior. A real
 Noise topology uses the same SDK identities as simultaneously bound native Iroh
 endpoints, rejects an allowed client's incorrect server pin, exchanges exact packets
-and joins all three owned signaling roots before listener rebinding. These new tests
-have not yet run; they are identity-construction proof, not a custom Iroh transport,
-Amino discovery, or full signaling-only frame/path acceptance.
+and joins all three owned signaling roots before listener rebinding. At `b46e2d8`,
+actual completed [CI 40176806269](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40176806269)
+logs confirm all four new SDK units and the P04 vector-constructor case passed on
+Linux and Windows: 45 SDK library tests, 32 P2P library tests, seven real relay
+scenarios and the full regression matrix succeeded. This is identity-construction
+proof, not a custom Iroh transport, Amino discovery or full signaling-only frame/path
+acceptance.
+
+## Generation-bound send admission — authored, pending CI
+
+A snapshot check followed by `send(peer, ...)` is not atomic with closing or reopening
+a circuit. `send_on(Link, ...)` queues the exact expected authenticated connection
+and route alongside the datagram. The sole carrier owner checks these before the
+request-response ID is allocated. Stale, closing and wrong-route generations cannot
+transfer queued work to a successor link. Existing peer-only send semantics, bounded
+request charges, remote-admission acknowledgement and ambiguous post-admission
+cancellation are unchanged.
+
+The pinned request-response `src/lib.rs:566-583` queues NotifyHandler::One for the
+selected connected ID. Admission permits only one physical connection per peer, and
+all behaviour callbacks are driven by the same Swarm owner. No await or connection
+event can interleave exact-link validation and that request submission. This does
+not make a subsequent remote acknowledgement proof of application consumption.
+
+Authored tests retain an actual command queued before close, reopen the real Noise
+link, then dispatch that old command and require rejection before any local request
+charge. A positive generation-bound packet must still arrive exactly on the new
+link. Native tests also reject forged routes, and the owned relay scenario rejects
+a changed generation on the same physical connection before exchanging min/max
+packets through the pinned link. Runtime outcomes await CI. The remaining Iroh
+factory, batching, per-instance address bindings, multi-waiter backpressure and joined
+SDK ownership are not implemented by this admission method alone.
 
 ## Remaining implementation and acceptance
 

@@ -51,6 +51,7 @@ type Reply<T> = oneshot::Sender<io::Result<T>>;
 enum Command {
     Connect(PeerId, SocketAddr, Reply<ConnectionId>),
     Send(PeerId, Datagram, Reply<()>),
+    SendOn(Link, Datagram, Reply<()>),
     Disconnect(PeerId, Reply<()>),
     Reserve(RelayAddr, Reply<RelayLease>),
     ReleaseRelay(PeerId, Reply<()>),
@@ -92,6 +93,15 @@ impl CarrierHandle {
     pub async fn send(&self, peer: PeerId, packet: Datagram) -> io::Result<()> {
         let (reply, result) = oneshot::channel();
         self.submit(Command::Send(peer, packet, reply))?;
+        result.await.map_err(|_| closed())?
+    }
+
+    /// Admits a packet only on this exact current authenticated connection and route.
+    /// Reopen never transfers queued work to a successor connection; no payload replay occurs.
+    /// cancel-safe: NO — after admission, delivery may be ambiguous as with `send`.
+    pub async fn send_on(&self, link: Link, packet: Datagram) -> io::Result<()> {
+        let (reply, result) = oneshot::channel();
+        self.submit(Command::SendOn(link, packet, reply))?;
         result.await.map_err(|_| closed())?
     }
 

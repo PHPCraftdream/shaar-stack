@@ -25,9 +25,13 @@ async fn actual_relay_packets_are_pinned_exact_bounded_reused_and_reopened() {
         changed_endpoint.set_port(if changed_endpoint.port() == 1 { 2 } else { 1 });
         let changed_relay = RelayAddr::new(group.relay.peer_id(), changed_endpoint).unwrap();
         assert_eq!(group.a.connect_via(group.b.peer_id(), changed_relay).await.unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        let pinned = links.borrow()[0];
+        let Route::Relayed { relay, generation } = pinned.route else { panic!("expected pinned relay route"); };
+        let wrong_generation = shaar_p2p::Link { route: Route::Relayed { relay, generation: generation + 1 }, ..pinned };
+        assert_eq!(group.a.send_on(wrong_generation, Datagram::new(b"wrong generation").unwrap()).await.unwrap_err().kind(), io::ErrorKind::NotConnected);
         let mut first_generation = None;
         for bytes in [&[7_u8][..], &[9_u8; shaar_p2p::MAX_DATAGRAM][..]] {
-            group.a.send(group.b.peer_id(), Datagram::new(bytes).unwrap()).await.unwrap();
+            group.a.send_on(pinned, Datagram::new(bytes).unwrap()).await.unwrap();
             let received = group.b_in.recv().await.unwrap();
             assert_eq!(received.peer, group.a.peer_id());
             assert!(group.b.is_current(&received));

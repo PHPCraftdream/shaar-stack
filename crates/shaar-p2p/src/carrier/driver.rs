@@ -297,6 +297,49 @@ impl Core {
         Ok(())
     }
 
+    fn send_packet(
+        &mut self,
+        peer: PeerId,
+        expected: Option<Link>,
+        packet: Datagram,
+        reply: Reply<()>,
+    ) {
+        if reply.is_closed() {
+            return;
+        }
+        if self.requests.len() >= REQUEST_LIMIT {
+            let _ = reply.send(Err(capacity()));
+        } else if !self.swarm.behaviour().admission.allows(&peer)
+            || self.closing.contains_key(&peer)
+            || !self.swarm.behaviour().packets.is_connected(&peer)
+            || expected.is_some_and(|link| {
+                self.swarm.behaviour().admission.connection(&peer) != Some(link.connection)
+                    || self.relay.routes.get(&link.connection) != Some(&link.route)
+            })
+        {
+            let _ = reply.send(Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "carrier peer not connected",
+            )));
+        } else {
+            // The sole owner validates the exact link before allocating a request ID.
+            // With one admitted connection per peer, request-response pins NotifyHandler to that ID.
+            let id = self
+                .swarm
+                .behaviour_mut()
+                .packets
+                .send_request(&peer, packet);
+            self.requests.insert(
+                id,
+                Request {
+                    peer,
+                    deadline: tokio::time::Instant::now() + DEADLINE,
+                    reply: Some(reply),
+                },
+            );
+        }
+    }
+
     fn command(&mut self, command: Command) {
         match command {
             Command::Connect(peer, address, reply) => {
@@ -356,36 +399,9 @@ impl Core {
                     }
                 }
             }
-            Command::Send(peer, packet, reply) => {
-                if reply.is_closed() {
-                    return;
-                }
-                if self.requests.len() >= REQUEST_LIMIT {
-                    let _ = reply.send(Err(capacity()));
-                } else if !self.swarm.behaviour().admission.allows(&peer)
-                    || self.closing.contains_key(&peer)
-                    || !self.swarm.behaviour().packets.is_connected(&peer)
-                {
-                    let _ = reply.send(Err(io::Error::new(
-                        io::ErrorKind::NotConnected,
-                        "carrier peer not connected",
-                    )));
-                } else {
-                    // The global gate precedes ID allocation and dependency pending-map insertion.
-                    let id = self
-                        .swarm
-                        .behaviour_mut()
-                        .packets
-                        .send_request(&peer, packet);
-                    self.requests.insert(
-                        id,
-                        Request {
-                            peer,
-                            deadline: tokio::time::Instant::now() + DEADLINE,
-                            reply: Some(reply),
-                        },
-                    );
-                }
+            Command::Send(peer, packet, reply) => self.send_packet(peer, None, packet, reply),
+            Command::SendOn(link, packet, reply) => {
+                self.send_packet(link.peer, Some(link), packet, reply)
             }
             Command::Disconnect(peer, reply) => {
                 if self.closing.contains_key(&peer)
