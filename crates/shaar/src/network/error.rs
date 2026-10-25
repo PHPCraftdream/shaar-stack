@@ -16,6 +16,7 @@ pub enum NetworkError {
     Connect(Box<iroh::endpoint::ConnectError>),
     Handshake(Box<iroh::endpoint::ConnectingError>),
     Signaling(std::io::Error),
+    SignalingOperation(std::io::Error),
 }
 
 impl NetworkError {
@@ -63,6 +64,7 @@ impl fmt::Display for NetworkError {
             Self::Connect(_) => "native peer connection failed",
             Self::Handshake(_) => "peer handshake failed",
             Self::Signaling(_) => "signaling carrier initialization failed",
+            Self::SignalingOperation(_) => "signaling operation failed",
         };
         f.write_str(message)
     }
@@ -74,7 +76,7 @@ impl Error for NetworkError {
             Self::Bind(source) => Some(source.as_ref()),
             Self::Connect(source) => Some(source.as_ref()),
             Self::Handshake(source) => Some(source.as_ref()),
-            Self::Signaling(source) => Some(source),
+            Self::Signaling(source) | Self::SignalingOperation(source) => Some(source),
             _ => None,
         }
     }

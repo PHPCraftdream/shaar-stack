@@ -335,6 +335,7 @@ async fn backend_metadata_exhaustion_is_capacity_not_a_generic_connect_failure()
             address,
             allowlist: Allowlist::default(),
             slots: Arc::new(Semaphore::new(1)),
+            custom: None,
         };
         let observer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         assert!(matches!(

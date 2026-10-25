@@ -160,6 +160,19 @@ impl Shared {
         Ok(state.by_epoch[epoch].address.clone())
     }
 
+    pub fn link(&self, addr: &CustomAddr) -> io::Result<Link> {
+        let epoch = self.epoch(addr)?;
+        let state = self.state.lock().map_err(|_| error(io::ErrorKind::Other))?;
+        if state.closed {
+            return Err(error(io::ErrorKind::BrokenPipe));
+        }
+        state
+            .by_epoch
+            .get(&epoch)
+            .map(|binding| binding.link)
+            .ok_or_else(|| error(io::ErrorKind::NotConnected))
+    }
+
     pub fn matches(&self, addr: &CustomAddr, link: Link) -> bool {
         let Ok(epoch) = self.epoch(addr) else {
             return false;
@@ -172,6 +185,10 @@ impl Shared {
                 .by_epoch
                 .get(&epoch)
                 .is_some_and(|binding| binding.link == link)
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.state.lock().is_ok_and(|state| state.closed)
     }
 
     pub fn accepts(&self, addr: &CustomAddr) -> bool {
@@ -301,6 +318,14 @@ mod tests {
             shared: Arc::downgrade(shared),
             count: AtomicUsize::new(0),
         })
+    }
+
+    #[test]
+    fn shutdown_observation_does_not_depend_on_watch_notification_publication() {
+        let shared = Shared::new().unwrap();
+        shared.state.lock().unwrap().closed = true;
+        assert!(!*shared.closed.borrow());
+        assert!(shared.is_closed());
     }
 
     #[test]

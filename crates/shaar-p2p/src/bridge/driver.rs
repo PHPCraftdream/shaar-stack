@@ -48,8 +48,41 @@ impl SignalingPump {
             result = &mut workers => result.map(|_| ()),
             result = &mut receive => result,
         };
-        shared.close();
-        result
+        shutdown_result(&shared, result)
+    }
+}
+
+fn shutdown_result(shared: &Shared, result: io::Result<()>) -> io::Result<()> {
+    let result = match result {
+        Err(error) if shared.is_closed() && error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        result => result,
+    };
+    shared.close();
+    result
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+
+    #[test]
+    fn only_an_already_closed_pipe_is_normalized_before_local_cleanup() {
+        let shared = Shared::new().unwrap();
+        assert!(shutdown_result(&shared, Err(io::ErrorKind::BrokenPipe.into())).is_err());
+        assert!(shared.is_closed());
+        assert!(shutdown_result(&shared, Err(io::ErrorKind::BrokenPipe.into())).is_ok());
+        assert_eq!(
+            shutdown_result(&shared, Err(io::ErrorKind::InvalidData.into()))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            shutdown_result(&shared, Err(io::ErrorKind::PermissionDenied.into()))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::PermissionDenied
+        );
     }
 }
 

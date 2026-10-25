@@ -3954,9 +3954,11 @@ dependencies = [
 name = "shaar"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "iroh",
  "iroh-base",
  "ktav",
+ "libp2p",
  "libp2p-identity",
  "n0-future",
  "netwatch",

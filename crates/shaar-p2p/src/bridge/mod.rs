@@ -79,6 +79,15 @@ impl SignalingTransport {
         self.shared.refresh(&current)?;
         self.shared.peer_address(peer)
     }
+
+    /// Resolves only a current locally minted source, for final TLS-peer and epoch validation.
+    /// The returned observation does not authorize later I/O or keep the link alive.
+    pub fn authenticated_link(&self, address: &CustomAddr) -> io::Result<Link> {
+        let links = self.handle.links();
+        let current = links.borrow();
+        self.shared.refresh(&current)?;
+        self.shared.link(address)
+    }
 }
 
 impl CustomTransport for SignalingTransport {

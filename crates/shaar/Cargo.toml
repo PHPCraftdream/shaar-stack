@@ -20,6 +20,8 @@ libp2p-identity = { version = "=0.3.0", default-features = false, features = ["e
 shaar-platform = { path = "../shaar-platform" }
 
 [dev-dependencies]
+futures = "=0.3.34"
+libp2p = { version = "=0.57.1", default-features = false, features = ["ed25519", "tokio", "tcp", "noise", "yamux", "relay"] }
 n0-future = "=0.3.2"
 netwatch = "=0.19.3"
 tokio-util = { version = "=0.7.20", features = ["rt"] }

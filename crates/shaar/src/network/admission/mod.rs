@@ -1,8 +1,9 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use iroh::endpoint::{NetReportConfig, PortmapperConfig, QuicTransportConfig, VarInt, presets};
-use iroh::{EndpointAddr, TransportAddr};
+use iroh::{EndpointAddr, TransportAddr, endpoint::IncomingAddr};
 use iroh_base::PublicKey;
+use shaar_p2p::SignalingTransport;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::identity::Identity;
@@ -25,6 +26,7 @@ pub struct Endpoint {
     address: SocketAddr,
     allowlist: Allowlist,
     slots: Arc<Semaphore>,
+    custom: Option<Arc<SignalingTransport>>,
 }
 
 impl Endpoint {
@@ -36,9 +38,25 @@ impl Endpoint {
         allowlist: Allowlist,
         limits: Limits,
     ) -> Result<Self, NetworkError> {
+        Self::bind_custom(identity, address, allowlist, limits, None).await
+    }
+
+    pub(in crate::network) fn validate_bind(address: SocketAddr) -> Result<(), NetworkError> {
         if !policy::native_ip(address.ip()) || address.ip().is_multicast() {
             return Err(NetworkError::InvalidAddress);
         }
+        Ok(())
+    }
+
+    /// cancel-safe: NO — cancellation does not prove completed backend startup or drain.
+    pub(in crate::network) async fn bind_custom(
+        identity: &Identity,
+        address: SocketAddr,
+        allowlist: Allowlist,
+        limits: Limits,
+        custom: Option<Arc<SignalingTransport>>,
+    ) -> Result<Self, NetworkError> {
+        Self::validate_bind(address)?;
         let transport = QuicTransportConfig::builder()
             .application_data_filter(|path| policy::native_ip(path.remote().ip()))
             .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_LIMIT)))
@@ -49,7 +67,7 @@ impl Endpoint {
             .datagram_receive_buffer_size(None)
             .datagram_send_buffer_size(0)
             .build();
-        let inner = iroh::Endpoint::builder(presets::Minimal)
+        let builder = iroh::Endpoint::builder(presets::Minimal)
             .secret_key(identity.transport_key())
             .alpns(vec![ALPN.to_vec()])
             .clear_ip_transports()
@@ -59,20 +77,28 @@ impl Endpoint {
             .net_report_config(NetReportConfig::minimal())
             .incoming_limits(limits.sessions, 16 * 1024, 512 * 1024)
             .connection_limit(limits.sessions * 2)
-            .transport_config(transport)
+            .transport_config(transport);
+        let builder = match &custom {
+            Some(factory) => builder.add_custom_transport(factory.clone()),
+            None => builder,
+        };
+        let inner = builder
             .bind()
             .await
             .map_err(|error| NetworkError::Bind(Box::new(error)))?;
-        let address = inner
-            .bound_sockets()
-            .into_iter()
-            .next()
-            .ok_or(NetworkError::InvalidAddress)?;
+        let address = match inner.bound_sockets().into_iter().next() {
+            Some(address) => address,
+            None => {
+                inner.close().await;
+                return Err(NetworkError::InvalidAddress);
+            }
+        };
         Ok(Self {
             inner,
             address,
             allowlist,
             slots: Arc::new(Semaphore::new(limits.sessions)),
+            custom,
         })
     }
 
@@ -107,13 +133,37 @@ impl Endpoint {
         if !policy::dial_address(address) {
             return Err(NetworkError::InvalidAddress);
         }
+        self.connect_route(peer, TransportAddr::Ip(address)).await
+    }
+
+    /// cancel-safe: NO — a cancelled handshake is abandoned, not replayed.
+    pub(in crate::network) async fn connect_custom(
+        &self,
+        peer: PublicKey,
+        address: iroh_base::CustomAddr,
+    ) -> Result<Session, NetworkError> {
+        self.connect_route(peer, TransportAddr::Custom(address))
+            .await
+    }
+
+    /// cancel-safe: NO — a completed handshake may retain bounded metadata until drain.
+    async fn connect_route(
+        &self,
+        peer: PublicKey,
+        address: TransportAddr,
+    ) -> Result<Session, NetworkError> {
+        let source = match &address {
+            TransportAddr::Ip(address) => IncomingAddr::Ip(*address),
+            TransportAddr::Custom(address) => IncomingAddr::Custom(address.clone()),
+            _ => return Err(NetworkError::InvalidAddress),
+        };
         let admission = self.admit()?;
-        let remote = EndpointAddr::from_parts(peer, [TransportAddr::Ip(address)]);
+        let remote = EndpointAddr::from_parts(peer, [address]);
         let connection = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.connect(remote, ALPN))
             .await
             .map_err(|_| NetworkError::Deadline)?
             .map_err(NetworkError::from_connect)?;
-        if connection.remote_id() != peer {
+        if connection.remote_id() != peer || !self.source_matches(&source, &peer) {
             connection.close(VarInt::from_u32(2), b"");
             return Err(NetworkError::PeerMismatch);
         }
@@ -126,6 +176,7 @@ impl Endpoint {
     /// SDK slots are returned on cancellation, protocol metadata drains separately.
     pub async fn accept(&mut self) -> Result<Session, NetworkError> {
         let incoming = self.inner.accept().await.ok_or(NetworkError::Closed)?;
+        let source = incoming.remote_addr();
         let admission = match self.admit() {
             Ok(admission) => admission,
             Err(error) => {
@@ -141,7 +192,26 @@ impl Endpoint {
             connection.close(VarInt::from_u32(ACCESS_DENIED), b"");
             return Err(NetworkError::AccessDenied);
         }
+        if !self.source_matches(&source, &connection.remote_id()) {
+            connection.close(VarInt::from_u32(2), b"");
+            return Err(NetworkError::PeerMismatch);
+        }
         Self::session(connection, admission)
+    }
+
+    fn source_matches(&self, source: &IncomingAddr, peer: &PublicKey) -> bool {
+        match source {
+            IncomingAddr::Ip(address) => policy::native_ip(address.ip()),
+            IncomingAddr::Custom(address) => self.custom.as_ref().is_some_and(|factory| {
+                let Ok(peer) = super::signaling::peer_id(peer) else {
+                    return false;
+                };
+                factory
+                    .authenticated_link(address)
+                    .is_ok_and(|link| link.peer == peer)
+            }),
+            _ => false,
+        }
     }
 
     fn session(

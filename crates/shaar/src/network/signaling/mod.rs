@@ -1,3 +1,7 @@
+mod endpoint;
+mod owner;
+pub use endpoint::SignaledEndpoint;
+
 use std::{io, net::SocketAddr};
 
 use iroh_base::PublicKey;
@@ -18,12 +22,7 @@ pub fn bind_signaling(
     address: SocketAddr,
     peers: &[PublicKey],
 ) -> Result<(Carrier, CarrierHandle, mpsc::Receiver<Received>), NetworkError> {
-    if peers.len() > 16 {
-        return Err(NetworkError::Signaling(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "signaling allowlist exceeds 16 entries",
-        )));
-    }
+    check_peers(peers)?;
     let peers = peers
         .iter()
         .map(peer_id)
@@ -33,7 +32,17 @@ pub fn bind_signaling(
     Carrier::bind(key, address, peers).map_err(NetworkError::Signaling)
 }
 
-fn peer_id(key: &PublicKey) -> io::Result<PeerId> {
+fn check_peers(peers: &[PublicKey]) -> Result<(), NetworkError> {
+    if peers.len() > 16 {
+        return Err(NetworkError::Signaling(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "signaling allowlist exceeds 16 entries",
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn peer_id(key: &PublicKey) -> io::Result<PeerId> {
     let key = ed25519::PublicKey::try_from_bytes(key.as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid signaling peer key"))?;
     Ok(SignalingKey::from(key).to_peer_id())

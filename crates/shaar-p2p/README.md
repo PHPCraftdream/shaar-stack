@@ -457,7 +457,7 @@ case, seven real relay scenarios and the full regression matrix. Factory/batchin
 address binding, multi-waiter backpressure and SDK ownership are separate from this
 admission method.
 
-## Caller-driven Iroh adapter — authored, pending CI
+## Caller-driven Iroh adapter — component CI proof
 
 `SignalingTransport::attach` consumes the carrier's sole incoming receiver and returns
 a single-bind custom-transport factory plus `SignalingPump`. The caller owns both
@@ -494,15 +494,61 @@ and queue shutdown. Real TCP/Noise carrier tests cover exact 1/1500-byte adapter
 packets and owned four-root cleanup; a separate injected-boundary case covers batches.
 A real Iroh handshake test disables every IP/relay transport and permits no custom
 APP frames, requiring the actual custom carrier to complete control traffic. These
-new tests have NOT yet run.
+tests passed on both OSes at `a8e26b0`, completed
+[CI 40182149229](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40182149229):
+all five new bridge cases, 38 P2P library tests, seven relay scenarios and the full
+regression matrix succeeded. The first adapter attempt stopped before runtime on
+Rust 1.99.1's deprecated fetch_update spelling; try_update preserved the checked
+counter and ordering without a lint suppression or version change.
 
-The adapter is not yet installed into SDK Endpoint ownership. Shared SDK identity
-construction is accepted separately; matching an incoming custom source to the final
-TLS peer, joined SDK startup/close/bind-failure handling, consolidated frame/path
-calibration and public Amino discovery remain unfinished. A generic factory is not
-positive application-data authority: the trusted Noq NativeOnly filter remains
-mandatory, before packetization/encryption. No opaque custom sender can enforce that
-policy by inspecting encrypted bytes.
+This component proof is not final SDK ownership or consolidated frame/path
+acceptance. A generic factory is not positive application-data authority: the
+trusted Noq NativeOnly filter remains mandatory, before packetization/encryption.
+No opaque custom sender can enforce that policy by inspecting encrypted bytes.
+
+## Joined SDK owner and source identity — authored, pending CI
+
+`shaar::network::SignaledEndpoint` composes the native SDK endpoint with one retained
+signaling coordinator. Its constructor accepts at most 16 input public peer keys
+before deduplication, validates native addressing before startup, waits for signaling
+readiness and awaits signaling cleanup on a failed native bind. The original native
+Endpoint API remains available and unchanged. The new owner's close returns a typed
+result: Iroh drains while signaling is available, then both carrier and pump results
+are observed and their owned work is joined. Session/factory handles do not own the
+coordinator or native sockets. Drop/cancel is only an abort fallback; it must not be
+misrepresented as an async joined-close guarantee.
+
+A custom IncomingAddr is captured before TLS completion. Before a Session is created,
+the current locally minted source resolves to an actual authenticated Link; its peer
+must equal the canonical libp2p identity of the final TLS key. Reopened/stale epochs
+fail lookup. Allowlisting both A and D is insufficient to let carrier peer A forward
+QUIC from identity D and become an SDK Session for D. Outbound custom negotiation also
+rechecks the exact source binding after the pinned TLS handshake. None of these checks
+grants APP permission on custom paths; the NativeOnly packetization policy is unchanged.
+
+Independent configured-reviewer and @fh source reviews agreed on a graceful-close
+race: a ready receive refresh could return BrokenPipe after the shared adapter was
+closed but before the outer select observed its close notification. The terminal
+finalizer now normalizes only BrokenPipe with already-closed state, before performing
+its own cleanup. It reads the protected state rather than a potentially lagging watch
+notification; other errors are retained. Deterministic authored regressions cover the
+classification order and notification gap. This is not a sleep, retry or diagnostic
+suppression. Final lease observations are also cleared on owner destruction rather
+than leaving a closed endpoint's advertisement as the last watch value.
+
+New SDK tests are authored, not yet executed: valid custom identity versus A/D
+laundering with both ACL entries and a client with no IP shortcut; public direct
+signaling negotiation plus native APP exchange; owned relay reservation/bootstrap
+without a destination direct-TCP shortcut; final lease revocation; immediate native
+UDP/control-TCP rebind with sessions/factories retained; failed startup; cancelled
+admitted control handshake followed by explicit joined close; cancellation while
+close awaits its coordinator; and both child-completion/error orders. The relay
+fixture reuses exact already-locked libp2p/futures packages as dev-only SDK edges;
+all package versions, identities, sources and checksums remain preserved.
+
+SDK integration acceptance still requires actual Linux/Windows CI. Consolidated
+single-connection frame/path attribution with positive allow-all calibration,
+Amino discovery and separate public-network smoke remain independent later leaves.
 
 ## Remaining implementation and acceptance
 

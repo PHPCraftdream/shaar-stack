@@ -167,6 +167,12 @@ pub(super) struct State {
     dirty: bool,
 }
 
+impl Drop for State {
+    fn drop(&mut self) {
+        self.snapshots.send_replace(Vec::new());
+    }
+}
+
 impl State {
     pub(super) fn new() -> (Self, watch::Receiver<Vec<RelayLease>>) {
         let (snapshots, receiver) = watch::channel(Vec::new());
