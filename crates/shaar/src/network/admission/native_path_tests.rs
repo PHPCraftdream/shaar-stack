@@ -219,10 +219,12 @@ async fn failed_finalization(cancel: bool) {
             .with_test_writer()
             .without_time()
             .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
-                matches!(
-                    metadata.target(),
-                    "noq::connection" | "noq::endpoint" | "noq_proto::connection" | "iroh::socket"
-                )
+                metadata.is_span()
+                    || metadata.fields().field("close_deadline").is_some()
+                    || metadata.fields().field("close_timer_expired").is_some()
+                    || metadata.fields().field("shutdown_barrier").is_some()
+                    || (metadata.target().starts_with("noq")
+                        && *metadata.level() <= tracing::Level::WARN)
             })),
     );
     let _subscriber = tracing::subscriber::set_default(subscriber);

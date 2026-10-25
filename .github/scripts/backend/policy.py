@@ -340,6 +340,8 @@ def connection(text):
         }""")
     text = replace(text, "        let pto_max = self.max_pto_for_space(self.highest_space);", """        let pto_max = self.max_pto_for_space(self.highest_space);
         trace!(?now, ?pto_max, close_deadline = ?(now + 3 * pto_max), "connection close timer");""")
+    text = replace(text, "                    ConnTimer::Close => {", """                    ConnTimer::Close => {
+                        trace!(?now, close_timer_expired = true, "connection close timer expired");""")
     return text
 
 
@@ -565,6 +567,10 @@ def joined_actor_shutdown(root: Path):
         #[cfg(not(wasm_browser))]
         crate::actor_shutdown::close_native_sockets(&self.native_sockets).await;
         trace!("endpoint native sockets closed");""")
+    for barrier in ("wait_all_draining start", "wait_all_draining done", "endpoint actor joined",
+                    "endpoint runtime joined", "endpoint native sockets closed"):
+        socket = replace(socket, f'trace!("{barrier}");',
+                         f'trace!(shutdown_barrier = "{barrier}", "{barrier}");')
     owned = Path(__file__).with_name("actor_shutdown.rs").read_bytes()
     for path, text in ((runtime_path, runtime), (remote_path, remote), (child_path, child),
                        (transports_path, transports), (ip_path, ip)):

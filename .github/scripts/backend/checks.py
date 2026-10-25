@@ -168,16 +168,19 @@ class PreparationChecks(unittest.TestCase):
         self.assertLess(socket.index("let native_sockets = transports.native_socket_handles()"),
                         socket.index("let endpoint = noq::Endpoint::new_with_abstract_socket"))
         self.assertIn("            native_sockets,", socket)
-        self.assertLess(socket.index('trace!("endpoint actor joined")'),
+        self.assertLess(socket.index('shutdown_barrier = "endpoint actor joined"'),
                         socket.index("self.runtime.shutdown().await"))
         self.assertLess(socket.index("self.runtime.shutdown().await"),
-                        socket.index('trace!("endpoint runtime joined")'))
-        self.assertLess(socket.index('trace!("endpoint runtime joined")'),
+                        socket.index('shutdown_barrier = "endpoint runtime joined"'))
+        self.assertLess(socket.index('shutdown_barrier = "endpoint runtime joined"'),
                         socket.index("close_native_sockets(&self.native_sockets).await"))
         self.assertLess(socket.index("close_native_sockets(&self.native_sockets).await"),
-                        socket.index('trace!("endpoint native sockets closed")'))
+                        socket.index('shutdown_barrier = "endpoint native sockets closed"'))
         connection = (ROOTS["noq-proto"] / "src/connection/mod.rs").read_text(encoding="utf-8")
         self.assertEqual(connection.count('close_deadline = ?(now + 3 * pto_max)'), 1)
+        self.assertEqual(connection.count('close_timer_expired = true'), 1)
+        self.assertIn('shutdown_barrier = "wait_all_draining start"', socket)
+        self.assertIn('shutdown_barrier = "wait_all_draining done"', socket)
         self.assertLess(socket.index("close_native_sockets(&self.native_sockets).await"),
                         socket.index("self.sock.shutdown.closed.store"))
 
