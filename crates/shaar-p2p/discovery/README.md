@@ -1,6 +1,8 @@
 # Amino bootstrap preflight: exact locked-family report
 
 > Source baseline: `a8e26b0`. This is an implementation preflight, not runtime acceptance.
+> Task 80 follow-up below prepares the same-version Kademlia retention boundary;
+> historical upstream observations remain the baseline, not the prepared API.
 > Numeric budgets below are recommendations, not newly approved configuration requirements.
 > Source citations use archive-relative crate/version paths; generated extraction trees need not be retained.
 >
@@ -350,4 +352,107 @@ The current graph verification checks prepared relay/swarm resolution paths, rat
 - Treat public refusal, rate limiting, timeout, and no-HOP results as availability observations, not deterministic correctness failures.
 - Do not claim successful relay availability from successful Amino bootstrap.
 
-**Final status:** Source-only preflight completed; parent integrated this report after checking critical source claims. No new production code, builds, tests or public availability smoke are accepted by this document. Strict small internal Kademlia/DNS bounds and prepared resolver shutdown remain implementation/verification obligations, not runtime-verified properties.
+**Preflight status:** Source-only preflight completed; parent integrated this report after checking critical source claims. The report itself does not establish runtime acceptance. The implementation follow-up below narrows the Kademlia obligation; DNS bounds and resolver shutdown remain separate work.
+
+## 11. Task 80: prepared Kademlia retention boundary
+
+The root Cargo patch selects **libp2p-kad 0.49.0**, prepared from the exact archive
+and checksum in the provenance table. Only that package's registry source/checksum
+is removed from the product lock; versions, dependency edges, and all unrelated
+package identities stay unchanged. This is a local reviewed source preparation,
+not a published fork or a new package family.
+
+`.github/scripts/p2p/kad.py` checks the archive hash, package identity, embedded MIT
+notice, VCS revision, original archive lock, and unique source anchors before
+writing a fresh destination. Its receipt records every original/prepared file hash.
+Existing destinations are never overwritten. The production deltas are confined
+to `Cargo.toml` (standalone workspace boundary), `src/behaviour.rs`, and
+`src/query/peers/closest.rs`; codec, crypto, routing, record/provider and server
+implementations are not changed.
+
+### Exact retention contract
+
+- `Behaviour::discovered` admits at most **32 referral peers per query address
+  map**, before inserting map entries or cloning addresses. Initial routing peers
+  are not entries in that map unless subsequently referred.
+- Each retained peer has at most **4 unique addresses**, each at most **256 encoded
+  bytes**. Length and bounded deduplication checks precede cloning. The first
+  admissible peers/addresses in response order win. Excess entries are ignored;
+  all-oversized or empty address sets do not consume a new referral slot.
+- Repeated responses merge only into remaining address capacity, without
+  replacing already retained hints. Connection-address migration also checks the
+  byte bound before cloning and removes duplicates; failed-address removal can
+  free address slots but does not free peer charges.
+- Each **single closest-peer iterator** retains at most **32 peer states**,
+  including the initial at-most-20 routing peers. Admission stops before creating
+  an additional key/state or inserting it. Failed/timed-out states are not evicted,
+  so they cannot replenish the lifetime contact budget. This deliberately trades
+  exhaustive closest-peer search quality for bounded retention: later, potentially
+  closer peers can be dropped. Small successful queries retain ordinary behavior.
+- Finished queries ignore late referrals. This is not a socket-abort guarantee.
+- `Config::set_automatic_bootstrap_throttle(None)` is exposed in production and
+  disables insertion-triggered bootstrap. Periodic bootstrap is independent and
+  still requires `set_periodic_bootstrap_interval(None)`; manual bootstrap remains
+  available. Defaults are unchanged.
+
+The scratch peer list is an inline `SmallVec<[PeerId; 32]>`; address selection uses
+at most four borrowed addresses before cloning. Deduplication scans are bounded
+by 32 peers or four addresses. Processing remains linear in the supplied decoded
+response (with these fixed factors); this does not bound wire-decoder allocation.
+The query cache retains at most 32 × 4 × 256 = **32,768 encoded address bytes**,
+excluding container/peer overhead and already-decoded input.
+
+**Not a global operation bound:** 32 states per closest iterator is not 32 contacts
+for arbitrary Kademlia operations. Disjoint iterators and multi-stage bootstrap
+can multiply contacts; initial routing peers and referral-map peers are different
+sets. Fixed-peer operations are outside this closest-iterator proof. No global
+query-count, routing-table, transport-address, DNS, or connection cap is introduced.
+Task 67 still needs owner admission, Identify validation, bounded DNS, one bounded
+closest lookup where appropriate, manual insertion/client mode, and a hard owner
+deadline. This work does **not** establish Amino readiness or public availability.
+
+### CI proof path and local verification limit
+
+CI prepares `target/p2p/kad/libp2p-kad-0.49.0` before workspace checks. Full resolved
+Cargo metadata must point to that exact prepared manifest, not stock registry
+Kademlia. Candidate staging rewrites its patch to an absolute prepared path; graph
+verification permits only the explicitly reviewed registry-to-same-version-path
+replacement and retains the other identity checks. The workflow-dispatch candidate
+lane remains available and reuses the prepared Kademlia source.
+
+Python controls cover checksum/size rejection, source-anchor drift, original-byte
+preservation, repeatability, no-overwrite behavior, provenance drift, pre-clone
+checks, fixture-only changes, and the exact allowed lock identity replacement.
+Owned Rust tests call the patched dependency's actual constructors, discovery
+callback, query pool, connection-address handler, and closest iterator. They
+inspect internal retention before final results, including duplicate/oversized
+addresses, repeated referrals, initial K=20, failures/timeouts, finish/late input,
+and the insertion-bootstrap disable with an enabled control.
+
+The standalone fixture retains the archive's **unchanged Cargo.lock** (SHA256
+`1fef5141047eb6e9d4d514bf99a6af4e0bc05bafc6281174931ccc993038bfa2`). The published
+manifest omits `quickcheck` although upstream unit modules reference it. Rather
+than introduce dependency/version changes, the fixture excludes the explicitly
+listed upstream test modules and appends the owned contracts inside the actual
+behaviour/iterator modules. Production function bodies and the manifest/lock are
+unchanged by fixture preparation. This lane is **not** an upstream-suite pass;
+production compilation and product regressions use the existing workspace lanes.
+
+CI-only commands after source preparation:
+
+```sh
+python -I .github/scripts/p2p/kad_checks.py
+python -I .github/scripts/p2p/kad.py fixture \
+  --source target/p2p/kad/libp2p-kad-0.49.0 \
+  --destination target/kad-retention/libp2p-kad-0.49.0
+cargo test --locked \
+  --manifest-path target/kad-retention/libp2p-kad-0.49.0/Cargo.toml \
+  --lib retention_
+```
+
+These tests are authored for GitHub CI, **not reported as passed** by this source
+change. Local work is restricted to source/data transformation, hashes, TOML/AST
+inspection and standalone formatting; no Cargo, compilation, test, or smoke run.
+The prepared override can be removed only when a reviewed upstream release
+provides equivalent pre-retention bounds and bootstrap control, with equivalent
+contract tests and an explicitly coordinated lock migration.
