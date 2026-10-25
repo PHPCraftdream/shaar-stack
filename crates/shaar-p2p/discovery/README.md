@@ -3,6 +3,9 @@
 > Source baseline: `a8e26b0`. This is an implementation preflight, not runtime acceptance.
 > Numeric budgets below are recommendations, not newly approved configuration requirements.
 > Source citations use archive-relative crate/version paths; generated extraction trees need not be retained.
+>
+> Follow-up: [DNS resolver ownership and retention](dns-ownership.md) verifies the
+> locked Hickory task-provider boundary and identifies additional pre-decode limits.
 
 ## Archive provenance
 
