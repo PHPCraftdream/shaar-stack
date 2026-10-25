@@ -303,7 +303,7 @@ must never produce a dial or handler action. These deterministic controls do not
 need network timing or a success-by-nondelivery timeout. Their runtime outcomes are
 pending CI; complete reservation/circuit ownership is still not accepted.
 
-## Owned relay lifecycle — authored, pending CI
+## Owned relay lifecycle — real-path CI proof
 
 The carrier composes a circuit-v2 client with native TCP/Noise/Yamux. `reserve`
 creates or reuses a locally owned reservation; `relay_leases` observes bounded
@@ -349,9 +349,22 @@ and independent deadline wakeups. Seven authored integration scenarios use an ow
 Rust relay and two signal drivers, with no direct destination shortcut: exact
 bidirectional 1/1500-byte packets, reuse/reopen and generations, renewal, refusal,
 physical relay loss, real server time/byte quotas and role rejection. The fixture
-retains and joins exactly three root tasks. These tests have NOT yet been executed;
-controller acceptance is pending actual Linux/Windows CI, not inferred from the
-previous expiry or native-carrier proofs. Common SDK identity, Iroh custom transport,
+retains and joins exactly three root tasks.
+
+At `36c026e`, actual completed [CI 40173783110](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40173783110)
+logs confirm Linux and Windows passed all seven real relay scenarios (8.11s/8.10s),
+30 P2P library tests, six codec cases, four cancellation controls, three HOP wire
+cases, 14 source controls and the existing SDK/structural regression matrix. The
+first runtime attempt at `4169051` passed six relay scenarios but exposed a fixture
+ordering error: local dial completion did not establish remote driver readiness
+before its reverse send. The exact forward-packet/remote-receive barrier corrected
+that ordering without sleeps, retries or weaker generation assertions.
+
+An additional virtual-time controller regression was authored after that run: a
+published lease is revoked at its local deadline, a late renewal cannot resurrect
+it, and a copied lease does not extend. It is not included in the earlier 30-test
+count. This is a controller transition test with injected authenticated context,
+not another real-network expiry proof. Common SDK identity, Iroh custom transport,
 Amino discovery and consolidated signaling-only frame proof remain separate leaves.
 
 ## Remaining implementation and acceptance

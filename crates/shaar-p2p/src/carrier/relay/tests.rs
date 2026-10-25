@@ -243,6 +243,69 @@ async fn a_closing_circuit_cannot_be_reused() {
     owner.run(async {}).await.unwrap();
 }
 
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn local_expiry_revokes_a_published_lease_and_rejects_late_renewal() {
+    let (mut owner, _handle, _incoming) = Carrier::bind(
+        Keypair::generate_ed25519(),
+        "127.0.0.1:0".parse().unwrap(),
+        vec![],
+    )
+    .unwrap();
+    let relay = address(peer());
+    let (reply, result) = oneshot::channel();
+    owner.core.reserve_relay(relay, reply);
+    let current = ConnectionId::new_unchecked(803);
+    let endpoint = libp2p::core::ConnectedPoint::Listener {
+        local_addr: multiaddr(relay.address),
+        send_back_addr: multiaddr(relay.address),
+    };
+    owner.core.swarm.behaviour_mut().admission.on_swarm_event(
+        libp2p::swarm::behaviour::FromSwarm::ConnectionEstablished(
+            libp2p::swarm::behaviour::ConnectionEstablished {
+                peer_id: relay.peer,
+                connection_id: current,
+                endpoint: &endpoint,
+                failed_addresses: &[],
+                other_established: 0,
+            },
+        ),
+    );
+    let listener = owner.core.relay.records[&relay.peer].listener.unwrap();
+    let advertised = relay
+        .prefix()
+        .with(Protocol::P2p(*owner.core.swarm.local_peer_id()));
+    owner.core.relay_listen_address(listener, advertised);
+    let expires = Instant::now() + Duration::from_secs(1);
+    owner
+        .core
+        .relay_event(protocol::client::Event::ReservationReqAccepted {
+            relay_peer_id: relay.peer,
+            connection_id: current,
+            renewal: false,
+            limit: None,
+            expires_at: expires.into_std(),
+        });
+    let lease = result.await.unwrap().unwrap();
+    assert_eq!(owner.core.relay.snapshots.borrow().as_slice(), &[lease]);
+    assert_eq!(owner.core.relay.next_deadline(), Some(expires));
+    tokio::time::advance(Duration::from_secs(1)).await;
+    owner.core.relay_tick(Instant::now()).unwrap();
+    assert!(owner.core.relay.snapshots.borrow().is_empty());
+    assert!(owner.core.relay.records[&relay.peer].phase == Phase::Stopping);
+    owner
+        .core
+        .relay_event(protocol::client::Event::ReservationReqAccepted {
+            relay_peer_id: relay.peer,
+            connection_id: current,
+            renewal: true,
+            limit: None,
+            expires_at: (Instant::now() + Duration::from_secs(60)).into_std(),
+        });
+    assert!(owner.core.relay.snapshots.borrow().is_empty());
+    assert_eq!(lease.expires_at(), expires);
+    owner.run(async {}).await.unwrap();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn stale_or_stopping_acceptances_never_publish_a_lease() {
     let (mut owner, _handle, _incoming) = Carrier::bind(
