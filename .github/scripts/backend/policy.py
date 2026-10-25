@@ -97,8 +97,9 @@ NATIVE_PATH_API = """    /// Establishes an explicit native path on this authent
                 biased;
                 error = self.inner.closed() => return Err(io::Error::new(io::ErrorKind::BrokenPipe, error)),
                 event = events.next() => match event {
-                    Some(Ok(noq::PathEvent::Abandoned { id: abandoned, .. })) if abandoned == id => {
-                        return Err(io::Error::new(io::ErrorKind::NotConnected, "native path was abandoned"));
+                    Some(Ok(noq::PathEvent::Abandoned { id: abandoned, reason, .. })) if abandoned == id => {
+                        return Err(io::Error::new(io::ErrorKind::NotConnected,
+                            format!("native path {id:?} was abandoned: {reason:?}")));
                     }
                     Some(Err(_)) => return Err(io::Error::other("native path event history lost")),
                     None => return Err(io::ErrorKind::BrokenPipe.into()),

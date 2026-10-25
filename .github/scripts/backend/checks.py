@@ -218,6 +218,8 @@ class ProductWorkspaceChecks(unittest.TestCase):
         self.assertLess(api.index("self.paths_stream()"), api.index("open_path_ensure("))
         for required in ("snapshot.get(id)", "opened && observed", "self.inner.closed()", "PathEvent::Abandoned", "native path event history lost", "PathStatus::Backup", "self.side().is_server()"):
             self.assertIn(required, api)
+        self.assertIn("id: abandoned, reason, ..", api)
+        self.assertIn('format!("native path {id:?} was abandoned: {reason:?}")', api)
         for forbidden in ("pending_open_paths", "tokio::spawn", "PathStatus::Available", "application_data_filter"):
             self.assertNotIn(forbidden, api)
         with self.assertRaises(ValueError):
