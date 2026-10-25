@@ -123,6 +123,13 @@ impl Fixture {
 
     /// cancel-safe: NO — only completion proves both driver joins and socket release.
     async fn close(self) {
+        self.close_with_phase(&Cell::new("joined fixture close"))
+            .await;
+    }
+
+    /// cancel-safe: NO — phase observations do not replace either join boundary.
+    async fn close_with_phase(self, phase: &Cell<&'static str>) {
+        let started = std::time::Instant::now();
         let Self {
             client,
             server,
@@ -135,8 +142,37 @@ impl Fixture {
             control,
             accepted_control,
         } = self;
-        let (_, server_closed) = tokio::join!(client.close(), server.close());
+        let client_done = Cell::new(false);
+        let server_done = Cell::new(false);
+        phase.set("joining native owners: neither complete");
+        let (_, server_closed) = tokio::join!(
+            async {
+                client.close().await;
+                client_done.set(true);
+                phase.set(if server_done.get() {
+                    "both native owners joined"
+                } else {
+                    "client native joined; server owner pending"
+                });
+                eprintln!("client native joined after {:?}", started.elapsed());
+            },
+            async {
+                let result = server.close().await;
+                server_done.set(true);
+                phase.set(if client_done.get() {
+                    "both native owners joined"
+                } else {
+                    "server owner joined; client native pending"
+                });
+                eprintln!(
+                    "server owner joined after {:?}: {result:?}",
+                    started.elapsed()
+                );
+                result
+            }
+        );
         server_closed.unwrap();
+        phase.set("joining client carrier and pump: neither observed");
         for stop in stops {
             let _ = stop.send(());
         }
@@ -144,21 +180,34 @@ impl Fixture {
         while let Some(result) = tasks.join_next().await {
             result.unwrap().unwrap();
             joined += 1;
+            phase.set(if joined == 1 {
+                "one client driver joined; other pending"
+            } else {
+                "both client drivers joined"
+            });
+            eprintln!(
+                "client driver {joined}/2 joined after {:?}",
+                started.elapsed()
+            );
         }
         assert_eq!(joined, 2);
+        phase.set("observe closed signaling handles");
         assert!(handle.local_addr().await.is_err());
         assert!(
             factory
                 .peer_address(peer_id(&control.peer_id()).unwrap())
                 .is_err()
         );
+        phase.set("rebind joined native UDP sockets");
         for address in native {
             let _rebound = UdpSocket::bind(address).await.unwrap();
         }
+        phase.set("rebind joined signaling TCP sockets");
         for address in signaling {
             let _rebound = TcpListener::bind(address).await.unwrap();
         }
         drop((control, accepted_control, factory, handle));
+        phase.set("fixture close complete");
     }
 }
 
@@ -194,6 +243,7 @@ async fn failed_finalization(cancel: bool) {
         } else {
             phase.set("typed native validation failure");
             let result = finish.as_mut().await;
+            eprintln!("native finalization result: {result:?}");
             assert!(matches!(result, Err(NetworkError::Deadline))
                 || matches!(result, Err(NetworkError::NativePath(ref error))
                     if error.kind() == io::ErrorKind::NotConnected), "unexpected finalization: {result:?}");
@@ -204,7 +254,7 @@ async fn failed_finalization(cancel: bool) {
         assert!(matches!(inbound.closed().await, NetworkError::Closed));
         fixture.control_is_open().await;
         phase.set("joined owners and socket rebind with handles retained");
-        fixture.close().await;
+        fixture.close_with_phase(&phase).await;
         drop(inbound);
     }).await.unwrap_or_else(|error| panic!("native finalization deadline: {error}; phase={}", phase.get()));
 }
