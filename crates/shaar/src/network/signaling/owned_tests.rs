@@ -3,11 +3,12 @@ mod relay_fixture;
 
 use super::*;
 use crate::network::{ALPN, Session};
+use futures::StreamExt;
 use iroh::{
     EndpointAddr, TransportAddr,
     endpoint::{QuicTransportConfig, presets},
 };
-use std::time::Duration;
+use std::{cell::Cell, time::Duration};
 use tokio::{
     io::AsyncReadExt,
     net::{TcpListener, UdpSocket},
@@ -20,8 +21,32 @@ fn public(identity: &Identity) -> PublicKey {
     identity.transport_key().public()
 }
 
+fn trace_paths(label: &str, session: &Session) {
+    for path in session.connection.paths().iter() {
+        let kind = match path.remote_addr() {
+            TransportAddr::Ip(_) => "native",
+            TransportAddr::Custom(_) => "custom",
+            TransportAddr::Relay(_) => "relay",
+            _ => "unknown",
+        };
+        eprintln!(
+            "{label}: path={:?} kind={kind} selected={} rtt={:?}",
+            path.id(),
+            path.is_selected(),
+            path.rtt()
+        );
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn native_app_and_both_joined_backends_close_with_sessions_and_factories_retained() {
+    let phase = Cell::new("bind endpoints");
+    let send_phase = Cell::new("not started");
+    let receive_phase = Cell::new("not started");
+    let control_connect = Cell::new("not started");
+    let control_accept = Cell::new("not started");
+    let native_connect = Cell::new("not started");
+    let native_accept = Cell::new("not started");
     tokio::time::timeout(Duration::from_secs(25), async {
         let a = Identity::generate();
         let b = Identity::generate();
@@ -36,36 +61,99 @@ async fn native_app_and_both_joined_backends_close_with_sessions_and_factories_r
         let native = [client.local_addr(), server.local_addr()];
         let signaling = [client.signaling_addr(), server.signaling_addr()];
         let retained = client.signaling.factory.clone();
+        phase.set("custom negotiation");
+        let server_id = server.id();
+        let server_signaling = server.signaling_addr();
         let (control, control_accepted) = tokio::join!(
-            client.connect_signaling(server.id(), server.signaling_addr()),
-            server.accept()
+            async {
+                control_connect.set("waiting");
+                let result = client.connect_signaling(server_id, server_signaling).await;
+                control_connect.set(if result.is_ok() { "ok" } else { "error" });
+                if let Err(error) = &result { eprintln!("control connect error: {error:?}"); }
+                result
+            },
+            async {
+                control_accept.set("waiting");
+                let result = server.accept().await;
+                control_accept.set(if result.is_ok() { "ok" } else { "error" });
+                if let Err(error) = &result { eprintln!("control accept error: {error:?}"); }
+                result
+            }
         );
         let (control, control_accepted) = (control.unwrap(), control_accepted.unwrap());
         assert_eq!(control.peer_id(), server.id());
         assert_eq!(control_accepted.peer_id(), client.id());
+        trace_paths("control client", &control);
+        trace_paths("control server", &control_accepted);
+        phase.set("native connection and accept");
+        let server_native = server.local_addr();
         let (connected, accepted) = tokio::join!(
-            client.connect(server.id(), server.local_addr()),
-            server.accept()
+            async {
+                native_connect.set("waiting");
+                let result = client.connect(server_id, server_native).await;
+                native_connect.set(if result.is_ok() { "ok" } else { "error" });
+                if let Err(error) = &result { eprintln!("native connect error: {error:?}"); }
+                result
+            },
+            async {
+                native_accept.set("waiting");
+                let result = server.accept().await;
+                native_accept.set(if result.is_ok() { "ok" } else { "error" });
+                if let Err(error) = &result { eprintln!("native accept error: {error:?}"); }
+                result
+            }
         );
         let (connected, accepted) = (connected.unwrap(), accepted.unwrap());
+        trace_paths("native-request client", &connected);
+        trace_paths("native-request server", &accepted);
+        phase.set("native APP exchange");
         let payload = b"native APP while signaling ownership is installed";
+        {
         let send = async {
+            send_phase.set("open bidi");
             let (mut send, mut receive) = connected.connection.open_bi().await.unwrap();
+            send_phase.set("write request");
             send.write_all(payload).await.unwrap();
             send.finish().unwrap();
+            send_phase.set("read response");
             assert_eq!(receive.read_to_end(1024).await.unwrap(), payload);
+            send_phase.set("complete");
         };
         let receive = async {
+            receive_phase.set("accept bidi");
             let (mut send, mut receive) = accepted.connection.accept_bi().await.unwrap();
+            receive_phase.set("read request");
             let bytes = receive.read_to_end(1024).await.unwrap();
             assert_eq!(bytes, payload);
+            receive_phase.set("write response");
             send.write_all(&bytes).await.unwrap();
             send.finish().unwrap();
+            receive_phase.set("complete");
         };
-        tokio::join!(send, receive);
+        let exchange = async { tokio::join!(send, receive); };
+        tokio::pin!(exchange);
+        let mut client_paths = connected.connection.path_events();
+        let mut server_paths = accepted.connection.path_events();
+        let (mut client_events_open, mut server_events_open) = (true, true);
+        loop {
+            tokio::select! {
+                _ = &mut exchange => break,
+                event = client_paths.next(), if client_events_open => {
+                    client_events_open = event.is_some();
+                    trace_paths("client path update", &connected);
+                }
+                event = server_paths.next(), if server_events_open => {
+                    server_events_open = event.is_some();
+                    trace_paths("server path update", &accepted);
+                }
+            }
+        }
+        }
+        phase.set("joined close");
         let (a_closed, b_closed) = tokio::join!(client.close(), server.close());
         a_closed.unwrap();
         b_closed.unwrap();
+        phase.set("kernel resource rebind");
         for address in native {
             let _rebound = UdpSocket::bind(address).await.unwrap();
         }
@@ -80,7 +168,7 @@ async fn native_app_and_both_joined_backends_close_with_sessions_and_factories_r
         drop((control, control_accepted, connected, accepted));
     })
     .await
-    .expect("signed SDK native APP/joined shutdown deadline");
+    .unwrap_or_else(|error| panic!("SDK deadline: {error}; phase={}; control_connect={}; control_accept={}; native_connect={}; native_accept={}; send={}; receive={}", phase.get(), control_connect.get(), control_accept.get(), native_connect.get(), native_accept.get(), send_phase.get(), receive_phase.get()));
 }
 
 /// cancel-safe: NO — the fixture retains its owner until explicit Iroh and carrier close.
