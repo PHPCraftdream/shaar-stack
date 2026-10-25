@@ -50,6 +50,7 @@ def prepare(archives, lock_path, destination):
             raise ValueError("backend license changed")
         roots[package] = root
     runtime.apply(roots["noq"])
+    runtime.native_cid_events(roots["noq"])
     policy.apply(roots["noq-proto"])
     policy.native_cid_events(roots["noq-proto"])
     policy.endpoint_capacity(roots["noq-proto"])

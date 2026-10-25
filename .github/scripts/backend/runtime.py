@@ -96,10 +96,16 @@ struct ConnectionSet {""")
                                         .get_mut(&handle)
                                         .unwrap()
                                         .send_datagram(event, &mut memory);""")
-    conn = replace(conn, "Path(evt @ PathEvent::RemoteStatus { .. }) => {",
-                   "Path(evt @ (PathEvent::RemoteStatus { .. } | PathEvent::RemoteCidsAvailable { .. })) => {")
     owned = Path(__file__).with_name("ingress_budget.rs").read_bytes()
     # All anchors and the owned module are ready before modifying downloaded source.
     for path, value in ((library, lib), (endpoint, text), (connection, conn)):
         path.write_text(value, encoding="utf-8", newline="\n")
     module.write_bytes(owned)
+
+
+def native_cid_events(root: Path):
+    path = root / "src/connection.rs"
+    text = replace(path.read_text(encoding="utf-8"),
+                   "Path(evt @ PathEvent::RemoteStatus { .. }) => {",
+                   "Path(evt @ (PathEvent::RemoteStatus { .. } | PathEvent::RemoteCidsAvailable { .. })) => {")
+    path.write_text(text, encoding="utf-8", newline="\n")

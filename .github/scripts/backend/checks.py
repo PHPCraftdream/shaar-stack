@@ -224,6 +224,22 @@ class ProductWorkspaceChecks(unittest.TestCase):
             policy.native_path_bridge(ROOTS["iroh"])
         self.assertEqual(path.read_bytes(), before)
 
+    def test_native_cid_forwarding_is_an_explicit_production_step(self):
+        with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
+            root = Path(temporary)
+            with tarfile.open(ARCHIVES["noq"]) as archive:
+                archive.extractall(root, filter="data")
+            root = root / f"noq-{prepare.VERSION}"
+            prepare.runtime.apply(root)
+            path = root / "src/connection.rs"
+            self.assertNotIn("RemoteCidsAvailable", path.read_text(encoding="utf-8"))
+            prepare.runtime.native_cid_events(root)
+            before = path.read_bytes()
+            self.assertIn("RemoteCidsAvailable", before.decode("utf-8"))
+            with self.assertRaises(ValueError):
+                prepare.runtime.native_cid_events(root)
+            self.assertEqual(path.read_bytes(), before)
+
     def test_native_cid_event_is_emitted_only_after_accepted_first_cid(self):
         root = ROOTS["noq-proto"]
         paths_path = root / "src/connection/paths.rs"
