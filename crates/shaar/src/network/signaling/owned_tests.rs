@@ -255,6 +255,12 @@ async fn actual_custom_source_must_match_final_tls_key_even_when_both_keys_are_a
 #[tokio::test(flavor = "current_thread")]
 async fn unreachable_explicit_native_path_publishes_no_session_and_closes_only_the_new_connection()
 {
+    let phase = Cell::new("bind endpoints");
+    let control_connect = Cell::new("not started");
+    let control_accept = Cell::new("not started");
+    let native_connect = Cell::new("not started");
+    let native_accept = Cell::new("not started");
+    let native_probe = Cell::new("not started");
     tokio::time::timeout(Duration::from_secs(25), async {
         let a = Identity::generate();
         let b = Identity::generate();
@@ -266,29 +272,64 @@ async fn unreachable_explicit_native_path_publishes_no_session_and_closes_only_t
             SignaledEndpoint::bind(&b, loopback(), loopback(), &[public(&a)], Limits::default())
                 .await
                 .unwrap();
+        phase.set("custom control handshake");
+        let server_id = server.id();
+        let signaling_address = server.signaling_addr();
         let (control, accepted_control) = tokio::join!(
-            client.connect_signaling(server.id(), server.signaling_addr()),
-            server.accept()
+            async {
+                control_connect.set("waiting");
+                let result = client.connect_signaling(server_id, signaling_address).await;
+                control_connect.set(if result.is_ok() { "ok" } else { "error" });
+                if let Err(error) = &result { eprintln!("control connect error: {error:?}"); }
+                result
+            },
+            async {
+                control_accept.set("waiting");
+                let result = server.accept().await;
+                control_accept.set(if result.is_ok() { "ok" } else { "error" });
+                if let Err(error) = &result { eprintln!("control accept error: {error:?}"); }
+                result
+            }
         );
         let (control, accepted_control) = (control.unwrap(), accepted_control.unwrap());
+        phase.set("bind unreachable UDP witness");
         let unreachable = UdpSocket::bind(loopback()).await.unwrap();
         let expected_source = client.local_addr();
         let probe = async {
+            native_probe.set("waiting");
             let mut bytes = [0; 2048];
             let (length, source) = unreachable.recv_from(&mut bytes).await.unwrap();
             assert!(length > 0);
+            native_probe.set("ok");
             source
         };
+        phase.set("native connect, server accept and UDP witness");
+        let unreachable_address = unreachable.local_addr().unwrap();
         let (attempt, inbound, observed_source) = tokio::join!(
-            client.connect(server.id(), unreachable.local_addr().unwrap()),
-            server.accept(),
+            async {
+                native_connect.set("waiting");
+                let result = client.connect(server_id, unreachable_address).await;
+                native_connect.set(if result.is_ok() { "ok" } else { "error" });
+                if let Err(error) = &result { eprintln!("unreachable native connect error: {error:?}"); }
+                result
+            },
+            async {
+                native_accept.set("waiting");
+                let result = server.accept().await;
+                native_accept.set(if result.is_ok() { "ok" } else { "error" });
+                if let Err(error) = &result { eprintln!("unreachable native accept error: {error:?}"); }
+                result
+            },
             probe
         );
+        phase.set("validate unpublished attempt");
         assert_eq!(observed_source, expected_source);
         let inbound = inbound.unwrap();
         assert!(matches!(attempt, Err(NetworkError::Deadline))
             || matches!(attempt, Err(NetworkError::NativePath(ref error)) if error.kind() == std::io::ErrorKind::NotConnected));
+        phase.set("await unpublished inbound connection close");
         let _closed = inbound.closed().await;
+        phase.set("observe original control remains live");
         {
             let closed = control.connection.closed();
             tokio::pin!(closed);
@@ -299,13 +340,15 @@ async fn unreachable_explicit_native_path_publishes_no_session_and_closes_only_t
                 .await
             );
         }
+        phase.set("joined endpoint close");
         let (a_closed, b_closed) = tokio::join!(client.close(), server.close());
         a_closed.unwrap();
         b_closed.unwrap();
         drop((control, accepted_control, inbound));
+        phase.set("complete");
     })
     .await
-    .expect("failed native path unpublished connection cleanup deadline");
+    .unwrap_or_else(|error| panic!("failed native path unpublished connection cleanup deadline: {error}; phase={}; control_connect={}; control_accept={}; native_connect={}; native_accept={}; native_probe={}", phase.get(), control_connect.get(), control_accept.get(), native_connect.get(), native_accept.get(), native_probe.get()));
 }
 
 #[tokio::test(flavor = "current_thread")]
