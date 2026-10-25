@@ -51,6 +51,7 @@ def prepare(archives, lock_path, destination):
         roots[package] = root
     runtime.apply(roots["noq"])
     policy.apply(roots["noq-proto"])
+    policy.native_cid_events(roots["noq-proto"])
     policy.endpoint_capacity(roots["noq-proto"])
     policy.listener_limits(roots["iroh"])
     policy.connection_limit_bridge(roots["iroh"])
@@ -66,7 +67,8 @@ def prepare(archives, lock_path, destination):
                   "patch_sources": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                                     for name in ("policy.py", "runtime.py", "ingress_budget.rs", "actor_shutdown.rs")},
                   "fixture_instrumentation": False,
-                  "completed_native_path_bridge": True}
+                  "completed_native_path_bridge": True,
+                  "native_cid_readiness_event": True}
     (destination / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     return roots
 

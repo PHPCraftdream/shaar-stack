@@ -263,6 +263,27 @@ source guards and the SDK native-after-custom, exact-path reuse, invalid-input,
 unreachable-path/cancellation and APP/resource regressions still require CI execution.
 No new unsafe, package version, public fork or local compilation is introduced.
 
+The first native-path run (`40199013113`) passed companion source/gate/NAT checks but
+returned RemoteCidsExhausted on both OSes immediately after TLS. Connected precedes
+the separate PATH_NEW_CONNECTION_ID delivery; neither handshake completion nor
+handshake confirmation proves that an additional path can yet be admitted. The
+existing actor uses a timer retry, which is not adopted here.
+
+A new informational RemoteCidsAvailable PathEvent is emitted only after successfully
+accepting the first CID for a PathId. Duplicate/retired/invalid CID frames do not
+produce repeated readiness events. The async Noq wrapper forwards it through its
+existing bounded broadcast; Iroh treats it as informational. No queue, timer, task,
+cache, path-ID availability policy or wire format is added. The single native
+operation subscribes before checking admission and waits on this state transition
+only for RemoteCidsExhausted, within its original caller deadline. Every other
+admission error remains immediate. Once a path ID exists, the original validation,
+exact snapshot, abandonment, closure and lag barriers remain intact. Notification is
+not a reservation; a wake causes an actual admission-state recheck, never payload
+replay. Source guards reverse the exact CID blocks when comparing shared gate code.
+The unreachable regression now requires UDP transmission from the expected client
+source and a deadline/post-admission NotConnected error; an arbitrary pre-admission
+NativePath error can no longer count as validation failure.
+
 ## Explicit preparation, not a build script
 
 Run the script from the repository root, with Python isolated mode:

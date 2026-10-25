@@ -272,15 +272,22 @@ async fn unreachable_explicit_native_path_publishes_no_session_and_closes_only_t
         );
         let (control, accepted_control) = (control.unwrap(), accepted_control.unwrap());
         let unreachable = UdpSocket::bind(loopback()).await.unwrap();
-        let (attempt, inbound) = tokio::join!(
+        let expected_source = client.local_addr();
+        let probe = async {
+            let mut bytes = [0; 2048];
+            let (length, source) = unreachable.recv_from(&mut bytes).await.unwrap();
+            assert!(length > 0);
+            source
+        };
+        let (attempt, inbound, observed_source) = tokio::join!(
             client.connect(server.id(), unreachable.local_addr().unwrap()),
-            server.accept()
+            server.accept(),
+            probe
         );
+        assert_eq!(observed_source, expected_source);
         let inbound = inbound.unwrap();
-        assert!(matches!(
-            attempt,
-            Err(NetworkError::NativePath(_)) | Err(NetworkError::Deadline)
-        ));
+        assert!(matches!(attempt, Err(NetworkError::Deadline))
+            || matches!(attempt, Err(NetworkError::NativePath(ref error)) if error.kind() == std::io::ErrorKind::NotConnected));
         let _closed = inbound.closed().await;
         {
             let closed = control.connection.closed();

@@ -48,6 +48,9 @@ class PreparationChecks(unittest.TestCase):
                          "src/connection/datagrams.rs", "src/config/mod.rs", "src/endpoint.rs"):
             production = (ROOTS["noq-proto"] / relative).read_text(encoding="utf-8")
             gate = (ARGS.gate_noq / relative).read_text(encoding="utf-8")
+            if relative == "src/connection/mod.rs":
+                production = policy.replace(production, policy.NATIVE_CID_FIRST, "")
+                production = policy.replace(production, policy.NATIVE_CID_READY, "")
             suffix = '\n#[cfg(test)]\n#[path = "payload_policy_bounds.rs"]\nmod payload_policy_bounds;\n'
             if relative.endswith("datagrams.rs"):
                 self.assertTrue(gate.endswith(suffix))
@@ -71,6 +74,7 @@ class PreparationChecks(unittest.TestCase):
         provenance = ARGS.destination / "provenance.json"
         self.assertEqual(json.loads(provenance.read_text())["fixture_instrumentation"], False)
         self.assertEqual(json.loads(provenance.read_text())["completed_native_path_bridge"], True)
+        self.assertEqual(json.loads(provenance.read_text())["native_cid_readiness_event"], True)
         for package, relative in [("iroh", "src/endpoint/connection.rs"), ("iroh", "src/socket/transports.rs"),
                                   ("iroh", "src/socket/transports/ip.rs"),
                                   ("noq-proto", "src/connection/packet_builder.rs"), ("noq-proto", "src/connection/qlog.rs")]:
@@ -219,6 +223,39 @@ class ProductWorkspaceChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy.native_path_bridge(ROOTS["iroh"])
         self.assertEqual(path.read_bytes(), before)
+
+    def test_native_cid_event_is_emitted_only_after_accepted_first_cid(self):
+        root = ROOTS["noq-proto"]
+        paths_path = root / "src/connection/paths.rs"
+        connection_path = root / "src/connection/mod.rs"
+        paths = paths_path.read_text(encoding="utf-8")
+        connection = connection_path.read_text(encoding="utf-8")
+        self.assertEqual(paths.count(policy.NATIVE_CID_EVENT), 1)
+        self.assertEqual(connection.count(policy.NATIVE_CID_FIRST), 1)
+        self.assertEqual(connection.count(policy.NATIVE_CID_READY), 1)
+        start = connection.index(policy.NATIVE_CID_FIRST)
+        inserted = connection.index("match remote_cids.insert(frame)", start)
+        notified = connection.index(policy.NATIVE_CID_READY, inserted)
+        self.assertLess(start, inserted)
+        self.assertLess(inserted, notified)
+        self.assertIn("continue;", connection[inserted:notified])
+        runtime = (ROOTS["noq"] / "src/connection.rs").read_text(encoding="utf-8")
+        self.assertIn("PathEvent::RemoteStatus { .. } | PathEvent::RemoteCidsAvailable { .. }", runtime)
+        remote = (ROOTS["iroh"] / "src/socket/remote_map/remote_state.rs").read_text(encoding="utf-8")
+        self.assertIn("NoqPathEvent::RemoteCidsAvailable { .. }", remote)
+        with tarfile.open(ARCHIVES["noq-proto"]) as archive:
+            original = archive.extractfile(f"noq-proto-{prepare.VERSION}/src/connection/paths.rs").read()
+        self.assertEqual(policy.replace(paths, policy.NATIVE_CID_EVENT, "").encode("utf-8"), original)
+        before = (paths_path.read_bytes(), connection_path.read_bytes())
+        with self.assertRaises(ValueError):
+            policy.native_cid_events(root)
+        self.assertEqual(before, (paths_path.read_bytes(), connection_path.read_bytes()))
+        api = policy.NATIVE_PATH_API
+        self.assertLess(api.index("self.inner.path_events()"), api.index("open_path_ensure("))
+        self.assertIn("Err(noq::PathError::RemoteCidsExhausted)", api)
+        self.assertIn("Some(Ok(noq::PathEvent::RemoteCidsAvailable", api)
+        self.assertNotIn("sleep(", api)
+        self.assertNotIn("yield_now", api)
 
     def test_native_path_bridge_anchor_mismatch_does_not_overwrite(self):
         with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:

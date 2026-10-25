@@ -14,6 +14,43 @@ NATIVE_SOCKET_HANDLES = """    #[cfg(not(wasm_browser))]
 """
 
 
+NATIVE_CID_EVENT = """    /// The first usable remote connection ID was accepted for this path.
+    #[non_exhaustive]
+    RemoteCidsAvailable {
+        /// Path whose remote connection IDs changed from absent to accepted.
+        id: PathId,
+    },
+"""
+NATIVE_CID_FIRST = "                    let first_for_path = !self.remote_cids.contains_key(&path_id);\n"
+NATIVE_CID_READY = """                    if first_for_path {
+                        self.events.push_back(PathEvent::RemoteCidsAvailable { id: path_id }.into());
+                    }
+
+"""
+
+
+def native_cid_events(root: Path):
+    paths_path = root / "src/connection/paths.rs"
+    connection_path = root / "src/connection/mod.rs"
+    paths = paths_path.read_text(encoding="utf-8")
+    connection = connection_path.read_text(encoding="utf-8")
+    if "RemoteCidsAvailable" in paths or "first_for_path" in connection:
+        raise ValueError("unexpected existing native CID readiness bridge")
+    paths = replace(paths, "pub enum PathEvent {\n", "pub enum PathEvent {\n" + NATIVE_CID_EVENT)
+    connection = replace(connection, """                    let remote_cids = self
+                        .remote_cids
+                        .entry(path_id)
+                        .or_insert_with(|| CidQueue::new(frame.id));""", NATIVE_CID_FIRST + """                    let remote_cids = self
+                        .remote_cids
+                        .entry(path_id)
+                        .or_insert_with(|| CidQueue::new(frame.id));""")
+    connection = replace(connection, """                    if self.side.is_server()
+                        && path_id == PathId::ZERO""", NATIVE_CID_READY + """                    if self.side.is_server()
+                        && path_id == PathId::ZERO""")
+    paths_path.write_text(paths, encoding="utf-8", newline="\n")
+    connection_path.write_text(connection, encoding="utf-8", newline="\n")
+
+
 NATIVE_PATH_API = """    /// Establishes an explicit native path on this authenticated client connection.
     /// The caller bounds the wait and closes an unpublished connection on failure.
     /// cancel-safe: NO — cancellation stops waiting, not admitted path validation.
@@ -32,9 +69,26 @@ NATIVE_PATH_API = """    /// Establishes an explicit native path on this authent
         let remote = if ip.is_ipv4() { SocketAddr::new(ip, remote.port()) } else { remote };
         let mut events = self.inner.path_events();
         let mut snapshots = self.paths_stream();
-        let opening = self.inner.open_path_ensure(noq::FourTuple::new(remote, None), noq::PathStatus::Backup);
-        let Some(id) = opening.path_id() else {
-            return opening.await.map(|_| ()).map_err(io::Error::other);
+        let (opening, id) = loop {
+            let opening = self.inner.open_path_ensure(noq::FourTuple::new(remote, None), noq::PathStatus::Backup);
+            if let Some(id) = opening.path_id() { break (opening, id); }
+            match opening.await {
+                Err(noq::PathError::RemoteCidsExhausted) => {}
+                Err(error) => return Err(io::Error::other(error)),
+                Ok(_) => return Err(io::Error::other("path admission omitted its identifier")),
+            }
+            loop {
+                tokio::select! {
+                    biased;
+                    error = self.inner.closed() => return Err(io::Error::new(io::ErrorKind::BrokenPipe, error)),
+                    event = events.next() => match event {
+                        Some(Ok(noq::PathEvent::RemoteCidsAvailable { .. })) => break,
+                        Some(Ok(_)) => {},
+                        Some(Err(_)) => return Err(io::Error::other("native path event history lost")),
+                        None => return Err(io::ErrorKind::BrokenPipe.into()),
+                    }
+                }
+            }
         };
         tokio::pin!(opening);
         let (mut opened, mut observed) = (false, false);
@@ -51,7 +105,10 @@ NATIVE_PATH_API = """    /// Establishes an explicit native path on this authent
                     Some(Ok(_)) => {}
                 },
                 result = &mut opening, if !opened => {
-                    let _path = result.map_err(io::Error::other)?;
+                    let _path = result.map_err(|error| match error {
+                        noq::PathError::ValidationFailed => io::Error::new(io::ErrorKind::NotConnected, error),
+                        error => io::Error::other(error),
+                    })?;
                     opened = true;
                 }
                 snapshot = snapshots.next() => {
@@ -75,7 +132,12 @@ def native_path_bridge(root: Path):
         raise ValueError("unexpected existing native path bridge")
     text = replace(text, "impl Connection<HandshakeCompleted> {\n",
                    "impl Connection<HandshakeCompleted> {\n" + NATIVE_PATH_API)
+    remote_path = root / "src/socket/remote_map/remote_state.rs"
+    remote = replace(remote_path.read_text(encoding="utf-8"),
+                     "NoqPathEvent::RemoteStatus { .. } | NoqPathEvent::ObservedAddr { .. } => {",
+                     "NoqPathEvent::RemoteStatus { .. } | NoqPathEvent::ObservedAddr { .. } | NoqPathEvent::RemoteCidsAvailable { .. } => {")
     path.write_text(text, encoding="utf-8", newline="\n")
+    remote_path.write_text(remote, encoding="utf-8", newline="\n")
 
 
 def replace(text, old, new, count=1):

@@ -580,6 +580,16 @@ These corrections and new cases are not yet runtime-accepted. Forced pending-QNT
 capacity-exhaustion interleavings are source-reviewed but must not be described as
 newly executed runtime coverage.
 
+The first correction exposed a second readiness boundary: main CI `40199013113`
+passed 52 SDK cases on each OS but native connect returned RemoteCidsExhausted before
+path admission. Initial additional-path CIDs arrive separately from the TLS Connected
+notification. Preparation now forwards one bounded informational event after the
+first successfully accepted CID for a PathId, and the same native operation waits on
+that actual state change only for this error. No sleep, retry task, actor queue,
+deadline extension, hard-limit suppression or APP policy change is involved.
+Unreachable-path testing now requires observed native transmission and excludes
+arbitrary admission errors. This event/readiness correction still requires CI.
+
 ## Remaining implementation and acceptance
 
 P08 is decomposed into dependency/safety gate, bounded carrier and owned executor,
