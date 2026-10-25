@@ -9,9 +9,10 @@ use libp2p::{PeerId, swarm::ConnectionId};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::Datagram;
-pub use driver::Carrier;
+pub use driver::{Carrier, RelayAddr, RelayLease, Route};
 
 const PEER_LIMIT: usize = 16;
+const RELAY_LIMIT: usize = 8;
 const PENDING_LIMIT: usize = 8;
 const QUEUE_LIMIT: usize = 32;
 const REQUEST_LIMIT: usize = 32;
@@ -21,6 +22,7 @@ const REQUEST_LIMIT: usize = 32;
 pub struct Received {
     pub peer: PeerId,
     pub connection: ConnectionId,
+    pub route: Route,
     pub packet: Datagram,
 }
 
@@ -29,6 +31,7 @@ pub struct Received {
 pub struct CarrierHandle {
     commands: mpsc::Sender<Command>,
     listening: watch::Receiver<Option<SocketAddr>>,
+    leases: watch::Receiver<Vec<RelayLease>>,
     peer: PeerId,
 }
 
@@ -40,6 +43,9 @@ enum Command {
     Connect(PeerId, SocketAddr, Reply<ConnectionId>),
     Send(PeerId, Datagram, Reply<()>),
     Disconnect(PeerId, Reply<()>),
+    Reserve(RelayAddr, Reply<RelayLease>),
+    ReleaseRelay(PeerId, Reply<()>),
+    ConnectVia(PeerId, RelayAddr, Reply<ConnectionId>),
 }
 
 impl CarrierHandle {
@@ -85,6 +91,36 @@ impl CarrierHandle {
     pub async fn disconnect(&self, peer: PeerId) -> io::Result<()> {
         let (reply, result) = oneshot::channel();
         self.submit(Command::Disconnect(peer, reply))?;
+        result.await.map_err(|_| closed())?
+    }
+
+    /// Bounded snapshots only; retaining a receiver does not own any network resource.
+    pub fn relay_leases(&self) -> watch::Receiver<Vec<RelayLease>> {
+        self.leases.clone()
+    }
+
+    /// Requests or reuses one of at most two advertised relay reservations.
+    /// cancel-safe: NO — cancellation may briefly create transport work before cleanup.
+    pub async fn reserve(&self, relay: RelayAddr) -> io::Result<RelayLease> {
+        let (reply, result) = oneshot::channel();
+        self.submit(Command::Reserve(relay, reply))?;
+        result.await.map_err(|_| closed())?
+    }
+
+    /// Releases the listener and its relay control connection, including related circuits.
+    /// cancel-safe: NO — cancellation does not undo an admitted release.
+    pub async fn release_relay(&self, peer: PeerId) -> io::Result<()> {
+        let (reply, result) = oneshot::channel();
+        self.submit(Command::ReleaseRelay(peer, reply))?;
+        result.await.map_err(|_| closed())?
+    }
+
+    /// Opens a pinned end-to-end Noise connection through the specified relay.
+    /// No payload is replayed; an existing different route must be disconnected first.
+    /// cancel-safe: NO — an admitted circuit dial can finish after waiter cancellation.
+    pub async fn connect_via(&self, peer: PeerId, relay: RelayAddr) -> io::Result<ConnectionId> {
+        let (reply, result) = oneshot::channel();
+        self.submit(Command::ConnectVia(peer, relay, reply))?;
         result.await.map_err(|_| closed())?
     }
 

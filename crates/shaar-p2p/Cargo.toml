@@ -20,3 +20,4 @@ tokio = { version = "=1.54.1", features = ["rt", "net", "sync", "time", "macros"
 asynchronous-codec = "=0.7.0"
 prost = "=0.14.4"
 prost-codec = "=0.4.0"
+tokio = { version = "=1.54.1", features = ["test-util"] }

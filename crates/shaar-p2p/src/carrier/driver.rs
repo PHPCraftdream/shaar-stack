@@ -5,7 +5,7 @@ use std::{
 use futures::StreamExt;
 use libp2p::{
     PeerId, StreamProtocol, Swarm, Transport,
-    core::{muxing::StreamMuxerBox, upgrade},
+    core::{muxing::StreamMuxerBox, transport::ListenerId, upgrade},
     identity::Keypair,
     noise, request_response as rpc,
     swarm::{ConnectionId, NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
@@ -21,9 +21,16 @@ use crate::{CONTROL_PROTOCOL, Datagram, DatagramCodec, OwnedExecutor};
 
 const DEADLINE: Duration = Duration::from_secs(10);
 
+#[path = "circuit_io.rs"]
+mod circuit_io;
+#[path = "relay/mod.rs"]
+mod relay;
+pub use relay::{RelayAddr, RelayLease, Route};
+
 #[derive(NetworkBehaviour)]
 struct Behaviour {
     admission: Admission,
+    relays: libp2p::relay::client::Behaviour,
     packets: rpc::Behaviour<DatagramCodec>,
 }
 
@@ -38,9 +45,17 @@ struct Core {
     commands: mpsc::Receiver<Command>,
     incoming: mpsc::Sender<Received>,
     listening: watch::Sender<Option<SocketAddr>>,
-    pending: HashMap<ConnectionId, (PeerId, Reply<ConnectionId>)>,
+    pending: HashMap<ConnectionId, Pending>,
+    native_listener: ListenerId,
+    relay: relay::State,
     requests: HashMap<rpc::OutboundRequestId, Request>,
     closing: HashMap<PeerId, Closing>,
+}
+
+struct Pending {
+    peer: PeerId,
+    reply: Reply<ConnectionId>,
+    route: Option<RelayAddr>,
 }
 
 struct Request {
@@ -69,15 +84,19 @@ impl Carrier {
             .map_err(|_| io::Error::other("carrier requires a Tokio runtime"))?;
         let peer = key.public().to_peer_id();
         let executor = OwnedExecutor::new();
-        let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
-            .upgrade(upgrade::Version::V1Lazy)
-            .authenticate(noise::Config::new(&key).map_err(io::Error::other)?)
-            .multiplex(yamux::Config::default())
-            .timeout(DEADLINE)
-            .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)))
-            .boxed();
+        let transport = relay::native::FreshPorts(tcp::tokio::Transport::new(
+            tcp::Config::default().nodelay(true),
+        ))
+        .upgrade(upgrade::Version::V1Lazy)
+        .authenticate(noise::Config::new(&key).map_err(io::Error::other)?)
+        .multiplex(yamux::Config::default())
+        .timeout(DEADLINE)
+        .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)))
+        .boxed();
+        let (transport, relays) = relay::transport(transport, &key)?;
         let behaviour = Behaviour {
             admission,
+            relays,
             packets: rpc::Behaviour::with_codec(
                 DatagramCodec,
                 [(
@@ -99,13 +118,15 @@ impl Carrier {
                 .with_max_negotiating_inbound_streams(2)
                 .with_idle_connection_timeout(Duration::from_secs(30)),
         );
-        swarm.listen_on(multiaddr(bind)).map_err(io::Error::other)?;
+        let native_listener = swarm.listen_on(multiaddr(bind)).map_err(io::Error::other)?;
         let (sender, commands) = mpsc::channel(QUEUE_LIMIT);
         let (incoming, receiver) = mpsc::channel(QUEUE_LIMIT);
         let (listening, ready) = watch::channel(None);
+        let (relay, leases) = relay::State::new();
         let handle = CarrierHandle {
             commands: sender,
             listening: ready,
+            leases,
             peer,
         };
         Ok((
@@ -115,9 +136,11 @@ impl Carrier {
                     commands,
                     incoming,
                     listening,
+                    native_listener,
+                    relay,
                     pending: HashMap::with_capacity(PENDING_LIMIT),
                     requests: HashMap::with_capacity(REQUEST_LIMIT),
-                    closing: HashMap::with_capacity(super::PEER_LIMIT),
+                    closing: HashMap::with_capacity(super::PEER_LIMIT + super::RELAY_LIMIT),
                 },
                 executor,
             },
@@ -158,7 +181,8 @@ impl Core {
     ) -> io::Result<()> {
         tokio::pin!(stop);
         loop {
-            // At most 48 entries: a bounded scan avoids a separately allocated timer queue.
+            self.relay_tick(tokio::time::Instant::now())?;
+            // All ledgers have fixed limits; no separately allocated timer queue.
             let deadline = self
                 .closing
                 .values()
@@ -169,6 +193,7 @@ impl Core {
                         .filter(|request| request.reply.is_some())
                         .map(|request| request.deadline),
                 )
+                .chain(self.relay.next_deadline())
                 .min();
             let closing_deadline = async {
                 match deadline {
@@ -177,7 +202,11 @@ impl Core {
                 }
             };
             tokio::select! {
-                _ = closing_deadline => self.expire(tokio::time::Instant::now())?,
+                _ = closing_deadline => {
+                    let now = tokio::time::Instant::now();
+                    self.expire(now)?;
+                    self.relay_tick(now)?;
+                },
                 _ = &mut stop => return Ok(()),
                 _ = self.incoming.closed() => return Ok(()),
                 command = self.commands.recv() => match command {
@@ -244,9 +273,17 @@ impl Core {
                 } else if self.closing.contains_key(&peer) {
                     let _ = reply.send(Err(capacity()));
                 } else if let Some(id) = self.swarm.behaviour().admission.connection(&peer) {
-                    let _ = reply.send(Ok(id));
+                    let result = if self.relay.routes.get(&id) == Some(&Route::Direct) {
+                        Ok(id)
+                    } else {
+                        Err(io::Error::new(
+                            io::ErrorKind::AlreadyExists,
+                            "peer has a different carrier route",
+                        ))
+                    };
+                    let _ = reply.send(result);
                 } else if self.pending.len() >= PENDING_LIMIT
-                    || self.pending.values().any(|(id, _)| *id == peer)
+                    || self.pending.values().any(|pending| pending.peer == peer)
                 {
                     let _ = reply.send(Err(capacity()));
                 } else {
@@ -258,7 +295,14 @@ impl Core {
                     let id = options.connection_id();
                     match self.swarm.dial(options) {
                         Ok(()) => {
-                            self.pending.insert(id, (peer, reply));
+                            self.pending.insert(
+                                id,
+                                Pending {
+                                    peer,
+                                    reply,
+                                    route: None,
+                                },
+                            );
                         }
                         Err(error) => {
                             let _ = reply.send(Err(io::Error::other(error)));
@@ -272,7 +316,8 @@ impl Core {
                 }
                 if self.requests.len() >= REQUEST_LIMIT {
                     let _ = reply.send(Err(capacity()));
-                } else if self.closing.contains_key(&peer)
+                } else if !self.swarm.behaviour().admission.allows(&peer)
+                    || self.closing.contains_key(&peer)
                     || !self.swarm.behaviour().packets.is_connected(&peer)
                 {
                     let _ = reply.send(Err(io::Error::new(
@@ -298,7 +343,7 @@ impl Core {
             }
             Command::Disconnect(peer, reply) => {
                 if self.closing.contains_key(&peer)
-                    || self.pending.values().any(|(id, _)| *id == peer)
+                    || self.pending.values().any(|pending| pending.peer == peer)
                 {
                     let _ = reply.send(Err(capacity()));
                 } else if self.swarm.disconnect_peer_id(peer).is_ok() {
@@ -313,25 +358,63 @@ impl Core {
                     let _ = reply.send(Ok(()));
                 }
             }
+            Command::Reserve(relay, reply) => self.reserve_relay(relay, reply),
+            Command::ReleaseRelay(peer, reply) => self.release_relay(peer, reply),
+            Command::ConnectVia(peer, relay, reply) => self.connect_via(peer, relay, reply),
         }
     }
 
     fn event(&mut self, event: SwarmEvent<BehaviourEvent>) -> io::Result<()> {
         match event {
-            SwarmEvent::NewListenAddr { address, .. } => {
+            SwarmEvent::NewListenAddr {
+                listener_id,
+                address,
+            } if listener_id == self.native_listener => {
                 let address = socket_address(&address)
                     .ok_or_else(|| io::Error::other("unexpected carrier listen address"))?;
                 self.listening.send_replace(Some(address));
             }
-            SwarmEvent::ListenerError { error, .. } => return Err(error),
-            SwarmEvent::ListenerClosed { reason, .. } => {
+            SwarmEvent::NewListenAddr {
+                listener_id,
+                address,
+            } => self.relay_listen_address(listener_id, address),
+            SwarmEvent::ListenerError { listener_id, error }
+                if listener_id == self.native_listener =>
+            {
+                return Err(error);
+            }
+            SwarmEvent::ListenerError { listener_id, error } => {
+                self.relay_listener_failed(listener_id, error)
+            }
+            SwarmEvent::ListenerClosed {
+                listener_id,
+                reason,
+                ..
+            } if listener_id == self.native_listener => {
                 return Err(reason
                     .err()
                     .unwrap_or_else(|| io::Error::other("carrier listener closed")));
             }
-            SwarmEvent::ConnectionEstablished { connection_id, .. } => {
-                if let Some((_, reply)) = self.pending.remove(&connection_id) {
-                    let _ = reply.send(Ok(connection_id));
+            SwarmEvent::ListenerClosed {
+                listener_id,
+                reason,
+                ..
+            } => self.relay_listener_closed(listener_id, reason.err()),
+            SwarmEvent::ConnectionEstablished {
+                peer_id,
+                connection_id,
+                endpoint,
+                ..
+            } => {
+                let pending = self.pending.remove(&connection_id);
+                let intended = pending.as_ref().and_then(|pending| pending.route);
+                let result =
+                    self.relay_connected(peer_id, connection_id, endpoint.is_relayed(), intended);
+                if result.is_err() {
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                }
+                if let Some(pending) = pending {
+                    let _ = pending.reply.send(result.map(|()| connection_id));
                 }
             }
             SwarmEvent::OutgoingConnectionError {
@@ -339,26 +422,31 @@ impl Core {
                 error,
                 ..
             } => {
-                if let Some((_, reply)) = self.pending.remove(&connection_id) {
-                    let _ = reply.send(Err(io::Error::other(error)));
+                if let Some(pending) = self.pending.remove(&connection_id) {
+                    let _ = pending.reply.send(Err(io::Error::other(error)));
                 }
             }
             SwarmEvent::ConnectionClosed {
                 peer_id,
-                num_established: 0,
+                connection_id,
+                num_established,
                 ..
             } => {
-                if let Some(Closing {
-                    reply: Some(reply), ..
-                }) = self.closing.remove(&peer_id)
-                {
-                    let _ = reply.send(Ok(()));
+                self.relay_control_closed(peer_id, connection_id);
+                if num_established == 0 {
+                    if let Some(Closing {
+                        reply: Some(reply), ..
+                    }) = self.closing.remove(&peer_id)
+                    {
+                        let _ = reply.send(Ok(()));
+                    }
                 }
-                // Request-response emits the terminal failure for each outstanding ID.
+                // Request-response emits terminal failures; request charges stay until then.
             }
+            SwarmEvent::Behaviour(BehaviourEvent::Relays(event)) => self.relay_event(event),
             SwarmEvent::Behaviour(BehaviourEvent::Packets(event)) => self.packet(event),
             SwarmEvent::Behaviour(BehaviourEvent::Admission(event)) => match event {},
-            _ => {} // Other transport/address notifications own no carrier ledger entries.
+            _ => {} // Other notifications add no carrier state.
         }
         Ok(())
     }
@@ -373,12 +461,22 @@ impl Core {
                         request, channel, ..
                     },
             } => {
-                // Event metadata is authenticated; failed admission omits the acknowledgement.
+                let Some(route) = self.relay.routes.get(&connection_id).copied() else {
+                    return;
+                };
+                if !self.swarm.behaviour().admission.allows(&peer)
+                    || self.swarm.behaviour().admission.connection(&peer) != Some(connection_id)
+                    || self.closing.contains_key(&peer)
+                {
+                    return;
+                }
+                // Authenticated current circuit only; failed admission omits the acknowledgement.
                 if self
                     .incoming
                     .try_send(Received {
                         peer,
                         connection: connection_id,
+                        route,
                         packet: request,
                     })
                     .is_ok()

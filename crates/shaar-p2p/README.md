@@ -303,6 +303,57 @@ must never produce a dial or handler action. These deterministic controls do not
 need network timing or a success-by-nondelivery timeout. Their runtime outcomes are
 pending CI; complete reservation/circuit ownership is still not accepted.
 
+## Owned relay lifecycle — authored, pending CI
+
+The carrier composes a circuit-v2 client with native TCP/Noise/Yamux. `reserve`
+creates or reuses a locally owned reservation; `relay_leases` observes bounded
+snapshots, not ownership or authority to extend a copied lease. Publication requires
+an actual authenticated control ConnectionId, validated future expiry and a bounded
+advertisement for the local peer. Renewal updates expiry without replacing the
+reservation generation. Cancellation, expiry, listener failure and control loss
+revoke publication; teardown waits for listener and control termination, with a
+ten-second fatal fence. A new generation cannot reuse an old physical control.
+
+Application identities (at most 16) and infrastructure relay identities (at most
+eight) are disjoint. Infrastructure RPC packets never enter the incoming queue.
+At most two reservation records exist, each retaining at most four distinct
+advertisements of at most 256 encoded bytes. Failures retain bounded 60-second
+history; retries are explicit, at most three per history, with exponential cooldown
+and non-cryptographic jitter. There is no automatic payload retry. Idle unreferenced
+relay targets expire after 60 seconds, with managed disconnect before reclamation.
+These fixed policies trade public relay compatibility for predictable state; they
+are not a new configurable discovery subsystem.
+
+`connect_via` pins the application peer through end-to-end Noise. `Received.route`
+distinguishes native libp2p TCP from an actual relayed circuit; neither denotes
+native QUIC application-data permission. Outbound circuits retain the configured
+relay identity; inbound relay-hop attribution is explicitly unknown, rather than
+invented from a relay's claim. The authenticated peer, local ConnectionId and local
+circuit generation remain available. Existing different routes require explicit
+disconnect before replacement. All native TCP dials, including internal relay
+behaviour control dials, force fresh local ports; listener-port reuse is not needed
+for this signaling transport.
+
+Before Noise, each raw relayed stream has a combined read/write budget of 1 MiB
+(including Noise/Yamux overhead) and an absolute 120-second lifetime. Exhaustion
+returns an error, never a successful empty read. Two cold timer allocations preserve
+independent read/write task wakeups; there is no new per-packet wrapper allocation.
+Lower server quotas still terminate circuits normally. No retry resumes a partial
+frame. State transitions use fixed bounded scans and allocate lease snapshots only
+when changed, not per packet; this is not a whole-process RSS guarantee.
+
+Authored units exercise role/capacity separation, stale contexts, malformed and
+oversized advertisements, advertisement deduplication/caps, non-busy retry cooldown,
+fresh-port dial policy, exact shared byte budgets, partial-write terminal behavior
+and independent deadline wakeups. Seven authored integration scenarios use an owned
+Rust relay and two signal drivers, with no direct destination shortcut: exact
+bidirectional 1/1500-byte packets, reuse/reopen and generations, renewal, refusal,
+physical relay loss, real server time/byte quotas and role rejection. The fixture
+retains and joins exactly three root tasks. These tests have NOT yet been executed;
+controller acceptance is pending actual Linux/Windows CI, not inferred from the
+previous expiry or native-carrier proofs. Common SDK identity, Iroh custom transport,
+Amino discovery and consolidated signaling-only frame proof remain separate leaves.
+
 ## Remaining implementation and acceptance
 
 P08 is decomposed into dependency/safety gate, bounded carrier and owned executor,

@@ -14,13 +14,14 @@ use libp2p::{
     },
 };
 
-use super::{PEER_LIMIT, PENDING_LIMIT, capacity};
+use super::{PEER_LIMIT, PENDING_LIMIT, RELAY_LIMIT, capacity};
 
 /// Single Swarm owner; bounds apply before Noise negotiation and handler creation.
 pub(super) struct Admission {
     allowed: Box<[PeerId]>,
-    pending: HashSet<ConnectionId>,
+    pending: HashMap<ConnectionId, Option<PeerId>>,
     connected: HashMap<PeerId, ConnectionId>,
+    relays: HashSet<PeerId>,
 }
 
 impl Admission {
@@ -32,8 +33,9 @@ impl Admission {
         peers.dedup();
         Ok(Self {
             allowed: peers.into_boxed_slice(),
-            pending: HashSet::with_capacity(PENDING_LIMIT),
-            connected: HashMap::with_capacity(PEER_LIMIT),
+            pending: HashMap::with_capacity(PENDING_LIMIT),
+            connected: HashMap::with_capacity(PEER_LIMIT + RELAY_LIMIT),
+            relays: HashSet::with_capacity(RELAY_LIMIT),
         })
     }
 
@@ -45,11 +47,39 @@ impl Admission {
         self.connected.get(peer).copied()
     }
 
-    fn pending(&mut self, id: ConnectionId) -> Result<(), ConnectionDenied> {
+    pub(super) fn authorize_relay(&mut self, peer: PeerId) -> io::Result<()> {
+        if self.allows(&peer) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "relay and application identities must be distinct",
+            ));
+        }
+        if !self.relays.contains(&peer) && self.relays.len() >= RELAY_LIMIT {
+            return Err(capacity());
+        }
+        self.relays.insert(peer);
+        Ok(())
+    }
+
+    pub(super) fn pending_peer(&self, peer: PeerId) -> bool {
+        self.pending.values().any(|pending| *pending == Some(peer))
+    }
+
+    pub(super) fn forget_relay(&mut self, peer: PeerId) {
+        if !self.connected.contains_key(&peer) && !self.pending_peer(peer) {
+            self.relays.remove(&peer);
+        }
+    }
+
+    fn permits(&self, peer: &PeerId) -> bool {
+        self.allows(peer) || self.relays.contains(peer)
+    }
+
+    fn pending(&mut self, id: ConnectionId, peer: Option<PeerId>) -> Result<(), ConnectionDenied> {
         if self.pending.len() >= PENDING_LIMIT {
             return Err(ConnectionDenied::new(capacity()));
         }
-        self.pending.insert(id);
+        self.pending.insert(id, peer);
         Ok(())
     }
 
@@ -59,13 +89,13 @@ impl Admission {
         peer: PeerId,
     ) -> Result<dummy::ConnectionHandler, ConnectionDenied> {
         self.pending.remove(&id);
-        if !self.allows(&peer) {
+        if !self.permits(&peer) {
             return Err(ConnectionDenied::new(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "carrier peer not allowed",
             )));
         }
-        if self.connected.len() >= PEER_LIMIT || self.connected.contains_key(&peer) {
+        if self.connected.len() >= PEER_LIMIT + RELAY_LIMIT || self.connected.contains_key(&peer) {
             return Err(ConnectionDenied::new(capacity()));
         }
         Ok(dummy::ConnectionHandler)
@@ -82,7 +112,7 @@ impl NetworkBehaviour for Admission {
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<(), ConnectionDenied> {
-        self.pending(id)
+        self.pending(id, None)
     }
 
     fn handle_pending_outbound_connection(
@@ -92,13 +122,13 @@ impl NetworkBehaviour for Admission {
         _: &[Multiaddr],
         _: Endpoint,
     ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
-        if !peer.is_some_and(|peer| self.allows(&peer)) {
+        if !peer.is_some_and(|peer| self.permits(&peer)) {
             return Err(ConnectionDenied::new(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "carrier peer not allowed",
             )));
         }
-        self.pending(id)?;
+        self.pending(id, peer)?;
         Ok(Vec::new())
     }
 
@@ -109,6 +139,13 @@ impl NetworkBehaviour for Admission {
         _: &Multiaddr,
         _: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
+        if !self.allows(&peer) {
+            self.pending.remove(&id);
+            return Err(ConnectionDenied::new(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "unsolicited infrastructure connection",
+            )));
+        }
         self.established(id, peer)
     }
 

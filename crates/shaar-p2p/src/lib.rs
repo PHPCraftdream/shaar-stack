@@ -8,6 +8,6 @@ mod carrier;
 mod executor;
 mod packet;
 
-pub use carrier::{Carrier, CarrierHandle, Received};
+pub use carrier::{Carrier, CarrierHandle, Received, RelayAddr, RelayLease, Route};
 pub use executor::{ExecutorHandle, OwnedExecutor};
 pub use packet::{CONTROL_PROTOCOL, Datagram, DatagramCodec, MAX_DATAGRAM};
