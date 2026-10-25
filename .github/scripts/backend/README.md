@@ -232,7 +232,7 @@ controls; known-fixture output scans were clean. The separate Linux unprivileged
 reader probe passed. Companion results are recorded separately rather than inferred
 from the main run. No downloaded code, compilation or test ran locally.
 
-## Explicit authenticated native-path establishment — authored, pending CI
+## Explicit authenticated native-path establishment — verified on Linux and Windows
 
 A native address passed to Iroh connect is a peer-cache hint, not an exclusive path.
 After a custom handshake, the selected custom path can carry a second handshake too.
@@ -242,8 +242,9 @@ correctly excluded that path. Windows passed; a blind retry is not a correction.
 
 Preparation now adds one safe `Connection<HandshakeCompleted>::ensure_native_path`
 method. It accepts only an explicit usable native client socket address, opens or
-coalesces one Backup path on that exact connection, and preserves immediate Noq
-path/CID errors without retry queues or actor-wide cached-address replay. The SDK
+coalesces and retains one Backup path on that exact connection. Hard Noq admission
+errors remain immediate; initial CID readiness uses the bounded event wait below,
+without retry timers, extra queues or actor-wide cached-address replay. The SDK
 uses only the original locally supplied address, after TLS/source/ALPN checks, on
 the newly returned connection. The existing overall deadline includes both handshake
 and path setup; an unpublished Session guard closes that connection on error/cancel.
@@ -258,10 +259,11 @@ connections gain this API; zero-RTT, selected-path policy, NativeOnly and the ac
 pending-open-path queue are unchanged.
 
 `checks.py` reverses only the exact owned method block before comparing connection.rs
-with every original archive byte. Repeat/drift must fail without overwrite. These
-source guards and the SDK native-after-custom, exact-path reuse, invalid-input,
-unreachable-path/cancellation and APP/resource regressions still require CI execution.
-No new unsafe, package version, public fork or local compilation is introduced.
+with every original archive byte. Repeat/drift must fail without overwrite. The
+source guards and SDK native-after-custom, exact-path reuse, invalid-input,
+unreachable-path/cancellation and APP/resource regressions passed the final matrix
+referenced below. No new unsafe, package version, public fork or local compilation
+is introduced.
 
 The first native-path run (`40199013113`) passed companion source/gate/NAT checks but
 returned RemoteCidsExhausted on both OSes immediately after TLS. Connected precedes
@@ -284,7 +286,7 @@ The unreachable regression now requires UDP transmission from the expected clien
 source and a deadline/post-admission NotConnected error; an arbitrary pre-admission
 NativePath error can no longer count as validation failure.
 
-## Explicit native-path retention — authored, pending CI
+## Explicit native-path retention — verified on Linux and Windows
 
 Windows reproduction run `40207768332` failed on trial 2 with
 `PathId(1)` abandoned locally as `ApplicationClosed { error_code: 62 }`.
@@ -316,10 +318,43 @@ already locked futures-lite 2.6.1 package through a generated CI-only dev edge,
 without changing package versions or the product dependency graph.
 
 Protocol lifecycle tests use a CI-only copy of the prepared crate and its untouched
-archive lock, not the product lock's graph. Actor-level tests must also observe
-normal establishment, competing-path pruning, a different selected native tuple,
-exact retained-ID survival and real native APP. Authored tests and source checks
-are not runtime acceptance; their CI results remain required.
+archive lock, not the product lock's graph. They distinguish immediate abandonment
+from per-path discard: a path closed before its first transmission is unknown to the
+peer, so there is no reciprocal PATH_ABANDON to arm that path's drain timer. The
+prune-first case instead verifies the closed old ID, retained replacement and both
+explicitly closed connection owners reaching Drained. Established-path cases still
+require actual per-path Discarded events.
+
+### Verified matrix at `5647335`
+
+Completed run conclusions and full job logs were inspected:
+
+- [Main CI 40213704569](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40213704569):
+  Linux and Windows passed all 8 selected protocol retention cases, 53 SDK cases,
+  40 P2P cases and all 7 relay lifecycle cases, plus formatting, clippy, scanner and
+  structural checks. Other upstream protocol unit tests were filtered, not claimed
+  executed. Windows additionally passed all 12 exact executions of the original
+  custom-first/native-second SDK regression; each execution required its successful
+  harness marker. These finite CI executions add no retry to the product.
+- [Iroh bridge 40213704761](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40213704761):
+  both OSes passed 19 production preparation checks and the actual actor regression.
+  A test-only selector retains custom selection while IPv4 A is explicitly admitted
+  and ordinary B reaches Opened then Closed through normal actor pruning. Selection
+  then moves to a distinct IPv6 C. A later ordinary IPv4 D reaches Opened then Closed
+  while the test rejects closure of A or C, preventing a stale snapshot or a minimum-ID
+  survivor-only fix from false-passing. Exact A remains non-selected; real STREAM and
+  DATAGRAM traffic succeeds in both phases. Both qlogs show one original authenticated
+  connection, native APP and no custom APP. Endpoint close is awaited with connection
+  handles retained. The selector and admission hook exist only in the fixture.
+- [Noq gate 40213704596](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40213704596):
+  Linux and Windows passed the existing packet-policy regression lane.
+- [Two-NAT proof 40213704686](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40213704686):
+  the existing traversal, physical direct-path loss and re-punch lane passed.
+
+This accepts the explicit native establishment/retention boundary, not all P08
+requirements. Bounded Amino discovery and consolidated owned-relay/public availability
+proofs remain separate work. No local compilation, tests or native smoke ran. The
+matrix does not claim exhaustive coverage of every upstream migration/interleaving.
 
 ## Explicit preparation, not a build script
 
