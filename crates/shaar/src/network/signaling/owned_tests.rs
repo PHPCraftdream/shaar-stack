@@ -106,6 +106,14 @@ async fn native_app_and_both_joined_backends_close_with_sessions_and_factories_r
         let (connected, accepted) = (connected.unwrap(), accepted.unwrap());
         trace_paths("native-request client", &connected);
         trace_paths("native-request server", &accepted);
+        assert!(connected.connection.paths().iter().any(|path| matches!(path.remote_addr(), TransportAddr::Ip(address) if *address == server_native)));
+        let ids: Vec<_> = connected.connection.paths().iter().map(|path| path.id()).collect();
+        connected.connection.ensure_native_path(server_native).await.unwrap();
+        assert_eq!(connected.connection.paths().iter().map(|path| path.id()).collect::<Vec<_>>(), ids);
+        for invalid in ["0.0.0.0:1", "127.0.0.1:0", "224.0.0.1:1", "255.255.255.255:1", "[fd15:70a:510b::1]:1"] {
+            assert_eq!(connected.connection.ensure_native_path(invalid.parse().unwrap()).await.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+        }
+        assert_eq!(accepted.connection.ensure_native_path(client.local_addr()).await.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
         phase.set("native APP exchange");
         let payload = b"native APP while signaling ownership is installed";
         {
@@ -242,6 +250,55 @@ async fn actual_custom_source_must_match_final_tls_key_even_when_both_keys_are_a
     })
     .await
     .expect("actual carrier source/TLS identity binding deadline");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unreachable_explicit_native_path_publishes_no_session_and_closes_only_the_new_connection()
+{
+    tokio::time::timeout(Duration::from_secs(25), async {
+        let a = Identity::generate();
+        let b = Identity::generate();
+        let client =
+            SignaledEndpoint::bind(&a, loopback(), loopback(), &[public(&b)], Limits::default())
+                .await
+                .unwrap();
+        let mut server =
+            SignaledEndpoint::bind(&b, loopback(), loopback(), &[public(&a)], Limits::default())
+                .await
+                .unwrap();
+        let (control, accepted_control) = tokio::join!(
+            client.connect_signaling(server.id(), server.signaling_addr()),
+            server.accept()
+        );
+        let (control, accepted_control) = (control.unwrap(), accepted_control.unwrap());
+        let unreachable = UdpSocket::bind(loopback()).await.unwrap();
+        let (attempt, inbound) = tokio::join!(
+            client.connect(server.id(), unreachable.local_addr().unwrap()),
+            server.accept()
+        );
+        let inbound = inbound.unwrap();
+        assert!(matches!(
+            attempt,
+            Err(NetworkError::NativePath(_)) | Err(NetworkError::Deadline)
+        ));
+        let _closed = inbound.closed().await;
+        {
+            let closed = control.connection.closed();
+            tokio::pin!(closed);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(
+                    closed.as_mut().poll(cx).is_pending()
+                ))
+                .await
+            );
+        }
+        let (a_closed, b_closed) = tokio::join!(client.close(), server.close());
+        a_closed.unwrap();
+        b_closed.unwrap();
+        drop((control, accepted_control, inbound));
+    })
+    .await
+    .expect("failed native path unpublished connection cleanup deadline");
 }
 
 #[tokio::test(flavor = "current_thread")]

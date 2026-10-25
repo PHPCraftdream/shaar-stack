@@ -550,6 +550,36 @@ SDK integration acceptance still requires actual Linux/Windows CI. Consolidated
 single-connection frame/path attribution with positive allow-all calibration,
 Amino discovery and separate public-network smoke remain independent later leaves.
 
+## Native after custom negotiation — diagnosed; correction pending CI
+
+SDK run `40193934972` localized the remaining Linux failure: both custom and later
+native-requested handshakes succeeded, but the APP-bearing second connection exposed
+only custom paths; the client buffered a request and the server waited for a stream.
+Windows passed that run. A native Iroh connect argument is a cached peer-address hint,
+not proof that this connection has an established native path. The NativeOnly filter
+correctly prevented APP fallback; neither a retry nor native-first test reordering
+would correct the integration gap.
+
+The reviewed backend bridge now exposes a completed-client-connection operation for
+one original explicitly supplied native address. SDK native connect, after TLS/source
+and ALPN checks, establishes that path on the same new connection before publishing
+Session, within the unchanged total deadline. The unpublished Session is the existing
+close-on-drop guard. Custom connects and accepted/server connections do not invoke it;
+no actor-wide hint replay, selector relaxation, retries or new pending queues appear.
+The bridge additionally observes exact PathId establishment: bare Noq ensure can be
+ready for an internally created QNT path that is still validating. It also handles
+abandonment, event lag and connection close explicitly. Source preparation reverses
+only this exact owned method before original-byte equality checks.
+
+Authored regressions retain the original custom-first/native-second payload scenario,
+check an established exact native path on the second connection, repeat ensure without
+allocating another PathId, reject invalid/native-reserved/server-side inputs, and test
+an unreachable explicit candidate: no client Session is published, its new connection
+closes, the prior control connection remains open, and explicit endpoint close joins.
+These corrections and new cases are not yet runtime-accepted. Forced pending-QNT and
+capacity-exhaustion interleavings are source-reviewed but must not be described as
+newly executed runtime coverage.
+
 ## Remaining implementation and acceptance
 
 P08 is decomposed into dependency/safety gate, bounded carrier and owned executor,

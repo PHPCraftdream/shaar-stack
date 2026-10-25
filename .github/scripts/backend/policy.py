@@ -14,6 +14,70 @@ NATIVE_SOCKET_HANDLES = """    #[cfg(not(wasm_browser))]
 """
 
 
+NATIVE_PATH_API = """    /// Establishes an explicit native path on this authenticated client connection.
+    /// The caller bounds the wait and closes an unpublished connection on failure.
+    /// cancel-safe: NO — cancellation stops waiting, not admitted path validation.
+    pub async fn ensure_native_path(&self, remote: std::net::SocketAddr) -> std::io::Result<()> {
+        use futures_util::StreamExt;
+        use std::{io, net::{IpAddr, SocketAddr}};
+        let ip = remote.ip().to_canonical();
+        let synthetic = matches!(ip, IpAddr::V6(ip)
+            if ip.octets()[..6] == [0xfd, 0x15, 0x07, 0x0a, 0x51, 0x0b]);
+        if self.side().is_server() || remote.port() == 0 || ip.is_unspecified()
+            || ip.is_multicast() || ip == IpAddr::V4(std::net::Ipv4Addr::BROADCAST)
+            || synthetic
+        {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "a native client path is required"));
+        }
+        let remote = if ip.is_ipv4() { SocketAddr::new(ip, remote.port()) } else { remote };
+        let mut events = self.inner.path_events();
+        let mut snapshots = self.paths_stream();
+        let opening = self.inner.open_path_ensure(noq::FourTuple::new(remote, None), noq::PathStatus::Backup);
+        let Some(id) = opening.path_id() else {
+            return opening.await.map(|_| ()).map_err(io::Error::other);
+        };
+        tokio::pin!(opening);
+        let (mut opened, mut observed) = (false, false);
+        loop {
+            tokio::select! {
+                biased;
+                error = self.inner.closed() => return Err(io::Error::new(io::ErrorKind::BrokenPipe, error)),
+                event = events.next() => match event {
+                    Some(Ok(noq::PathEvent::Abandoned { id: abandoned, .. })) if abandoned == id => {
+                        return Err(io::Error::new(io::ErrorKind::NotConnected, "native path was abandoned"));
+                    }
+                    Some(Err(_)) => return Err(io::Error::other("native path event history lost")),
+                    None => return Err(io::ErrorKind::BrokenPipe.into()),
+                    Some(Ok(_)) => {}
+                },
+                result = &mut opening, if !opened => {
+                    let _path = result.map_err(io::Error::other)?;
+                    opened = true;
+                }
+                snapshot = snapshots.next() => {
+                    let Some(snapshot) = snapshot else { return Err(io::ErrorKind::BrokenPipe.into()); };
+                    observed = snapshot.get(id).is_some_and(|path| matches!(path.remote_addr(),
+                        iroh_base::TransportAddr::Ip(address)
+                            if address.ip().to_canonical() == ip && address.port() == remote.port()));
+                }
+            }
+            if opened && observed { return Ok(()); }
+        }
+    }
+
+"""
+
+
+def native_path_bridge(root: Path):
+    path = root / "src/endpoint/connection.rs"
+    text = path.read_text(encoding="utf-8")
+    if "pub async fn ensure_native_path(" in text:
+        raise ValueError("unexpected existing native path bridge")
+    text = replace(text, "impl Connection<HandshakeCompleted> {\n",
+                   "impl Connection<HandshakeCompleted> {\n" + NATIVE_PATH_API)
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def replace(text, old, new, count=1):
     actual = text.count(old)
     if actual != count:

@@ -159,15 +159,36 @@ impl Endpoint {
         };
         let admission = self.admit()?;
         let remote = EndpointAddr::from_parts(peer, [address]);
-        let connection = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.connect(remote, ALPN))
+        let connect = async {
+            let connection = self
+                .inner
+                .connect(remote, ALPN)
+                .await
+                .map_err(NetworkError::from_connect)?;
+            if connection.remote_id() != peer || !self.source_matches(&source, &peer) {
+                connection.close(VarInt::from_u32(2), b"");
+                return Err(NetworkError::PeerMismatch);
+            }
+            // An unpublished Session closes the new connection if path setup fails or is cancelled.
+            let session = Self::session(connection, admission)?;
+            if let IncomingAddr::Ip(address) = source
+                && self.custom.is_some()
+            {
+                let established = session.connection.paths().iter().any(|path|
+                    matches!(path.remote_addr(), TransportAddr::Ip(remote) if *remote == address));
+                if !established {
+                    session
+                        .connection
+                        .ensure_native_path(address)
+                        .await
+                        .map_err(NetworkError::NativePath)?;
+                }
+            }
+            Ok(session)
+        };
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, connect)
             .await
             .map_err(|_| NetworkError::Deadline)?
-            .map_err(NetworkError::from_connect)?;
-        if connection.remote_id() != peer || !self.source_matches(&source, &peer) {
-            connection.close(VarInt::from_u32(2), b"");
-            return Err(NetworkError::PeerMismatch);
-        }
-        Self::session(connection, admission)
     }
 
     /// Accepts one fully handshaken, allowlisted peer. Mutable access serializes

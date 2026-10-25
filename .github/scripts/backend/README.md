@@ -17,8 +17,9 @@ The production source contains application readiness/eligibility, STREAM and
 DATAGRAM writer checks, bounded empty-DATAGRAM accounting, the iroh forwarder and
 an optional pre-accept incoming-budget bridge. The same-version Noq async wrapper
 also receives counted raw-datagram ingress admission.
-It does not add explicit path-open/disable-NAT hooks, a Transmit constructor,
-fixture tests, or encrypted packet logging. Normal upstream qlog behavior is not
+It does not add fixture-only path-open/disable-NAT hooks, a Transmit constructor,
+fixture tests, or encrypted packet logging. The completed-connection native path
+bridge below is a bounded production operation, not the old spike instrumentation. Normal upstream qlog behavior is not
 rewritten. Upstream versions and the original standalone lock remain unchanged.
 
 ## Pre-accept budgets for SDK endpoint work
@@ -230,6 +231,37 @@ cases, 12 P08 source/graph controls, five ingress cases and 88 structural/scanne
 controls; known-fixture output scans were clean. The separate Linux unprivileged
 reader probe passed. Companion results are recorded separately rather than inferred
 from the main run. No downloaded code, compilation or test ran locally.
+
+## Explicit authenticated native-path establishment — authored, pending CI
+
+A native address passed to Iroh connect is a peer-cache hint, not an exclusive path.
+After a custom handshake, the selected custom path can carry a second handshake too.
+Diagnostic workspace CI `40193934972` observed that second connection with only a
+custom path on Linux: both handshakes succeeded, but APP waited because NativeOnly
+correctly excluded that path. Windows passed; a blind retry is not a correction.
+
+Preparation now adds one safe `Connection<HandshakeCompleted>::ensure_native_path`
+method. It accepts only an explicit usable native client socket address, opens or
+coalesces one Backup path on that exact connection, and preserves immediate Noq
+path/CID errors without retry queues or actor-wide cached-address replay. The SDK
+uses only the original locally supplied address, after TLS/source/ALPN checks, on
+the newly returned connection. The existing overall deadline includes both handshake
+and path setup; an unpublished Session guard closes that connection on error/cancel.
+
+Bare Noq ensure completion is insufficient when proto already created a still-pending
+QNT path without a runtime waiter entry. The bridge therefore also waits for the
+exact returned PathId/native remote in Iroh's established-path snapshot, subscribes
+to abandonment before admission, handles event lag fail-closed and observes connection
+closure separately. Cancellation stops waiting, not admitted validation; successful
+return proves observed establishment, never future liveness. Only client completed
+connections gain this API; zero-RTT, selected-path policy, NativeOnly and the actor's
+pending-open-path queue are unchanged.
+
+`checks.py` reverses only the exact owned method block before comparing connection.rs
+with every original archive byte. Repeat/drift must fail without overwrite. These
+source guards and the SDK native-after-custom, exact-path reuse, invalid-input,
+unreachable-path/cancellation and APP/resource regressions still require CI execution.
+No new unsafe, package version, public fork or local compilation is introduced.
 
 ## Explicit preparation, not a build script
 

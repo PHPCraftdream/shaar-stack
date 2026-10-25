@@ -17,6 +17,7 @@ pub enum NetworkError {
     Handshake(Box<iroh::endpoint::ConnectingError>),
     Signaling(std::io::Error),
     SignalingOperation(std::io::Error),
+    NativePath(std::io::Error),
 }
 
 impl NetworkError {
@@ -65,6 +66,7 @@ impl fmt::Display for NetworkError {
             Self::Handshake(_) => "peer handshake failed",
             Self::Signaling(_) => "signaling carrier initialization failed",
             Self::SignalingOperation(_) => "signaling operation failed",
+            Self::NativePath(_) => "native QUIC path establishment failed",
         };
         f.write_str(message)
     }
@@ -76,7 +78,9 @@ impl Error for NetworkError {
             Self::Bind(source) => Some(source.as_ref()),
             Self::Connect(source) => Some(source.as_ref()),
             Self::Handshake(source) => Some(source.as_ref()),
-            Self::Signaling(source) | Self::SignalingOperation(source) => Some(source),
+            Self::Signaling(source)
+            | Self::SignalingOperation(source)
+            | Self::NativePath(source) => Some(source),
             _ => None,
         }
     }

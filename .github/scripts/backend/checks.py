@@ -70,13 +70,16 @@ class PreparationChecks(unittest.TestCase):
         self.assertEqual(wrapper.count("pub fn application_data_filter("), 1)
         provenance = ARGS.destination / "provenance.json"
         self.assertEqual(json.loads(provenance.read_text())["fixture_instrumentation"], False)
+        self.assertEqual(json.loads(provenance.read_text())["completed_native_path_bridge"], True)
         for package, relative in [("iroh", "src/endpoint/connection.rs"), ("iroh", "src/socket/transports.rs"),
                                   ("iroh", "src/socket/transports/ip.rs"),
                                   ("noq-proto", "src/connection/packet_builder.rs"), ("noq-proto", "src/connection/qlog.rs")]:
             with tarfile.open(ARCHIVES[package]) as archive:
                 with archive.extractfile(f"{package}-{prepare.VERSION}/{relative}") as original:
                     actual = (ROOTS[package] / relative).read_bytes()
-                    if package == "iroh" and relative == "src/socket/transports.rs":
+                    if package == "iroh" and relative == "src/endpoint/connection.rs":
+                        actual = policy.replace(actual.decode("utf-8"), policy.NATIVE_PATH_API, "").encode("utf-8")
+                    elif package == "iroh" and relative == "src/socket/transports.rs":
                         actual = policy.replace(actual.decode("utf-8"), policy.NATIVE_SOCKET_HANDLES, "").encode("utf-8")
                     elif package == "iroh" and relative == "src/socket/transports/ip.rs":
                         actual = policy.replace(actual.decode("utf-8"), policy.NATIVE_SOCKET_HANDLE, "").encode("utf-8")
@@ -199,6 +202,34 @@ class ProductWorkspaceChecks(unittest.TestCase):
         self.assertFalse(sdk["dependencies"]["iroh"]["default-features"])
         self.assertNotIn("qlog", sdk["dependencies"]["iroh"]["features"])
         self.assertTrue((repo / "crates/shaar/tests/backend_gate.rs").is_file())
+
+    def test_native_path_bridge_is_completed_only_and_waits_for_exact_establishment(self):
+        path = ROOTS["iroh"] / "src/endpoint/connection.rs"
+        before = path.read_bytes()
+        text = before.decode("utf-8")
+        self.assertEqual(text.count(policy.NATIVE_PATH_API), 1)
+        self.assertIn("impl Connection<HandshakeCompleted> {\n" + policy.NATIVE_PATH_API, text)
+        api = policy.NATIVE_PATH_API
+        self.assertLess(api.index("self.inner.path_events()"), api.index("open_path_ensure("))
+        self.assertLess(api.index("self.paths_stream()"), api.index("open_path_ensure("))
+        for required in ("snapshot.get(id)", "opened && observed", "self.inner.closed()", "PathEvent::Abandoned", "native path event history lost", "PathStatus::Backup", "self.side().is_server()"):
+            self.assertIn(required, api)
+        for forbidden in ("pending_open_paths", "tokio::spawn", "PathStatus::Available", "application_data_filter"):
+            self.assertNotIn(forbidden, api)
+        with self.assertRaises(ValueError):
+            policy.native_path_bridge(ROOTS["iroh"])
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_native_path_bridge_anchor_mismatch_does_not_overwrite(self):
+        with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
+            root = Path(temporary)
+            path = root / "src/endpoint/connection.rs"
+            path.parent.mkdir(parents=True)
+            original = b"impl Connection<HandshakeCompleted> { source drift"
+            path.write_bytes(original)
+            with self.assertRaises(ValueError):
+                policy.native_path_bridge(root)
+            self.assertEqual(path.read_bytes(), original)
 
     def test_product_lock_pins_the_reviewed_backend_family(self):
         repo = ARGS.probe.resolve().parents[2]

@@ -55,6 +55,7 @@ def prepare(archives, lock_path, destination):
     policy.listener_limits(roots["iroh"])
     policy.connection_limit_bridge(roots["iroh"])
     policy.joined_actor_shutdown(roots["iroh"])
+    policy.native_path_bridge(roots["iroh"])
     wrapper = roots["iroh"] / "src/endpoint/quic.rs"
     wrapper.write_text(policy.forwarder(wrapper.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
     for root in roots.values():
@@ -64,7 +65,8 @@ def prepare(archives, lock_path, destination):
                   "patch_sha256": hashlib.sha256(Path(policy.__file__).read_bytes()).hexdigest(),
                   "patch_sources": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                                     for name in ("policy.py", "runtime.py", "ingress_budget.rs", "actor_shutdown.rs")},
-                  "fixture_instrumentation": False}
+                  "fixture_instrumentation": False,
+                  "completed_native_path_bridge": True}
     (destination / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     return roots
 
