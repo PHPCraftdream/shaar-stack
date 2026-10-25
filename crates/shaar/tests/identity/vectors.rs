@@ -45,7 +45,7 @@ async fn from_seed_deterministic_generate_distinct() {
     assert_ne!(g1.public_key_bytes(), g2.public_key_bytes());
 }
 
-/// 2. PeerId reference: for RFC TEST1, the libp2p-identity dev-dep
+/// 2. PeerId reference: for RFC TEST1, the pinned libp2p-identity
 /// derivation must equal `identity.peer_id_bytes()`, and the wire prefix
 /// `00 24 08 01 12 20` is asserted directly.
 #[tokio::test]
@@ -60,6 +60,23 @@ async fn peer_id_matches_libp2p_reference() {
     let kp = libp2p_identity::Keypair::ed25519_from_bytes(&mut kp_seed).expect("libp2p keypair");
     let reference: Vec<u8> = kp.public().to_peer_id().to_bytes();
     assert_eq!(ours.as_slice(), reference.as_slice());
+}
+
+#[tokio::test]
+async fn signaling_carrier_uses_all_three_p04_reference_identities() {
+    for (seed, public) in [
+        (common::TEST1_SEED, common::TEST1_PUB),
+        (common::TEST2_SEED, common::TEST2_PUB),
+        (common::TEST3_SEED, common::TEST3_PUB),
+    ] {
+        let identity = Identity::from_seed(seed);
+        let (owner, handle, _incoming) =
+            shaar::network::bind_signaling(&identity, "127.0.0.1:0".parse().unwrap(), &[]).unwrap();
+        let bytes = handle.peer_id().to_bytes();
+        assert_eq!(&bytes[..6], &[0x00, 0x24, 0x08, 0x01, 0x12, 0x20]);
+        assert_eq!(&bytes[6..], &public);
+        owner.run(async {}).await.unwrap();
+    }
 }
 
 /// 3. Identity-level determinism/consistency only (no golden claim):

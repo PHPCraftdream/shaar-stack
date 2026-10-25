@@ -14,6 +14,7 @@ iroh-base = { version = "=1.3.0", default-features = false, features = ["key"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 tokio = { version = "=1.54.1", features = ["fs", "io-util", "rt", "sync", "time", "net", "macros"] }
 zeroize = "=1.9.1"
+libp2p-identity = { version = "=0.3.0", default-features = false, features = ["ed25519", "peerid"] }
 
 [target.'cfg(windows)'.dependencies]
 shaar-platform = { path = "../shaar-platform" }
@@ -22,6 +23,5 @@ shaar-platform = { path = "../shaar-platform" }
 n0-future = "=0.3.2"
 netwatch = "=0.19.3"
 tokio-util = { version = "=0.7.20", features = ["rt"] }
-libp2p-identity = { version = "=0.3.0", default-features = false, features = ["ed25519", "peerid"] }
 # Multi-thread execution and deterministic test coordination only.
 tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "sync", "time", "net"] }

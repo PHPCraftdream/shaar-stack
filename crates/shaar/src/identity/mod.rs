@@ -69,6 +69,16 @@ impl Identity {
         self.secret.clone()
     }
 
+    pub(crate) fn signaling_key(&self) -> std::io::Result<libp2p_identity::Keypair> {
+        let mut seed = zeroize::Zeroizing::new(self.secret.to_bytes());
+        libp2p_identity::Keypair::ed25519_from_bytes(&mut seed[..]).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid signaling identity",
+            )
+        })
+    }
+
     /// The 32-byte Ed25519 public key (stable, config-compatible form).
     pub fn public_key_bytes(&self) -> [u8; 32] {
         *self.secret.public().as_bytes()

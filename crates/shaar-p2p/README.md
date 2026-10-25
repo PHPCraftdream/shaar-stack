@@ -373,7 +373,7 @@ tests and all seven real relay scenarios passed, with the full matrix successful
 The integrated controller worktree was removed only after all changed files were
 verified byte-identical to tracked product files and this CI proof was read.
 
-## Current link observations — authored, pending CI
+## Current link observations — accepted prerequisite
 
 A queued `Received` can outlive its physical connection. `CarrierHandle::links`
 therefore exposes at most 16 application-link observations, sorted by authenticated
@@ -394,8 +394,36 @@ binding and final authenticated-peer validation. Noq's NativeOnly policy is unch
 Authored controls cover real native queued-record rejection across disconnect and
 reopen, forged connection/route metadata, retained observers after shutdown, timeout
 revocation, fatal/last-handle/consumer terminal exits and real owned-relay link
-metadata. Their new outcomes await CI; this prerequisite is not the full Iroh adapter
-or the common SDK identity bridge.
+metadata. At `b5174a9`, completed [CI 40175458904](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40175458904)
+logs confirm Linux and Windows passed all 32 P2P library tests, seven real relay
+scenarios, 14 source controls and the full regression matrix. This prerequisite is
+not the full Iroh adapter or the common SDK identity bridge.
+
+## Common SDK identity construction — authored, pending CI
+
+`shaar::network::bind_signaling` constructs the existing caller-driven carrier from
+an SDK Identity, one TCP bind address and at most 16 public peer keys before
+deduplication. It returns the owner, submission handle and bounded incoming receiver;
+the caller must drive and await the owner for joined cleanup. This constructor does
+not install an Iroh custom transport or make SDK Endpoint::close own a separate
+carrier. Native QUIC construction and its NativeOnly filter remain unchanged.
+
+The crate-private Identity conversion uses libp2p-identity 0.3.0's reviewed
+ed25519_from_bytes API with a Zeroizing staging buffer. There is no new public
+seed/key getter and no custom cryptographic algorithm. Staging erasure remains
+best-effort: dependency-internal temporary copies and compiler/OS copies are not
+covered by this guarantee. Identity error formatting remains redacted. The existing
+exact libp2p-identity dependency moves from dev-only to production use; it was
+already in the product lock and carrier graph, with no new package or version.
+
+Authored tests cross-verify signatures with the pinned Iroh/libp2p libraries,
+reject wrong keys and modified messages, reuse all three existing P04 RFC vectors
+through the production constructor, and check bounds/runtime/error behavior. A real
+Noise topology uses the same SDK identities as simultaneously bound native Iroh
+endpoints, rejects an allowed client's incorrect server pin, exchanges exact packets
+and joins all three owned signaling roots before listener rebinding. These new tests
+have not yet run; they are identity-construction proof, not a custom Iroh transport,
+Amino discovery, or full signaling-only frame/path acceptance.
 
 ## Remaining implementation and acceptance
 
