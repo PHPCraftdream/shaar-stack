@@ -69,7 +69,7 @@ impl Shared {
     pub fn new() -> io::Result<Self> {
         // Local namespace uniqueness, not a cryptographic nonce or remote authority.
         let instance = INSTANCE
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |id| id.checked_add(1))
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |id| id.checked_add(1))
             .map_err(|_| error(io::ErrorKind::Other))?;
         let (closed, _) = watch::channel(false);
         Ok(Self {
