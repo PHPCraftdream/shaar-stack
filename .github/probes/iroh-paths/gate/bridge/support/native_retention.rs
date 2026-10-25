@@ -166,7 +166,9 @@ fn native_retention_pruning_first_allocates_a_different_id() -> TestResult {
     pair.drive();
     let client_events = events(&mut pair, Client);
     assert_established(&client_events, retained);
-    assert_discarded(&client_events, abandoned);
+    assert!(!client_events.iter().any(|event| matches!(
+        event, Event::Path(PathEvent::Established { id, .. }) if *id == abandoned
+    )));
     assert!(client_events.iter().any(|event| matches!(
         event,
         Event::Path(PathEvent::Abandoned {
@@ -178,6 +180,19 @@ fn native_retention_pruning_first_allocates_a_different_id() -> TestResult {
     )));
     assert_established(&events(&mut pair, Server), retained);
     assert_matches!(prune(&mut pair, abandoned), Err(ClosePathError::ClosedPath));
+    assert!(!prune(&mut pair, retained)?);
+    assert!(!pair.paths(Server).contains(&abandoned));
+
+    // The peer never saw this path, so it cannot echo PATH_ABANDON to arm PathDrained.
+    // Verify owner teardown instead of requiring a per-path Discarded event here.
+    pair.close(Client, 0, b"done");
+    pair.close(Server, 0, b"done");
+    assert!(
+        !pair.drive_bounded(100),
+        "connection teardown did not quiesce"
+    );
+    assert!(pair.is_drained(Client));
+    assert!(pair.is_drained(Server));
     Ok(())
 }
 
