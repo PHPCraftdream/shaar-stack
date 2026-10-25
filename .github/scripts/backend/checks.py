@@ -252,9 +252,14 @@ class ProductWorkspaceChecks(unittest.TestCase):
         remote = policy.replace(remote,
             "NoqPathEvent::RemoteStatus { .. } | NoqPathEvent::ObservedAddr { .. } | NoqPathEvent::RemoteCidsAvailable { .. } => {",
             "NoqPathEvent::RemoteStatus { .. } | NoqPathEvent::ObservedAddr { .. } => {")
-        with tarfile.open(ARCHIVES["iroh"]) as archive:
-            original = archive.extractfile(f"iroh-{prepare.VERSION}/src/socket/remote_map/remote_state.rs").read()
-        self.assertEqual(remote.encode("utf-8"), original)
+        with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
+            baseline = Path(temporary)
+            with tarfile.open(ARCHIVES["iroh"]) as archive:
+                archive.extractall(baseline, filter="data")
+            baseline = baseline / f"iroh-{prepare.VERSION}"
+            policy.joined_actor_shutdown(baseline)
+            expected = (baseline / "src/socket/remote_map/remote_state.rs").read_bytes()
+        self.assertEqual(remote.encode("utf-8"), expected)
         for root, apply, names in (
             (ROOTS["noq-proto"], policy.native_path_retention, ("src/connection/mod.rs", "src/connection/paths.rs")),
             (ROOTS["noq"], prepare.runtime.native_path_retention, ("src/connection.rs", "src/path.rs")),
