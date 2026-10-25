@@ -284,6 +284,43 @@ The unreachable regression now requires UDP transmission from the expected clien
 source and a deadline/post-admission NotConnected error; an arbitrary pre-admission
 NativePath error can no longer count as validation failure.
 
+## Explicit native-path retention — authored, pending CI
+
+Windows reproduction run `40207768332` failed on trial 2 with
+`PathId(1)` abandoned locally as `ApplicationClosed { error_code: 62 }`.
+This is the error used by Noq's ordinary application path close. Iroh's automatic
+pruning could close the explicitly admitted native path while custom remained
+selected; its unchanged per-loop IP count could also close every unselected IP
+path in one pass. A prior green matrix did not establish lifecycle correctness.
+
+Retained admission now marks one boolean on the existing protocol `PathState`,
+under the same Noq connection mutex as admission. Only automatic Iroh pruning uses
+an atomic close-if-unretained operation under that mutex; a separate getter followed
+by close would race with retaining a reused ID. No map, queue, task, allocation or
+additional mutex is introduced. The bit follows the existing path-ID state through
+migration and disappears with normal discard. Explicit close, remote abandonment,
+network invalidation, idle timeout and connection shutdown remain authoritative.
+Retention is not a future-liveness promise and does not change APP eligibility.
+
+Each Iroh pruning pass chooses one live IP survivor, preferring the selected tuple,
+before closing other unretained candidates. Explicitly retained IDs also survive
+when another native tuple becomes selected. This is a bounded O(n) pass over the
+existing path set, replacing repeated O(n) recounting inside the loop. The selected-
+path policy and immutable NativeOnly filter are unchanged.
+
+Source controls reverse the exact owned protocol fields/methods and Iroh pruning
+changes, require original remaining archive bytes, and reject repeat/drift before
+writing. Isolated calibration receives the matching protocol/runtime retention and
+CID APIs; production inputs are not overwritten. Its StreamExt observer reuses the
+already locked futures-lite 2.6.1 package through a generated CI-only dev edge,
+without changing package versions or the product dependency graph.
+
+Protocol lifecycle tests use a CI-only copy of the prepared crate and its untouched
+archive lock, not the product lock's graph. Actor-level tests must also observe
+normal establishment, competing-path pruning, a different selected native tuple,
+exact retained-ID survival and real native APP. Authored tests and source checks
+are not runtime acceptance; their CI results remain required.
+
 ## Explicit preparation, not a build script
 
 Run the script from the repository root, with Python isolated mode:

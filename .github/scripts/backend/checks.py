@@ -51,6 +51,7 @@ class PreparationChecks(unittest.TestCase):
             if relative == "src/connection/mod.rs":
                 production = policy.replace(production, policy.NATIVE_CID_FIRST, "")
                 production = policy.replace(production, policy.NATIVE_CID_READY, "")
+                production = policy.strip_native_path_retention(production)
             suffix = '\n#[cfg(test)]\n#[path = "payload_policy_bounds.rs"]\nmod payload_policy_bounds;\n'
             if relative.endswith("datagrams.rs"):
                 self.assertTrue(gate.endswith(suffix))
@@ -214,8 +215,8 @@ class ProductWorkspaceChecks(unittest.TestCase):
         self.assertEqual(text.count(policy.NATIVE_PATH_API), 1)
         self.assertIn("impl Connection<HandshakeCompleted> {\n" + policy.NATIVE_PATH_API, text)
         api = policy.NATIVE_PATH_API
-        self.assertLess(api.index("self.inner.path_events()"), api.index("open_path_ensure("))
-        self.assertLess(api.index("self.paths_stream()"), api.index("open_path_ensure("))
+        self.assertLess(api.index("self.inner.path_events()"), api.index("open_path_ensure_retained("))
+        self.assertLess(api.index("self.paths_stream()"), api.index("open_path_ensure_retained("))
         for required in ("snapshot.get(id)", "opened && observed", "self.inner.closed()", "PathEvent::Abandoned", "native path event history lost", "PathStatus::Backup", "self.side().is_server()"):
             self.assertIn(required, api)
         self.assertIn("id: abandoned, reason, ..", api)
@@ -225,6 +226,58 @@ class ProductWorkspaceChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy.native_path_bridge(ROOTS["iroh"])
         self.assertEqual(path.read_bytes(), before)
+
+    def test_native_retention_is_atomic_and_pruning_keeps_a_survivor(self):
+        proto = (ROOTS["noq-proto"] / "src/connection/mod.rs").read_text(encoding="utf-8")
+        self.assertEqual(proto.count(policy.NATIVE_RETENTION_PROTO_API), 1)
+        api = policy.NATIVE_RETENTION_PROTO_API
+        self.assertLess(api.index("self.open_path_ensure("), api.index("retained_by_application = true"))
+        self.assertLess(api.index("path.retained_by_application)"), api.index("self.close_path("))
+        runtime = (ROOTS["noq"] / "src/connection.rs").read_text(encoding="utf-8")
+        retained = runtime.split("pub fn open_path_ensure_retained(", 1)[1].split("/// Opens an additional path", 1)[0]
+        self.assertLess(retained.index('lock_and_wake("open_path")'), retained.index(".open_path_ensure_retained("))
+        close = (ROOTS["noq"] / "src/path.rs").read_text(encoding="utf-8")
+        self.assertEqual(close.count(prepare.runtime.NATIVE_RETENTION_CLOSE), 1)
+        restored_close = policy.replace(close, prepare.runtime.NATIVE_RETENTION_CLOSE, "")
+        with tarfile.open(ARCHIVES["noq"]) as archive:
+            original_close = archive.extractfile(f"noq-{prepare.VERSION}/src/path.rs").read()
+        self.assertEqual(restored_close.encode("utf-8"), original_close)
+        self.assertLess(prepare.runtime.NATIVE_RETENTION_CLOSE.index("lock_and_wake"),
+                        prepare.runtime.NATIVE_RETENTION_CLOSE.index(".close_path_if_unretained("))
+        remote = (ROOTS["iroh"] / "src/socket/remote_map/remote_state.rs").read_text(encoding="utf-8")
+        self.assertIn(policy.NATIVE_PRUNE_SURVIVOR, remote)
+        self.assertIn("match path.close_if_unretained()", remote)
+        for old, new in reversed(policy.NATIVE_PRUNE_SWAPS):
+            remote = policy.replace(remote, new, old)
+        remote = policy.replace(remote,
+            "NoqPathEvent::RemoteStatus { .. } | NoqPathEvent::ObservedAddr { .. } | NoqPathEvent::RemoteCidsAvailable { .. } => {",
+            "NoqPathEvent::RemoteStatus { .. } | NoqPathEvent::ObservedAddr { .. } => {")
+        with tarfile.open(ARCHIVES["iroh"]) as archive:
+            original = archive.extractfile(f"iroh-{prepare.VERSION}/src/socket/remote_map/remote_state.rs").read()
+        self.assertEqual(remote.encode("utf-8"), original)
+        for root, apply, names in (
+            (ROOTS["noq-proto"], policy.native_path_retention, ("src/connection/mod.rs", "src/connection/paths.rs")),
+            (ROOTS["noq"], prepare.runtime.native_path_retention, ("src/connection.rs", "src/path.rs")),
+            (ROOTS["iroh"], policy.native_path_retention_bridge, ("src/socket/remote_map/remote_state.rs",)),
+        ):
+            before = [(root / name).read_bytes() for name in names]
+            with self.assertRaisesRegex(ValueError, "retention"):
+                apply(root)
+            self.assertEqual([(root / name).read_bytes() for name in names], before)
+
+    def test_native_retention_runtime_drift_rejects_before_any_overwrite(self):
+        with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
+            root = Path(temporary)
+            with tarfile.open(ARCHIVES["noq"]) as archive:
+                archive.extractall(root, filter="data")
+            root = root / f"noq-{prepare.VERSION}"
+            path = root / "src/path.rs"
+            path.write_text(path.read_text(encoding="utf-8").replace("    /// Closes this path.\n", "    /// Changed close anchor.\n"), encoding="utf-8")
+            paths = [root / "src/connection.rs", path]
+            before = [path.read_bytes() for path in paths]
+            with self.assertRaises(ValueError):
+                prepare.runtime.native_path_retention(root)
+            self.assertEqual([path.read_bytes() for path in paths], before)
 
     def test_native_cid_forwarding_is_an_explicit_production_step(self):
         with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
@@ -263,13 +316,15 @@ class ProductWorkspaceChecks(unittest.TestCase):
         self.assertIn("NoqPathEvent::RemoteCidsAvailable { .. }", remote)
         with tarfile.open(ARCHIVES["noq-proto"]) as archive:
             original = archive.extractfile(f"noq-proto-{prepare.VERSION}/src/connection/paths.rs").read()
-        self.assertEqual(policy.replace(paths, policy.NATIVE_CID_EVENT, "").encode("utf-8"), original)
+        restored = policy.replace(paths, policy.NATIVE_CID_EVENT, "")
+        restored = policy.replace(restored, policy.NATIVE_RETENTION_FIELD, "")
+        self.assertEqual(restored.encode("utf-8"), original)
         before = (paths_path.read_bytes(), connection_path.read_bytes())
         with self.assertRaises(ValueError):
             policy.native_cid_events(root)
         self.assertEqual(before, (paths_path.read_bytes(), connection_path.read_bytes()))
         api = policy.NATIVE_PATH_API
-        self.assertLess(api.index("self.inner.path_events()"), api.index("open_path_ensure("))
+        self.assertLess(api.index("self.inner.path_events()"), api.index("open_path_ensure_retained("))
         self.assertIn("Err(noq::PathError::RemoteCidsExhausted)", api)
         self.assertIn("Some(Ok(noq::PathEvent::RemoteCidsAvailable", api)
         self.assertNotIn("sleep(", api)

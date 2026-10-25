@@ -11,7 +11,11 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
 from packet_identity import apply as add_packet_identity  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "scripts/backend"))
-from policy import connection_limit_bridge, forwarder, joined_actor_shutdown, listener_limits, replace  # noqa: E402
+from policy import (  # noqa: E402
+    connection_limit_bridge, forwarder, joined_actor_shutdown, listener_limits,
+    native_cid_events, native_path_bridge, native_path_retention,
+    native_path_retention_bridge, replace,
+)
 
 DIGEST = "885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833"
 
@@ -44,6 +48,9 @@ def main():
     args = parser.parse_args()
     lock_text = (args.probe / "Cargo.lock").read_text(encoding="utf-8")
     lock = tomllib.loads(lock_text)
+    stream = next(p for p in lock["package"] if p["name"] == "futures-lite")
+    if stream["version"] != "2.6.1" or stream["checksum"] != "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad":
+        raise ValueError("reviewed fixture StreamExt dependency changed")
     entry = next(p for p in lock["package"] if p["name"] == "iroh" and p["version"] == "1.3.0")
     if args.archive.stat().st_size > 2 * 1024 * 1024:
         raise ValueError("reviewed iroh archive exceeds 2 MiB")
@@ -63,6 +70,8 @@ def main():
     listener_limits(iroh)
     connection_limit_bridge(iroh)
     joined_actor_shutdown(iroh)
+    native_path_bridge(iroh)
+    native_path_retention_bridge(iroh)
     config = iroh / "src/endpoint/quic.rs"
     text = forwarder(config.read_text(encoding="utf-8"))
     anchor = "    pub fn application_data_filter(mut self, filter: fn(noq_proto::FourTuple) -> bool) -> Self {\n        self.0.application_data_filter(filter);\n        self\n    }"
@@ -86,6 +95,40 @@ def main():
     pub async fn spike_open_ip_path(&self, remote: SocketAddr) -> bool {
         self.inner.open_path_ensure(noq::FourTuple::new(remote, None), noq::PathStatus::Backup)
             .await.is_ok()
+    }
+
+    /// Fixture-only: admit a competing, unretained native path on this connection.
+    /// cancel-safe: NO — dropping the waiter does not undo admitted validation.
+    pub async fn spike_open_competing_native_path(
+        &self, remote: SocketAddr, local: std::net::IpAddr,
+    ) -> std::io::Result<noq::PathId> {
+        use futures_util::StreamExt;
+        let mut events = self.inner.path_events();
+        loop {
+            let opening = self.inner.open_path(noq::FourTuple::new(remote, Some(local)), noq::PathStatus::Backup);
+            if let Some(id) = opening.path_id() {
+                // Noq continues validation after the OpenPath future is dropped.
+                drop(opening);
+                return Ok(id);
+            }
+            match opening.await {
+                Err(noq::PathError::RemoteCidsExhausted) => {},
+                Err(error) => return Err(std::io::Error::other(error)),
+                Ok(_) => return Err(std::io::Error::other("path admission omitted its identifier")),
+            }
+            loop {
+                tokio::select! {
+                    biased;
+                    error = self.inner.closed() => return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, error)),
+                    event = events.next() => match event {
+                        Some(Ok(noq::PathEvent::RemoteCidsAvailable { .. })) => break,
+                        Some(Ok(_)) => {},
+                        Some(Err(_)) => return Err(std::io::Error::other("fixture path event history lost")),
+                        None => return Err(std::io::ErrorKind::BrokenPipe.into()),
+                    }
+                }
+            }
+        }
     }"""
     connection.write_text(connection_text.replace(connection_anchor, connection_anchor + connection_addition), encoding="utf-8")
     transports = iroh / "src/socket/transports.rs"
@@ -111,13 +154,16 @@ def main():
     support = project / "tests/support"
     support.mkdir()
     for script in Path(__file__).with_name("support").glob("*.rs"):
-        shutil.copyfile(script, support / script.name)
+        if script.name != "native_retention.rs":
+            shutil.copyfile(script, support / script.name)
     shutil.copytree(Path(__file__).with_name("support") / "nat", support / "nat",
                     ignore=shutil.ignore_patterns("*.py", "__pycache__"))
     (project / "tests/nat_control.rs").write_text(
         '#![forbid(unsafe_code)]\n#[path = "support/nat/tests.rs"]\nmod suite;\n', encoding="utf-8")
     noq = args.destination / "noq-source"
     shutil.copytree(args.noq_source, noq)
+    native_cid_events(noq)
+    native_path_retention(noq)
     add_packet_identity(noq)
     runtime = args.destination / "runtime-source"
     shutil.copytree(args.runtime_source, runtime)
@@ -126,6 +172,7 @@ def main():
     if manifest.count('    "net",\n') != 1:
         raise ValueError("pinned Tokio feature anchor changed")
     manifest = manifest.replace('    "net",\n', '    "net",\n    "fs",\n')
+    manifest += '\n[dev-dependencies]\nfutures-lite = "=2.6.1"\n'
     manifest += '\n[patch.crates-io]\niroh = { path = "../source/iroh-1.3.0" }\n'
     manifest += 'noq-proto = { path = "../noq-source" }\n'
     manifest += 'noq = { path = "../runtime-source" }\n'
@@ -136,6 +183,9 @@ def main():
     replaced = set()
     for index, block in enumerate(blocks[1:], 1):
         package = tomllib.loads("[[package]]" + block)["package"][0]
+        if package["name"] == "iroh-paths-probe":
+            blocks[index] = replace(block, "dependencies = [\n", 'dependencies = [\n "futures-lite",\n')
+            continue
         if package["name"] not in ("iroh", "noq-proto", "noq"):
             continue
         if package["version"] != "1.3.0" or package["name"] in replaced:

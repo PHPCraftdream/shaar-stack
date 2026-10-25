@@ -174,15 +174,12 @@ impl Endpoint {
             if let IncomingAddr::Ip(address) = source
                 && self.custom.is_some()
             {
-                let established = session.connection.paths().iter().any(|path|
-                    matches!(path.remote_addr(), TransportAddr::Ip(remote) if *remote == address));
-                if !established {
-                    session
-                        .connection
-                        .ensure_native_path(address)
-                        .await
-                        .map_err(NetworkError::NativePath)?;
-                }
+                // Reused paths need the same pruning retention as newly admitted paths.
+                session
+                    .connection
+                    .ensure_native_path(address)
+                    .await
+                    .map_err(NetworkError::NativePath)?;
             }
             Ok(session)
         };

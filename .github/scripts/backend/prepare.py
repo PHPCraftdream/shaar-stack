@@ -51,13 +51,16 @@ def prepare(archives, lock_path, destination):
         roots[package] = root
     runtime.apply(roots["noq"])
     runtime.native_cid_events(roots["noq"])
+    runtime.native_path_retention(roots["noq"])
     policy.apply(roots["noq-proto"])
     policy.native_cid_events(roots["noq-proto"])
+    policy.native_path_retention(roots["noq-proto"])
     policy.endpoint_capacity(roots["noq-proto"])
     policy.listener_limits(roots["iroh"])
     policy.connection_limit_bridge(roots["iroh"])
     policy.joined_actor_shutdown(roots["iroh"])
     policy.native_path_bridge(roots["iroh"])
+    policy.native_path_retention_bridge(roots["iroh"])
     wrapper = roots["iroh"] / "src/endpoint/quic.rs"
     wrapper.write_text(policy.forwarder(wrapper.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
     for root in roots.values():
@@ -69,7 +72,8 @@ def prepare(archives, lock_path, destination):
                                     for name in ("policy.py", "runtime.py", "ingress_budget.rs", "actor_shutdown.rs")},
                   "fixture_instrumentation": False,
                   "completed_native_path_bridge": True,
-                  "native_cid_readiness_event": True}
+                  "native_cid_readiness_event": True,
+                  "native_path_retention": True}
     (destination / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     return roots
 

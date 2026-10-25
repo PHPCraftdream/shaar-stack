@@ -3,6 +3,8 @@
 
 use std::{net::SocketAddr, time::Duration};
 
+#[path = "support/iroh_retention.rs"]
+mod iroh_retention;
 #[path = "support/mixed_fixture.rs"]
 mod mixed_fixture;
 use iroh::{

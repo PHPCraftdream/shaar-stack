@@ -70,7 +70,7 @@ NATIVE_PATH_API = """    /// Establishes an explicit native path on this authent
         let mut events = self.inner.path_events();
         let mut snapshots = self.paths_stream();
         let (opening, id) = loop {
-            let opening = self.inner.open_path_ensure(noq::FourTuple::new(remote, None), noq::PathStatus::Backup);
+            let opening = self.inner.open_path_ensure_retained(noq::FourTuple::new(remote, None), noq::PathStatus::Backup);
             if let Some(id) = opening.path_id() { break (opening, id); }
             match opening.await {
                 Err(noq::PathError::RemoteCidsExhausted) => {}
@@ -139,6 +139,96 @@ def native_path_bridge(root: Path):
                      "NoqPathEvent::RemoteStatus { .. } | NoqPathEvent::ObservedAddr { .. } | NoqPathEvent::RemoteCidsAvailable { .. } => {")
     path.write_text(text, encoding="utf-8", newline="\n")
     remote_path.write_text(remote, encoding="utf-8", newline="\n")
+
+
+NATIVE_RETENTION_PROTO_API = """    /// Ensures a path and retains its ID against automatic application pruning.
+    /// Retention does not prevent explicit close, remote abandonment, or timeouts.
+    pub fn open_path_ensure_retained(
+        &mut self,
+        network_path: FourTuple,
+        initial_status: PathStatus,
+        now: Instant,
+    ) -> Result<(PathId, bool), PathError> {
+        let (id, existed) = self.open_path_ensure(network_path, initial_status, now)?;
+        self.paths.get_mut(&id).expect("an ensured path exists").retained_by_application = true;
+        Ok((id, existed))
+    }
+
+    /// Atomically skips retained paths during automatic application pruning.
+    /// Returns true only when the ordinary close operation was performed.
+    pub fn close_path_if_unretained(
+        &mut self,
+        now: Instant,
+        path_id: PathId,
+        error_code: VarInt,
+    ) -> Result<bool, ClosePathError> {
+        if !self.abandoned_paths.contains(&path_id)
+            && self.paths.get(&path_id).is_some_and(|path| path.retained_by_application)
+        {
+            return Ok(false);
+        }
+        self.close_path(now, path_id, error_code).map(|()| true)
+    }
+
+"""
+NATIVE_RETENTION_FIELD = "    pub(super) retained_by_application: bool,\n"
+NATIVE_RETENTION_INITIAL = "                    retained_by_application: false,\n"
+
+
+def native_path_retention(root: Path):
+    paths_path = root / "src/connection/paths.rs"
+    connection_path = root / "src/connection/mod.rs"
+    paths = paths_path.read_text(encoding="utf-8")
+    connection = connection_path.read_text(encoding="utf-8")
+    if "retained_by_application" in paths or "open_path_ensure_retained" in connection:
+        raise ValueError("unexpected existing native path retention")
+    paths = replace(paths, "pub(super) struct PathState {\n",
+                    "pub(super) struct PathState {\n" + NATIVE_RETENTION_FIELD)
+    connection = replace(connection, "                    prev: None,\n                },",
+                         "                    prev: None,\n" + NATIVE_RETENTION_INITIAL + "                },")
+    connection = replace(connection, "PathState { data, prev: None }",
+                         "PathState { data, prev: None, retained_by_application: false }")
+    anchor = "    /// Opens a new path only if no path on the same network path currently exists.\n"
+    connection = replace(connection, anchor, NATIVE_RETENTION_PROTO_API + anchor)
+    paths_path.write_text(paths, encoding="utf-8", newline="\n")
+    connection_path.write_text(connection, encoding="utf-8", newline="\n")
+
+
+def strip_native_path_retention(connection):
+    connection = replace(connection, NATIVE_RETENTION_PROTO_API, "")
+    connection = replace(connection, NATIVE_RETENTION_INITIAL, "")
+    return replace(connection, "PathState { data, prev: None, retained_by_application: false }",
+                   "PathState { data, prev: None }")
+
+
+NATIVE_PRUNE_SURVIVOR = """            let native_survivor = conn_state.paths.iter()
+                .filter(|(id, tuple)| tuple.is_ip() && conn.path(**id).is_some())
+                .min_by_key(|(id, tuple)| (*tuple != &selected, **id))
+                .map(|(id, _)| *id);
+
+"""
+NATIVE_PRUNE_SWAPS = (
+    ("            for (path_id, path_fourtuple) in conn_state.paths.iter() {",
+     NATIVE_PRUNE_SURVIVOR + "            for (path_id, path_fourtuple) in conn_state.paths.iter() {"),
+    ("// Closes redundant IP paths so that at most one remains per connection.",
+     "// Keep a live IP survivor and every explicitly retained path."),
+    ("conn_state.paths.values().filter(|a| a.is_ip()).count() > 1",
+     "Some(*path_id) != native_survivor"),
+    ("match path.close() {", "match path.close_if_unretained() {"),
+    ("                        Ok(()) => {}\n                    }\n                    continue;",
+     "                        Ok(false) => self.state.set_path_status(*conn_id, &path, path_fourtuple),\n"
+     "                        Ok(true) => {}\n                    }\n                    continue;"),
+)
+
+
+def native_path_retention_bridge(root: Path):
+    path = root / "src/socket/remote_map/remote_state.rs"
+    text = path.read_text(encoding="utf-8")
+    if "native_survivor" in text or "close_if_unretained" in text:
+        raise ValueError("unexpected existing native path pruning retention")
+    for old, new in NATIVE_PRUNE_SWAPS:
+        text = replace(text, old, new)
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
 def replace(text, old, new, count=1):

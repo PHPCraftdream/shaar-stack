@@ -103,6 +103,40 @@ struct ConnectionSet {""")
     module.write_bytes(owned)
 
 
+NATIVE_RETENTION_CLOSE = """    /// Closes an automatically pruned path only if no application retained its ID.
+    /// The check and close share the connection lock with retained admission.
+    pub fn close_if_unretained(&self) -> Result<bool, ClosePathError> {
+        let mut state = self.conn.lock_and_wake("prune_path");
+        state.inner.close_path_if_unretained(
+            crate::Instant::now(),
+            self.id(),
+            TransportErrorCode::APPLICATION_ABANDON_PATH.into(),
+        )
+    }
+
+"""
+
+
+def native_path_retention(root: Path):
+    connection_path = root / "src/connection.rs"
+    path_path = root / "src/path.rs"
+    connection = connection_path.read_text(encoding="utf-8")
+    path = path_path.read_text(encoding="utf-8")
+    if "open_path_ensure_retained" in connection or "close_if_unretained" in path:
+        raise ValueError("unexpected existing native runtime path retention")
+    start = connection.index("    pub fn open_path_ensure(\n")
+    end = connection.index("    /// Opens an additional path if the multipath extension is negotiated.", start)
+    method = connection[start:end]
+    retained = replace(method, "pub fn open_path_ensure(", "pub fn open_path_ensure_retained(")
+    retained = replace(retained, ".open_path_ensure(network_path, initial_status, now)",
+                       ".open_path_ensure_retained(network_path, initial_status, now)")
+    retained = "    /// Ensures and retains the exact path ID against automatic pruning.\n" + retained
+    connection = connection[:end] + retained + connection[end:]
+    path = replace(path, "    /// Closes this path.\n", NATIVE_RETENTION_CLOSE + "    /// Closes this path.\n")
+    connection_path.write_text(connection, encoding="utf-8", newline="\n")
+    path_path.write_text(path, encoding="utf-8", newline="\n")
+
+
 def native_cid_events(root: Path):
     path = root / "src/connection.rs"
     text = replace(path.read_text(encoding="utf-8"),
