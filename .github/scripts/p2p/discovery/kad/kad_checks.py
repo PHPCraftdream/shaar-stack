@@ -9,10 +9,11 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import graph  # noqa: E402
 import kad  # noqa: E402
 
-REPOSITORY = Path(__file__).resolve().parents[3]
+REPOSITORY = Path(__file__).resolve().parents[5]
 ARCHIVE = REPOSITORY / "target/p2p/kad-archive/kad.crate"
 SOURCE = REPOSITORY / "target/p2p/kad" / kad.PACKAGE
 
@@ -128,11 +129,11 @@ class PreparationChecks(unittest.TestCase):
 
 class IdentityChecks(unittest.TestCase):
     def setUp(self):
-        self.roots = [Path("relay"), Path("swarm"), Path("kad")]
+        self.roots = [Path("relay"), Path("swarm"), Path("kad"), Path("dns")]
         self.old = {"package": [{"name": "unrelated", "version": "1", "source": "registry", "checksum": "keep"}]}
         self.new = copy.deepcopy(self.old)
         self.metadata = {"packages": [], "resolve": {"nodes": []}}
-        paths = dict(zip(("libp2p-relay", "libp2p-swarm", "libp2p-kad"), self.roots))
+        paths = dict(zip(("libp2p-relay", "libp2p-swarm", "libp2p-kad", "libp2p-dns"), self.roots))
         for name, version in graph.FAMILY.items():
             source = None if name in paths else "registry"
             self.new["package"].append({"name": name, "version": version, "source": source})

@@ -146,3 +146,44 @@ These are requirements to verify, not new public configuration knobs:
 
 Source review stops here: the ownership mechanism and additional pre-retention
 boundaries are identified. Implementation and runtime acceptance remain open.
+
+## Task 85 follow-up: constructor and expansion only
+
+The prepared libp2p-dns 0.45.0 boundary now supplies
+`Transport::with_resolver(inner, resolver)` and fixed pre-retention expansion
+limits. See [the exact prepared contract and CI proof path](README.md#12-task-85-prepared-dns-expansion-boundary).
+The historical constructor-gap observation above describes the stock archive;
+only that API gap and libp2p-owned expansion retention are addressed by this leaf.
+The stock Tokio constructor still constructs its default runtime provider.
+
+Prepared source is checksum/license/VCS/anchor pinned and reverses byte-exactly to
+the original library. Numeric collection is capped at four before collection;
+TXT acceptance is capped at 16 before parsing another candidate, with a 1,024-byte
+whole-record text gate. The existing component parser writes into a fixed
+256-byte buffer before any Multiaddr allocation. Pending candidates and error
+history are bounded at 32 and 16 respectively. First-character-string semantics,
+expected suffix matching, direct pass-through and the outer-timeout composition
+are preserved. No second answer cache is added.
+
+Source APIs used by the helper are `multiaddr-0.19.1/src/protocol.rs:141-289,476-620`
+(`from_str_parts`, `write_bytes`) and `src/lib.rs:298-319` (upstream slash/component
+parsing). Its archive SHA256 is
+`fd707c05eadfb37577f01cbec206726feeecf0b9edea259aee6fc9bc541ee253` from the product
+lock. The unchanged DNS fixture lock selects multiaddr 0.19.0, SHA256
+`d96879ec0057cf5f99543c5333f6818c1473081684ae7ad55da21b6ea65ba214`; source comparison
+confirms identical component string parsing/encoding APIs. The fixture's
+hickory-resolver 0.26.1 archive SHA256 is
+`f0d58d28879ceecde6607729660c2667a081ccdc082e082675042793960f178c`, and
+hickory-proto 0.26.1 is
+`0bab31817bfb44672a252e97fe81cd0c18d1b2cf892108922f6818820df8c643`.
+`lookup.rs:53-70`, `lookup_ip.rs:68-72`, `rr/record.rs:163` and
+`rr/rdata/txt.rs:78-85` provide the real Lookup/record constructors used by owned
+fixtures. All supplemental archives were treated as data, not executed.
+
+The 16 added Rust contracts and 9 Python controls are CI-only and not yet runtime
+acceptance evidence. Fake-future cancellation demonstrates only the transport's
+local cancellation path. Hickory wire/decoded-record allocations, resolver cache,
+arbitrary error payload bytes, task admission, joined shutdown with retained
+handles, real sockets, numeric destination policy and owner epoch integration
+remain open. The ownership conclusion above is unchanged: dropping or timing out
+a stock resolver is not proof of awaited task or kernel-resource destruction.

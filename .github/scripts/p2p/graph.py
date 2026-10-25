@@ -9,6 +9,7 @@ import tomllib
 FAMILY = {
     "libp2p": "0.57.1",
     "libp2p-kad": "0.49.0",
+    "libp2p-dns": "0.45.0",
     "libp2p-swarm": "0.48.0",
     "libp2p-relay": "0.22.0",
     "libp2p-request-response": "0.30.0",
@@ -32,11 +33,14 @@ def replace(text, old, new):
     return text.replace(old, new)
 
 
-def create(repository, destination, relay_source, swarm_source, kad_source):
+def create(repository, destination, relay_source, swarm_source, kad_source, dns_source):
     repository = repository.resolve()
     relay_source = relay_source.resolve()
     swarm_source = swarm_source.resolve()
     kad_source = kad_source.resolve()
+    dns_source = dns_source.resolve()
+    if not (dns_source / "Cargo.toml").is_file():
+        raise ValueError("reviewed DNS source is missing")
     if not (kad_source / "Cargo.toml").is_file():
         raise ValueError("reviewed Kademlia source is missing")
     swarm = tomllib.loads((swarm_source / "Cargo.toml").read_text(encoding="utf-8"))
@@ -52,7 +56,7 @@ def create(repository, destination, relay_source, swarm_source, kad_source):
             raise ValueError("production backend must be prepared before candidate resolution")
         manifest = replace(manifest, f'path = "{relative}"', f"path = {json.dumps(actual.as_posix())}")
     root_patches = tomllib.loads(manifest)["patch"]["crates-io"]
-    for name, path in (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source), ("libp2p-kad", kad_source)):
+    for name, path in (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source), ("libp2p-kad", kad_source), ("libp2p-dns", dns_source)):
         if name in root_patches:
             previous = root_patches[name]["path"]
             manifest = replace(manifest, f'path = "{previous}"', f"path = {json.dumps(path.as_posix())}")
@@ -66,8 +70,8 @@ def create(repository, destination, relay_source, swarm_source, kad_source):
         candidate = replace(original, "[dependencies]", DEPENDENCIES.rstrip())
     else:
         for name, version in FAMILY.items():
-            if name == "libp2p-kad":
-                continue  # Kademlia is enabled transitively by libp2p/kad.
+            if name in ("libp2p-kad", "libp2p-dns"):
+                continue  # Discovery transports/protocols are enabled transitively by libp2p.
             dependency = dependencies.get(name)
             declared = dependency.get("version") if isinstance(dependency, dict) else dependency
             if declared != "=" + version:
@@ -86,7 +90,7 @@ def identities(lock):
     return {(p["name"], p["version"], p.get("source"), p.get("checksum")) for p in lock["package"]}
 
 
-def validate(old, new, metadata, relay_source, swarm_source, kad_source):
+def validate(old, new, metadata, relay_source, swarm_source, kad_source, dns_source):
     previous = identities(old)
     current = identities(new)
     registry_kad = ("libp2p-kad", "0.49.0", "registry+https://github.com/rust-lang/crates.io-index",
@@ -94,12 +98,30 @@ def validate(old, new, metadata, relay_source, swarm_source, kad_source):
     prepared_kad = ("libp2p-kad", "0.49.0", None, None)
     replaced = registry_kad in previous and registry_kad not in current and prepared_kad in current
     retained = previous - {registry_kad} if replaced else previous
+    registry_dns = ("libp2p-dns", "0.45.0", "registry+https://github.com/rust-lang/crates.io-index",
+                    "18694695e98ff9ce26ee245fdede7cd0b4186cb793b25da3258d9c053400a291")
+    prepared_dns = ("libp2p-dns", "0.45.0", None, None)
+    dns_replaced = registry_dns in previous and registry_dns not in current and prepared_dns in current
+    if dns_replaced:
+        retained -= {registry_dns}
     if not retained.issubset(current):
         missing = sorted((name, version) for name, version, _, _ in retained - current)
         raise ValueError(f"candidate removed or changed an existing package identity: {missing}")
     kad_lock = [p for p in new["package"] if p["name"] == "libp2p-kad"]
     if len(kad_lock) != 1 or kad_lock[0].get("source") is not None or kad_lock[0].get("checksum") is not None:
         raise ValueError("candidate Kademlia lock must use the reviewed path identity")
+    dns_lock = [p for p in new["package"] if p["name"] == "libp2p-dns"]
+    if len(dns_lock) != 1 or dns_lock[0].get("source") is not None or dns_lock[0].get("checksum") is not None:
+        raise ValueError("candidate DNS lock must use the reviewed path identity")
+    # An identity substitution must not silently change an existing package's edges.
+    by_identity = {}
+    for package in new["package"]:
+        key = (package["name"], package["version"])
+        by_identity.setdefault(key, []).append(package)
+    for package in old["package"]:
+        same = by_identity.get((package["name"], package["version"]), [])
+        if len(same) != 1 or same[0].get("dependencies", []) != package.get("dependencies", []):
+            raise ValueError("candidate changed an existing package dependency edge")
     nodes = metadata.get("resolve", {}).get("nodes") if metadata.get("resolve") else None
     if not nodes:
         raise ValueError("full resolved metadata is required; --no-deps is insufficient")
@@ -112,19 +134,19 @@ def validate(old, new, metadata, relay_source, swarm_source, kad_source):
         matches = [p for p in packages if p["name"] == name]
         if len(matches) != 1 or matches[0]["version"] != version or matches[0]["id"] not in resolved:
             raise ValueError("candidate dependency family differs from reviewed source APIs")
-    for name, root in (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source), ("libp2p-kad", kad_source)):
+    for name, root in (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source), ("libp2p-kad", kad_source), ("libp2p-dns", dns_source)):
         package = next(p for p in packages if p["name"] == name)
         if package["source"] is not None or Path(package["manifest_path"]).resolve() != (root / "Cargo.toml").resolve():
             raise ValueError(f"candidate did not resolve the prepared source: {name}")
     added = sorted((name, version, source or "path", checksum or "") for name, version, source, checksum in current - previous)
-    return {"reviewed_kad_identity_replacement": replaced, "retained_package_identities": len(retained), "added_package_identities": added, "family": FAMILY}
+    return {"reviewed_dns_identity_replacement": dns_replaced, "reviewed_kad_identity_replacement": replaced, "retained_package_identities": len(retained), "added_package_identities": added, "family": FAMILY}
 
 
-def verify(workspace, metadata_path, relay_source, swarm_source, kad_source, baseline=None, receipt_path=None):
+def verify(workspace, metadata_path, relay_source, swarm_source, kad_source, dns_source, baseline=None, receipt_path=None):
     old_bytes = (baseline or workspace / "baseline.lock").read_bytes()
     new_bytes = (workspace / "Cargo.lock").read_bytes()
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    receipt = validate(tomllib.loads(old_bytes.decode()), tomllib.loads(new_bytes.decode()), metadata, relay_source, swarm_source, kad_source)
+    receipt = validate(tomllib.loads(old_bytes.decode()), tomllib.loads(new_bytes.decode()), metadata, relay_source, swarm_source, kad_source, dns_source)
     receipt["baseline_lock_sha256"] = hashlib.sha256(old_bytes).hexdigest()
     receipt["candidate_lock_sha256"] = hashlib.sha256(new_bytes).hexdigest()
     (receipt_path or workspace / "graph-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
@@ -146,18 +168,22 @@ def main():
     check.add_argument("--swarm-source", type=Path, required=True)
     prepare.add_argument("--kad-source", type=Path, required=True)
     check.add_argument("--kad-source", type=Path, required=True)
+    prepare.add_argument("--dns-source", type=Path, required=True)
+    check.add_argument("--dns-source", type=Path, required=True)
     check.add_argument("--baseline", type=Path)
     check.add_argument("--receipt", type=Path)
     args = parser.parse_args()
     import sys
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import kad
+    from discovery.kad import kad
+    from discovery.dns import prepare as dns
     kad.verify(args.kad_source.resolve())
+    dns.verify(args.dns_source.resolve())
     if args.mode == "create":
-        create(args.repository, args.destination, args.relay_source, args.swarm_source, args.kad_source)
+        create(args.repository, args.destination, args.relay_source, args.swarm_source, args.kad_source, args.dns_source)
     else:
-        verify(args.workspace, args.metadata, args.relay_source, args.swarm_source, args.kad_source, args.baseline, args.receipt)
+        verify(args.workspace, args.metadata, args.relay_source, args.swarm_source, args.kad_source, args.dns_source, args.baseline, args.receipt)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # Amino bootstrap preflight: exact locked-family report
 
 > Source baseline: `a8e26b0`. This is an implementation preflight, not runtime acceptance.
-> Task 80 follow-up below prepares the same-version Kademlia retention boundary;
+> Task 80 and Task 85 follow-ups prepare same-version Kademlia and DNS boundaries;
 > historical upstream observations remain the baseline, not the prepared API.
 > Numeric budgets below are recommendations, not newly approved configuration requirements.
 > Source citations use archive-relative crate/version paths; generated extraction trees need not be retained.
@@ -362,7 +362,7 @@ is removed from the product lock; versions, dependency edges, and all unrelated
 package identities stay unchanged. This is a local reviewed source preparation,
 not a published fork or a new package family.
 
-`.github/scripts/p2p/kad.py` checks the archive hash, package identity, embedded MIT
+`.github/scripts/p2p/discovery/kad/kad.py` checks the archive hash, package identity, embedded MIT
 notice, VCS revision, original archive lock, and unique source anchors before
 writing a fresh destination. Its receipt records every original/prepared file hash.
 Existing destinations are never overwritten. The production deltas are confined
@@ -441,8 +441,8 @@ production compilation and product regressions use the existing workspace lanes.
 CI-only commands after source preparation:
 
 ```sh
-python -I .github/scripts/p2p/kad_checks.py
-python -I .github/scripts/p2p/kad.py fixture \
+python -I .github/scripts/p2p/discovery/kad/kad_checks.py
+python -I .github/scripts/p2p/discovery/kad/kad.py fixture \
   --source target/p2p/kad/libp2p-kad-0.49.0 \
   --destination target/kad-retention/libp2p-kad-0.49.0
 cargo test --locked \
@@ -456,3 +456,110 @@ inspection and standalone formatting; no Cargo, compilation, test, or smoke run.
 The prepared override can be removed only when a reviewed upstream release
 provides equivalent pre-retention bounds and bootstrap control, with equivalent
 contract tests and an explicitly coordinated lock migration.
+
+## 12. Task 85: prepared DNS expansion boundary
+
+The root patch selects **libp2p-dns 0.45.0** from the archive in the provenance
+table above. Only its registry source/checksum is removed from Cargo.lock; all
+versions, other package identities and dependency edges remain unchanged.
+Preparation lives in `.github/scripts/p2p/discovery/dns/`; the existing Kademlia
+helpers moved to the sibling `discovery/kad/` without changing their production
+transformation, owned Rust contracts or prepared destination. This purposeful
+layout leaves five direct items under `p2p`, two under `discovery`, three under
+`kad` and six under `dns`.
+
+`Transport::with_resolver(inner, resolver)` makes the existing generic resolver
+boundary constructible by callers. It adds no trait, default provider, cache,
+configuration mode or background task. The existing Tokio constructors are
+unchanged. This API enables a future owned RuntimeProvider, **not** joined shutdown
+of the stock resolver.
+
+### Observable fixed profile
+
+| Boundary | Prepared contract |
+| --- | --- |
+| Work | Existing 32 lookups and 16 accepted inner dial futures per DNS dial |
+| Numeric lookup | First four A/AAAA alternatives, before inline SmallVec collection; empty/wrong-type successful answers become errors instead of panics |
+| TXT expansion | At most 16 accepted, suffix-matching, pending-distinct addresses per lookup; admission stops before parsing another candidate |
+| Pending addresses | At most 32 unresolved/resolved candidates; capacity checked before materializing an address |
+| Encoded addresses | At most 256 bytes for DNS input and every generated address, including inherited prefix |
+| TXT input | At most 1,024 total decoded character-string bytes per TXT record, checked before parsing; also checked by the parsing helper |
+| Error history | First 16 errors, checked before vector insertion; later failures still advance the existing work budgets |
+
+The independently bounded 1,024-byte TXT text budget accommodates ordinary textual
+expansion of the small binary addresses, but intentionally rejects longer textual
+representations even if they could encode compactly. This is a fixed profile, not
+a new configuration surface. The upstream first-character-string interpretation
+is preserved; no concatenation allocation is introduced. Later character-strings
+count toward the total text budget even though they are not parsed.
+
+The implementation reuses `multiaddr::Protocol::from_str_parts` and `write_bytes`
+with a fixed 256-byte output buffer. It does not reimplement protocol grammars or
+varints. Only after encoding fits, the expected suffix matches and pending
+deduplication succeeds is an owned Multiaddr materialized. Prefix/suffix and numeric
+replacement encoding use the same bounded storage. The whole decoded Hickory
+Lookup is passed through without collecting a second TXT-address vector. Numeric
+alternatives remain inline. Oversized DNS input is rejected before resolver name
+cloning; direct non-DNS input is moved unchanged and is not subject to the DNS
+expansion byte limit.
+
+First admissible entries in answer order win; upstream LIFO pending processing
+remains unchanged. Pending duplicates do not consume extra address slots, but
+there is no second answer cache or lifetime visited set. Cycles terminate at the
+existing lookup budget. A filled queue drops later alternatives; this trades
+exhaustive reachability for bounded retention. Suffix matching remains a location
+filter, not authentication: the owner must still pin the peer through Noise/Swarm.
+Rejected inner dials do not count as accepted attempts, matching upstream behavior;
+their error history is nevertheless bounded. Generic resolver/transport error
+payload bytes are not bounded by the 16-entry history cap.
+
+At most 32 pending addresses retain 8,192 encoded address bytes, plus the current
+address, bounded stack scratch, four inline numeric protocols and at most 16
+errors. This is not a total-memory figure: container overhead, input Lookup records
+and arbitrary generic error payloads are excluded. Processing is linear in the
+already-decoded answer list with fixed bounded scans over at most 32 candidates.
+No new timeout is introduced or restarted between alternatives: the existing
+outer transport deadline must continue to include resolution and all inner dials.
+
+### Provenance and CI contracts
+
+The DNS preparer checks checksum, package/license/VCS identity, original library
+and manifest byte hashes, the archive lock, unique anchors and byte-exact reversal.
+It never overwrites a destination. Receipts include original/prepared file hashes
+and all recipe inputs. Verification reconstructs and checks the original library
+and manifest, rejects source/recipe drift and unexpected files, and verifies the
+owned helper bytes. Native protocol and all other prepared dependencies stay intact.
+
+Production DNS is prepared at `target/p2p/dns/libp2p-dns-0.45.0` before any Cargo
+metadata/fmt/clippy/test step. Full resolved graph verification checks this exact
+manifest path and rejects registry/duplicate DNS identities; candidate staging
+rewrites it to the same absolute prepared source. Existing Kademlia, relay and
+swarm graph controls remain present, with existing-package dependency-edge checks.
+
+CI adds **9 Python controls** and **16 owned Rust dependency contracts** on both
+operating systems. Rust contracts use the real patched transport with owned fake
+resolver/inner transport: success, direct pass-through, expected-peer mismatch,
+A/AAAA fan-out, intermediate inline collection, pre-parse TXT caps, 256/257-byte
+boundaries, malformed/oversized records, pending duplicates, recursive fan-out,
+cycles, bounded errors, cancellation and an outer deadline. Fixture-only counters
+observe actual parse/materialization/queue/error admission sites, not a copied
+algorithm or only the final result. Cancellation witnesses destruction of these
+owned fake futures, **not** native sockets or stock Hickory background tasks.
+
+The isolated fixture retains the published DNS archive's unchanged Cargo.lock,
+SHA256 `c27554a61acfec08fa7ce6519b377fbcd19f7199b78eec5715769b53a9d3ee27`.
+Its Hickory 0.26.1, multiaddr 0.19.0 and Tokio 1.53.1 pins differ from the product's
+0.26.3, 0.19.1 and 1.54.1; no fixture dependency version is changed. Exact fixture
+Lookup constructors and parser APIs were source-checked. The fixture adds only
+owned tests and admission observations; no upstream test module or production
+body is disabled. CI requires exactly 16 executed Rust tests, not a zero-filter
+success. Existing Kademlia 11 Rust/9 Python controls and native/workspace lanes
+remain in place. Added tests have **not run locally**; source/data preparation,
+hash/TOML/AST checks and standalone formatting are not a CI pass.
+
+**Remaining boundary:** Hickory Lookup/decoded RRs already allocate before this
+leaf sees them. Neither DNS wire decoding/cache/global memory, resolved numeric
+destination policy, nor task closure is proved here. Those remain with the
+owned-provider/wire-gate leaf and Task 67 owner integration. Discovery metadata is
+untrusted; infrastructure/bootstrap roles must never enter the application
+allowlist. This leaf establishes neither Amino readiness nor public availability.

@@ -2120,8 +2120,6 @@ dependencies = [
 [[package]]
 name = "libp2p-dns"
 version = "0.45.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18694695e98ff9ce26ee245fdede7cd0b4186cb793b25da3258d9c053400a291"
 dependencies = [
  "futures",
  "hickory-resolver",
