@@ -429,7 +429,7 @@ scenarios and the full regression matrix succeeded. This is identity-constructio
 proof, not a custom Iroh transport, Amino discovery or full signaling-only frame/path
 acceptance.
 
-## Generation-bound send admission — authored, pending CI
+## Generation-bound send admission — accepted prerequisite
 
 A snapshot check followed by `send(peer, ...)` is not atomic with closing or reopening
 a circuit. `send_on(Link, ...)` queues the exact expected authenticated connection
@@ -450,9 +450,59 @@ link, then dispatch that old command and require rejection before any local requ
 charge. A positive generation-bound packet must still arrive exactly on the new
 link. Native tests also reject forged routes, and the owned relay scenario rejects
 a changed generation on the same physical connection before exchanging min/max
-packets through the pinned link. Runtime outcomes await CI. The remaining Iroh
-factory, batching, per-instance address bindings, multi-waiter backpressure and joined
-SDK ownership are not implemented by this admission method alone.
+packets through the pinned link. At `642e8a5`, completed
+[CI 40177845591](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40177845591)
+logs confirm both OSes passed 33 P2P library tests, including the queued-before-reopen
+case, seven real relay scenarios and the full regression matrix. Factory/batching,
+address binding, multi-waiter backpressure and SDK ownership are separate from this
+admission method.
+
+## Caller-driven Iroh adapter — authored, pending CI
+
+`SignalingTransport::attach` consumes the carrier's sole incoming receiver and returns
+a single-bind custom-transport factory plus `SignalingPump`. The caller owns both
+carrier and pump execution. The pump uses eight fixed async worker futures, allocated
+once through a bounded join, rather than detached tasks or a per-packet growing future
+set. Each worker submits through exact-link send_on. Local send completion means
+bounded queue admission, not remote delivery; QUIC owns control retransmission, and
+failed or stale RPCs are never replayed on a successor link.
+
+Outbound and delivered-input queues each hold at most 32 records. A semaphore serves
+at most eight fixed consumer waiters. Up to 64 distinct send wakers are registered
+before returning Pending, with deduplication; overflow returns WouldBlock, not a
+permanently unwakeable future. Dequeue, binding refresh and close wake registered
+senders outside the critical section. The registry is a fixed array, so cancellation
+cannot extend a waiter history indefinitely. The short synchronous mutex protects
+queue admission and at most 16 mappings; it never spans an await, network I/O or
+foreign-future destruction. Formal lock-freedom is not claimed.
+
+Opaque custom addresses contain a checked process-local instance and per-link epoch,
+16 bytes cached inline by the pinned address type. They are local references, not
+portable peer announcements or secret capabilities. Source bindings are minted from
+actual current peer/ConnectionId/Route observations, and both the pump and receive
+boundary reject stale records. Maps are cardinality-bounded; refresh is cold, while
+packet lookup uses the epoch index. No new address/body field grants application-data
+permission. Batches validate slice lengths and the platform BATCH_SIZE; GSO splitting
+is not supported. Close revokes queue admission and address bindings synchronously;
+it is not an asynchronous I/O join promise.
+
+A direct edge to existing iroh-base 1.3.0 is needed for the public CustomAddr API;
+only that workspace dependency edge is added to the lock, with all package
+identities, versions, sources and checksums preserved. Authored units cover namespace
+and epoch invalidation, counter exhaustion, state poison, bounded multi-waiter wakeup
+and queue shutdown. Real TCP/Noise carrier tests cover exact 1/1500-byte adapter
+packets and owned four-root cleanup; a separate injected-boundary case covers batches.
+A real Iroh handshake test disables every IP/relay transport and permits no custom
+APP frames, requiring the actual custom carrier to complete control traffic. These
+new tests have NOT yet run.
+
+The adapter is not yet installed into SDK Endpoint ownership. Shared SDK identity
+construction is accepted separately; matching an incoming custom source to the final
+TLS peer, joined SDK startup/close/bind-failure handling, consolidated frame/path
+calibration and public Amino discovery remain unfinished. A generic factory is not
+positive application-data authority: the trusted Noq NativeOnly filter remains
+mandatory, before packetization/encryption. No opaque custom sender can enforce that
+policy by inspecting encrypted bytes.
 
 ## Remaining implementation and acceptance
 
