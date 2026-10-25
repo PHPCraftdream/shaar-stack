@@ -201,7 +201,7 @@ jobs:
           for trial in {1..3}; do
             printf 'Parallel SDK lifecycle trial %s/3\n' "$trial"
             log="$RUNNER_TEMP/shaar-sdk-lifecycle-$trial.log"
-            if cargo test -p shaar --lib --locked -- --color never >"$log" 2>&1; then
+            if cargo test -p shaar --lib --locked -- --color never --show-output >"$log" 2>&1; then
               status=0
             else
               status=$?
