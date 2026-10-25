@@ -180,10 +180,154 @@ hickory-proto 0.26.1 is
 `rr/rdata/txt.rs:78-85` provide the real Lookup/record constructors used by owned
 fixtures. All supplemental archives were treated as data, not executed.
 
-The 16 added Rust contracts and 9 Python controls are CI-only and not yet runtime
-acceptance evidence. Fake-future cancellation demonstrates only the transport's
-local cancellation path. Hickory wire/decoded-record allocations, resolver cache,
+The 16 added Rust contracts and 9 Python controls passed on Windows and Linux in
+CI runs `40223815897` and `40224856427`. This is scoped transport-expansion
+acceptance, not resolver/socket lifecycle acceptance. Fake-future cancellation
+demonstrates only the transport's local cancellation path. Hickory wire/decoded-record allocations, resolver cache,
 arbitrary error payload bytes, task admission, joined shutdown with retained
 handles, real sockets, numeric destination policy and owner epoch integration
 remain open. The ownership conclusion above is unchanged: dropping or timing out
 a stock resolver is not proof of awaited task or kernel-resource destruction.
+
+## Task 92: concrete runtime, I/O and cancellation boundaries
+
+Source-only follow-up on baseline `3999dd0`; the archive identities and aliases
+above still apply. No provider implementation or runtime acceptance is claimed.
+The product graph selects Hickory 0.26.3 and Tokio 1.54.1. The DNS archive fixture
+uses Hickory 0.26.1/Tokio 1.53.1; the supplied Hickory archives' own locks use
+Tokio 1.52.0. Those fixture graphs cannot substitute for product-graph acceptance.
+
+### Exact adapter and import surface
+
+`N/runtime.rs:244-348` defines `RuntimeProvider`, `Spawn`, `DnsUdpSocket` and
+`DnsTcpStream`. `Spawn::spawn_bg` accepts a `Send + 'static` future returning `()`
+and returns no admission result. `RuntimeProvider` supplies handle, timer, UDP
+and TCP associated types; its TCP/bind methods return boxed `Send` futures.
+The UDP socket must remain unconnected. Gate both polling methods:
+`poll_recv_from` and `poll_send_to`; the default async methods delegate to them.
+`DnsTcpStream` uses futures-I/O traits, not Tokio's traits directly.
+`TokioTime` supplies timers without a new spawn owner (`N/runtime.rs:376-395`).
+
+Construct through `Resolver::builder_with_config(config, provider)` and the
+prepared `Transport::with_resolver`, not the stock Tokio transport constructor.
+Stock `D/lib.rs:107-110` reexports only resolver configuration and the error,
+not `RuntimeProvider` or `Resolver`. A direct dependency on the already resolved
+Hickory package, or an explicitly reviewed reexport, is still needed; do not
+assume an import through libp2p-dns exists. This is an import-surface choice,
+not permission to migrate dependency versions.
+
+### A task cap is not socket ownership
+
+Forward `spawn_bg` to the existing `ExecutorHandle::exec`: DNS and Swarm share
+one 64-task cap, not two independent pools. The executor releases its mutex
+before rejecting/dropping a foreign future and takes its JoinSet outside the
+mutex before abort-and-join (`crates/shaar-p2p/src/executor.rs:110-174`).
+Completed-but-unreaped tasks conservatively retain slots; the owner must keep
+observing results. An exchange task completing with `()` is not DNS success:
+stream errors are logged before that completion (`N/xfer/dns_exchange.rs:148-158`).
+Observe the actual lookup result separately.
+
+Two ownership paths prevent a provider-only shutdown claim:
+
+- UDP request sockets are created and held by the returned lookup/request future,
+  not necessarily the exchange background task
+  (`N/udp/udp_client_stream.rs:192-222,422-445`). The provider retained by that
+  stream also retains the executor submission capability. Explicit owner shutdown
+  must break task/provider retention; dropping one handle is insufficient.
+- TCP awaits `connect_tcp` before calling `spawn_bg`
+  (`N/tcp/tcp_client_stream.rs:50-88`). Task-cap rejection may happen after a TCP
+  socket has connected. It bounds background tasks, not all preceding I/O.
+
+Keep admitted lookups and connection futures bounded and carrier-owned; do not
+export raw resolver futures as independently retained capabilities. Close DNS
+admission and an I/O epoch gate, drop active lookup/dial owners and Swarm, then
+await the existing executor shutdown. Retained provider/resolver/submit handles
+must not restart I/O after closure. Cancellation of close remains abort-only.
+
+Queued cancellation has a distinct boundary. The exchange calls
+`io_stream.send_message` before discovering a canceled response recipient
+(`N/xfer/dns_exchange.rs:163-177`). TCP serialization can already enqueue output
+and active state (`N/xfer/dns_multiplexer.rs:249-267`); removing a canceled active
+request does not retract that output (`:147-172`). If cancellation before dequeue
+must mean no send, add an exact recipient-cancellation check before `send_message`.
+Do not promise rollback after serialization/admission.
+
+### Dependency locking still needs a narrow correction
+
+- `R/name_server.rs:265-275` holds the connections mutex while awaiting
+  `cx.transport_state()`. The comment calling this a short lock does not remove
+  the await. A provider wrapper cannot correct it. Establish a coherent snapshot
+  and lock order before changing this same-version dependency code.
+- `R/name_server_pool.rs:941-944` discards the result of map removal while its
+  temporary mutex guard still exists. The removed `SharedLookup` contains a
+  boxed shared foreign future (`:984-995`). Move removal into a scoped local,
+  release the guard, then destroy the value. A concrete deadlock is not proved;
+  whether this is the last reference depends on the other waiters.
+- That active-request map has no explicit cardinality admission at insertion
+  (`R/name_server_pool.rs:150-195`). Background-task admission is not a bound on
+  unique concurrent lookup keys. Bound outer lookups separately.
+
+### Earliest wire and destination gates
+
+UDP allocates a receive buffer no larger than 4096 and copies a received packet
+before source/transaction checks (`N/udp/udp_client_stream.rs:140,217-273`). Gate
+length and header counts in the socket polling wrapper, before exposing the
+slice. Discard unrelated invalid datagrams without making spoofed input a fatal
+query error; bound per-poll discard work and arrange a correct wakeup. Explicitly
+handle oversize detection and Windows truncation behavior: a full receive buffer
+alone cannot distinguish a complete packet from a truncated larger packet.
+
+TCP reads two length bytes and allocates the declared body immediately
+(`N/tcp/tcp_stream.rs:309-340`). A framing-aware read wrapper must validate the
+prefix and fixed 12-byte DNS header before replaying the complete prefix to
+Hickory, otherwise that allocation is already authorized. Preserve partial reads,
+Pending, empty output buffers, EOF distinctions and consecutive frames. Use the
+existing `Header::read`/`BinDecoder`, not another DNS parser; widen count sums.
+`P/op/message.rs:665-679` reserves QDCOUNT before parsing any questions.
+
+A proposed discovery-only profile is 12-4096 wire bytes, at most one question and
+64 combined answer/authority/additional records. These are proposed limits, not
+implemented acceptance: they reject some valid large responses. A wire envelope
+also does not prove the transport's 1024-byte TXT limit occurs before Hickory's
+TXT allocations. Keep that distinction explicit.
+
+There are two destination policies:
+
+1. Validate configured DNS-server endpoints and recheck before TCP creation/UDP
+   bind. Because UDP remains unconnected, check every `poll_send_to` target
+   against the approved endpoint too.
+2. Validate fully composed discovery Multiaddr encoding before
+   `Encoded::address()` in `.github/scripts/p2p/discovery/dns/bounds.rs`, then
+   recheck every actual numeric native dial immediately above TCP inside DNS.
+   Include direct numeric input, DNS/DNS4/DNS6 replacement, DNSADDR TXT, inherited
+   prefix/suffix composition, nested resolution and behavior-generated dials.
+
+Do not impose a new public-only policy on the existing public `Carrier::connect`
+or `RelayAddr::new`: their loopback/private endpoint behavior is intentional.
+The extra policy belongs to internal discovery roles, not a global SDK change.
+
+Restrict this initial provider profile to UDP/TCP before resolver construction.
+TLS encrypts the bytes a raw TCP DNS framing gate would inspect (`N/tls.rs:97-112`).
+H2 and H3 have direct Tokio driver spawning (`N/h2.rs:200-210,291-300`;
+`N/h3/h3_client_stream.rs:315-328,411-425`); QUIC/H3 select TokioRuntime and can bind
+UDP separately. Leave `quic_binder` unsupported. Optional persistence and Moka
+cache lifecycle require separate proof; `cache_size = 0` still constructs Moka
+and does not establish a genuinely allocation-free no-cache path.
+
+### Discriminating product-graph CI cases
+
+Require owned UDP/TCP fixtures for success, NXDOMAIN, silence and UDP-to-TCP
+fallback; exact wire limits and limit+1; split length/header/body, consecutive
+frames and EOF at each stage; hostile QDCOUNT and combined RR counts before body
+allocation; malformed/TXT bounds and spoofed IDs. Assert destination rejection
+before materialization and before any socket operation through every route.
+
+Fill the shared 64-task budget with mixed DNS/Swarm work; reject the 65th from a
+clone without polling it, permit reentrant rejected-future destruction and observe
+owner failure. Separately test queued cancellation before dequeue and after TCP
+serialization, pending UDP lookup, pending TCP connect, established exchange,
+lookup error/timeout, panic and unavailable runtime. Close with resolver/provider/
+submission handles retained: prove task destruction, UDP rebind and TCP closure
+on Windows/Linux. Keep the shutdown future owned across observation deadlines;
+never turn dropping it into a joined-close claim. Verify enabled protocol/features
+in CI so later feature unification cannot silently invalidate the UDP/TCP proof.
