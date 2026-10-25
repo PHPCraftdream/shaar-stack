@@ -1,5 +1,7 @@
 """CI-only rejection controls for the owned source-data preparation script."""
 import argparse
+import hashlib
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +15,31 @@ from prepare import CID_PATH_DISPATCH, LEGACY_PATH_DISPATCH, pair_runtime_events
 
 
 class PreparationChecks(unittest.TestCase):
+    def test_path_timer_fixture_reversal_and_drift_guards(self):
+        script = Path(__file__).resolve().parents[1] / "prepare.py"
+        spec = importlib.util.spec_from_file_location("gate_prepare", script)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        path = self.args.noq_source / "src/tests/multipath.rs"
+        before = path.read_bytes()
+        patched = before.decode("utf-8")
+        original = gate.path_timer_fixture(patched, reverse=True)
+        self.assertEqual(hashlib.sha256(original.encode("utf-8")).hexdigest(), gate.MULTIPATH_DIGEST)
+        self.assertEqual(gate.path_timer_fixture(original), patched)
+        for text, reverse in ((patched, False), (original, True)):
+            with self.subTest(reverse=reverse), self.assertRaises(ValueError):
+                gate.path_timer_fixture(text, reverse=reverse)
+        for old, new in gate.PATH_TEST_SWAPS:
+            for text, anchor, reverse in ((original, old, False), (patched, new, True)):
+                for replacement in ("changed fixture anchor", anchor + anchor):
+                    with self.subTest(anchor=anchor, reverse=reverse), self.assertRaises(ValueError):
+                        gate.path_timer_fixture(text.replace(anchor, replacement, 1), reverse=reverse)
+        # No whole-file exemption: even unrelated upstream text must remain byte-exact.
+        for text, reverse in ((original, False), (patched, True)):
+            with self.subTest(reverse=reverse), self.assertRaisesRegex(ValueError, "reviewed archive"):
+                gate.path_timer_fixture(text + "\n// unrelated mutation\n", reverse=reverse)
+        self.assertEqual(path.read_bytes(), before)
+
     def run_prepare(self, archive, probe, destination):
         return subprocess.run(
             [sys.executable, "-I", str(Path(__file__).with_name("prepare.py")),
