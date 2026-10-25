@@ -137,6 +137,129 @@ def native_path_retention(root: Path):
     path_path.write_text(path, encoding="utf-8", newline="\n")
 
 
+LOCAL_ABORT_API = """    /// Permanently stop local processing without sending a close packet.
+    /// Preserves an existing terminal reason and emits terminal endpoint events once.
+    /// The caller must forward pending events before destroying its driver.
+    pub fn abort_local(&mut self, reason: ConnectionError) {
+        if self.state.is_drained() {
+            return;
+        }
+        if self.state.is_closed() {
+            self.close_common();
+            self.state.move_to_drained(None, &mut self.endpoint_events);
+        } else {
+            self.kill(reason);
+        }
+    }
+
+"""
+LOCAL_IO_VARIANT = """    /// Local transport I/O failed; detail remains in the runtime driver's I/O error.
+    #[error("local transport I/O failed: {0}")]
+    LocalIo(io::ErrorKind),
+"""
+PROTO_ABORT_SWAPS = (
+    ("    /// Terminate the connection instantly, without sending a close packet\n",
+     LOCAL_ABORT_API + "    /// Terminate the connection instantly, without sending a close packet\n"),
+    ("pub enum ConnectionError {\n", "pub enum ConnectionError {\n" + LOCAL_IO_VARIANT),
+    ("                ConnectionError::LocallyClosed => {",
+     "                ConnectionError::LocalIo(_) | ConnectionError::LocallyClosed => {"),
+    ("            TimedOut => io::ErrorKind::TimedOut,",
+     "            LocalIo(kind) => kind,\n            TimedOut => io::ErrorKind::TimedOut,"),
+)
+DRIVER_ABORT = """    fn abort_driver(&mut self, reason: ConnectionError, shared: &Shared) {
+        self.inner.abort_local(reason.clone());
+        self.forward_endpoint_events();
+        self.forward_app_events(shared);
+        if self.error.is_none() {
+            self.terminate(reason, shared);
+        }
+    }
+
+"""
+DRIVER_DROP_OLD = """        let sender = self.0.lock_without_waking("drop_driver").sender.take();
+        drop(sender);"""
+DRIVER_DROP_NEW = """        let resources = {
+            let mut state = self.0.lock_without_waking("drop_driver");
+            state.abort_driver(ConnectionError::LocallyClosed, &self.0.shared);
+            (state.sender.take(), state.conn_events.take(), state.timer.take(), state.driver.take(),
+             std::mem::take(&mut state.open_path))
+        };
+        // Queued Rebind senders and timer implementations can own foreign resources too.
+        drop(resources);"""
+RUNTIME_ABORT_SWAPS = (
+    (DRIVER_DROP_OLD, DRIVER_DROP_NEW),
+    ("            conn.terminate(e, &self.0.shared);\n            return Poll::Ready(Ok(()));",
+     "            conn.abort_driver(e, &self.0.shared);\n            return Poll::Ready(Ok(()));"),
+    ("        let mut keep_going = conn.drive_transmit(cx)?;", """        let mut keep_going = match conn.drive_transmit(cx) {
+            Ok(keep_going) => keep_going,
+            Err(error) => {
+                conn.abort_driver(ConnectionError::LocalIo(error.kind()), &self.0.shared);
+                return Poll::Ready(Err(error));
+            }
+        };"""),
+    ("\n    conn_events: mpsc::UnboundedReceiver<ConnectionEvent>,",
+     "\n    conn_events: Option<mpsc::UnboundedReceiver<ConnectionEvent>>,"),
+    ("            conn_events,\n            endpoint_events,",
+     "            conn_events: Some(conn_events),\n            endpoint_events,"),
+    ("match self.conn_events.poll_recv(cx)",
+     'match self.conn_events.as_mut().expect("live driver receiver").poll_recv(cx)'),
+    ("    /// Used to wake up all blocked futures when the connection becomes closed for any reason\n",
+     DRIVER_ABORT + "    /// Used to wake up all blocked futures when the connection becomes closed for any reason\n"),
+)
+
+
+def transform_abort(text, swaps, reverse=False):
+    for old, new in (reversed(swaps) if reverse else swaps):
+        text = replace(text, new if reverse else old, old if reverse else new)
+    return text
+
+
+def local_abort_proto(root: Path):
+    path = root / "src/connection/mod.rs"
+    text = path.read_text(encoding="utf-8")
+    transformed = transform_abort(text, PROTO_ABORT_SWAPS)
+    if transform_abort(transformed, PROTO_ABORT_SWAPS, reverse=True) != text:
+        raise ValueError("protocol local abort reversal mismatch")
+    path.write_text(transformed, encoding="utf-8", newline="\n")
+
+
+ENDPOINT_ABORT_OLD = """        let mut endpoint = self.0.state.lock().unwrap();
+        endpoint.driver_lost = true;
+        self.0.shared.incoming.notify_waiters();
+        // Drop all outgoing channels, signaling the termination of the endpoint to the associated
+        // connections.
+        endpoint.recv_state.connections.senders.clear();
+        endpoint.recv_state.connections.active_connections = 0;"""
+ENDPOINT_ABORT_NEW = """        let senders = {
+            let mut endpoint = self.0.state.lock().unwrap();
+            endpoint.driver_lost = true;
+            endpoint.recv_state.connections.active_connections = 0;
+            std::mem::take(&mut endpoint.recv_state.connections.senders)
+        };
+        // Release channels and wake observers outside the endpoint lock.
+        drop(senders);
+        self.0.shared.incoming.notify_waiters();
+        self.0.shared.all_draining.notify_waiters();
+        self.0.shared.idle.notify_waiters();"""
+
+
+def local_abort_runtime(root: Path):
+    path = root / "src/connection.rs"
+    text = path.read_text(encoding="utf-8")
+    transformed = transform_abort(text, RUNTIME_ABORT_SWAPS)
+    restored = transform_abort(transformed, RUNTIME_ABORT_SWAPS, reverse=True)
+    if restored != text:
+        raise ValueError("runtime local abort reversal mismatch")
+    endpoint_path = root / "src/endpoint.rs"
+    endpoint = endpoint_path.read_text(encoding="utf-8")
+    rewritten_endpoint = replace(endpoint, ENDPOINT_ABORT_OLD, ENDPOINT_ABORT_NEW)
+    if replace(rewritten_endpoint, ENDPOINT_ABORT_NEW, ENDPOINT_ABORT_OLD) != endpoint:
+        raise ValueError("endpoint local abort reversal mismatch")
+    endpoint = rewritten_endpoint
+    path.write_text(transformed, encoding="utf-8", newline="\n")
+    endpoint_path.write_text(endpoint, encoding="utf-8", newline="\n")
+
+
 def native_cid_events(root: Path):
     path = root / "src/connection.rs"
     text = replace(path.read_text(encoding="utf-8"),

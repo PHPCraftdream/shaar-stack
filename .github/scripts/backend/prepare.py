@@ -50,6 +50,8 @@ def prepare(archives, lock_path, destination):
             raise ValueError("backend license changed")
         roots[package] = root
     runtime.apply(roots["noq"])
+    runtime.local_abort_runtime(roots["noq"])
+    runtime.local_abort_proto(roots["noq-proto"])
     runtime.native_cid_events(roots["noq"])
     runtime.native_path_retention(roots["noq"])
     policy.apply(roots["noq-proto"])
@@ -73,7 +75,8 @@ def prepare(archives, lock_path, destination):
                   "fixture_instrumentation": False,
                   "completed_native_path_bridge": True,
                   "native_cid_readiness_event": True,
-                  "native_path_retention": True}
+                  "native_path_retention": True,
+                  "driver_local_abort": True}
     (destination / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     return roots
 

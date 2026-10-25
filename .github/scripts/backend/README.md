@@ -47,6 +47,43 @@ limit propagation. Preparation refuses a second listener patch without overwriti
 source. Existing Noq queue-budget regressions remain part of backend CI. No new
 metrics feature, dependency version or public SDK networking API is introduced.
 
+## Permanent Noq driver exit
+
+The owned runtime transformation closes a source-confirmed lifecycle gap: a fatal
+UDP send could return before protocol/application event forwarding, while retained
+connection and stream handles delayed the state's destructor. A destructor-only
+`Drained` event cannot repair the active counter, which is decremented by `Draining`.
+This mechanism is not established as the cause of the historical Windows deadline.
+
+Noq-proto now owns an idempotent `abort_local` transition. It preserves a prior
+terminal reason, resets timers, and produces the ordered terminal events through
+its existing state machine. The runtime forwards them before exit. Application
+observers receive `LocalIo(ErrorKind)` for a new fatal send; the original `io::Error`,
+including its detail, remains the driver's return value and existing log input.
+Observer detail is intentionally limited to the error kind, with no copied string
+or new error allocation. Cancellation uses `LocallyClosed` only without a prior
+reason. Drop is abort-only, not joined shutdown or peer notification.
+
+The driver extracts its sender, queued event receiver, timer, stored driver waker,
+and pending path watchers before releasing them outside the state mutex. Existing
+application-notification logic is reused. Endpoint-driver cancellation also moves
+out its sender table and wakes pre-registered shutdown observers after unlocking.
+
+Authored regressions live under `../tests/noq_driver/`. They use real Noq endpoints,
+TLS and loopback UDP, an independently owned barrier-controlled sender, retained
+connection/stream/path handles, and a one-entry metadata quota to force slot reuse.
+CI runs the archive dev graph separately from the shared runtime suite using
+product package identities and prepared sources. It mirrors and verifies activated
+features and normal/build edges throughout the driver's resolved dependency closure,
+including Tokio and Rustls, and emits a feature receipt. Archive-only private probes
+use nonblocking mutex inspection in active/queued sender, timer, stored-waker and
+pending OpenPath callbacks; fixture hook reversal must recover every production byte.
+Protocol controls preserve unread errors from genuine Closed and Draining states.
+The reverted-runtime negative control must reach authenticated retained-handle and
+chosen-send-error preconditions, then fail only POST_FATAL_NOTIFICATION_DEADLINE.
+Handshake, barrier, outer, slot-reuse and cleanup timeouts cannot satisfy it.
+These new regressions require CI validation; they have not been run locally.
+
 ## Raw datagram queue boundary
 
 The async Noq wrapper used an unbounded channel to forward classified UDP events

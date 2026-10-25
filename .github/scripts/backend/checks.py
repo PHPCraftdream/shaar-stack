@@ -49,6 +49,7 @@ class PreparationChecks(unittest.TestCase):
             production = (ROOTS["noq-proto"] / relative).read_text(encoding="utf-8")
             gate = (ARGS.gate_noq / relative).read_text(encoding="utf-8")
             if relative == "src/connection/mod.rs":
+                production = prepare.runtime.transform_abort(production, prepare.runtime.PROTO_ABORT_SWAPS, reverse=True)
                 production = policy.replace(production, policy.NATIVE_CID_FIRST, "")
                 production = policy.replace(production, policy.NATIVE_CID_READY, "")
                 production = policy.strip_native_path_retention(production)
@@ -191,6 +192,64 @@ class PreparationChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "existing ingress budget module"):
             prepare.runtime.apply(root)
         self.assertEqual([path.read_bytes() for path in paths], before)
+
+    def test_local_abort_reversal_repeat_and_drift_are_guarded(self):
+        runtime = prepare.runtime
+        for package, apply, names in (
+            ("noq", runtime.local_abort_runtime, ("src/connection.rs", "src/endpoint.rs")),
+            ("noq-proto", runtime.local_abort_proto, ("src/connection/mod.rs",)),
+        ):
+            paths = [ROOTS[package] / name for name in names]
+            before = [path.read_bytes() for path in paths]
+            with self.assertRaises(ValueError):
+                apply(ROOTS[package])
+            self.assertEqual([path.read_bytes() for path in paths], before)
+            with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
+                root = Path(temporary)
+                with tarfile.open(ARCHIVES[package]) as archive:
+                    archive.extractall(root, filter="data")
+                root = root / f"{package}-{prepare.VERSION}"
+                if package == "noq":
+                    runtime.apply(root)
+                    # Other production transforms affect different anchors.
+                    runtime.native_cid_events(root)
+                    runtime.native_path_retention(root)
+                else:
+                    policy.apply(root)
+                    policy.native_cid_events(root)
+                    policy.native_path_retention(root)
+                baseline = [(root / name).read_text(encoding="utf-8") for name in names]
+                apply(root)
+                actual = [(root / name).read_text(encoding="utf-8") for name in names]
+                self.assertEqual(actual, [value.decode("utf-8") for value in before])
+                swaps = runtime.RUNTIME_ABORT_SWAPS if package == "noq" else runtime.PROTO_ABORT_SWAPS
+                self.assertEqual(runtime.transform_abort(actual[0], swaps, reverse=True), baseline[0])
+                if package == "noq":
+                    self.assertEqual(policy.replace(actual[1], runtime.ENDPOINT_ABORT_NEW,
+                                                    runtime.ENDPOINT_ABORT_OLD), baseline[1])
+                for name, value in zip(names, baseline):
+                    (root / name).write_text(value, encoding="utf-8")
+                drift = root / names[-1]
+                drift.write_text("source anchor drift", encoding="utf-8")
+                snapshot = [(root / name).read_bytes() for name in names]
+                with self.assertRaises(ValueError):
+                    apply(root)
+                self.assertEqual([(root / name).read_bytes() for name in names], snapshot)
+
+    def test_driver_abort_returns_original_error_and_drops_resources_after_unlock(self):
+        runtime = prepare.runtime
+        text = (ROOTS["noq"] / "src/connection.rs").read_text(encoding="utf-8")
+        self.assertIn("return Poll::Ready(Err(error));", text)
+        self.assertIn(runtime.DRIVER_DROP_NEW, text)
+        self.assertIn("state.conn_events.take()", runtime.DRIVER_DROP_NEW)
+        self.assertLess(runtime.DRIVER_DROP_NEW.index("};"), runtime.DRIVER_DROP_NEW.index("drop(resources)"))
+        self.assertLess(runtime.DRIVER_ABORT.index("abort_local("), runtime.DRIVER_ABORT.index("forward_endpoint_events()"))
+        self.assertLess(runtime.DRIVER_ABORT.index("forward_endpoint_events()"), runtime.DRIVER_ABORT.index("forward_app_events(shared)"))
+        self.assertIn("if self.error.is_none()", runtime.DRIVER_ABORT)
+        self.assertIn("std::mem::take(&mut state.open_path)", runtime.DRIVER_DROP_NEW)
+        self.assertLess(runtime.ENDPOINT_ABORT_NEW.index("};"), runtime.ENDPOINT_ABORT_NEW.index("drop(senders)"))
+        self.assertLess(runtime.ENDPOINT_ABORT_NEW.index("};"), runtime.ENDPOINT_ABORT_NEW.index("notify_waiters()"))
+        self.assertTrue(json.loads((ARGS.destination / "provenance.json").read_text())["driver_local_abort"])
 
     def test_source_anchor_drift_and_repeat_patch_are_rejected(self):
         for source in ("", "unexpected source", "aa"):

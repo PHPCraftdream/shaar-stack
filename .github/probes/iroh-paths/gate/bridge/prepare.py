@@ -162,6 +162,8 @@ def main():
         '#![forbid(unsafe_code)]\n#[path = "support/nat/tests.rs"]\nmod suite;\n', encoding="utf-8")
     noq = args.destination / "noq-source"
     shutil.copytree(args.noq_source, noq)
+    from runtime import local_abort_proto
+    local_abort_proto(noq)
     native_cid_events(noq)
     native_path_retention(noq)
     add_packet_identity(noq)
