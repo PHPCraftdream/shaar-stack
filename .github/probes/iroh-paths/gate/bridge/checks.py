@@ -7,6 +7,10 @@ import tempfile
 import tomllib
 import unittest
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from prepare import CID_PATH_DISPATCH, LEGACY_PATH_DISPATCH, pair_runtime_events  # noqa: E402
+
 
 class PreparationChecks(unittest.TestCase):
     def run_prepare(self, archive, probe, destination):
@@ -18,6 +22,70 @@ class PreparationChecks(unittest.TestCase):
              "--destination", str(destination)],
             text=True, capture_output=True, timeout=30,
         )
+
+    def test_runtime_event_pairing_preserves_other_source(self):
+        for has_event, dispatch, expected in (
+            (False, CID_PATH_DISPATCH, LEGACY_PATH_DISPATCH),
+            (False, LEGACY_PATH_DISPATCH, LEGACY_PATH_DISPATCH),
+            (True, CID_PATH_DISPATCH, CID_PATH_DISPATCH),
+        ):
+            with self.subTest(has_event=has_event, dispatch=dispatch):
+                with tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    runtime, proto = root / "runtime", root / "proto"
+                    (runtime / "src").mkdir(parents=True)
+                    (proto / "src/connection").mkdir(parents=True)
+                    connection = runtime / "src/connection.rs"
+                    protocol = proto / "src/connection/paths.rs"
+                    connection.write_text("before\n" + dispatch + "\nafter\n", encoding="utf-8")
+                    protocol.write_text("RemoteCidsAvailable" if has_event else "RemoteStatus", encoding="utf-8")
+                    original_protocol = protocol.read_bytes()
+                    pair_runtime_events(runtime, proto)
+                    self.assertEqual(connection.read_text(encoding="utf-8"), "before\n" + expected + "\nafter\n")
+                    self.assertEqual(protocol.read_bytes(), original_protocol)
+                    first = connection.read_bytes()
+                    pair_runtime_events(runtime, proto)
+                    self.assertEqual(connection.read_bytes(), first)
+
+    def test_runtime_event_pairing_rejects_drift_without_overwrite(self):
+        for protocol_text, runtime_text, message in (
+            ("RemoteCidsAvailable", LEGACY_PATH_DISPATCH, "protocol/runtime event mismatch"),
+            ("RemoteStatus", "changed dispatch", "dispatch anchor changed"),
+            ("RemoteStatus", CID_PATH_DISPATCH * 2, "dispatch anchor changed"),
+        ):
+            with self.subTest(runtime=runtime_text):
+                with tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    runtime, proto = root / "runtime", root / "proto"
+                    (runtime / "src").mkdir(parents=True)
+                    (proto / "src/connection").mkdir(parents=True)
+                    connection = runtime / "src/connection.rs"
+                    protocol = proto / "src/connection/paths.rs"
+                    connection.write_text(runtime_text, encoding="utf-8")
+                    protocol.write_text(protocol_text, encoding="utf-8")
+                    before_runtime, before_proto = connection.read_bytes(), protocol.read_bytes()
+                    with self.assertRaisesRegex(ValueError, message):
+                        pair_runtime_events(runtime, proto)
+                    self.assertEqual(connection.read_bytes(), before_runtime)
+                    self.assertEqual(protocol.read_bytes(), before_proto)
+
+    def test_prepared_pair_does_not_modify_input_sources(self):
+        runtime_input = self.args.runtime_source / "src/connection.rs"
+        proto_input = self.args.noq_source / "src/connection/paths.rs"
+        before_runtime, before_proto = runtime_input.read_bytes(), proto_input.read_bytes()
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / "destination"
+            result = self.run_prepare(self.args.archive, self.args.probe, destination)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            copied_runtime = (destination / "runtime-source/src/connection.rs").read_text(encoding="utf-8")
+            copied_proto = (destination / "noq-source/src/connection/paths.rs").read_text(encoding="utf-8")
+            expected = before_runtime.decode("utf-8")
+            if "RemoteCidsAvailable" not in copied_proto:
+                expected = expected.replace(CID_PATH_DISPATCH, LEGACY_PATH_DISPATCH)
+                self.assertNotIn("RemoteCidsAvailable", copied_runtime)
+            self.assertEqual(copied_runtime, expected)
+        self.assertEqual(runtime_input.read_bytes(), before_runtime)
+        self.assertEqual(proto_input.read_bytes(), before_proto)
 
     def test_corrupt_archive_is_rejected_before_destination_creation(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -16,6 +16,24 @@ from policy import connection_limit_bridge, forwarder, joined_actor_shutdown, li
 DIGEST = "885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833"
 
 
+LEGACY_PATH_DISPATCH = "Path(evt @ PathEvent::RemoteStatus { .. }) => {"
+CID_PATH_DISPATCH = "Path(evt @ (PathEvent::RemoteStatus { .. } | PathEvent::RemoteCidsAvailable { .. })) => {"
+
+
+def pair_runtime_events(runtime: Path, proto: Path):
+    connection = runtime / "src/connection.rs"
+    text = connection.read_text(encoding="utf-8")
+    protocol = (proto / "src/connection/paths.rs").read_text(encoding="utf-8")
+    if text.count(CID_PATH_DISPATCH) + text.count(LEGACY_PATH_DISPATCH) != 1:
+        raise ValueError("native CID runtime dispatch anchor changed")
+    if "RemoteCidsAvailable" not in protocol and CID_PATH_DISPATCH in text:
+        # Only the isolated copy loses an informational event absent from its paired protocol.
+        text = replace(text, CID_PATH_DISPATCH, LEGACY_PATH_DISPATCH)
+        connection.write_text(text, encoding="utf-8", newline="\n")
+    elif "RemoteCidsAvailable" in protocol and CID_PATH_DISPATCH not in text:
+        raise ValueError("native CID protocol/runtime event mismatch")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", type=Path, required=True)
@@ -101,7 +119,9 @@ def main():
     noq = args.destination / "noq-source"
     shutil.copytree(args.noq_source, noq)
     add_packet_identity(noq)
-    shutil.copytree(args.runtime_source, args.destination / "runtime-source")
+    runtime = args.destination / "runtime-source"
+    shutil.copytree(args.runtime_source, runtime)
+    pair_runtime_events(runtime, noq)
     manifest = (args.probe / "Cargo.toml").read_text(encoding="utf-8")
     if manifest.count('    "net",\n') != 1:
         raise ValueError("pinned Tokio feature anchor changed")
