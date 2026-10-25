@@ -433,13 +433,12 @@ impl Core {
                 ..
             } => {
                 self.relay_control_closed(peer_id, connection_id);
-                if num_established == 0 {
-                    if let Some(Closing {
+                if num_established == 0
+                    && let Some(Closing {
                         reply: Some(reply), ..
                     }) = self.closing.remove(&peer_id)
-                    {
-                        let _ = reply.send(Ok(()));
-                    }
+                {
+                    let _ = reply.send(Ok(()));
                 }
                 // Request-response emits terminal failures; request charges stay until then.
             }

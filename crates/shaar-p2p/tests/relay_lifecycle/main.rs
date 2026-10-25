@@ -17,6 +17,10 @@ async fn actual_relay_packets_are_pinned_exact_bounded_reused_and_reopened() {
         assert_eq!(snapshots.borrow().as_slice(), &[lease]);
         assert_eq!(group.b.reserve(group.relay).await.unwrap(), lease);
         let connection = group.a.connect_via(group.b.peer_id(), group.relay).await.unwrap();
+        let mut changed_endpoint = group.relay.socket_addr();
+        changed_endpoint.set_port(if changed_endpoint.port() == 1 { 2 } else { 1 });
+        let changed_relay = RelayAddr::new(group.relay.peer_id(), changed_endpoint).unwrap();
+        assert_eq!(group.a.connect_via(group.b.peer_id(), changed_relay).await.unwrap_err().kind(), io::ErrorKind::AlreadyExists);
         let mut first_generation = None;
         for bytes in [&[7_u8][..], &[9_u8; shaar_p2p::MAX_DATAGRAM][..]] {
             group.a.send(group.b.peer_id(), Datagram::new(bytes).unwrap()).await.unwrap();

@@ -71,9 +71,10 @@ async fn failed_reservations_wait_for_demand_without_a_ready_timer_loop() {
     let relay = address(peer());
     let (reply, result) = oneshot::channel();
     owner.core.reserve_relay(relay, reply);
+    let listener = owner.core.relay.records[&relay.peer].listener.unwrap();
     owner
         .core
-        .stop_reservation(relay.peer, Some(io::ErrorKind::ConnectionRefused.into()));
+        .relay_listener_failed(listener, io::ErrorKind::ConnectionRefused.into());
     // Model the transport's terminal listener acknowledgement, not merely remove_listener.
     owner
         .core
@@ -165,6 +166,80 @@ async fn advertisements_are_validated_and_bounded_before_retention() {
     let record = &owner.core.relay.records[&relay.peer];
     assert_eq!(record.addresses.len(), ADDRESSES);
     assert!(record.phase == Phase::Stopping);
+    owner.run(async {}).await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancelled_reservation_waiter_stops_before_the_admission_deadline() {
+    let (mut owner, _handle, _incoming) = Carrier::bind(
+        Keypair::generate_ed25519(),
+        "127.0.0.1:0".parse().unwrap(),
+        vec![],
+    )
+    .unwrap();
+    let relay = address(peer());
+    let (reply, result) = oneshot::channel();
+    owner.core.reserve_relay(relay, reply);
+    assert!(owner.core.relay.records[&relay.peer].phase == Phase::Pending);
+    drop(result);
+    owner.core.relay_tick(Instant::now()).unwrap();
+    let record = &owner.core.relay.records[&relay.peer];
+    assert!(record.phase == Phase::Stopping);
+    assert!(record.expiry.is_none());
+    assert!(owner.core.relay.snapshots.borrow().is_empty());
+    owner.run(async {}).await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_closing_circuit_cannot_be_reused() {
+    let app = peer();
+    let (mut owner, _handle, _incoming) = Carrier::bind(
+        Keypair::generate_ed25519(),
+        "127.0.0.1:0".parse().unwrap(),
+        vec![app],
+    )
+    .unwrap();
+    let relay = address(peer());
+    let current = ConnectionId::new_unchecked(802);
+    let endpoint = libp2p::core::ConnectedPoint::Dialer {
+        address: relay.prefix().with(Protocol::P2p(app)),
+        role_override: libp2p::core::Endpoint::Dialer,
+        port_use: libp2p::core::transport::PortUse::New,
+    };
+    owner.core.swarm.behaviour_mut().admission.on_swarm_event(
+        libp2p::swarm::behaviour::FromSwarm::ConnectionEstablished(
+            libp2p::swarm::behaviour::ConnectionEstablished {
+                peer_id: app,
+                connection_id: current,
+                endpoint: &endpoint,
+                failed_addresses: &[],
+                other_established: 0,
+            },
+        ),
+    );
+    owner.core.relay.routes.insert(
+        current,
+        Route::Relayed {
+            relay: Some(relay.peer),
+            generation: 1,
+        },
+    );
+    let (reply, reused) = oneshot::channel();
+    owner.core.connect_via(app, relay, reply);
+    assert_eq!(reused.await.unwrap().unwrap(), current);
+    owner.core.closing.insert(
+        app,
+        Closing {
+            deadline: Instant::now() + DEADLINE,
+            reply: None,
+        },
+    );
+    let (reply, rejected) = oneshot::channel();
+    owner.core.connect_via(app, relay, reply);
+    assert_eq!(
+        rejected.await.unwrap().unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
     owner.run(async {}).await.unwrap();
 }
 

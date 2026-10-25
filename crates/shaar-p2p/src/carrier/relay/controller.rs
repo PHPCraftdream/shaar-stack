@@ -157,6 +157,22 @@ impl Core {
             let _ = reply.send(Err(io::Error::from(io::ErrorKind::PermissionDenied)));
             return;
         }
+        if self.closing.contains_key(&peer) {
+            let _ = reply.send(Err(capacity()));
+            return;
+        }
+        if self
+            .relay
+            .targets
+            .get(&address.peer)
+            .is_some_and(|target| target.address != address)
+        {
+            let _ = reply.send(Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "relay address already pinned",
+            )));
+            return;
+        }
         if let Some(id) = self.swarm.behaviour().admission.connection(&peer) {
             let result = match self.relay.routes.get(&id) {
                 Some(Route::Relayed {
@@ -172,7 +188,6 @@ impl Core {
         }
         if self.pending.len() >= PENDING_LIMIT
             || self.pending.values().any(|pending| pending.peer == peer)
-            || self.closing.contains_key(&peer)
         {
             let _ = reply.send(Err(capacity()));
             return;
