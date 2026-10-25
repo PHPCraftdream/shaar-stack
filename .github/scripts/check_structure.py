@@ -190,6 +190,9 @@ def check_item_limits(paths: list[bytes]) -> list[str]:
         # Every item, including a file, counts as an item of its directory.
         for i in range(len(parts)):
             parent = b"/".join(parts[:i])
+            # Only direct Markdown snapshots have the agreed checkpoint exemption.
+            if parent == b"docs/checkpoints" and i == len(parts) - 1 and ext(path) in DOC_EXTS:
+                continue
             children[parent].add(parts[i])
     errors: list[str] = []
     for parent in sorted(children):

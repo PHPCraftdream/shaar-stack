@@ -126,6 +126,20 @@ class ItemLimitTests(unittest.TestCase):
         counted = cs.check_item_limits(paths + [b"p/sub8/f.rs"])
         self.assertEqual(len(counted), 1)
 
+    def test_only_direct_checkpoint_markdown_is_exempt(self):
+        snapshots = [f"docs/checkpoints/{i}.md".encode() for i in range(10)]
+        self.assertEqual(cs.check_item_limits(snapshots), [])
+        self.assertFalse(cs.is_ignored(snapshots[0]))
+        for prefix in ("docs/other", "docs/checkpoints/nested"):
+            paths = [f"{prefix}/{i}.md".encode() for i in range(8)]
+            self.assertEqual(len(cs.check_item_limits(paths)), 1)
+        code = [f"docs/checkpoints/{i}.py".encode() for i in range(8)]
+        self.assertEqual(len(cs.check_item_limits(snapshots + code)), 1)
+        directories = [f"docs/checkpoints/sub{i}/x.md".encode() for i in range(8)]
+        self.assertEqual(len(cs.check_item_limits(snapshots + directories)), 1)
+        siblings = [f"docs/other{i}.md".encode() for i in range(7)]
+        self.assertEqual(len(cs.check_item_limits(snapshots + siblings)), 1)
+
     def test_hidden_project_items_counted(self):
         # Root: .gitignore + 7 hidden files = 8 items.
         paths = [b".gitignore"] + [f".hidden{i}.rs".encode() for i in range(7)]

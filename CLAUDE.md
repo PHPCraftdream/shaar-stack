@@ -51,6 +51,9 @@ written in English. The directory `docs/checkpoints/` may remain in Russian.
   subdirectories combined. Hidden project items count too.
 - The rule applies to the repository root as well as to test and
   documentation directories.
+- Direct Markdown snapshots in `docs/checkpoints/` are exempt from the item
+  count. The directory itself, its subdirectories, and non-Markdown files
+  remain subject to the limit.
 - Tool service data and generated artifacts that are not project sources do
   not count: for example, `.git` and `target`.
 - Structure must be planned in advance; new directory levels must reflect the
