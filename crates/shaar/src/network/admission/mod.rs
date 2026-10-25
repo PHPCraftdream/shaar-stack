@@ -17,6 +17,9 @@ pub use policy::{Allowlist, Limits};
 #[path = "tests.rs"]
 mod tests;
 
+#[cfg(test)]
+mod native_path_tests;
+
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A single native socket and immutable admission policy. Not Clone.
@@ -165,27 +168,39 @@ impl Endpoint {
                 .connect(remote, ALPN)
                 .await
                 .map_err(NetworkError::from_connect)?;
-            if connection.remote_id() != peer || !self.source_matches(&source, &peer) {
-                connection.close(VarInt::from_u32(2), b"");
-                return Err(NetworkError::PeerMismatch);
-            }
-            // An unpublished Session closes the new connection if path setup fails or is cancelled.
-            let session = Self::session(connection, admission)?;
-            if let IncomingAddr::Ip(address) = source
-                && self.custom.is_some()
-            {
-                // Reused paths need the same pruning retention as newly admitted paths.
-                session
-                    .connection
-                    .ensure_native_path(address)
-                    .await
-                    .map_err(NetworkError::NativePath)?;
-            }
-            Ok(session)
+            self.finish_connect(connection, admission, peer, source)
+                .await
         };
         tokio::time::timeout(HANDSHAKE_TIMEOUT, connect)
             .await
             .map_err(|_| NetworkError::Deadline)?
+    }
+
+    /// cancel-safe: NO — an unpublished session closes on failure or cancellation, not drain.
+    async fn finish_connect(
+        &self,
+        connection: iroh::endpoint::Connection,
+        admission: OwnedSemaphorePermit,
+        peer: PublicKey,
+        source: IncomingAddr,
+    ) -> Result<Session, NetworkError> {
+        if connection.remote_id() != peer || !self.source_matches(&source, &peer) {
+            connection.close(VarInt::from_u32(2), b"");
+            return Err(NetworkError::PeerMismatch);
+        }
+        // An unpublished Session closes the new connection if path setup fails or is cancelled.
+        let session = Self::session(connection, admission)?;
+        if let IncomingAddr::Ip(address) = source
+            && self.custom.is_some()
+        {
+            // Reused paths need the same pruning retention as newly admitted paths.
+            session
+                .connection
+                .ensure_native_path(address)
+                .await
+                .map_err(NetworkError::NativePath)?;
+        }
+        Ok(session)
     }
 
     /// Accepts one fully handshaken, allowlisted peer. Mutable access serializes

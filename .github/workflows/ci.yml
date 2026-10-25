@@ -209,7 +209,7 @@ jobs:
             if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
             cat "$log"
             if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-            grep -E '^test result: ok\. 53 passed; 0 failed;' "$log"
+            grep -E '^test result: ok\. 57 passed; 0 failed;' "$log"
           done
       - name: cargo test
         shell: bash
