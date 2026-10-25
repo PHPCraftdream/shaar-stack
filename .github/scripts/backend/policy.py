@@ -338,6 +338,8 @@ def connection(text):
             other: false,
             application_data,
         }""")
+    text = replace(text, "        let pto_max = self.max_pto_for_space(self.highest_space);", """        let pto_max = self.max_pto_for_space(self.highest_space);
+        trace!(?now, ?pto_max, close_deadline = ?(now + 3 * pto_max), "connection close timer");""")
     return text
 
 
@@ -557,8 +559,12 @@ def joined_actor_shutdown(root: Path):
                      "        #[cfg(not(wasm_browser))]\n        let native_sockets = transports.native_socket_handles();\n\n        let local_addrs_watch = transports.local_addrs_watch();")
     socket = replace(socket, "            runtime,\n            static_config,",
                      "            runtime,\n            #[cfg(not(wasm_browser))]\n            native_sockets,\n            static_config,")
-    socket = replace(socket, "        self.runtime.shutdown().await;",
-                     "        self.runtime.shutdown().await;\n        #[cfg(not(wasm_browser))]\n        crate::actor_shutdown::close_native_sockets(&self.native_sockets).await;")
+    socket = replace(socket, "        self.runtime.shutdown().await;", """        trace!("endpoint actor joined");
+        self.runtime.shutdown().await;
+        trace!("endpoint runtime joined");
+        #[cfg(not(wasm_browser))]
+        crate::actor_shutdown::close_native_sockets(&self.native_sockets).await;
+        trace!("endpoint native sockets closed");""")
     owned = Path(__file__).with_name("actor_shutdown.rs").read_bytes()
     for path, text in ((runtime_path, runtime), (remote_path, remote), (child_path, child),
                        (transports_path, transports), (ip_path, ip)):

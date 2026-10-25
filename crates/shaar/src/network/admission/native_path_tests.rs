@@ -213,6 +213,19 @@ impl Fixture {
 
 /// cancel-safe: NO — terminal test deadline; cancellation is an explicit test branch.
 async fn failed_finalization(cancel: bool) {
+    use tracing_subscriber::{Layer, layer::SubscriberExt};
+    let subscriber = tracing_subscriber::registry().with(
+        tracing_subscriber::fmt::layer()
+            .with_test_writer()
+            .without_time()
+            .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                matches!(
+                    metadata.target(),
+                    "noq::connection" | "noq::endpoint" | "noq_proto::connection" | "iroh::socket"
+                )
+            })),
+    );
+    let _subscriber = tracing::subscriber::set_default(subscriber);
     let phase = Cell::new("fixture startup");
     tokio::time::timeout(Duration::from_secs(25), async {
         let mut fixture = Fixture::start().await;
