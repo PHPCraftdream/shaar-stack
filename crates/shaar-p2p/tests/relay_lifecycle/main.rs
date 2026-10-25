@@ -17,6 +17,10 @@ async fn actual_relay_packets_are_pinned_exact_bounded_reused_and_reopened() {
         assert_eq!(snapshots.borrow().as_slice(), &[lease]);
         assert_eq!(group.b.reserve(group.relay).await.unwrap(), lease);
         let connection = group.a.connect_via(group.b.peer_id(), group.relay).await.unwrap();
+        let links = group.a.links();
+        assert_eq!(links.borrow().len(), 1);
+        assert_eq!(links.borrow()[0].connection, connection);
+        assert!(matches!(links.borrow()[0].route, Route::Relayed { relay: Some(peer), .. } if peer == group.relay.peer_id()));
         let mut changed_endpoint = group.relay.socket_addr();
         changed_endpoint.set_port(if changed_endpoint.port() == 1 { 2 } else { 1 });
         let changed_relay = RelayAddr::new(group.relay.peer_id(), changed_endpoint).unwrap();
@@ -26,12 +30,14 @@ async fn actual_relay_packets_are_pinned_exact_bounded_reused_and_reopened() {
             group.a.send(group.b.peer_id(), Datagram::new(bytes).unwrap()).await.unwrap();
             let received = group.b_in.recv().await.unwrap();
             assert_eq!(received.peer, group.a.peer_id());
+            assert!(group.b.is_current(&received));
             assert_eq!(received.packet.as_bytes(), bytes);
             assert!(matches!(received.route, Route::Relayed { relay: None, .. }));
             group.b.send(group.a.peer_id(), received.packet).await.unwrap();
             let received = group.a_in.recv().await.unwrap();
             assert_eq!(received.peer, group.b.peer_id());
             assert_eq!(received.connection, connection);
+            assert!(group.a.is_current(&received));
             assert_eq!(received.packet.as_bytes(), bytes);
             let Route::Relayed { relay: Some(relay), generation } = received.route else { panic!("no actual relay route"); };
             assert_eq!(relay, group.relay.peer_id());
@@ -42,6 +48,7 @@ async fn actual_relay_packets_are_pinned_exact_bounded_reused_and_reopened() {
         assert_eq!(group.a.connect_via(unknown_peer(), group.relay).await.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
         group.wait_counts(|counts| counts.circuits >= 1).await;
         group.a.disconnect(group.b.peer_id()).await.unwrap();
+        assert!(links.borrow().is_empty());
         group.b.disconnect(group.a.peer_id()).await.unwrap();
         let reopened = group.a.connect_via(group.b.peer_id(), group.relay).await.unwrap();
         assert_ne!(reopened, connection);
@@ -57,6 +64,7 @@ async fn actual_relay_packets_are_pinned_exact_bounded_reused_and_reopened() {
         group.b.release_relay(group.relay.peer_id()).await.unwrap();
         assert!(snapshots.borrow().is_empty());
         group.close().await;
+        assert!(links.borrow().is_empty());
     }).await.expect("owned relay exact/reopen deadline");
 }
 

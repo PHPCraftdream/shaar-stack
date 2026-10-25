@@ -77,6 +77,68 @@ impl Pair {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn current_link_observations_revoke_queued_packets_across_reopen_and_shutdown() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let mut pair = Pair::start(false).await;
+        let a_links = pair.a.links();
+        let b_links = pair.b.links();
+        assert!(a_links.borrow().is_empty());
+        let first = pair.connect().await;
+        assert_eq!(
+            a_links.borrow().as_slice(),
+            &[Link {
+                peer: pair.b.peer_id(),
+                connection: first,
+                route: Route::Direct
+            }]
+        );
+        pair.a
+            .send(pair.b.peer_id(), Datagram::new(b"first").unwrap())
+            .await
+            .unwrap();
+        let old = pair.b_in.recv().await.unwrap();
+        assert!(pair.b.is_current(&old));
+        let forged = Received {
+            peer: old.peer,
+            connection: ConnectionId::new_unchecked(usize::MAX),
+            route: old.route,
+            packet: Datagram::new(b"forged").unwrap(),
+        };
+        assert!(!pair.b.is_current(&forged));
+        let forged = Received {
+            peer: old.peer,
+            connection: old.connection,
+            route: Route::Relayed {
+                relay: None,
+                generation: 1,
+            },
+            packet: Datagram::new(b"forged").unwrap(),
+        };
+        assert!(!pair.b.is_current(&forged));
+        pair.a.disconnect(pair.b.peer_id()).await.unwrap();
+        assert!(a_links.borrow().is_empty());
+        pair.b.disconnect(pair.a.peer_id()).await.unwrap();
+        assert!(b_links.borrow().is_empty());
+        assert!(!pair.b.is_current(&old));
+        let next = pair.connect().await;
+        assert_ne!(next, first);
+        pair.a
+            .send(pair.b.peer_id(), Datagram::new(b"next").unwrap())
+            .await
+            .unwrap();
+        let current = pair.b_in.recv().await.unwrap();
+        assert!(pair.b.is_current(&current));
+        assert!(!pair.b.is_current(&old));
+        assert_ne!(old.connection, current.connection);
+        pair.close().await;
+        assert!(a_links.borrow().is_empty());
+        assert!(b_links.borrow().is_empty());
+    })
+    .await
+    .expect("current native link observation deadline");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn configuration_and_native_address_boundaries_are_explicit() {
     let peer = key().public().to_peer_id();
     assert!(Carrier::bind(key(), loopback(), vec![peer; super::super::PEER_LIMIT + 1]).is_err());

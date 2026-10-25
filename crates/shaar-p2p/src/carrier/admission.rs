@@ -47,6 +47,14 @@ impl Admission {
         self.connected.get(peer).copied()
     }
 
+    pub(super) fn application_connections(
+        &self,
+    ) -> impl Iterator<Item = (PeerId, ConnectionId)> + '_ {
+        self.connected
+            .iter()
+            .filter_map(|(peer, connection)| self.allows(peer).then_some((*peer, *connection)))
+    }
+
     pub(super) fn authorize_relay(&mut self, peer: PeerId) -> io::Result<()> {
         if self.allows(&peer) {
             return Err(io::Error::new(

@@ -14,7 +14,7 @@ use libp2p::{
 use tokio::sync::{mpsc, watch};
 
 use super::{
-    CarrierHandle, Command, PENDING_LIMIT, QUEUE_LIMIT, REQUEST_LIMIT, Received, Reply,
+    CarrierHandle, Command, Link, PENDING_LIMIT, QUEUE_LIMIT, REQUEST_LIMIT, Received, Reply,
     admission::Admission, capacity, multiaddr, socket_address,
 };
 use crate::{CONTROL_PROTOCOL, Datagram, DatagramCodec, OwnedExecutor};
@@ -45,6 +45,7 @@ struct Core {
     commands: mpsc::Receiver<Command>,
     incoming: mpsc::Sender<Received>,
     listening: watch::Sender<Option<SocketAddr>>,
+    links: watch::Sender<Vec<Link>>,
     pending: HashMap<ConnectionId, Pending>,
     native_listener: ListenerId,
     relay: relay::State,
@@ -123,10 +124,12 @@ impl Carrier {
         let (incoming, receiver) = mpsc::channel(QUEUE_LIMIT);
         let (listening, ready) = watch::channel(None);
         let (relay, leases) = relay::State::new();
+        let (links, observed_links) = watch::channel(Vec::new());
         let handle = CarrierHandle {
             commands: sender,
             listening: ready,
             leases,
+            links: observed_links,
             peer,
         };
         Ok((
@@ -136,6 +139,7 @@ impl Carrier {
                     commands,
                     incoming,
                     listening,
+                    links,
                     native_listener,
                     relay,
                     pending: HashMap::with_capacity(PENDING_LIMIT),
@@ -173,7 +177,42 @@ mod tests;
 #[path = "fault_tests.rs"]
 mod fault_tests;
 
+impl Drop for Core {
+    fn drop(&mut self) {
+        // Synchronous observation revocation only; I/O destruction is joined by Carrier::run.
+        self.links.send_replace(Vec::new());
+    }
+}
+
 impl Core {
+    fn publish_links(&self) {
+        let mut links: Vec<_> = self
+            .swarm
+            .behaviour()
+            .admission
+            .application_connections()
+            .filter_map(|(peer, connection)| {
+                if self.closing.contains_key(&peer) {
+                    return None;
+                }
+                self.relay
+                    .routes
+                    .get(&connection)
+                    .copied()
+                    .map(|route| Link {
+                        peer,
+                        connection,
+                        route,
+                    })
+            })
+            .collect();
+        links.sort_unstable_by_key(|link| link.peer);
+        let changed = *self.links.borrow() != links;
+        if changed {
+            self.links.send_replace(links);
+        }
+    }
+
     async fn drive(
         &mut self,
         executor: &mut OwnedExecutor,
@@ -226,27 +265,34 @@ impl Core {
                 "carrier disconnect deadline",
             ));
         }
-        for request in self.requests.values_mut() {
-            if request.deadline > now {
-                continue;
-            }
-            let Some(reply) = request.reply.take() else {
-                continue;
-            };
-            let _ = reply.send(Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "carrier request deadline",
-            )));
-            // Keep the ID charged until the dependency emits its terminal event.
-            if let std::collections::hash_map::Entry::Vacant(entry) =
-                self.closing.entry(request.peer)
+        let mut changed = false;
+        for request in self.requests.values() {
+            if request.deadline <= now
+                && request.reply.is_some()
+                && let std::collections::hash_map::Entry::Vacant(entry) =
+                    self.closing.entry(request.peer)
             {
                 let _ = self.swarm.disconnect_peer_id(request.peer);
                 entry.insert(Closing {
                     deadline: now + DEADLINE,
                     reply: None,
                 });
+                changed = true;
             }
+        }
+        if changed {
+            self.publish_links();
+        }
+        for request in self.requests.values_mut() {
+            if request.deadline <= now
+                && let Some(reply) = request.reply.take()
+            {
+                let _ = reply.send(Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "carrier request deadline",
+                )));
+            }
+            // Keep the ID charged until the dependency emits its terminal event.
         }
         Ok(())
     }
@@ -354,6 +400,7 @@ impl Core {
                             reply: Some(reply),
                         },
                     );
+                    self.publish_links();
                 } else {
                     let _ = reply.send(Ok(()));
                 }
@@ -413,6 +460,7 @@ impl Core {
                 if result.is_err() {
                     let _ = self.swarm.disconnect_peer_id(peer_id);
                 }
+                self.publish_links();
                 if let Some(pending) = pending {
                     let _ = pending.reply.send(result.map(|()| connection_id));
                 }
@@ -433,6 +481,7 @@ impl Core {
                 ..
             } => {
                 self.relay_control_closed(peer_id, connection_id);
+                self.publish_links();
                 if num_established == 0
                     && let Some(Closing {
                         reply: Some(reply), ..

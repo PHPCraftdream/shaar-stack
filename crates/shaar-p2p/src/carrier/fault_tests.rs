@@ -20,6 +20,13 @@ async fn terminal_driver_paths_join_and_release_listeners_with_external_handles(
             let peer = key().public().to_peer_id();
             let (mut owner, handle, incoming) =
                 Carrier::bind(key(), address.parse().unwrap(), vec![peer]).unwrap();
+            // Seed an observation to make destruction revocation sensitive on every terminal path.
+            owner.core.links.send_replace(vec![Link {
+                peer,
+                connection: ConnectionId::new_unchecked(99),
+                route: Route::Direct,
+            }]);
+            let observed = handle.links();
             match mode {
                 0 => {
                     owner.core.closing.insert(
@@ -45,6 +52,7 @@ async fn terminal_driver_paths_join_and_release_listeners_with_external_handles(
                     drop(incoming);
                 }
             }
+            assert!(observed.borrow().is_empty());
             let _rebound = tokio::net::TcpListener::bind(address).await.unwrap();
         }
     })
@@ -74,6 +82,7 @@ async fn ledger_caps_before_submission_and_expired_ids_remain_charged_until_term
             a.core.event(event).unwrap();
         }
         connected.await.unwrap().unwrap();
+        assert_eq!(a.core.links.borrow().len(), 1);
         let mut results = Vec::with_capacity(REQUEST_LIMIT);
         for _ in 0..REQUEST_LIMIT {
             let (reply, result) = oneshot::channel();
@@ -96,6 +105,7 @@ async fn ledger_caps_before_submission_and_expired_ids_remain_charged_until_term
         // Exercise the production deadline action on real admitted IDs, before polling replies.
         let expired = tokio::time::Instant::now() + DEADLINE;
         a.core.expire(expired).unwrap();
+        assert!(a.core.links.borrow().is_empty());
         for result in results {
             assert_eq!(
                 result.await.unwrap().unwrap_err().kind(),

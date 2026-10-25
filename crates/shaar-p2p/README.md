@@ -367,6 +367,36 @@ count. This is a controller transition test with injected authenticated context,
 not another real-network expiry proof. Common SDK identity, Iroh custom transport,
 Amino discovery and consolidated signaling-only frame proof remain separate leaves.
 
+At `9626c37`, completed [CI 40174230988](https://github.com/PHPCraftdream/shaar-stack/actions/runs/40174230988)
+confirmed that additional expiry regression on Linux and Windows: 31 P2P library
+tests and all seven real relay scenarios passed, with the full matrix successful.
+The integrated controller worktree was removed only after all changed files were
+verified byte-identical to tracked product files and this CI proof was read.
+
+## Current link observations — authored, pending CI
+
+A queued `Received` can outlive its physical connection. `CarrierHandle::links`
+therefore exposes at most 16 application-link observations, sorted by authenticated
+peer and carrying the actual ConnectionId and route. Infrastructure connections are
+excluded. Publication occurs only on connection lifecycle changes, not per packet.
+A bounded cold scan and small Vec are chosen over maintaining another hot shared
+index. Closing links are removed before a disconnect completes or timeout replies
+are delivered; synchronous Core destruction publishes an empty final snapshot,
+including cancellation/fatal exits. This is not async work in Drop or a joined I/O
+promise: `Carrier::run` still owns actual task abort/join.
+
+`is_current` compares a queued record with that current observation and refuses
+closed submission handles. A copied snapshot does not pin a link, promise future
+liveness, or grant QUIC application-data permission. Observation and subsequent I/O
+are not one atomic operation; the Iroh adapter still needs instance/generation
+binding and final authenticated-peer validation. Noq's NativeOnly policy is unchanged.
+
+Authored controls cover real native queued-record rejection across disconnect and
+reopen, forged connection/route metadata, retained observers after shutdown, timeout
+revocation, fatal/last-handle/consumer terminal exits and real owned-relay link
+metadata. Their new outcomes await CI; this prerequisite is not the full Iroh adapter
+or the common SDK identity bridge.
+
 ## Remaining implementation and acceptance
 
 P08 is decomposed into dependency/safety gate, bounded carrier and owned executor,

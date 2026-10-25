@@ -17,6 +17,14 @@ const PENDING_LIMIT: usize = 8;
 const QUEUE_LIMIT: usize = 32;
 const REQUEST_LIMIT: usize = 32;
 
+/// A current application link observation, not authority to extend a connection's lifetime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Link {
+    pub peer: PeerId,
+    pub connection: ConnectionId,
+    pub route: Route,
+}
+
 /// Source identity and connection come from authenticated Swarm events, never packet bytes.
 #[derive(Debug)]
 pub struct Received {
@@ -32,6 +40,7 @@ pub struct CarrierHandle {
     commands: mpsc::Sender<Command>,
     listening: watch::Receiver<Option<SocketAddr>>,
     leases: watch::Receiver<Vec<RelayLease>>,
+    links: watch::Receiver<Vec<Link>>,
     peer: PeerId,
 }
 
@@ -97,6 +106,27 @@ impl CarrierHandle {
     /// Bounded snapshots only; retaining a receiver does not own any network resource.
     pub fn relay_leases(&self) -> watch::Receiver<Vec<RelayLease>> {
         self.leases.clone()
+    }
+
+    /// At most 16 authenticated application links, sorted by peer; infrastructure is excluded.
+    /// Closing links are omitted; driver destruction publishes an empty final snapshot.
+    /// A copied snapshot does not pin a live link or authorize application data on QUIC.
+    pub fn links(&self) -> watch::Receiver<Vec<Link>> {
+        self.links.clone()
+    }
+
+    /// Checks a queued record against the current observation; future liveness is not promised.
+    pub fn is_current(&self, received: &Received) -> bool {
+        if self.commands.is_closed() {
+            return false;
+        }
+        let links = self.links.borrow();
+        links
+            .binary_search_by_key(&received.peer, |link| link.peer)
+            .is_ok_and(|index| {
+                links[index].connection == received.connection
+                    && links[index].route == received.route
+            })
     }
 
     /// Requests or reuses one of at most two advertised relay reservations.
