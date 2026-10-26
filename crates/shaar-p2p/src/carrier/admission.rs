@@ -241,6 +241,15 @@ impl NetworkBehaviour for Admission {
                 )));
             }
             let peer = peer.expect("checked above");
+            if addresses.len() != 1 {
+                return Err(ConnectionDenied::new(io::Error::from(
+                    io::ErrorKind::PermissionDenied,
+                )));
+            }
+            // Swarm qualifies after this hook; pin the identical address before admission.
+            let qualified = addresses[0].clone().with_p2p(peer).map_err(|_| {
+                ConnectionDenied::new(io::Error::from(io::ErrorKind::PermissionDenied))
+            })?;
             let now = Instant::now();
             if let Some(key) = view.current(peer, now) {
                 if key.connection != id || addresses.len() != 1 {
@@ -249,14 +258,14 @@ impl NetworkBehaviour for Admission {
                         "destination authority unavailable",
                     )));
                 }
-                if view.matches_root(key, addresses[0].as_ref(), now) {
+                if view.matches_root(key, qualified.as_ref(), now) {
                     return Ok(Vec::new());
                 }
                 if view.is_child(key)
                     && self
                         .native_permit
                         .as_ref()
-                        .is_some_and(|permit| permit(peer, &addresses[0]))
+                        .is_some_and(|permit| permit(peer, &qualified))
                 {
                     return Ok(Vec::new());
                 }
@@ -271,7 +280,7 @@ impl NetworkBehaviour for Admission {
                 && self
                     .native_permit
                     .as_ref()
-                    .is_some_and(|permit| permit(peer, &addresses[0]));
+                    .is_some_and(|permit| permit(peer, &qualified));
             if application_child {
                 self.owner
                     .as_mut()
@@ -286,14 +295,14 @@ impl NetworkBehaviour for Admission {
                 && self
                     .native_permit
                     .as_ref()
-                    .is_some_and(|permit| permit(peer, &addresses[0]));
+                    .is_some_and(|permit| permit(peer, &qualified));
             if !exact_explicit {
                 return Err(ConnectionDenied::new(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     "destination authority unavailable",
                 )));
             }
-            self.stage_native(peer, &addresses[0], id)
+            self.stage_native(peer, &qualified, id)
                 .map_err(ConnectionDenied::new)?;
             return Ok(Vec::new());
         }

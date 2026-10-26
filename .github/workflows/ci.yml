@@ -114,6 +114,30 @@ jobs:
         run: |
           set -euo pipefail
           python -I .github/scripts/p2p/relay/fixtures/wire/run.py --repository . --source target/p2p/relay/libp2p-relay-0.22.0 --destination target/relay-operation-wire
+      - name: Verify Carrier protocol barrier and isolated guard counterfactual
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I .github/scripts/p2p/carrier-wire-proof/checks.py
+          python -I .github/scripts/p2p/carrier-wire-proof/run.py --repository . --destination target/carrier-wire-proof
+      - name: Preserve Carrier protocol proof receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: carrier-protocol-proof-${{ matrix.os }}
+          path: |
+            target/carrier-wire-proof/product-metadata.json
+            target/carrier-wire-proof/run-receipt.json
+            target/carrier-wire-proof/*/fixture-provenance.json
+            target/carrier-wire-proof/*/graph-receipt.json
+            target/carrier-wire-proof/*/metadata.json
+            target/carrier-wire-proof/*/compile.jsonl
+            target/carrier-wire-proof/*/compile-failure.log
+            target/carrier-wire-proof/*/run.log
+            target/carrier-wire-proof/*/inventory.log
+            target/carrier-wire-proof/*/variant-receipt.json
+            target/carrier-wire-proof/*/workspace/Cargo.lock
+          if-no-files-found: warn
       - name: Verify resolver locking with archive features and genuine counterfactuals
         shell: bash
         run: |
@@ -289,7 +313,7 @@ jobs:
           python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
           cat "$log"
           if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 32 passed; 0 failed;' "$log"
+          grep -E '^test result: ok\. 33 passed; 0 failed;' "$log"
       - name: Preserve owned relay revocation proof receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

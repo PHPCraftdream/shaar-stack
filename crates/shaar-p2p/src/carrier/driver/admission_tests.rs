@@ -8,6 +8,77 @@ use libp2p::{
 use std::{io, sync::Arc};
 use tokio::time::Instant;
 
+#[tokio::test(flavor = "current_thread")]
+async fn carrier_destination_relay_control_qualifies_before_swarm_transport() {
+    let relay = peer();
+    let socket: std::net::SocketAddr = "127.0.0.1:4321".parse().unwrap();
+    let address = multiaddr(socket);
+    let qualified = address
+        .clone()
+        .with(libp2p::multiaddr::Protocol::P2p(relay));
+    let mut owner = Owner::new(&[], &[]).unwrap();
+    owner
+        .admit_identity(relay, crate::discovery::roles::Role::ExplicitRelay(socket))
+        .unwrap();
+    let view = owner.view();
+    let gate = super::relay::gate::Gate::new();
+    let factory = gate.factory(view.clone());
+    let permit = gate.clone();
+    let mut admission = Admission::with_authority(
+        vec![],
+        owner,
+        Some(Arc::new(move |peer, address| {
+            permit.native_permit(peer, address)
+        })),
+    )
+    .unwrap();
+    let id = ConnectionId::new_unchecked(80);
+    let dial = |admission: &mut Admission, addresses: &[Multiaddr]| {
+        admission.handle_pending_outbound_connection(id, Some(relay), addresses, Endpoint::Dialer)
+    };
+    // A peer/endpoint pair alone is not authority.
+    assert!(dial(&mut admission, std::slice::from_ref(&address)).is_err());
+    let generation = gate
+        .stage_reserve(relay, socket, Instant::now() + DEADLINE)
+        .unwrap();
+    let (mut transport, behaviour) =
+        libp2p::relay::client::new_with_operation_factory(peer(), factory);
+    transport
+        .listen_on(
+            ListenerId::next(),
+            qualified
+                .clone()
+                .with(libp2p::multiaddr::Protocol::P2pCircuit),
+        )
+        .unwrap();
+    let foreign = address
+        .clone()
+        .with(libp2p::multiaddr::Protocol::P2p(peer()));
+    assert!(dial(&mut admission, &[foreign]).is_err());
+    assert!(
+        dial(
+            &mut admission,
+            &[multiaddr("127.0.0.1:4322".parse().unwrap())]
+        )
+        .is_err()
+    );
+    assert!(dial(&mut admission, &[address.clone(), qualified.clone()]).is_err());
+    // Relay Behaviour supplies the bare address; Swarm appends the peer after this hook.
+    assert!(dial(&mut admission, std::slice::from_ref(&address)).is_ok());
+    let key = view.current(relay, Instant::now()).unwrap();
+    assert_eq!(key.connection, id);
+    let lease = view.root_lease(qualified.as_ref()).unwrap();
+    assert!(view.root_lease(address.as_ref()).is_err());
+    admission.terminal(key, None);
+    drop(lease);
+    gate.revoke_all();
+    gate.terminal_reservation(relay, generation);
+    drop(transport);
+    drop(behaviour);
+    drop(admission);
+    gate.join_release().await.unwrap();
+}
+
 fn peer() -> PeerId {
     Keypair::generate_ed25519().public().to_peer_id()
 }
