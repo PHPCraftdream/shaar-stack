@@ -108,6 +108,20 @@ def prepare(archive, destination):
     transport = replace(transport_path.read_text(encoding="utf-8"),
                         "    fn close(&mut self, reason: Result<(), Error>) {\n        self.queued_events",
                         "    fn close(&mut self, reason: Result<(), Error>) {\n        self.from_behaviour.close();\n        self.queued_events")
+    import sys
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from relay.patch import patch as operation_patch
+    library, client, handler, transport, reservation = operation_patch(library, client, handler, transport)
+    operation_sources = {
+        "operation_gate.rs": "gate.rs",
+        "operation_tests.rs": "tests.rs",
+        "priv_client/operation_handler_tests.rs": "fixtures/handler_tests.rs",
+        "operation_client_tests.rs": "fixtures/client_tests.rs",
+    }
+    operation_bytes = {name: (Path(__file__).parent / "relay" / source).read_bytes()
+                       for name, source in operation_sources.items()}
+    operation_bytes["priv_client/handler/reservation.rs"] = reservation.encode("utf-8")
     owned = Path(__file__).with_name("lease.rs").read_bytes()
     module = root / "src/bounded_lease.rs"
     if module.exists():
@@ -119,17 +133,30 @@ def prepare(archive, destination):
     client_path.write_text(client, encoding="utf-8", newline="\n")
     transport_path.write_text(transport, encoding="utf-8", newline="\n")
     module.write_bytes(owned)
+    for name, content in operation_bytes.items():
+        path = root / "src" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
     manifest_path.write_text(original_manifest + "\n[workspace]\n", encoding="utf-8", newline="\n")
     receipt = {
         "package": "libp2p-relay", "version": VERSION, "archive_sha256": DIGEST,
         "lease_source_sha256": hashlib.sha256(owned).hexdigest(),
         "patch_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "max_lease_seconds": 86400, "fixture_instrumentation": False,
+        "relay_operation_gate": "owner-captured-generation-v1",
+        "operation_source_sha256": {name: hashlib.sha256(content).hexdigest()
+                                    for name, content in operation_bytes.items()},
+        "operation_patch_sha256": {name: hashlib.sha256((Path(__file__).parent / "relay" / name).read_bytes()).hexdigest()
+                                   for name in ("patch.py", "handler_patch.py")},
+        "operation_gate_unit_tests": 13,
+        "operation_handler_unit_tests": 7,
+        "operation_client_unit_tests": 5,
+        "operation_runtime_fixture_verified": False,
         "reservation_expiry_api": "validated-monotonic-instant",
         "authenticated_relay_connection_context": True,
         "cancelled_transport_requests_rejected_before_admission": True,
         "prepared_source_sha256": {name: hashlib.sha256(text.encode("utf-8")).hexdigest()
-                                   for name, text in (("protocol/outbound_hop.rs", protocol),
+                                   for name, text in (("lib.rs", library), ("protocol/outbound_hop.rs", protocol),
                                                       ("priv_client/handler.rs", handler),
                                                       ("priv_client.rs", client),
                                                       ("priv_client/transport.rs", transport))},

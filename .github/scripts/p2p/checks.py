@@ -9,6 +9,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import graph  # noqa: E402
 import prepare  # noqa: E402
+from relay.checks import OperationSourceChecks  # noqa: E402, F401
+from relay.fixtures.wire.checks import WireSourceChecks  # noqa: E402, F401
 
 
 class GraphChecks(unittest.TestCase):
@@ -158,15 +160,20 @@ version = "=0.4.79"\n''', encoding="utf-8")
         owned = Path(__file__).with_name("lease.rs").read_bytes()
         self.assertEqual((root / "src/bounded_lease.rs").read_bytes(), owned)
         self.assertEqual(receipt["lease_source_sha256"], hashlib.sha256(owned).hexdigest())
-        for name, digest in receipt["prepared_source_sha256"].items():
-            self.assertEqual(hashlib.sha256((root / "src" / name).read_bytes()).hexdigest(), digest)
+        self.assertEqual(receipt["relay_operation_gate"], "owner-captured-generation-v1")
+        for group in ("prepared_source_sha256", "operation_source_sha256"):
+            for name, digest in receipt[group].items():
+                self.assertEqual(hashlib.sha256((root / "src" / name).read_bytes()).hexdigest(), digest)
+        for name, digest in receipt["operation_patch_sha256"].items():
+            self.assertEqual(hashlib.sha256((Path(__file__).parent / "relay" / name).read_bytes()).hexdigest(), digest)
         protocol = (root / "src/protocol/outbound_hop.rs").read_text(encoding="utf-8")
         self.assertLess(protocol.index("checked_add(lease.expires_after)"), protocol.index("Delay::new(lease.renew_after)"))
         self.assertIn("        expires_at,", protocol)
         for name in ("priv_client/handler.rs", "priv_client.rs"):
             text = (root / "src" / name).read_text(encoding="utf-8")
             self.assertIn("expires_at: web_time::Instant", text)
-            self.assertIn("renewal, limit, expires_at", text)
+        reservation = (root / "src/priv_client/handler/reservation.rs").read_text(encoding="utf-8")
+        self.assertIn("operation, renewal, limit, expires_at", reservation)
 
     def test_relay_events_preserve_the_authenticated_control_connection(self):
         repository = Path(__file__).resolve().parents[3]
@@ -187,8 +194,10 @@ version = "=0.4.79"\n''', encoding="utf-8")
         close = transport[transport.index("fn close(&mut self, reason: Result<(), Error>)"):]
         self.assertLess(close.index("self.from_behaviour.close()"), close.index("TransportEvent::ListenerClosed"))
         handler = (root / "priv_client/handler.rs").read_text(encoding="utf-8")
-        self.assertIn("if !to_listener.is_closed() { self.make_new_reservation", handler)
-        self.assertIn("if !to_dial.is_canceled() { self.establish_new_circuit", handler)
+        self.assertIn("if to_listener.is_closed() || !operation.matches", handler)
+        self.assertIn("if !to_dial.is_canceled() && operation.matches", handler)
+        self.assertIn("future_operation.run(async move", handler)
+        self.assertIn("!operation.live() || !self.current(&operation)", handler)
 
     def test_existing_prepared_expiry_source_is_never_overwritten(self):
         import hashlib
