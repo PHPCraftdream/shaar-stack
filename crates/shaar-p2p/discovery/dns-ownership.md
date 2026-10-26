@@ -701,6 +701,15 @@ Positive-capacity preconditions prove each work probe is live. CI requires the
 specific selected test, assertion marker and exactly one failed test; compilation
 failure, setup failure or zero selected tests is not evidence.
 
+Each cache counterfactual uses its own initially absent target directory. CI
+rejects an existing directory and requires verbose Cargo logs identifying both
+compilation of the selected counterfactual resolver path and execution of its own
+test binary. This prevents copied same-name/version fixture roots from reusing a
+fixed binary through a shared target directory. The source-delta receipt remains
+necessary but is not a compiled-artifact witness by itself. Separate targets cost
+additional dependency compilation and disk space; isolation takes precedence over
+cache reuse and does not depend on modification timestamps.
+
 These contracts and controls are **added for GitHub CI, not run locally**. Local
 source-data preparation, syntax inspection and formatting do not establish a
 runtime pass. Moka 0.12.16 has no maintenance background worker to register or join.

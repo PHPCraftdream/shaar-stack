@@ -175,9 +175,14 @@ jobs:
                 marker=DISABLED_CACHE_PERFORMED_STORAGE_WORK ;;
             esac
             log="$RUNNER_TEMP/shaar-resolver-counterfactual-$mechanism.log"
-            if cargo test --locked --target-dir target/resolver-locking-archive/target --manifest-path "target/resolver-locking-counterfactual-$mechanism/Cargo.toml" --lib "$test_name" -- --exact >"$log" 2>&1; then status=0; else status=$?; fi
+            fixture="target/resolver-locking-counterfactual-$mechanism"
+            build="$fixture/target"
+            if [[ -e "$build" ]]; then printf 'Counterfactual target must be fresh: %s\n' "$build"; exit 1; fi
+            if cargo test --locked --verbose --target-dir "$build" --manifest-path "$fixture/Cargo.toml" --lib "$test_name" -- --exact >"$log" 2>&1; then status=0; else status=$?; fi
             python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
             cat "$log"
+            grep -E "Compiling hickory-resolver v0\\.26\\.3 .*resolver-locking-counterfactual-$mechanism" "$log"
+            grep -E "Running .*resolver-locking-counterfactual-$mechanism.*hickory_resolver-" "$log"
             if [[ "$status" -eq 0 ]]; then printf 'Cache counterfactual unexpectedly passed\n'; exit 1; fi
             grep -Fx "test $test_name ... FAILED" "$log"
             grep -F "$marker" "$log"
