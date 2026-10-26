@@ -491,3 +491,144 @@ transformation, syntax inspection and standalone formatting do not establish a C
 pass. This correction does not bound lookup cardinality, fix queued DNS exchange
 cancellation, establish cache or socket lifecycle, or implement task admission,
 wire/header limits or discovery destination policy. P08 acceptance remains open.
+
+### Task 97 scoped CI acceptance
+
+Commit `95bb0fc`, CI `40251607124`: Windows and Linux passed 12 common resolver
+contracts, 14 contracts in the additional archive TLS profile, 13 preparation
+controls, and the same 12 common contracts with product identities and host feature
+unions. Separate one-fault counterfactuals failed their exact assertions:
+`CONNECTIONS_HELD_WHILE_WAITING` and `FOREIGN_FUTURE_DROPPED_UNDER_LOCK`.
+Compilation or zero selected tests cannot satisfy either control. The product
+receipts cover 99 Linux and 103 Windows closure packages; the parent inspected
+resolved feature records, source deltas and the unchanged lock identities.
+SDK 58-test suites, existing driver proofs and high-PTO cleanup controls also
+passed. This accepts the two locking corrections, not DNS provider/wire/cache
+ownership or complete Amino discovery. No tests ran locally.
+
+## Task 101: actual Moka and zero-capacity cache boundary
+
+Source-only follow-up. **M** denotes `moka-0.12.16/`; R, N and P retain the
+Hickory 0.26.3 aliases above. The Moka archive is 251546 bytes, with product-lock
+SHA256 `4293f18e7567a1caf3c584855554377025c65e0aa445344d04171f5ad63d19b9`.
+The inspected extracted Moka and resolver files matched their verified archives.
+No dependency code or binary was executed.
+
+### Zero capacity does not mean no construction or copies
+
+`R/src/resolver.rs:558-563` constructs `ResponseCache` unconditionally.
+`R/src/cache.rs:39-46` constructs Moka and an `Arc<TtlConfig>` even at capacity
+zero. Moka still creates shared inner/housekeeper state, zero-capacity channel
+objects, a one-segment main map and a 64-segment initializer waiter map
+(`M/src/sync/base_cache.rs:152-186,1022-1034`;
+`M/src/sync/cache.rs:732-760`; `M/src/sync/value_initializer.rs:49-69`).
+The timer wheel initially has empty buckets, not eagerly populated expiry state.
+
+On the ordinary Hickory response-cache path, zero capacity does prevent retained
+entries and populated maintenance logs. Disabled reads return before read logging
+(`M/src/sync/base_cache.rs:265-280`). Insertion still hashes the key and allocates
+`Arc<K>` before its disabled-map check (`M/src/sync/cache.rs:1476-1485`).
+Maintenance itself immediately returns at zero capacity
+(`M/src/sync/base_cache.rs:1190-1198`). Thus a zero-entry assertion alone cannot
+prove suppression of construction or transient cache work.
+
+Hickory creates cache-only data before those checks:
+
+- Positive finalization clamps TTLs, clones the complete Message into Lookup and
+  sends the original Message to insertion (`R/src/caching_client.rs:531-544`).
+- Error finalization clones the error solely for insertion (`:546-548`).
+- Recursive CNAME finalization constructs an alias-cache Message and clones all
+  answer/authority/additional records, then returns the original child Lookup
+  (`:520-528`).
+- `ResponseCache::upsert_clamped_ttl` computes cache-side lifetime and allocates
+  an `Arc<Result<Message, NetError>>` before Moka rejects storage
+  (`R/src/cache.rs:69-108`).
+
+### Maintenance runs on callers, not background workers
+
+**Moka 0.12.16's sync cache starts no maintenance background threads.** Removal
+of those threads is explicit in `M/README.md:95-98`. The concrete housekeeper
+contains locks, timestamps and configuration; its maintenance methods call the
+cache directly (`M/src/common/concurrent/housekeeper.rs:26-74,105-126`).
+The 300 ms interval is an eligibility threshold checked during operations, not
+a periodic background task. This does not establish that the whole resolver or
+all other dependencies are thread-free.
+
+For positive capacity, Hickory's limit counts responses, not bytes; the default
+is 8192 (`R/src/config.rs:532-534,698-700`). Moka's default weight is one.
+Insertion precedes policy-log processing, so the capacity is not a hard
+pre-retention admission bound. Read/write operation logs each hold 384 entries,
+with flush thresholds 64 and interval 300 ms
+(`M/src/common/concurrent/constants.rs:1-13`). Full read logs drop observations;
+full write logs can retry synchronously with 50-microsecond sleeps
+(`M/src/sync/cache.rs:1819-1842`). Do not describe this path as wholly asynchronous
+or lock-free. Entry-count limits do not establish byte bounds.
+
+Clones share cache state and TTL configuration; lookup futures can retain them.
+Expired entries become unreadable before physical removal. Hickory clear-all is
+Moka timestamp invalidation, not immediate reclamation. Final owner destruction
+and crossbeam epoch flushing are not an awaited global reclamation barrier.
+Returned Lookups and active requests retain their own data independently.
+
+### Minimal forward change and compatibility boundary
+
+Recommended design, **not yet implemented**:
+
+1. Make only ResponseCache's private Moka storage optional. Existing capacity
+   zero must take a genuinely lazy branch that never calls the Moka builder;
+   eagerly evaluated `then_some(builder.build())` is insufficient. Keep TTL
+   configuration available independently. Disabled reads miss; writes/upserts
+   return before cache-only lifetime/entry construction; clears are harmless and
+   metric entry count is zero. Add at most a crate-private enabled predicate.
+2. In CachingClient, preserve positive TTL clamping and valid-until calculation,
+   but move the processed Message into Lookup when storage is absent. Return the
+   original error without an insertion clone. In the CNAME path return the child
+   Lookup before constructing its otherwise-unused alias-cache Message.
+3. Keep nonzero behavior and public signatures unchanged. Do not replace
+   CachingClient with a raw DnsHandle: special-use names, validation, name/class/
+   type checks, CNAME recursion/depth, DNSSEC/Bogus treatment, DO-bit stripping,
+   record sections/order and per-type/NS TTL rules remain required.
+
+Negative min/max TTL affects cache lifetime; it must not start rewriting the
+first returned negative error. The CNAME child Lookup's query, ordering and
+deadline must not be rewritten as part of copy removal. This is not a claim of
+zero allocations: parser output, Lookup, CNAME work, TTL configuration and other
+resolver state still allocate.
+
+ResponseCache is publicly exported and also used by recursor construction,
+reads, writes and ghost-domain upserts (`R/src/lib.rs:206`;
+`R/src/recursor/handle.rs:131,174,426,511-515,555-557,610,686-689`;
+`R/src/recursor/mod.rs:419,457,539-540`). Preserve those method signatures and
+positive-capacity semantics. A forward-resolver copy fix does not automatically
+remove recursor callers' clones.
+
+Extend the same-version prepared resolver while retaining Task 97 byte-exactly.
+Rollback removes only the new cache transformations and related fixture changes;
+no persistent cache-data migration is required. Do not remove the resolver root
+patch or undo its locking corrections to roll back this leaf.
+
+### Required discriminating CI cases
+
+- Observe the actual private Moka-construction boundary: zero capacity makes no
+  cache; positive capacity constructs once; cloning does not reconstruct it.
+  Zero entry count alone passes against the unfixed implementation.
+- Two distinct sequential same-query responses: zero capacity calls the client
+  twice and returns both in order; positive capacity returns a cached first
+  result. Include positive, NXDOMAIN/NODATA and noncacheable errors.
+- For copy removal, prove ownership transfer of the real section-vector buffers
+  at positive finalization, and suppression of error/alias cache-only work with
+  scoped fixture probes. Counterfactual original branches must fail those exact
+  assertions, not process RSS, timing or thread-count heuristics.
+- Preserve A/AAAA/TXT, section ordering, zero/min/max/per-type TTL and NS deadline
+  rules, CNAME same/subsequent-response behavior, both preserve-intermediates
+  settings, recursion exhaustion, wrong name/class/type and special-use errors.
+  Include a DNSSEC feature lane for Bogus, negative TTL and DO-bit semantics.
+- Cancel unpolled/pending lookups and drop resolver clones while another remains;
+  returned Lookups stay valid independently. These are not socket/task-close
+  proofs. Protect nonzero cache hit/expiry/clear/metrics/clone sharing and relevant
+  recursor compilation/upsert contracts with product identity/feature receipts.
+
+Disabling this response cache does not disable DNSSEC's separate validation cache
+(`N/src/dnssec/mod.rs:101,1576-1584`), bound active lookup cardinality or wire/parser
+allocations, or establish provider/task/socket ownership. Those obligations and
+complete P08 readiness remain open.
