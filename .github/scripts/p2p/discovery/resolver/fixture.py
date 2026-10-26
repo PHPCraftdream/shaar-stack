@@ -10,6 +10,9 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("resolver_prepare", HERE / "prepare.py")
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
+spec = importlib.util.spec_from_file_location("resolver_cache_fixture", HERE / "tests/cache/fixture.py")
+cache_fixture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cache_fixture)
 
 # Published manifests omit test_support. Exclude only these original test modules.
 EXCLUSIONS = {
@@ -32,15 +35,18 @@ EXCLUSIONS = {
     "src/system_conf/unix.rs": ["mod tests {"],
 }
 MODULES = {"src/name_server.rs": "connections", "src/name_server_pool.rs": "cleanup"}
+COUNTERFACTUALS = ("connections", "cleanup", *cache_fixture.MECHANISMS)
 
 
 def transformed(source, counterfactual=None):
-    if counterfactual not in (None, "connections", "cleanup"):
+    if counterfactual not in (None, *COUNTERFACTUALS):
         raise ValueError("unknown resolver counterfactual mechanism")
     files = prepare.verify(source)
     production = prepare.hashes(files)
     reversed_files = []
-    if counterfactual:
+    if counterfactual in cache_fixture.MECHANISMS:
+        reversed_files.append(cache_fixture.counterfactual(files, counterfactual, prepare))
+    elif counterfactual:
         name = next(parent for parent, mechanism in MODULES.items() if mechanism == counterfactual)
         text = files[name].decode()
         for old, new in reversed(prepare.patch.EDITS[name]):
@@ -57,16 +63,18 @@ def transformed(source, counterfactual=None):
         files[name] = text.encode()
     for parent, name in MODULES.items():
         files[parent] += f'\n#[cfg(all(test, feature = "tokio"))]\n#[path = "locking_{name}.rs"]\nmod locking_{name};\n'.encode()
-        files[f"src/locking_{name}.rs"] = (HERE / f"{name}.rs").read_bytes()
+        files[f"src/locking_{name}.rs"] = (HERE / "tests" / f"{name}.rs").read_bytes()
+    cache_fixture.instrument(files, prepare)
     if prepare.digest(files["Cargo.lock"]) != prepare.LOCK_DIGEST:
         raise ValueError("resolver fixture archive lock changed")
+    inputs = ["fixture.py", "tests/connections.rs", "tests/cleanup.rs", "tests/cache/fixture.py"]
+    inputs += [f"tests/cache/{name}" for name in cache_fixture.INPUTS]
     record = {
         "production_files": production, "fixture_files": prepare.hashes(files),
         "archive_lock_sha256": prepare.LOCK_DIGEST, "counterfactual": counterfactual,
         "production_source_delta": production_delta,
         "excluded_upstream_test_modules": EXCLUSIONS,
-        "owned_inputs": prepare.hashes({name: (HERE / name).read_bytes() for name in
-                                       ("fixture.py", "connections.rs", "cleanup.rs")}),
+        "owned_inputs": prepare.hashes({name: (HERE / name).read_bytes() for name in inputs}),
     }
     return files, record
 
@@ -81,7 +89,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--destination", type=Path, required=True)
-    parser.add_argument("--counterfactual", choices=("connections", "cleanup"))
+    parser.add_argument("--counterfactual", choices=COUNTERFACTUALS)
     args = parser.parse_args()
     fixture(args.source, args.destination, args.counterfactual)
 

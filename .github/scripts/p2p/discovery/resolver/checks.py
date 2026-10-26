@@ -33,8 +33,8 @@ class PreparationChecks(unittest.TestCase):
         prepared = resolver.verify(SOURCE)
         record = json.loads((SOURCE.parent / "provenance.json").read_text())
         self.assertEqual(record["original_files"], resolver.hashes(original))
-        self.assertEqual(record["changed_files"], ["Cargo.toml", "src/lib.rs", "src/name_server.rs", "src/name_server_pool.rs"])
-        reversed_files = resolver.patch.reverse(prepared)
+        self.assertEqual(record["changed_files"], ["Cargo.toml", "src/cache.rs", "src/caching_client.rs", "src/lib.rs", "src/name_server.rs", "src/name_server_pool.rs"])
+        reversed_files = resolver.reverse(prepared)
         reversed_files["Cargo.toml"] = reversed_files["Cargo.toml"].removesuffix(b"\n[workspace]\n")
         reversed_files["src/lib.rs"] = reversed_files["src/lib.rs"].removeprefix(b"#![forbid(unsafe_code)]\n")
         self.assertEqual(reversed_files, original)
@@ -105,11 +105,12 @@ class PreparationChecks(unittest.TestCase):
         production = resolver.verify(SOURCE)
         files, record = fixture.transformed(SOURCE)
         restored = dict(files)
+        fixture.cache_fixture.uninstrument(restored, resolver)
         for parent, name in fixture.MODULES.items():
             suffix = f'\n#[cfg(all(test, feature = "tokio"))]\n#[path = "locking_{name}.rs"]\nmod locking_{name};\n'.encode()
             self.assertTrue(restored[parent].endswith(suffix))
             restored[parent] = restored[parent].removesuffix(suffix)
-            self.assertEqual(restored.pop(f"src/locking_{name}.rs"), (HERE / f"{name}.rs").read_bytes())
+            self.assertEqual(restored.pop(f"src/locking_{name}.rs"), (HERE / "tests" / f"{name}.rs").read_bytes())
         for name, anchors in fixture.EXCLUSIONS.items():
             for anchor in anchors:
                 indent = anchor[:len(anchor) - len(anchor.lstrip())]

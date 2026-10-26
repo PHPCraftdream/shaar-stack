@@ -13,6 +13,9 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("resolver_patch", HERE / "patch.py")
 patch = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(patch)
+spec = importlib.util.spec_from_file_location("resolver_cache_patch", HERE / "cache_patch.py")
+cache_patch = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cache_patch)
 VERSION = "0.26.3"
 PACKAGE = f"hickory-resolver-{VERSION}"
 DIGEST = "3f3da5255c95d5a716857d54b5b8f4e8d67c3484d3beaaaae2ce25063b3ba981"
@@ -28,6 +31,8 @@ PINS = {
     "src/lib.rs": "c1568bed06f5807ade30705f15aa86b8eaac7f4aafc55d433dd4f691d008c4a1",
     "src/name_server.rs": "ddb6335e5859c92bf14e83a0f945f14d6b487a1932734101f988fdece0c3d7ea",
     "src/name_server_pool.rs": "cf41556017f8a1b5abd1315070b2d60b619e247eef3bb4136192c71f1f334b8e",
+    "src/cache.rs": "d042cff125539ba04d51175903f1abd6990f3cae8006211a50dbc5553cf859e6",
+    "src/caching_client.rs": "fc36dd569763eaa04669321cc05ffe9bbeb77b004cb58963715a3f3a96778c2e",
 }
 
 
@@ -40,7 +45,11 @@ def hashes(files):
 
 
 def recipe():
-    return hashes({name: (HERE / name).read_bytes() for name in ("prepare.py", "patch.py")})
+    return hashes({name: (HERE / name).read_bytes() for name in ("prepare.py", "patch.py", "cache_patch.py")})
+
+
+def reverse(files):
+    return patch.reverse(cache_patch.reverse(files, patch.replace))
 
 
 def archive_files(archive):
@@ -87,8 +96,9 @@ def originals(files):
 
 def transform(files):
     changed = patch.transform(files)
+    changed.update(cache_patch.transform(files, patch.replace))
     originals(files)
-    if patch.reverse(dict(files, **changed)) != files:
+    if reverse(dict(files, **changed)) != files:
         raise ValueError("resolver original-byte reverse mismatch")
     changed["Cargo.toml"] = files["Cargo.toml"] + b"\n[workspace]\n"
     changed["src/lib.rs"] = b"#![forbid(unsafe_code)]\n" + files["src/lib.rs"]
@@ -132,7 +142,7 @@ def verify(root):
     files = {p.relative_to(root).as_posix(): p.read_bytes() for p in paths if p.is_file()}
     if hashes(files) != record["prepared_files"]:
         raise ValueError("resolver prepared source drift")
-    restored = patch.reverse(files)
+    restored = reverse(files)
     if not restored["Cargo.toml"].endswith(b"\n[workspace]\n") or not restored["src/lib.rs"].startswith(b"#![forbid(unsafe_code)]\n"):
         raise ValueError("resolver preparation boundary changed")
     restored["Cargo.toml"] = restored["Cargo.toml"].removesuffix(b"\n[workspace]\n")

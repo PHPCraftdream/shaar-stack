@@ -90,11 +90,12 @@ jobs:
           mkdir -p target/p2p/resolver-archive
           curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/hickory-resolver/hickory-resolver-0.26.3.crate --output target/p2p/resolver-archive/resolver.crate
           script=.github/scripts/p2p/discovery/resolver
-          rustfmt --edition 2021 --check "$script/connections.rs" "$script/cleanup.rs"
+          rustfmt --edition 2021 --config skip_children=true --check "$script/tests/connections.rs" "$script/tests/cleanup.rs" "$script"/tests/cache/*.rs
           python -I "$script/prepare.py" --archive target/p2p/resolver-archive/resolver.crate --destination target/p2p/resolver
           python -I "$script/checks.py"
+          python -I "$script/tests/cache/checks.py"
           python -I "$script/fixture.py" --source target/p2p/resolver/hickory-resolver-0.26.3 --destination target/resolver-locking-archive
-          for mechanism in connections cleanup; do
+          for mechanism in connections cleanup cache_constructor cache_positive cache_error cache_alias cache_storage; do
             python -I "$script/fixture.py" --source target/p2p/resolver/hickory-resolver-0.26.3 --destination "target/resolver-locking-counterfactual-$mechanism" --counterfactual "$mechanism"
           done
       - name: Prepare reviewed Kademlia referral retention
@@ -140,6 +141,48 @@ jobs:
             grep -F "$marker" "$log"
             grep -E '^test result: FAILED\. 0 passed; 1 failed;' "$log"
           done
+      - name: Verify zero-capacity cache contracts and isolated counterfactuals
+        shell: bash
+        run: |
+          set -euo pipefail
+          for profile in plain dnssec; do
+            extra=()
+            count=23
+            if [[ "$profile" == dnssec ]]; then extra=(--features dnssec-ring,metrics,recursor,serde); count=28; fi
+            log="$RUNNER_TEMP/shaar-resolver-cache-$profile.log"
+            if cargo test --locked --manifest-path target/resolver-locking-archive/Cargo.toml --lib no_cache_ "${extra[@]}" >"$log" 2>&1; then status=0; else status=$?; fi
+            python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
+            cat "$log"
+            if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+            grep -E "^test result: ok\\. $count passed; 0 failed;" "$log"
+          done
+          for mechanism in cache_constructor cache_positive cache_error cache_alias cache_storage; do
+            case "$mechanism" in
+              cache_constructor)
+                test_name=cache::no_cache_storage::zero_capacity_never_constructs_moka_and_clones_share_configuration
+                marker=ZERO_CAPACITY_CONSTRUCTED_MOKA ;;
+              cache_positive)
+                test_name=caching_client::no_cache_client::positive_finalization_moves_all_nonempty_section_buffers
+                marker=DISABLED_CACHE_COPIED_POSITIVE_MESSAGE ;;
+              cache_error)
+                test_name=caching_client::no_cache_client::error_finalization_skips_cache_clone_and_preserves_original_error
+                marker=DISABLED_CACHE_CLONED_ERROR ;;
+              cache_alias)
+                test_name=caching_client::no_cache_client::alias_finalization_skips_cache_message_and_preserves_child_lookup
+                marker=DISABLED_CACHE_BUILT_ALIAS_MESSAGE ;;
+              cache_storage)
+                test_name=cache::no_cache_storage::disabled_storage_skips_upsert_work_and_clear_is_harmless
+                marker=DISABLED_CACHE_PERFORMED_STORAGE_WORK ;;
+            esac
+            log="$RUNNER_TEMP/shaar-resolver-counterfactual-$mechanism.log"
+            if cargo test --locked --target-dir target/resolver-locking-archive/target --manifest-path "target/resolver-locking-counterfactual-$mechanism/Cargo.toml" --lib "$test_name" -- --exact >"$log" 2>&1; then status=0; else status=$?; fi
+            python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
+            cat "$log"
+            if [[ "$status" -eq 0 ]]; then printf 'Cache counterfactual unexpectedly passed\n'; exit 1; fi
+            grep -Fx "test $test_name ... FAILED" "$log"
+            grep -F "$marker" "$log"
+            grep -E '^test result: FAILED\. 0 passed; 1 failed;' "$log"
+          done
       - name: Verify resolver locking with product identities and host feature unions
         shell: bash
         run: |
@@ -157,7 +200,21 @@ jobs:
           cat "$log"
           if [[ "$status" -ne 0 ]]; then exit "$status"; fi
           grep -E '^test result: ok\. 12 passed; 0 failed;' "$log"
-      - name: Preserve resolver locking proof receipts
+      - name: Verify no-cache contracts with the unchanged product feature union
+        shell: bash
+        run: |
+          set -euo pipefail
+          features=$(python -I .github/scripts/p2p/discovery/resolver/product.py features --destination target/resolver-locking-product)
+          count=23
+          case ",$features," in *,metrics,*) count=$((count + 1));; esac
+          case ",$features," in *,__dnssec,*) count=$((count + 4));; esac
+          log="$RUNNER_TEMP/shaar-resolver-cache-product.log"
+          if cargo test --locked --target-dir target --manifest-path target/resolver-locking-product/Cargo.toml --no-default-features --features "$features" --lib no_cache_ >"$log" 2>&1; then status=0; else status=$?; fi
+          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
+          cat "$log"
+          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+          grep -E "^test result: ok\\. $count passed; 0 failed;" "$log"
+      - name: Preserve resolver locking and cache proof receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

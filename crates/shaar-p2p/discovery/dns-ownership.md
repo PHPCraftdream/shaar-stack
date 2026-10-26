@@ -632,3 +632,77 @@ Disabling this response cache does not disable DNSSEC's separate validation cach
 (`N/src/dnssec/mod.rs:101,1576-1584`), bound active lookup cardinality or wire/parser
 allocations, or establish provider/task/socket ownership. Those obligations and
 complete P08 readiness remain open.
+
+## Task 102: prepared zero-capacity response-cache path
+
+The same-version resolver preparation now implements Task 101's optional private
+Moka storage. `cache_size = 0` takes a lazy constructor branch; reads miss, writes
+and ghost-domain upserts return before cache-only TTL/entry work, clear operations
+are harmless, and the metrics entry count is zero. The separate `Arc<TtlConfig>`
+remains available. Positive-capacity storage and public method signatures remain.
+
+`CachingClient` still performs answer validation, DNSSEC verdict handling,
+DO-bit stripping, CNAME processing and TTL clamping. Its zero-capacity positive
+path moves the processed Message into Lookup, its error path avoids the insertion
+clone, and its recursive-CNAME path returns the existing child Lookup before
+building the unused alias-cache Message. Initial negative-error contents and the
+child query, record order and deadline are not rewritten. These changes remove
+specific cache-only work, not all parser/Lookup allocations or every DNS cache.
+Recursor caller-side clones and DNSSEC's separate validation cache are unchanged.
+
+### Preparation and isolated rollback
+
+`resolver/cache_patch.py` is a separate reversible recipe with pinned original
+`src/cache.rs` and `src/caching_client.rs` hashes. The existing original-tree,
+archive, license, package, recipe and receipt checks still apply. Eighteen upstream
+unit-test accesses to the now-optional private storage are adapted explicitly and
+reversed exactly; their assertions are not removed. The fixture's pre-existing
+upstream-test exclusions remain explicit because the published package omits
+`test_support`.
+
+The accepted Task 97 production transformations remain byte-identical. Its owned
+`connections.rs` and `cleanup.rs` fixtures move byte-for-byte into `resolver/tests/`
+to preserve the seven-item directory limit. Rollback of this leaf reverses only
+`cache_patch.py` and its associated fixture/recipe additions, retaining the
+prepared resolver root override and Task 97 locking corrections. No dependency
+version, product lock edge, public configuration mode or Moka source is changed.
+
+### Added CI contracts, not a local runtime result
+
+The cache fixture has 23 common Rust contracts, four additional DNSSEC contracts,
+and one additional metrics contract. The archive feature lane enables
+`dnssec-ring,metrics,recursor,serde`; the product lane retains exactly the verified
+host product feature union. The shared ghost-domain upsert method is exercised
+with controlled request timestamps, while the recursor feature is compiled; this
+is not a recursor-network or cryptographic-signature-validation acceptance claim.
+Six additional Python preparation controls supplement, rather than replace, the
+existing 13. The 12 common/14 TLS locking contracts and their two counterfactuals
+remain selected independently.
+
+Contracts cover actual Moka construction and resolver-option forwarding, clone
+sharing, repeated distinct positive and negative responses, noncacheable errors,
+nonempty section-buffer transfer, initial error preservation, alias-message work,
+TTL and section ordering, per-type/NS rules, CNAME same/later-response behavior,
+recursion exhaustion, special-use and invalid answers, DNSSEC verdicts and DO-bit
+semantics, cancellation and retained returned Lookups. No sleeps, process RSS or
+thread-count heuristics are used. Deadline checks enclose the call's timestamp;
+cache expiration checks supply explicit request times.
+
+Five separate cache counterfactuals restore only constructor, positive-copy,
+error-copy, alias-copy or disabled-write work. Their receipts contain the exact
+selected source file and prepared/counterfactual hashes; other source files and
+locking fixes are unchanged. The constructor counterfactual retains the optional
+field type but always constructs `Some(Moka)`. The disabled-write counterfactual
+uses a local zero-capacity Moka fallback to restore write-side work without
+changing construction/read behavior. The other three restore the corresponding
+original copy behavior. Fixture-only thread-local observations are reversible
+statement/expression instrumentation, not replacement production bodies.
+Positive-capacity preconditions prove each work probe is live. CI requires the
+specific selected test, assertion marker and exactly one failed test; compilation
+failure, setup failure or zero selected tests is not evidence.
+
+These contracts and controls are **added for GitHub CI, not run locally**. Local
+source-data preparation, syntax inspection and formatting do not establish a
+runtime pass. Moka 0.12.16 has no maintenance background worker to register or join.
+Provider/socket/task lifecycle, wire/parser limits, active-query admission and
+complete P08 acceptance remain open.
