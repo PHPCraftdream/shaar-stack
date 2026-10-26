@@ -269,6 +269,7 @@ async fn carrier_destination_old_reservation_acceptance_cannot_replace_successor
                 break address;
             }
         };
+        server.add_external_address(relay_addr.clone());
         let relay = RelayAddr::new(relay_peer, socket_address(&relay_addr).unwrap()).unwrap();
         let seed = Keypair::generate_ed25519().public().to_peer_id();
         let discovery = DiscoveryConfig::new(
