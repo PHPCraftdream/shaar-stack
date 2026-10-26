@@ -54,7 +54,7 @@ def create(source, baseline, lock, destination, units=False):
     output = {"relay/" + name: content for name, content in tree.items()}
     lines = ["[package]", 'name = "shaar-p2p"', f'version = {json.dumps(package["version"])}',
              f'edition = {json.dumps(package["edition"])}', "publish = false", "build = false",
-             "[workspace]", 'resolver = "3"', "[lib]", 'path = "src/lib.rs"',
+             "[workspace]", 'resolver = "3"', 'exclude = ["relay"]', "[lib]", 'path = "src/lib.rs"',
              "[[test]]", f'name = "{target}"', f'path = "{test_path}"', "[dependencies]"]
     aliases = {name.replace("-", "_"): identity for name, identity in roots.items()}
     for index, identity in enumerate(sorted(graph)):

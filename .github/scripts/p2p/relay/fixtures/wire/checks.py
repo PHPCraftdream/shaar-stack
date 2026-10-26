@@ -1,5 +1,6 @@
 """Source-only CI controls for wire instrumentation and isolated defects."""
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -82,6 +83,51 @@ class WireSourceChecks(unittest.TestCase):
             self.assertNotIn("#[test]", text)
         self.assertNotIn("src/wire_probe.rs", tree)
         self.assertFalse(receipt["runtime_verified"])
+
+    def test_fixture_workspace_excludes_the_prepared_relay_root(self):
+        spec = importlib.util.spec_from_file_location("relay_wire_graph_create", HERE / "graph.py")
+        graph = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(graph)
+        newline = chr(10).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "prepared" / "libp2p-relay-0.22.0"
+            source.mkdir(parents=True)
+            receipt = {"package": "libp2p-relay", "version": "0.22.0",
+                       "archive_sha256": "e5227b053db429996242c00f6c756fd9b5382b942a03eec34b465431df29697a",
+                       "fixture_instrumentation": False,
+                       "prepared_source_sha256": {}, "operation_source_sha256": {}}
+            for name, edits in prepare.observations().items():
+                body = newline.join(old.encode() for old, _ in edits) + newline
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(body)
+                receipt["prepared_source_sha256"][name[len("src/"):]] = prepare.digest(body)
+            manifest = b'[package]' + newline + b'name = "libp2p-relay"' + newline + b'[workspace]' + newline
+            (source / "Cargo.toml").write_bytes(manifest)
+            (source.parent / "provenance.json").write_text(json.dumps(receipt), encoding="utf-8")
+            lock = Path(temporary) / "product.lock"
+            lock.write_bytes(b"")
+            registry = "registry+https://github.com/rust-lang/crates.io-index"
+            packages, nodes = [], []
+            for name, version, origin in (("libp2p", "0.57.1", registry), ("libp2p-relay", "0.22.0", None),
+                                          ("futures", "0.3.31", registry), ("tokio", "1.54.1", registry)):
+                identity = name + "@" + version
+                packages.append({"name": name, "version": version, "id": identity, "source": origin,
+                                 "manifest_path": "" if origin else str(source / "Cargo.toml")})
+                nodes.append({"id": identity, "deps": [], "features": []})
+            packages.append({"name": "shaar-p2p", "version": "9.9.9", "id": "shaar-p2p@9.9.9",
+                             "source": None, "manifest_path": "", "edition": "2024"})
+            baseline = Path(temporary) / "metadata.json"
+            baseline.write_text(json.dumps({"packages": packages, "resolve": {"nodes": nodes}}), encoding="utf-8")
+            destination = Path(temporary) / "fixture"
+            graph.create(source, baseline, lock, destination)
+            prepared = (source / "Cargo.toml").read_bytes()
+            self.assertEqual((destination / "relay" / "Cargo.toml").read_bytes(), prepared)
+            self.assertIn(b"[workspace]", prepared)
+            root = (destination / "Cargo.toml").read_bytes()
+            self.assertEqual(root.count(b"[workspace]"), 1)
+            self.assertEqual(graph.tomllib.loads(root.decode("utf-8"))["workspace"]["exclude"], ["relay"])
+            self.assertIn(b'path = "relay"', root)
 
     def test_failed_compile_writes_full_evidence_before_raising(self):
         spec = importlib.util.spec_from_file_location("relay_wire_run", HERE / "run.py")
