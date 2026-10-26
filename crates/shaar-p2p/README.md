@@ -677,7 +677,7 @@ policy. The next wire-only unit is described below; discovery-role policy, bound
 Kademlia/Identify ownership, `discover_relay`, SDK forwarding and Amino discovery
 remain unimplemented. No public-network availability is claimed.
 
-### Private DNS wire input envelope — authored, pending CI
+### Private DNS wire input envelope — verified in CI
 
 The existing private UDP/TCP wrappers now enforce 12..=4096 DNS message bytes,
 excluding the TCP length prefix, at most one question and at most 64 combined
@@ -717,9 +717,11 @@ empty/EOF/consecutive reads, cancellation, gate closure, and native socket relea
 with provider/resolver handles retained. Native fixtures use the production wrappers;
 deterministic scripts supplement them, not substitute for resource proofs. CI selects
 exactly 29 cases on both OSes while retaining the separate 30 foundation, 24 DNS
-expansion and 58 SDK contracts. These new cases have not been executed locally or
-accepted in CI. Public DNS dials remain rejected by `NumericOnly`; this is neither
-destination-role policy nor Amino readiness.
+expansion and 58 SDK contracts. CI run `40283709195` at `49ade51` passed the complete
+workflow on Linux and Windows; all four contract counts and the preserved host
+graph/lock receipts were independently checked. No tests were executed locally.
+Public DNS dials remain rejected by `NumericOnly`; this is neither destination-role
+policy nor Amino readiness.
 
 ## Remaining implementation and acceptance
 
