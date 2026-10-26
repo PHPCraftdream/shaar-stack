@@ -323,7 +323,9 @@ async fn wire_dns_native_tcp_rejects_before_hickory_frame_materialization() {
                     peer.write_all(&counts).await.unwrap();
                 }
                 // No body or EOF is supplied: waiting for an unchecked body cannot pass.
-                let error = stream.next().await.unwrap().unwrap_err();
+                let Err(error) = stream.next().await.expect("DNS TCP rejection missing") else {
+                    panic!("unchecked DNS TCP frame accepted");
+                };
                 assert_eq!(error.kind(), io::ErrorKind::InvalidData);
                 drop(stream);
                 drop(handle);
