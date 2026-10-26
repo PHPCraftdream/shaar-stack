@@ -127,10 +127,10 @@ fn retired_unissued(
 ) -> Vec<(Option<OperationOwner>, Option<OperationCapability>)> {
     let mut retired = Vec::new();
     for record in records.values_mut() {
-        if record.retired() {
-            if let Some(owner) = record.owner.take() {
-                retired.push((Some(owner), record.capability.take()));
-            }
+        if record.retired()
+            && let Some(owner) = record.owner.take()
+        {
+            retired.push((Some(owner), record.capability.take()));
         }
     }
     retired

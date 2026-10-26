@@ -300,10 +300,10 @@ impl Owner {
         if role == Role::Application {
             return Err(denied());
         }
-        if let Role::ExplicitRelay(endpoint) = role {
-            if !numeric_usable(endpoint) {
-                return Err(denied());
-            }
+        if let Role::ExplicitRelay(endpoint) = role
+            && !numeric_usable(endpoint)
+        {
+            return Err(denied());
         }
         let mut state = self.view.lock();
         if state.closed {
@@ -402,6 +402,7 @@ impl Owner {
         Ok(key)
     }
 
+    #[cfg(test)]
     pub(crate) fn revoke(&mut self, key: AttemptKey) {
         let notify = {
             let mut state = self.view.lock();

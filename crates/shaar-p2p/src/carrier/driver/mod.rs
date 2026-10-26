@@ -1,6 +1,5 @@
 use std::{
-    collections::HashMap, future::Future, io, net::SocketAddr, num::NonZeroUsize, sync::Arc,
-    time::Duration,
+    collections::HashMap, future::Future, io, net::SocketAddr, num::NonZeroUsize, time::Duration,
 };
 
 use futures::StreamExt;
@@ -20,6 +19,9 @@ use super::{
     REQUEST_LIMIT, Received, Reply, admission::Admission, capacity, multiaddr, socket_address,
 };
 use crate::discovery::roles::AttemptKey;
+#[cfg(test)]
+use std::sync::Arc;
+
 #[cfg(test)]
 use crate::dns::NumericOnly;
 use crate::{

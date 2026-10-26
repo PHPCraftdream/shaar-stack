@@ -250,11 +250,11 @@ where
         };
         this.done = true;
         drop(this.inner.take());
-        if let Some(lease) = &this.lease {
-            if let Err(error) = lease.check() {
-                drop(result);
-                return Poll::Ready(Err(Error::Authority(error)));
-            }
+        if let Some(lease) = &this.lease
+            && let Err(error) = lease.check()
+        {
+            drop(result);
+            return Poll::Ready(Err(Error::Authority(error)));
         }
         Poll::Ready(result.map_err(Error::Inner))
     }
@@ -308,11 +308,11 @@ where
         }
         match result {
             Ok(output) => {
-                if let Some(endpoint) = this.endpoint {
-                    if let Err(error) = this.lease.record_numeric(endpoint, Instant::now()) {
-                        drop(output);
-                        return Poll::Ready(Err(Error::Authority(error)));
-                    }
+                if let Some(endpoint) = this.endpoint
+                    && let Err(error) = this.lease.record_numeric(endpoint, Instant::now())
+                {
+                    drop(output);
+                    return Poll::Ready(Err(Error::Authority(error)));
                 }
                 Poll::Ready(Ok(output))
             }
