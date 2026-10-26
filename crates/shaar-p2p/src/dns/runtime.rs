@@ -19,6 +19,17 @@ pub(super) struct Provider {
     nameservers: Arc<[SocketAddr]>,
     #[cfg(test)]
     pub(super) pause_connect: Option<ConnectPause>,
+    #[cfg(test)]
+    pub(super) udp_bound: Option<tokio::sync::mpsc::Sender<UdpObservation>>,
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+pub(super) struct UdpObservation {
+    pub(super) local: SocketAddr,
+    pub(super) name: String,
+    pub(super) id: u16,
+    pub(super) live: std::sync::Weak<()>,
 }
 
 #[cfg(test)]
@@ -36,6 +47,8 @@ impl Provider {
             nameservers: nameservers.into(),
             #[cfg(test)]
             pause_connect: None,
+            #[cfg(test)]
+            udp_bound: None,
         }
     }
 
@@ -152,10 +165,16 @@ impl RuntimeProvider for Provider {
                 .during(async {
                     let socket = UdpSocket::bind(local).await?;
                     provider.gate.check()?;
+                    #[cfg(test)]
+                    let witness = provider.udp_bound.as_ref().map(|_| Arc::new(()));
                     Ok(Udp {
                         socket,
                         server,
                         gate: provider.gate.clone(),
+                        #[cfg(test)]
+                        observed: provider.udp_bound.clone(),
+                        #[cfg(test)]
+                        witness,
                     })
                 })
                 .await?

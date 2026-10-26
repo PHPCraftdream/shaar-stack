@@ -19,6 +19,11 @@ pub(super) struct Udp {
     pub(super) socket: UdpSocket,
     pub(super) server: SocketAddr,
     pub(super) gate: Gate,
+    #[cfg(test)]
+    pub(super) observed: Option<tokio::sync::mpsc::Sender<super::runtime::UdpObservation>>,
+    // Declared after the socket: losing the last witness means socket Drop already ran.
+    #[cfg(test)]
+    pub(super) witness: Option<std::sync::Arc<()>>,
 }
 
 impl DnsUdpSocket for Udp {
@@ -49,7 +54,26 @@ impl DnsUdpSocket for Udp {
                 "DNS UDP target differs from configured endpoint",
             )));
         }
-        self.socket.poll_send_to(cx, buffer, target)
+        let sent = std::task::ready!(self.socket.poll_send_to(cx, buffer, target))?;
+        #[cfg(test)]
+        if let (Some(observed), Some(live)) = (&self.observed, &self.witness) {
+            // Passive post-send evidence binds query identity to this exact socket generation.
+            let message =
+                hickory_resolver::proto::op::Message::from_vec(buffer).map_err(io::Error::other)?;
+            let query = message
+                .queries
+                .first()
+                .ok_or_else(|| io::Error::other("UDP witness has no query"))?;
+            observed
+                .try_send(super::runtime::UdpObservation {
+                    local: self.socket.local_addr()?,
+                    name: query.name.to_ascii(),
+                    id: message.metadata.id,
+                    live: std::sync::Arc::downgrade(live),
+                })
+                .map_err(io::Error::other)?;
+        }
+        Poll::Ready(Ok(sent))
     }
 }
 

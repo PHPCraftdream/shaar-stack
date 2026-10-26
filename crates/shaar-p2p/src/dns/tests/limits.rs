@@ -105,37 +105,105 @@ async fn owned_dns_pending_udp_call_owners_drop_before_join_and_release_all_nati
     bounded(
         async {
             let server = Server::new().await;
-            let (executor, lifetime, resolver, provider) = setup(server.address);
+            let executor = OwnedExecutor::new();
+            let lifetime = Lifetime::new();
+            let mut provider = Provider::new(lifetime.gate(), executor.handle(), &[server.address]);
+            let (observed, mut bindings) = tokio::sync::mpsc::channel(32);
+            provider.udp_bound = Some(observed);
+            let resolver = OwnedResolver::with_provider(&[server.address], provider.clone()).unwrap();
             let retained = resolver.clone();
             let handle = provider.create_handle();
             let mut calls = FuturesUnordered::new();
-            for index in 0..4 {
-                calls.push(resolver.ipv4_lookup(format!("pending{index}.example.")));
+            let names: Vec<_> = (0..4).map(|index| format!("pending{index}.example.")).collect();
+            for name in &names {
+                calls.push(resolver.ipv4_lookup(name.clone()));
             }
-            let mut addresses = Vec::with_capacity(4);
-            for _ in 0..4 {
+            let mut packets = Vec::with_capacity(32);
+            let mut observations = Vec::with_capacity(32);
+            loop {
                 tokio::select! {
-                    result = calls.next() => panic!("PENDING_DNS_LOOKUP_TERMINATED: {result:?}"),
-                    (_, source) = server.question() => addresses.push(source),
+                    result = calls.next() => panic!("PENDING_DNS_LOOKUP_TERMINATED: {result:?}; packets={packets:?}"),
+                    (query, source) = server.question() => {
+                        assert!(packets.len() < 32, "UDP_WITNESS_PACKET_BOUND: {packets:?}");
+                        assert_eq!(query.queries.len(), 1);
+                        let name = query.queries[0].name.to_ascii();
+                        assert!(names.contains(&name), "UNEXPECTED_UDP_QUERY: {name}");
+                        packets.push((name, query.metadata.id, source));
+                    }
+                }
+                while let Ok(observation) = bindings.try_recv() {
+                    assert!(observations.len() < 32, "UDP_BIND_OBSERVATION_BOUND");
+                    observations.push(observation);
+                }
+                // Retired retry sockets are history, not current ownership witnesses.
+                let mut seen = [false; 4];
+                for (name, id, source) in &packets {
+                    assert_eq!(source.ip(), server.address.ip());
+                    if observations.iter().any(|observed| {
+                        observed.local.port() == source.port()
+                            && observed.local.is_ipv4() == source.is_ipv4()
+                            && observed.name == *name
+                            && observed.id == *id
+                            && observed.live.upgrade().is_some()
+                    }) {
+                        seen[names.iter().position(|expected| expected == name).unwrap()] = true;
+                    }
+                }
+                if !seen.contains(&false) {
+                    break;
                 }
             }
+            // No further caller polling: request-socket ownership cannot change during probes.
+            let mut current: Vec<&super::super::runtime::UdpObservation> = Vec::with_capacity(32);
+            for observed in &observations {
+                if observed.live.upgrade().is_none() {
+                    continue;
+                }
+                if let Some(previous) = current.iter().find(|previous| {
+                    std::sync::Weak::ptr_eq(&previous.live, &observed.live)
+                }) {
+                    assert_eq!(previous.local, observed.local, "UDP_GENERATION_CHANGED_LOCAL");
+                    continue;
+                }
+                assert!(
+                    current.iter().all(|previous| previous.local != observed.local),
+                    "UDP_DISTINCT_GENERATIONS_SHARE_LOCAL: local={}; packets={packets:?}",
+                    observed.local
+                );
+                current.push(observed);
+            }
+            let addresses: Vec<_> = current.iter().map(|observed| observed.local).collect();
+            assert!(
+                current.len() >= 4,
+                "UDP_DISTINCT_LIVE_RESOURCES_MISSING: locals={addresses:?}; packets={packets:?}"
+            );
+            assert!(
+                addresses.iter().all(|local| local.ip().is_unspecified()),
+                "UDP_BIND_PROFILE_CHANGED: {addresses:?}"
+            );
             assert!(matches!(
                 retained.ipv4_lookup("overload.example.".into()).await,
                 Err(NetError::Busy)
             ));
             for address in &addresses {
-                assert!(
-                    tokio::net::UdpSocket::bind(address).await.is_err(),
-                    "UDP_RESOURCE_WITNESS_MISSING"
-                );
+                let error = tokio::net::UdpSocket::bind(address).await.err().unwrap_or_else(|| {
+                    panic!("UDP_RESOURCE_WITNESS_MISSING: local={address}; locals={addresses:?}; packets={packets:?}")
+                });
+                assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "UDP_LIVE_BIND_WRONG_ERROR: local={address}; error={error}");
             }
             lifetime.close();
             assert_eq!(resolver.calls.available_permits(), 0);
             drop(calls); // Carrier-owned dial/lookup destruction precedes executor shutdown.
             assert_eq!(resolver.calls.available_permits(), 4);
             executor.shutdown().await.unwrap();
+            assert!(
+                observations.iter().all(|observed| observed.live.upgrade().is_none()),
+                "UDP_CALLER_RESOURCE_RETAINED_AFTER_JOIN: locals={addresses:?}; packets={packets:?}"
+            );
             for address in addresses {
-                let _rebound = tokio::net::UdpSocket::bind(address).await.unwrap();
+                let _rebound = tokio::net::UdpSocket::bind(address).await.unwrap_or_else(|error| {
+                    panic!("UDP_EXACT_LOCAL_NOT_RELEASED: local={address}; packets={packets:?}; error={error}")
+                });
             }
             assert!(retained.ipv4_lookup("late.example.".into()).await.is_err());
             assert!(provider.bind_udp(loopback(), server.address).await.is_err());

@@ -39,7 +39,7 @@ impl Server {
     }
 
     pub(crate) async fn bind(local: SocketAddr) -> io::Result<Self> {
-        socket_pair(local, |address| UdpSocket::bind(address)).await
+        socket_pair(local, UdpSocket::bind).await
     }
 
     /// cancel-safe: yes — receives one complete datagram without partial-read state.
