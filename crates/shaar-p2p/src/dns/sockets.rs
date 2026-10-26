@@ -14,7 +14,6 @@ use tokio::net::{TcpStream, UdpSocket};
 use super::lifetime::Gate;
 
 /// Private socket capabilities are polled only inside Gate::during owned futures.
-/// Wire/header envelopes are the next unit, not a property of these lifetime wrappers.
 pub(super) struct Udp {
     pub(super) socket: UdpSocket,
     pub(super) server: SocketAddr,
@@ -35,10 +34,12 @@ impl DnsUdpSocket for Udp {
         buffer: &mut [u8],
     ) -> Poll<io::Result<(usize, SocketAddr)>> {
         self.gate.check()?;
-        let mut buffer = tokio::io::ReadBuf::new(buffer);
-        self.socket
-            .poll_recv_from(cx, &mut buffer)
-            .map_ok(|peer| (buffer.filled().len(), peer))
+        super::wire::receive(cx, buffer, self.server, |cx, bytes| {
+            let mut buffer = tokio::io::ReadBuf::new(bytes);
+            self.socket
+                .poll_recv_from(cx, &mut buffer)
+                .map_ok(|peer| (buffer.filled().len(), peer))
+        })
     }
 
     fn poll_send_to(
@@ -79,6 +80,7 @@ impl DnsUdpSocket for Udp {
 
 pub(super) struct Tcp {
     pub(super) stream: AsyncIoTokioAsStd<TcpStream>,
+    pub(super) input: super::wire::Input,
     pub(super) gate: Gate,
 }
 
@@ -93,7 +95,8 @@ impl AsyncRead for Tcp {
         buffer: &mut [u8],
     ) -> Poll<io::Result<usize>> {
         self.gate.check()?;
-        Pin::new(&mut self.stream).poll_read(cx, buffer)
+        let this = &mut *self;
+        this.input.poll_read(&mut this.stream, cx, buffer)
     }
 }
 

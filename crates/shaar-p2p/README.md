@@ -672,10 +672,54 @@ dead lifetime witnesses and exact-local rebind after joined shutdown. Routed pac
 source addresses are not substituted for wildcard socket bindings. No precise
 Windows kernel reuse mechanism is inferred from the earlier failed witness.
 
-Wire length/header gates, TCP pre-prefix validation, pre-materialization/numeric
-discovery-role policy, bounded Kademlia/Identify ownership, `discover_relay`, SDK
-forwarding and Amino discovery remain unimplemented by this unit. No public-network
-availability is claimed.
+The foundation alone does not implement wire length/header gates or destination-role
+policy. The next wire-only unit is described below; discovery-role policy, bounded
+Kademlia/Identify ownership, `discover_relay`, SDK forwarding and Amino discovery
+remain unimplemented. No public-network availability is claimed.
+
+### Private DNS wire input envelope — authored, pending CI
+
+The existing private UDP/TCP wrappers now enforce 12..=4096 DNS message bytes,
+excluding the TCP length prefix, at most one question and at most 64 combined
+answer/authority/additional records. Header parsing uses Hickory 0.26.3's
+`Header`/`BinDecoder`; counts are widened before addition. This is a fixed local
+resource profile, not unrestricted DNS compatibility or validation of record bodies.
+Body decoding and malformed-record handling remain Hickory's responsibility after
+the envelope passes. Output serialization is unchanged.
+
+UDP receives into one 4097-byte stack buffer per poll. The extra byte detects
+Linux's successful truncation; only Windows raw WSAEMSGSIZE (10040) is treated as
+a consumed oversized packet. Other I/O failures propagate. Wrong endpoints,
+invalid envelopes and packets exceeding the caller's output capacity are discarded,
+never returned as successful truncations or fatal malformed-packet errors. At most
+16 packets/errors are discarded per poll, then one wake yields to the executor.
+A socket Pending relies on its registered wake, not a self-waking busy loop. No new
+lock, per-packet heap buffer or additional task owner is introduced.
+
+TCP owns fourteen inline staging bytes and its partial-input state. No complete
+length prefix reaches Hickory's length-driven body allocation until the length and
+entire fixed header pass. Partial reads and canceled read futures preserve staging;
+empty reads do not consume input. Clean EOF is distinct from terminal partial-frame
+EOF. Reads cannot cross into an unchecked next frame. Gate closure rejects even
+already-validated staging; cancellation cannot unsend previously serialized output.
+The existing request deadlines, irreversible lifetime gate and sole executor remain
+responsible for cancellation and joined destruction.
+
+There are 29 authored `wire_dns_` cases: four profile controls, six UDP poll controls,
+eight TCP state-machine controls and eleven native UDP/TCP/resolver fixture controls.
+The wrong-source fixture allocates its two same-port UDP addresses as a bounded pair,
+retaining the first socket while binding the second and retrying only `AddrInUse`.
+Controls force a real second-address collision and verify bounded exhaustion and
+immediate propagation of non-collision errors. They cover
+boundary sizes/counts, truncation and exact source rejection, invalid-before-valid
+lookup behavior, bounded discard wakeups, pre-prefix ordering, fragmented/Pending/
+empty/EOF/consecutive reads, cancellation, gate closure, and native socket release
+with provider/resolver handles retained. Native fixtures use the production wrappers;
+deterministic scripts supplement them, not substitute for resource proofs. CI selects
+exactly 29 cases on both OSes while retaining the separate 30 foundation, 24 DNS
+expansion and 58 SDK contracts. These new cases have not been executed locally or
+accepted in CI. Public DNS dials remain rejected by `NumericOnly`; this is neither
+destination-role policy nor Amino readiness.
 
 ## Remaining implementation and acceptance
 

@@ -6,6 +6,7 @@ mod sockets;
 #[cfg(test)]
 pub(crate) mod tests;
 mod transport;
+mod wire;
 
 use std::{future::Future, io, net::SocketAddr, sync::Arc, time::Duration};
 

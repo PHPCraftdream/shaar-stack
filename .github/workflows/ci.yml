@@ -235,6 +235,16 @@ jobs:
           cat "$log"
           if [[ "$status" -ne 0 ]]; then exit "$status"; fi
           grep -E '^test result: ok\. 30 passed; 0 failed;' "$log"
+      - name: Verify private DNS wire input envelopes
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/shaar-wire-dns.log"
+          if cargo test -p shaar-p2p --lib --locked wire_dns_ >"$log" 2>&1; then status=0; else status=$?; fi
+          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
+          cat "$log"
+          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+          grep -E '^test result: ok\. 29 passed; 0 failed;' "$log"
       - name: Preserve owned DNS foundation proof receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -246,6 +256,7 @@ jobs:
             target/owned-dns-baseline/Cargo.lock
             target/resolver-locking-baseline.json
             ${{ runner.temp }}/shaar-owned-dns.log
+            ${{ runner.temp }}/shaar-wire-dns.log
           if-no-files-found: warn
       - name: Preserve resolver locking and cache proof receipts
         if: always()

@@ -145,6 +145,7 @@ impl RuntimeProvider for Provider {
                     provider.gate.check()?;
                     Ok(Tcp {
                         stream: AsyncIoTokioAsStd(stream),
+                        input: super::wire::Input::default(),
                         gate: provider.gate.clone(),
                     })
                 })
