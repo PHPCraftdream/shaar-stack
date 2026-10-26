@@ -164,8 +164,12 @@ Added cases exercise actual encoded Multiaddr bytes and `DiscoveryConfig::new`:
 - Pure pre-runtime numeric-seed rejection with static field errors; private and
   loopback nameservers still accepted while identical seed IPs are rejected.
 
-Tests are **added, not run locally**. No Cargo/rustc commands, compilation,
-builds, network tests, or public DNS/reachability probes were performed. Source
-inspection and standalone formatting/syntax checks are not execution evidence.
-CI must establish compilation and behavioral acceptance; later role/native/DNS
+CI run `40286191559` at `eb3c361` passed the complete workflow on Linux and
+Windows. All 16 address contracts and the preserved 29 wire, 30 foundation,
+24 prepared DNS, and 58 SDK contracts were independently checked in actual logs.
+Host-resolved dependency/feature and exact lock receipts remained unchanged.
+
+No Cargo/rustc commands, compilation, builds, or tests were run locally, and no
+public DNS/reachability probes were performed. Source inspection and standalone
+formatting/syntax checks are not execution evidence. Later role/native/DNS
 integration must supply its own pre-connect and pre-materialization proofs.
