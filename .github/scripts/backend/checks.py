@@ -143,7 +143,7 @@ class PreparationChecks(unittest.TestCase):
         paths = [root / name for name in ("src/lib.rs", "src/socket.rs", "src/actor_shutdown.rs",
                                           "src/runtime.rs", "src/socket/remote_map.rs",
                                           "src/socket/remote_map/remote_state.rs", "src/socket/transports.rs",
-                                          "src/socket/transports/ip.rs")]
+                                          "src/socket/transports/ip.rs", "src/endpoint.rs")]
         before = [path.read_bytes() for path in paths]
         self.assertEqual(before[2], Path(policy.__file__).with_name("actor_shutdown.rs").read_bytes())
         with self.assertRaisesRegex(ValueError, "actor shutdown module already exists"):
@@ -184,6 +184,60 @@ class PreparationChecks(unittest.TestCase):
         self.assertIn('shutdown_barrier = "wait_all_draining done"', socket)
         self.assertLess(socket.index("close_native_sockets(&self.native_sockets).await"),
                         socket.index("self.sock.shutdown.closed.store"))
+
+    def test_protocol_grace_bounds_only_observation_before_mandatory_joins(self):
+        socket = (ROOTS["iroh"] / "src/socket.rs").read_text(encoding="utf-8")
+        self.assertEqual(socket.count(policy.PROTOCOL_CLOSE_NEW), 1)
+        self.assertNotIn(policy.PROTOCOL_CLOSE_OLD, socket)
+        close = socket.split("pub(crate) async fn close(&self) {", 1)[1].split("pub(crate) fn abort", 1)[0]
+        ordered = (
+            'self.noq_endpoint().close(0u16.into(), b"")',
+            "crate::actor_shutdown::wait_for_protocol_close(",
+            "self.noq_endpoint().wait_all_draining(),",
+            "self.sock.shutdown.at_endpoint_closed.cancel()",
+            "crate::actor_shutdown::finish_actor(task).await",
+            "self.runtime.shutdown().await",
+            "crate::actor_shutdown::close_native_sockets(&self.native_sockets).await",
+            "self.sock.shutdown.closed.store",
+        )
+        positions = [close.index(anchor) for anchor in ordered]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("return", close[positions[1]:positions[-1]])
+        self.assertNotIn("wait_idle()", close)
+        self.assertNotIn("wait_all_draining().await", close)
+        self.assertIn("trace!(protocol_draining,", close)
+        endpoint = (ROOTS["iroh"] / "src/endpoint.rs").read_text(encoding="utf-8")
+        self.assertEqual(endpoint.count(policy.PROTOCOL_CLOSE_DOC_NEW), 1)
+        self.assertNotIn(policy.PROTOCOL_CLOSE_DOC_OLD, endpoint)
+        self.assertIn("Native UDP sockets are explicitly closed even if endpoint or connection handles remain.", endpoint)
+        owned = Path(policy.__file__).with_name("actor_shutdown.rs").read_text(encoding="utf-8")
+        helper = owned.split("pub(crate) async fn wait_for_protocol_close(", 1)[1].split("\n}", 1)[0]
+        self.assertIn("time::timeout(Duration::from_secs(3), observer)", helper)
+        for forbidden in ("spawn", "abort", "JoinHandle", "wait_idle"):
+            self.assertNotIn(forbidden, helper)
+
+    def test_protocol_grace_anchor_drift_does_not_overwrite_inputs(self):
+        with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
+            root = Path(temporary)
+            with tarfile.open(ARCHIVES["iroh"]) as archive:
+                archive.extractall(root, filter="data")
+            root = root / f"iroh-{prepare.VERSION}"
+            socket = root / "src/socket.rs"
+            original = socket.read_text(encoding="utf-8")
+            patched = policy.replace(original, policy.PROTOCOL_CLOSE_OLD, policy.PROTOCOL_CLOSE_NEW)
+            self.assertEqual(policy.replace(patched, policy.PROTOCOL_CLOSE_NEW, policy.PROTOCOL_CLOSE_OLD), original)
+            with self.assertRaises(ValueError):
+                policy.replace(patched, policy.PROTOCOL_CLOSE_OLD, policy.PROTOCOL_CLOSE_NEW)
+            socket.write_text(policy.replace(original, policy.PROTOCOL_CLOSE_OLD, "        // Changed close observer."), encoding="utf-8")
+            paths = [root / name for name in (
+                "src/lib.rs", "src/socket.rs", "src/endpoint.rs", "src/runtime.rs", "src/socket/remote_map.rs",
+                "src/socket/remote_map/remote_state.rs", "src/socket/transports.rs", "src/socket/transports/ip.rs",
+            )]
+            before = [path.read_bytes() for path in paths]
+            with self.assertRaises(ValueError):
+                policy.joined_actor_shutdown(root)
+            self.assertEqual([path.read_bytes() for path in paths], before)
+            self.assertFalse((root / "src/actor_shutdown.rs").exists())
 
     def test_runtime_ingress_transform_rejects_repeat_without_overwriting(self):
         root = ROOTS["noq"]

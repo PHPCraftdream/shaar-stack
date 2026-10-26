@@ -312,6 +312,60 @@ async fn startup_rejects_excess_input_and_failed_native_bind_joins_the_signaling
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn high_pto_close_joins_native_socket_with_connecting_and_endpoint_aliases_retained() {
+    tokio::time::timeout(Duration::from_secs(25), async {
+        let identity = Identity::generate();
+        let remote = public(&Identity::generate());
+        let blackhole = UdpSocket::bind(loopback()).await.unwrap();
+        // Without peer responses, the initial RTT cannot shrink through ACK sampling.
+        let transport = QuicTransportConfig::builder()
+            .initial_rtt(Duration::from_secs(10))
+            .build();
+        let endpoint = iroh::Endpoint::builder(presets::Minimal)
+            .secret_key(identity.transport_key())
+            .alpns(vec![ALPN.to_vec()])
+            .clear_ip_transports()
+            .clear_relay_transports()
+            .bind_addr(loopback())
+            .unwrap()
+            .portmapper_config(iroh::endpoint::PortmapperConfig::Disabled)
+            .net_report_config(iroh::endpoint::NetReportConfig::minimal())
+            .transport_config(transport)
+            .bind()
+            .await
+            .unwrap();
+        let alias = endpoint.clone();
+        let native = endpoint.bound_sockets();
+        assert_eq!(native.len(), 1);
+        let target =
+            EndpointAddr::from_parts(remote, [TransportAddr::Ip(blackhole.local_addr().unwrap())]);
+        // This admits the driver, but does not await the unavailable TLS peer.
+        let connecting = endpoint
+            .connect_with_opts(target, ALPN, Default::default())
+            .await
+            .unwrap();
+        let mut bytes = [0; 2048];
+        let (length, source) =
+            tokio::time::timeout(Duration::from_secs(5), blackhole.recv_from(&mut bytes))
+                .await
+                .expect("HIGH_PTO_INITIAL_WITNESS_DEADLINE")
+                .unwrap();
+        assert!(length >= 1200, "expected a complete QUIC Initial datagram");
+        assert_eq!(source, native[0]);
+        eprintln!("HIGH_PTO_INITIAL_WITNESS_OK");
+        // Initial RTT 10s gives PTO 30s and a 90s protocol-close period.
+        tokio::time::timeout(Duration::from_secs(10), endpoint.close())
+            .await
+            .unwrap_or_else(|_| panic!("HIGH_PTO_JOINED_CLOSE_DEADLINE"));
+        assert!(endpoint.is_closed() && alias.is_closed());
+        let _rebound = UdpSocket::bind(native[0]).await.unwrap();
+        drop((connecting, alias, endpoint));
+    })
+    .await
+    .expect("HIGH_PTO_FIXTURE_DEADLINE");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn cancellation_of_an_admitted_control_handshake_does_not_defeat_explicit_joined_close() {
     tokio::time::timeout(Duration::from_secs(20), async {
         let identity = Identity::generate();

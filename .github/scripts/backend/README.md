@@ -153,6 +153,48 @@ The companion bridge and NAT watchers completed successfully; their latest detai
 logs and artifacts have not been re-inspected. CI remains the only compilation and
 runtime environment; this accepts the metadata prerequisite, not the SDK endpoint.
 
+## Bounded protocol-close grace
+
+Windows CI `40244600817` localized the unreachable-native test failure to the old
+control connection's legitimate close timer, not an unpromised inbound handshake
+or fatal I/O. After native finalization returned `Deadline`, that connection's
+maximum PTO was 5.620881776 seconds, setting a 16.862645328-second close period.
+The server owner joined in 5.6417 milliseconds; the client's new connection timer
+expired after its 3.072-second period. The old control connection's close deadline
+lay beyond the unchanged 25-second test budget.
+
+Iroh endpoint shutdown now allows at most three seconds for its existing
+`wait_all_draining()` observer. Completion still proceeds immediately when peers
+respond. Grace expiry drops only this observer, not an owner or join handle, and
+always continues through actor abort/join, runtime cancellation/join and explicit
+native socket close. The existing local-abort transformation terminates canceled
+Noq drivers and their observers even when application handles remain alive.
+No extra task, lock, registry, public configuration or dependency is introduced.
+
+This bounds peer-notification grace, not total shutdown under arbitrary executor
+or kernel stalls. Peer notification remains best-effort: expiry does not promise
+remote delivery or full remote protocol drain; peers retain their own protocol
+timers. Waiting for `wait_idle()` instead would prolong the peer-dependent wait.
+SDK handshake and test deadlines, payload policy and retained-handle assertions
+are unchanged.
+
+Added helper regressions cover immediate completion, completion after observation,
+grace expiry and cancellation without canceling the observed owner. A real Iroh
+regression uses a live, silent UDP receiver and a high initial RTT, observes an
+Initial from the exact endpoint socket, and requires joined close and immediate
+socket rebind while both Connecting and endpoint aliases remain retained. The
+old unbounded wait would exceed its dedicated close deadline. Source controls
+pin call order and reject anchor drift without overwriting prepared inputs.
+After production proofs, CI copies the prepared Iroh tree and reverses only the
+exact protocol-observer call block. It verifies every copied file byte, records
+hashes and exact reversal, and uses a command-scoped Cargo path override with
+`--locked` for the same exact SDK test. The negative control must reach
+`HIGH_PTO_INITIAL_WITNESS_OK` and fail only `HIGH_PTO_JOINED_CLOSE_DEADLINE`, with
+exactly one failed test. Setup, witness, outer-budget, compilation and zero-test
+failures cannot satisfy it. The production tree and product lock remain unchanged.
+These regressions and CI controls are added, not locally executed; CI validation
+is required.
+
 ## Joined actor shutdown
 
 The later SDK matrix at `c20503d` again exposed an immediate UDP-rebind failure on

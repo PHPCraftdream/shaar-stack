@@ -16,6 +16,15 @@ pub(crate) fn track_child<F: Future>(
     tracker.track_future(future)
 }
 
+/// Bounds best-effort peer notification, not subsequent joined local shutdown.
+/// Pass only a closure observer, never an owner or task handle.
+/// cancel-safe: yes — dropping the observer does not cancel its drivers.
+pub(crate) async fn wait_for_protocol_close(observer: impl Future<Output = ()>) -> bool {
+    time::timeout(Duration::from_secs(3), observer)
+        .await
+        .is_ok()
+}
+
 /// cancel-safe: NO — dropping this waiter aborts the task but cannot join it.
 pub(crate) async fn finish_actor(mut task: AbortOnDropHandle<()>) -> Result<(), JoinError> {
     match time::timeout(Duration::from_millis(100), &mut task).await {
@@ -40,6 +49,61 @@ pub(crate) async fn close_native_sockets(sockets: &[std::sync::Arc<netwatch::Udp
 mod tests {
     use super::*;
     use tokio::{net::UdpSocket, sync::oneshot};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn protocol_close_observes_ready_and_later_completion() {
+        let mut ready = Box::pin(wait_for_protocol_close(std::future::ready(())));
+        std::future::poll_fn(|cx| {
+            assert_eq!(ready.as_mut().poll(cx), std::task::Poll::Ready(true));
+            std::task::Poll::Ready(())
+        })
+        .await;
+        let (complete, mut observed) = oneshot::channel();
+        let mut waiting = Box::pin(wait_for_protocol_close(async {
+            (&mut observed).await.unwrap();
+        }));
+        std::future::poll_fn(|cx| {
+            assert!(waiting.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        complete.send(()).unwrap();
+        assert!(waiting.await);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn protocol_close_grace_expiry_drops_only_the_observer() {
+        time::timeout(Duration::from_secs(10), async {
+            let (complete, mut observed) = oneshot::channel();
+            assert!(
+                !wait_for_protocol_close(async {
+                    (&mut observed).await.unwrap();
+                })
+                .await
+            );
+            // The producer and its receiver remain usable after grace expiry.
+            complete.send(()).unwrap();
+            observed.await.unwrap();
+        })
+        .await
+        .expect("protocol close grace did not expire");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelling_protocol_close_drops_only_the_observer() {
+        let (complete, mut observed) = oneshot::channel();
+        let mut waiting = Box::pin(wait_for_protocol_close(async {
+            (&mut observed).await.unwrap();
+        }));
+        std::future::poll_fn(|cx| {
+            assert!(waiting.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(waiting);
+        complete.send(()).unwrap();
+        observed.await.unwrap();
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn explicit_native_close_releases_sockets_with_sender_aliases_alive() {

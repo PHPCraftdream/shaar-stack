@@ -495,9 +495,45 @@ def connection_limit_bridge(root: Path):
     socket_path.write_text(socket, encoding="utf-8", newline="\n")
 
 
+PROTOCOL_CLOSE_OLD = '''        trace!("wait_all_draining start");
+        self.noq_endpoint().wait_all_draining().await;
+        trace!("wait_all_draining done");'''
+PROTOCOL_CLOSE_NEW = '''        trace!(shutdown_barrier = "wait_all_draining start", "wait_all_draining start");
+        // Peer-controlled PTO must not postpone joined local shutdown indefinitely.
+        let protocol_draining = crate::actor_shutdown::wait_for_protocol_close(
+            self.noq_endpoint().wait_all_draining(),
+        ).await;
+        trace!(protocol_draining, shutdown_barrier = "wait_all_draining done", "wait_all_draining done");'''
+
+
+PROTOCOL_CLOSE_DOC_OLD = """    /// It will then make a best effort to wait for all close notifications to be
+    /// acknowledged by the peers, re-transmitting them if needed. This ensures the
+    /// peers are aware of the closed connections instead of having to wait for a timeout
+    /// on the connection. Once all connections are closed or timed out, the future
+    /// finishes.
+    ///
+    /// The maximum time-out that this future will wait for depends on QUIC transport
+    /// configurations of non-drained connections at the time of calling, and their current
+    /// estimates of round trip time. With default parameters and a conservative estimate
+    /// of round trip time, this call's future should take 3 seconds to resolve in cases of
+    /// bad connectivity or failed connections. In the usual case, this call's future should
+    /// return much more quickly.
+"""
+PROTOCOL_CLOSE_DOC_NEW = """    /// Gives peers up to three seconds to respond to close notifications before
+    /// canceling and joining local drivers and explicitly closing native sockets.
+    /// Peer notification is best-effort, not a remote-delivery or full-drain guarantee.
+    /// A peer that misses the close still has its own protocol timeout.
+    ///
+    /// The grace period is independent of connection RTT and PTO estimates. Local
+    /// task destruction and native socket close are always awaited afterward;
+    /// three seconds is not a bound on executor or kernel cleanup latency.
+"""
+
+
 def joined_actor_shutdown(root: Path):
     library_path = root / "src/lib.rs"
     socket_path = root / "src/socket.rs"
+    endpoint_path = root / "src/endpoint.rs"
     module = root / "src/actor_shutdown.rs"
     if module.exists():
         raise ValueError("actor shutdown module already exists")
@@ -522,6 +558,11 @@ def joined_actor_shutdown(root: Path):
                 warn!("actor joined after shutdown: {:?}", err);
             }
         }""")
+    socket = replace(socket, PROTOCOL_CLOSE_OLD, PROTOCOL_CLOSE_NEW)
+    endpoint = replace(endpoint_path.read_text(encoding="utf-8"), PROTOCOL_CLOSE_DOC_OLD, PROTOCOL_CLOSE_DOC_NEW)
+    endpoint = replace(endpoint, """    /// Be aware however that the underlying UDP sockets are only closed once all clones of
+    /// the respective [`Endpoint`] are dropped.""", """    /// Native UDP sockets are explicitly closed even if endpoint or connection handles remain.
+    /// cancel-safe: NO — cancellation does not finish the remaining local joins or socket closes.""")
     runtime_path = root / "src/runtime.rs"
     remote_path = root / "src/socket/remote_map.rs"
     child_path = root / "src/socket/remote_map/remote_state.rs"
@@ -567,8 +608,7 @@ def joined_actor_shutdown(root: Path):
         #[cfg(not(wasm_browser))]
         crate::actor_shutdown::close_native_sockets(&self.native_sockets).await;
         trace!("endpoint native sockets closed");""")
-    for barrier in ("wait_all_draining start", "wait_all_draining done", "endpoint actor joined",
-                    "endpoint runtime joined", "endpoint native sockets closed"):
+    for barrier in ("endpoint actor joined", "endpoint runtime joined", "endpoint native sockets closed"):
         socket = replace(socket, f'trace!("{barrier}");',
                          f'trace!(shutdown_barrier = "{barrier}", "{barrier}");')
     owned = Path(__file__).with_name("actor_shutdown.rs").read_bytes()
@@ -577,6 +617,7 @@ def joined_actor_shutdown(root: Path):
         path.write_text(text, encoding="utf-8", newline="\n")
     library_path.write_text(library, encoding="utf-8", newline="\n")
     socket_path.write_text(socket, encoding="utf-8", newline="\n")
+    endpoint_path.write_text(endpoint, encoding="utf-8", newline="\n")
     module.write_bytes(owned)
 
 
