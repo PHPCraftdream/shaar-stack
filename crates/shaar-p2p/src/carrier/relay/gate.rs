@@ -239,7 +239,7 @@ impl Gate {
     pub(crate) fn next(&self) -> io::Result<u64> {
         self.core
             .counter
-            .fetch_update(Ordering::AcqRel, Ordering::AcqRel, |value| {
+            .try_update(Ordering::AcqRel, Ordering::AcqRel, |value| {
                 value.checked_add(1)
             })
             .map(|previous| previous + 1)

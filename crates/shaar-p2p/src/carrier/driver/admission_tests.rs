@@ -1,11 +1,11 @@
 use super::*;
-use crate::discovery::roles::{Owner, Role};
+use crate::discovery::roles::Owner;
 use libp2p::{
     Multiaddr,
     core::Endpoint,
     swarm::{ConnectionDenied, NetworkBehaviour},
 };
-use std::{io, net::SocketAddr, sync::Arc};
+use std::{io, sync::Arc};
 use tokio::time::Instant;
 
 fn peer() -> PeerId {

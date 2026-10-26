@@ -6,7 +6,7 @@
 use super::*;
 use crate::discovery::roles::{Owner, Role};
 use libp2p::{Multiaddr, relay::client::OperationKind};
-use std::{num::NonZeroU64, sync::atomic::Ordering as AtomicOrdering};
+use std::sync::atomic::Ordering as AtomicOrdering;
 use tokio::{
     net::TcpListener,
     sync::oneshot,
@@ -14,7 +14,7 @@ use tokio::{
     time::{Instant, timeout},
 };
 
-use super::relay::gate::{Gate, Slot, Ticket};
+use super::relay::gate::{Gate, Slot};
 
 /// Mirrors `gate::RECORDS` (2 * (RESERVATIONS + PENDING_LIMIT)): the bounded
 /// total of live records plus retained tombstones; the constant itself is
@@ -243,7 +243,7 @@ async fn carrier_destination_hostile_dial_rejects_without_fallback() {
 
 fn discovery_config(seed: PeerId) -> DiscoveryConfig {
     let address = Multiaddr::empty()
-        .with(Protocol::Dns("seed.example.".to_string()))
+        .with(Protocol::Dns("seed.example.".into()))
         .with(Protocol::Tcp(443))
         .with(Protocol::P2p(seed));
     DiscoveryConfig::new(vec![(seed, address)], vec!["8.8.8.8:53".parse().unwrap()]).unwrap()

@@ -254,7 +254,7 @@ impl Owner {
             return Err(denied());
         }
         let owner = NEXT_OWNER
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::Relaxed,
                 std::sync::atomic::Ordering::Relaxed,
                 |value| value.checked_add(1),

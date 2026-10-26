@@ -5,7 +5,7 @@ use super::*;
 use crate::discovery::roles::{Owner, Role};
 use libp2p::{Multiaddr, relay::client::OperationKind};
 use std::{num::NonZeroU64, sync::atomic::Ordering as AtomicOrdering};
-use tokio::time::{Instant, timeout};
+use tokio::time::Instant;
 const RECORD_BUDGET: usize = 20;
 fn peer() -> PeerId {
     Keypair::generate_ed25519().public().to_peer_id()
