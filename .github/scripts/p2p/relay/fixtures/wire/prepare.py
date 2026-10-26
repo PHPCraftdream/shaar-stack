@@ -106,6 +106,7 @@ UNIT_GROUPS = (
     ("gate", "src/operation_gate.rs", "src/operation_tests.rs", "tests", "operation_tests.rs", "operation_gate", 13),
     ("handler", "src/priv_client/handler.rs", "src/priv_client/operation_handler_tests.rs", "operation_handler_tests", "operation_handler_tests.rs", "priv_client::handler", 7),
     ("client", "src/priv_client.rs", "src/operation_client_tests.rs", "operation_client_tests", "operation_client_tests.rs", "priv_client", 5),
+    ("transport", "src/priv_client/transport.rs", "src/priv_client/operation_transport_tests.rs", "operation_transport_tests", "operation_transport_tests.rs", "priv_client::transport", 5),
 )
 
 
@@ -161,11 +162,11 @@ def unit_transform(source):
     for name in original.keys() - edits.keys():
         if tree[name] != original[name]:
             raise ValueError("unit bridge changed an unrelated production file")
-    if len(inventory) != 25:
-        raise ValueError("exactly 25 owned unit cases are required")
+    if len(inventory) != 30:
+        raise ValueError("exactly 30 owned unit cases are required")
     record = {"production_files": hashes(original), "instrumented_files": hashes(tree),
               "recipe_sha256": digest(Path(__file__).read_bytes()), "fixture_only": True,
-              "unit_inventory": inventory, "unit_tests_authored": 25, "runtime_verified": False,
+              "unit_inventory": inventory, "unit_tests_authored": 30, "runtime_verified": False,
               "unit_bridge_reversible_edits": edits, "unit_bodies_unchanged": True}
     return tree, record, ('\n'.join(harness) + '\n').encode()
 

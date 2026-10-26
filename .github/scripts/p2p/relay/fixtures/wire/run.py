@@ -117,8 +117,8 @@ def execute(root, executable, variant):
 
 
 def execute_units(root, executable, inventory):
-    if len(inventory) != 25 or len(set(inventory)) != 25:
-        raise ValueError("unit run requires exactly 25 distinct owned cases")
+    if len(inventory) != 30 or len(set(inventory)) != 30:
+        raise ValueError("unit run requires exactly 30 distinct owned cases")
     result = subprocess.run([str(executable), "--test-threads=1", "--show-output"], cwd=root,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8", errors="replace", timeout=180, check=False)
@@ -126,14 +126,14 @@ def execute_units(root, executable, inventory):
     (root / "run.log").write_text(output, encoding="utf-8")
     print(output)
     completed = re.findall(r"^RELAY_UNIT_COMPLETED=(.+)$", output, re.MULTILINE)
-    if result.returncode or not re.search(r"test result: ok\. 25 passed; 0 failed; 0 ignored;", output):
-        raise ValueError("owned operation unit suite did not pass exactly 25 cases")
-    if len(completed) != 25 or set(completed) != set(inventory):
+    if result.returncode or not re.search(r"test result: ok\. 30 passed; 0 failed; 0 ignored;", output):
+        raise ValueError("owned operation unit suite did not pass exactly 30 cases")
+    if len(completed) != 30 or set(completed) != set(inventory):
         raise ValueError("unit dispatch did not execute every unchanged body exactly once")
     for name in inventory:
         if f"test {name} ... ok" not in output:
             raise ValueError("unit result missing: " + name)
-    return {"expected_tests": 25, "exit_code": result.returncode, "unit_inventory": inventory,
+    return {"expected_tests": 30, "exit_code": result.returncode, "unit_inventory": inventory,
             "output_sha256": prepare.digest(output.encode()), "unit_bodies_unchanged": True}
 
 
@@ -184,7 +184,7 @@ def run(repository, source, destination):
         results[variant] = {**witness, **outcome, "lock_sha256": prepare.digest(lock)}
     if product_lock.read_bytes() != lock_before or prepare.hashes(prepare.files(source)) != product_sources:
         raise ValueError("wire fixtures changed production source or lock")
-    receipt = {"host": host, "unit_tests": 25, "units": units,
+    receipt = {"host": host, "unit_tests": 30, "units": units,
                "baseline_wire_tests": 3, "counterfactual_runs": 3,
                "runner_sha256": prepare.digest(Path(__file__).read_bytes()),
                "runtime_verified": True, "product_lock_sha256": prepare.digest(lock_before),

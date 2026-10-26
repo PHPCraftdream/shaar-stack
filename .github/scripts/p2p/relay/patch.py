@@ -20,7 +20,29 @@ def transport(text):
     text = replace(text, "            let stream = rx.await??;", "            let stream = rx.await??;\n            if !operation.live() { return Err(Error::Operation(crate::operation_gate::denied())); }\n            cancel.0 = None;")
     text = replace(text, "pub(crate) struct Listener {", "pub(crate) struct Listener {\n    operation: Operation,")
     text = replace(text, "        self.from_behaviour.close();", "        self.operation.cancel();\n        self.from_behaviour.close();\n        self.queued_events.clear();")
-    text = replace(text, "    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {\n        loop {", "    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {\n        loop {\n            if !self.is_closed && !self.operation.live() { self.close(Ok(())); }")
+    # A dead operation must not mask a typed rejection already queued for the listener.
+    text = replace(text, "                Poll::Pending => {\n                    self.waker = Some(cx.waker().clone());", '''                Poll::Pending => {
+                    if !self.operation.live() {
+                        // The operation ended without a queued typed rejection; close untyped.
+                        self.close(Ok(()));
+                        continue;
+                    }
+                    self.waker = Some(cx.waker().clone());''')
+    # A canceled operation must not accept an in-flight success or inbound circuit.
+    text = replace(text, "                ToListenerMsg::Reservation(Ok(Reservation { addrs })) => {", "                ToListenerMsg::Reservation(Ok(Reservation { addrs })) => {\n                    if !self.operation.live() { continue; }")
+    text = replace(text, "                    let listener_id = self.listener_id;", "                    if !self.operation.live() { continue; }\n                    let listener_id = self.listener_id;")
+    # Buffered events of a revoked operation must never be published.
+    text = replace(text, "            if let Some(event) = self.queued_events.pop_front() {\n                self.waker = None;\n                return Poll::Ready(Some(event));\n            }", '''            if let Some(event) = self.queued_events.pop_front() {
+                if self.is_closed || self.operation.live() {
+                    self.waker = None;
+                    return Poll::Ready(Some(event));
+                }
+                // A revoked operation loses buffered success publication, but a
+                // queued typed rejection must still be drained from the channel;
+                // the Pending branch then closes untyped if the channel is empty.
+                self.queued_events.clear();
+                continue;
+            }''')
     text = replace(text, "impl Stream for Listener {", "impl Drop for Listener {\n    fn drop(&mut self) { self.operation.cancel(); }\n}\n\nimpl Stream for Listener {")
     text = replace(text, "    DialReq {\n", "    DialReq {\n        operation: Operation,\n")
     text = replace(text, "    ListenReq {\n", "    ListenReq {\n        operation: Operation,\n")
@@ -149,4 +171,6 @@ impl fmt::Debug for In {''')
     handler_source += '\n#[cfg(test)]\n#[path = "operation_handler_tests.rs"]\nmod operation_handler_tests;\n'
     client_source = client(client_source)
     client_source += '\n#[cfg(test)]\n#[path = "operation_client_tests.rs"]\nmod operation_client_tests;\n'
-    return library, client_source, handler_source, transport(transport_source), reservation_source
+    transport_source = transport(transport_source)
+    transport_source += '\n#[cfg(test)]\n#[path = "operation_transport_tests.rs"]\nmod operation_transport_tests;\n'
+    return library, client_source, handler_source, transport_source, reservation_source

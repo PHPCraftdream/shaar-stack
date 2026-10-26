@@ -19,11 +19,13 @@ class OperationSourceChecks(unittest.TestCase):
         self.assertEqual(receipt["operation_gate_unit_tests"], 13)
         self.assertEqual(receipt["operation_handler_unit_tests"], 7)
         self.assertEqual(receipt["operation_client_unit_tests"], 5)
+        self.assertEqual(receipt["operation_transport_unit_tests"], 5)
         owned = Path(__file__).parent
         for generated, source in (("operation_gate.rs", "gate.rs"),
                                   ("operation_tests.rs", "tests.rs"),
                                   ("priv_client/operation_handler_tests.rs", "fixtures/handler_tests.rs"),
-                                  ("operation_client_tests.rs", "fixtures/client_tests.rs")):
+                                  ("operation_client_tests.rs", "fixtures/client_tests.rs"),
+                                  ("priv_client/operation_transport_tests.rs", "fixtures/transport_tests.rs")):
             expected = (owned / source).read_bytes()
             actual = (root / "src" / generated).read_bytes()
             self.assertEqual(actual, expected)

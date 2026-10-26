@@ -118,6 +118,7 @@ def prepare(archive, destination):
         "operation_tests.rs": "tests.rs",
         "priv_client/operation_handler_tests.rs": "fixtures/handler_tests.rs",
         "operation_client_tests.rs": "fixtures/client_tests.rs",
+        "priv_client/operation_transport_tests.rs": "fixtures/transport_tests.rs",
     }
     operation_bytes = {name: (Path(__file__).parent / "relay" / source).read_bytes()
                        for name, source in operation_sources.items()}
@@ -151,6 +152,7 @@ def prepare(archive, destination):
         "operation_gate_unit_tests": 13,
         "operation_handler_unit_tests": 7,
         "operation_client_unit_tests": 5,
+        "operation_transport_unit_tests": 5,
         "operation_runtime_fixture_verified": False,
         "reservation_expiry_api": "validated-monotonic-instant",
         "authenticated_relay_connection_context": True,
