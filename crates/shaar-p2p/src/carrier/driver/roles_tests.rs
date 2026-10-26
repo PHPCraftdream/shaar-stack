@@ -16,21 +16,12 @@ use tokio::{
 
 use super::relay::gate::{Gate, Slot};
 
-/// Mirrors `gate::RECORDS` (2 * (RESERVATIONS + PENDING_LIMIT)): the bounded
-/// total of live records plus retained tombstones; the constant itself is
-/// private to the gate module.
-const RECORD_BUDGET: usize = 20;
-
 fn peer() -> PeerId {
     Keypair::generate_ed25519().public().to_peer_id()
 }
 
 fn endpoint() -> SocketAddr {
     "127.0.0.1:4001".parse().unwrap()
-}
-
-fn other_endpoint() -> SocketAddr {
-    "127.0.0.1:4002".parse().unwrap()
 }
 
 fn plain(endpoint: SocketAddr) -> Multiaddr {

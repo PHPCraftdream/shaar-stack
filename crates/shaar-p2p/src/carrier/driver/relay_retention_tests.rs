@@ -320,3 +320,136 @@ async fn carrier_destination_old_reservation_acceptance_cannot_replace_successor
         assert!(matches!(result.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
     }).await.unwrap();
 }
+
+#[path = "../../../tests/relay_expiry/codec.rs"]
+mod hostile_codec;
+
+mod hostile_carrier_wire {
+    use super::hostile_codec::{Hop, HopCodec, Limit, Reservation};
+    use super::*;
+    use libp2p::{multiaddr::Protocol, request_response as rpc};
+    use std::{error::Error, time::SystemTime};
+
+    fn invalid_expiry(mut error: &(dyn Error + 'static)) -> bool {
+        for _ in 0..16 {
+            if matches!(
+                error.downcast_ref::<libp2p::relay::outbound::hop::ProtocolViolation>(),
+                Some(libp2p::relay::outbound::hop::ProtocolViolation::InvalidReservationExpiration)
+            ) {
+                return true;
+            }
+            if let Some(inner) = error
+                .downcast_ref::<io::Error>()
+                .and_then(io::Error::get_ref)
+            {
+                error = inner;
+                continue;
+            }
+            let Some(inner) = error.source() else {
+                return false;
+            };
+            error = inner;
+        }
+        false
+    }
+
+    fn discovery(dns: &crate::dns::tests::support::Server) -> DiscoveryConfig {
+        let seed = Keypair::generate_ed25519().public().to_peer_id();
+        DiscoveryConfig::new(
+            vec![(
+                seed,
+                format!("/dns4/seed.example./tcp/443/p2p/{seed}")
+                    .parse()
+                    .unwrap(),
+            )],
+            vec![dns.address],
+        )
+        .unwrap()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn carrier_destination_hostile_hop_typed_error_survives_revocation() {
+        timeout(Duration::from_secs(30), async {
+            // Positive control: valid expiry yields an installed reservation lease.
+            // Counterfactual: omitting expiry must preserve typed rejection across revocation.
+            for hostile in [false, true] {
+                let dns = crate::dns::tests::support::Server::new().await;
+                let server_key = Keypair::generate_ed25519();
+                let server_peer = server_key.public().to_peer_id();
+                let server_executor = Executor(Arc::new(std::sync::Mutex::new(JoinSet::new())));
+                let mut server = Swarm::new(native(&server_key), rpc::Behaviour::with_codec(
+                    HopCodec, [(libp2p::relay::HOP_PROTOCOL_NAME, rpc::ProtocolSupport::Full)],
+                    rpc::Config::default().with_request_timeout(Duration::from_secs(10)).with_max_concurrent_streams(1)),
+                    server_peer, libp2p::swarm::Config::with_executor(server_executor.clone()));
+                server.listen_on("/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
+                let listen = loop { if let SwarmEvent::NewListenAddr { address, .. } = server.select_next_some().await { break address; } };
+                let relay = RelayAddr::new(server_peer, socket_address(&listen).unwrap()).unwrap();
+                let (mut carrier, handle, _incoming) = Carrier::bind_with_discovery(Keypair::generate_ed25519(),
+                    "127.0.0.1:0".parse().unwrap(), vec![], discovery(&dns)).unwrap();
+                let (reply, mut result) = oneshot::channel();
+                carrier.core.command(Command::Reserve(relay, reply));
+                let mut requests = 0;
+                let mut expiration = None;
+                // Input: real RESERVE request; the server responds with actual HOP bytes.
+                let mut intercepted = None;
+                let mut valid_lease = None;
+                timeout(Duration::from_secs(15), async {
+                    loop { tokio::select! {
+                        event = server.select_next_some() => if let SwarmEvent::Behaviour(rpc::Event::Message { peer, message: rpc::Message::Request { request, channel, .. }, .. }) = event {
+                            assert_eq!(peer, *carrier.core.swarm.local_peer_id());
+                            assert_eq!(request.kind, Some(0));
+                            assert!(request.reservation.is_none()); requests += 1; assert_eq!(requests, 1);
+                            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+                            expiration = Some(std::time::Instant::now() + Duration::from_secs(60));
+                            server.behaviour_mut().send_response(channel, Hop { kind: Some(2), status: Some(100),
+                                reservation: Some(Reservation { expire: if hostile { None } else { Some(now + 60) }, addresses: vec![listen.clone().with(Protocol::P2p(server_peer)).to_vec()] }),
+                                limit: Some(Limit { duration: Some(1), data: Some(4096) }) }).unwrap();
+                        },
+                        event = carrier.core.swarm.select_next_some() => match event {
+                            event @ SwarmEvent::ListenerError { .. } | event @ SwarmEvent::ListenerClosed { .. } => { intercepted = Some(event); break; },
+                            event => {
+                                carrier.core.event(event).unwrap();
+                                if !hostile && let Ok(Ok(lease)) = result.try_recv() {
+                                    valid_lease = Some(lease);
+                                    break;
+                                }
+                            },
+                        }
+                    }}
+                }).await.unwrap();
+                assert_eq!(requests, 1);
+                if hostile {
+                    let event = intercepted.unwrap();
+                    let error: &(dyn Error + 'static) = match &event {
+                        SwarmEvent::ListenerError { error, .. } => error,
+                        SwarmEvent::ListenerClosed { reason, .. } => reason.as_ref().err().expect("closed listener carries typed rejection"),
+                        _ => unreachable!(),
+                    };
+                    assert!(invalid_expiry(error), "missing typed invalid-expiration source");
+                    carrier.core.relay.gate.revoke(server_peer, relay::gate::Slot::Reserve);
+                    assert!(matches!(result.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+                    // Replacing this dispatch with a local error loses the concrete source.
+                    carrier.core.event(event).unwrap();
+                    assert!(matches!(result.try_recv(), Ok(Err(error)) if invalid_expiry(&error)));
+                    assert!(handle.relay_leases().borrow().is_empty());
+                } else {
+                    let lease = valid_lease.expect("valid reservation reply");
+                    let deadline = expiration.unwrap();
+                    assert!(lease.expires_at().into_std() <= deadline);
+                    assert_eq!(lease.relay(), relay);
+                    assert_eq!(handle.relay_leases().borrow().as_slice(), &[lease]);
+                    assert!(lease.generation() > 0);
+                    let control = lease.connection_id();
+                    assert!(carrier.core.relay.gate.reservation_permit(server_peer, lease.generation(), control));
+                    assert_eq!(carrier.core.swarm.behaviour().admission.connection(&server_peer), Some(control));
+                }
+                let listening = (*handle.listening.borrow()).expect("native listener observed");
+                let run = carrier.run(async {}).await;
+                assert!(run.is_ok());
+                let listener = tokio::net::TcpListener::bind(listening).await.unwrap();
+                drop(listener);
+                drop(server); server_executor.shutdown().await.unwrap(); dns.quiet();
+            }
+        }).await.unwrap();
+    }
+}

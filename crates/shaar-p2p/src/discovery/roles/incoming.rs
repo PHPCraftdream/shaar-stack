@@ -65,7 +65,7 @@ impl View {
         })
     }
 
-    pub(crate) fn inbound_contains(state: &State, id: ConnectionId) -> bool {
+    pub(super) fn inbound_contains(state: &State, id: ConnectionId) -> bool {
         state
             .inbound
             .iter()

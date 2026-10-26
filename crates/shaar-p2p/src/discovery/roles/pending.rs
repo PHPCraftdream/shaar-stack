@@ -1,11 +1,9 @@
-use std::{io, net::SocketAddr};
+use std::io;
 
-use libp2p::{Multiaddr, PeerId, multiaddr::Protocol, swarm::ConnectionId};
+use libp2p::{PeerId, swarm::ConnectionId};
 use tokio::time::Instant;
 
-use super::{
-    AttemptKey, Lease, LeaseKind, Owner, Role, View, denied, numeric_usable, take_wakers, wake,
-};
+use super::{AttemptKey, Lease, LeaseKind, Owner, Role, View, denied, take_wakers, wake};
 
 impl Owner {
     pub(crate) fn admit_child(
@@ -145,25 +143,4 @@ impl View {
             entry.deadline,
         ))
     }
-}
-
-pub(crate) fn numeric_endpoint(address: &Multiaddr, peer: PeerId) -> io::Result<SocketAddr> {
-    let mut parts = address.iter();
-    let endpoint = match (parts.next(), parts.next(), parts.next(), parts.next()) {
-        (Some(Protocol::Ip4(ip)), Some(Protocol::Tcp(port)), Some(Protocol::P2p(id)), None)
-            if id == peer =>
-        {
-            SocketAddr::from((ip, port))
-        }
-        (Some(Protocol::Ip6(ip)), Some(Protocol::Tcp(port)), Some(Protocol::P2p(id)), None)
-            if id == peer =>
-        {
-            SocketAddr::from((ip, port))
-        }
-        _ => return Err(denied()),
-    };
-    if !numeric_usable(endpoint) {
-        return Err(denied());
-    }
-    Ok(endpoint)
 }
