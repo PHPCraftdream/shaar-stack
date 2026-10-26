@@ -499,9 +499,25 @@ impl Core {
                     relay: Some(address.peer),
                     generation: ticket.generation,
                 }
+            } else if self.swarm.behaviour().admission.roles_view().is_none() {
+                if !self.relay.records.values().any(|record| {
+                    record.phase == Phase::Active
+                        && record.expiry.is_some_and(|expiry| expiry > Instant::now())
+                }) {
+                    return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+                }
+                Route::Relayed {
+                    relay: None,
+                    generation: self.relay.gate.next()?,
+                }
             } else {
                 let local = local_address
                     .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))?;
+                // Incoming transport addresses omit our final advertised peer suffix.
+                let qualified = local
+                    .clone()
+                    .with_p2p(*self.swarm.local_peer_id())
+                    .map_err(|_| io::Error::from(io::ErrorKind::PermissionDenied))?;
                 let now = Instant::now();
                 let provenance = self
                     .relay
@@ -509,7 +525,7 @@ impl Core {
                     .iter()
                     .find_map(|(relay, record)| {
                         (record.phase == Phase::Active
-                            && record.addresses.contains(local)
+                            && record.addresses.contains(&qualified)
                             && record.control.is_some()
                             && record.expiry.is_some_and(|expiry| expiry > now)
                             && self.swarm.behaviour().admission.connection(relay) == record.control)
