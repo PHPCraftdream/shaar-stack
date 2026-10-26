@@ -96,9 +96,17 @@ EDITS = [
      '                            bounded_expansion::retain_error(&mut dial_errors, e);'),
     ('                            dial_errors.push(err);',
      '                            bounded_expansion::retain_error(&mut dial_errors, err);'),
-    ('\n' + ONE_OLD, '\n                            bounded_expansion::push_numeric(&mut unresolved, &addr, i, ip);'),
-    ('\n' + MANY_OLD, '\n                                bounded_expansion::push_numeric(&mut unresolved, &addr, i, ip);'),
-    (ADDRS_OLD, '                            bounded_expansion::push_txt(&mut unresolved, &addr, i, addrs);'),
+    ('\n' + ONE_OLD, '\n                            bounded_expansion::push_numeric(&mut unresolved, &addr, i, ip, &resolver);'),
+    ('\n' + MANY_OLD, '\n                                bounded_expansion::push_numeric(&mut unresolved, &addr, i, ip, &resolver);'),
+    (ADDRS_OLD, '                            bounded_expansion::push_txt(&mut unresolved, &addr, i, addrs, &resolver);'),
+    ('pub trait Resolver {', '''pub trait Resolver {
+    /// Checks a complete bounded DNS expansion before address allocation.
+    /// The bytes may contain further DNS components. Direct non-DNS input bypasses this hook.
+    /// Default acceptance preserves existing resolver behavior; this is not peer authentication.
+    fn permits_address(&self, _encoded: &[u8]) -> bool {
+        true
+    }
+'''),
     ("    Many(Vec<Protocol<'a>>),", "    Many(SmallVec<[Protocol<'a>; 4]>),"),
     ('    Addrs(Vec<Multiaddr>),', '    Addrs(Lookup),'),
     (TXT_OLD, '                    Ok(txts) => Ok(Resolved::Addrs(txts)),'),

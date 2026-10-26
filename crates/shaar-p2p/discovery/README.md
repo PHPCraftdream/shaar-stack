@@ -563,3 +563,43 @@ destination policy, nor task closure is proved here. Those remain with the
 owned-provider/wire-gate leaf and Task 67 owner integration. Discovery metadata is
 untrusted; infrastructure/bootstrap roles must never enter the application
 allowlist. This leaf establishes neither Amino readiness nor public availability.
+
+## Task 106: borrowed pre-materialization policy hook
+
+The same-version prepared DNS transport adds the defaulted existing-trait method
+`Resolver::permits_address(&self, encoded: &[u8]) -> bool`. Its default returns
+true, preserving existing resolver implementations and constructors. The original
+16 expansion contracts still use a resolver that does not override this method.
+
+Numeric and TXT expansion call the hook with the complete fixed-buffer encoding,
+including inherited prefix and suffix, after existing length, suffix and pending
+deduplication checks and before `Encoded::address()` creates an owned Multiaddr.
+The hook only borrows bytes; no address copy or owned parser is inserted at this
+boundary. Intermediate candidates may still contain DNS components. A rejected
+intermediate candidate is neither materialized nor resolved further.
+
+Policy rejection does not consume an accepted TXT slot, replenish the numeric
+four-answer selection, append an error, or admit an inner dial. With no other lookup/dial errors, rejecting every
+candidate returns the existing no-matching-records error. Accepted order,
+LIFO processing, first-character-string TXT interpretation, CNAME handling and
+all existing work, byte, queue and error ceilings remain unchanged.
+
+Eight additional owned contracts exercise the actual prepared transport with an
+overriding resolver: numeric rejection for DNS/DNS4/DNS6 and both cardinality
+branches, selective acceptance/order, all-rejected TXT input, complete inherited
+context and suffix validation, accepted-TXT accounting, nested forwarding, direct
+non-DNS pass-through, and cancellation/error ownership. Existing allocation and
+inner-dial observations distinguish pre-materialization rejection from filtering
+already allocated addresses. Fixture predicates compare borrowed bytes against
+expectations encoded by the upstream parser before the call; they do not decode
+multiaddrs by hand or allocate an owned address inside the predicate. CI requires
+24 executed Rust contracts and 10 preparation controls. These tests are added for
+CI, not run locally; syntax/formatting and source-data preparation are not runtime
+acceptance.
+
+The hook is included in the reversible, hash/anchor-pinned preparation and recipe
+receipt; its fixture input is hashed with the existing owned tests. Archive source,
+manifest and lock bytes are unchanged except for the already reviewed prepared
+transformations. Direct non-DNS inputs intentionally bypass this expansion hook.
+It neither supplies a destination classification nor authorizes application peers;
+the role-aware owned resolver and final native TCP guard remain separate work.

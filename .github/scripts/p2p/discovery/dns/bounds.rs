@@ -6,7 +6,7 @@ use hickory_resolver::{lookup::Lookup, proto::rr::RData};
 use libp2p_core::multiaddr::{Multiaddr, Protocol};
 use smallvec::SmallVec;
 
-use crate::{Error, MAX_TXT_RECORDS};
+use crate::{Error, MAX_TXT_RECORDS, Resolver};
 
 pub(crate) const MAX_PENDING: usize = 32;
 pub(crate) const MAX_ADDRESS_BYTES: usize = 256;
@@ -69,6 +69,7 @@ pub(crate) fn push_numeric(
     original: &Multiaddr,
     index: usize,
     ip: Protocol<'_>,
+    resolver: &impl Resolver,
 ) {
     if pending.len() >= MAX_PENDING {
         return;
@@ -90,12 +91,21 @@ pub(crate) fn push_numeric(
     {
         return;
     }
+    if !resolver.permits_address(encoded.bytes()) {
+        return;
+    }
     if let Ok(address) = encoded.address() {
         pending.push(address);
     }
 }
 
-pub(crate) fn push_txt(pending: &mut Pending, original: &Multiaddr, index: usize, lookup: Lookup) {
+pub(crate) fn push_txt(
+    pending: &mut Pending,
+    original: &Multiaddr,
+    index: usize,
+    lookup: Lookup,
+    resolver: &impl Resolver,
+) {
     let mut suffix = Encoded::new();
     for protocol in original.iter().skip(index + 1) {
         if suffix.push(protocol).is_err() {
@@ -130,6 +140,9 @@ pub(crate) fn push_txt(pending: &mut Pending, original: &Multiaddr, index: usize
                 .iter()
                 .any(|address| address.as_ref() == encoded.0.bytes())
         {
+            continue;
+        }
+        if !resolver.permits_address(encoded.0.bytes()) {
             continue;
         }
         if let Ok(address) = encoded.0.address() {

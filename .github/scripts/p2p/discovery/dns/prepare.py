@@ -110,6 +110,7 @@ def prepare(archive, destination):
         "dns_lookups": 32, "dial_attempts": 16, "accepted_txt_per_lookup": 16,
         "numeric_per_lookup": 4, "pending_candidates": 32, "retained_errors": 16,
         "encoded_address_bytes": 256, "txt_bytes": 1024,
+        "address_policy_hook": "Resolver::permits_address",
         "fixture_instrumentation": False, "hickory_memory_or_joined_shutdown_proven": False,
     }
     files.update(changes)
@@ -124,7 +125,8 @@ def prepare(archive, destination):
 def verify(root):
     receipt = json.loads((root.parent / "provenance.json").read_text(encoding="utf-8"))
     if (receipt["archive_sha256"] != DIGEST or receipt["recipe_files"] != recipe()
-            or receipt["fixture_instrumentation"]):
+            or receipt["fixture_instrumentation"]
+            or receipt.get("address_policy_hook") != "Resolver::permits_address"):
         raise ValueError("DNS prepared provenance mismatch")
     paths = list(root.rglob("*"))
     if any(path.is_symlink() for path in paths):
@@ -167,15 +169,15 @@ def fixture(source, destination):
     files = verify(source)
     before = hashes(files)
     files["src/bounded_expansion.rs"] = instrument(files["src/bounded_expansion.rs"].decode()).encode()
-    files["src/lib.rs"] += b"\n#[cfg(test)]\nmod retention_support;\n#[cfg(test)]\nmod retention_tests;\n"
-    for name in ("support", "tests"):
+    files["src/lib.rs"] += b"\n#[cfg(test)]\nmod retention_support;\n#[cfg(test)]\nmod retention_tests;\n#[cfg(test)]\nmod retention_policy_tests;\n"
+    for name in ("support", "tests", "policy_tests"):
         files[f"src/retention_{name}.rs"] = (HERE / f"{name}.rs").read_bytes()
     if digest(files["Cargo.lock"]) != LOCK_DIGEST:
         raise ValueError("DNS fixture archive lock changed")
     write_tree(files, destination)
     receipt = {"archive_sha256": DIGEST, "archive_lock_sha256": LOCK_DIGEST,
                "production_files": before, "fixture_files": hashes(files),
-               "owned_tests": hashes({name: (HERE / name).read_bytes() for name in ("support.rs", "tests.rs")}),
+               "owned_tests": hashes({name: (HERE / name).read_bytes() for name in ("support.rs", "tests.rs", "policy_tests.rs")}),
                "excluded_upstream_test_modules": []}
     (destination / "fixture-provenance.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
 

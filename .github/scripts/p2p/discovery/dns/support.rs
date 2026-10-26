@@ -167,6 +167,51 @@ impl Resolver for FakeResolver {
     }
 }
 
+type Policy = dyn Fn(&[u8]) -> bool + Send + Sync;
+
+#[derive(Clone)]
+pub(crate) struct PolicyResolver {
+    pub inner: FakeResolver,
+    policy: Arc<Policy>,
+    pub policy_calls: Arc<AtomicUsize>,
+}
+
+impl PolicyResolver {
+    pub(crate) fn new(
+        inner: FakeResolver,
+        policy: impl Fn(&[u8]) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            inner,
+            policy: Arc::new(policy),
+            policy_calls: Arc::default(),
+        }
+    }
+}
+
+impl Resolver for PolicyResolver {
+    fn permits_address(&self, encoded: &[u8]) -> bool {
+        self.policy_calls.fetch_add(1, Ordering::SeqCst);
+        (self.policy)(encoded)
+    }
+
+    async fn lookup_ip(&self, name: String) -> Result<LookupIp, ResolveError> {
+        self.inner.lookup_ip(name).await
+    }
+
+    async fn ipv4_lookup(&self, name: String) -> Result<Lookup, ResolveError> {
+        self.inner.ipv4_lookup(name).await
+    }
+
+    async fn ipv6_lookup(&self, name: String) -> Result<Lookup, ResolveError> {
+        self.inner.ipv6_lookup(name).await
+    }
+
+    async fn txt_lookup(&self, name: String) -> Result<Lookup, ResolveError> {
+        self.inner.txt_lookup(name).await
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum Mode {
     Success,

@@ -115,6 +115,34 @@ class PreparationChecks(unittest.TestCase):
         self.assertIn("Protocol::from_str_parts", parser)
         self.assertNotIn("Multiaddr::try_from", parser)
 
+    def test_policy_default_and_borrowed_preallocation_gates_are_exact(self):
+        files = dns.verify(SOURCE)
+        library = files["src/lib.rs"].decode()
+        default = library.split("fn permits_address(", 1)[1].split("}", 1)[0]
+        self.assertEqual([line.strip() for line in default.splitlines() if line.strip()],
+                         ["&self, _encoded: &[u8]) -> bool {", "true"])
+        self.assertEqual(library.count("ip, &resolver);"), 2)
+        self.assertEqual(library.count("i, addrs, &resolver);"), 1)
+        bounded = files["src/bounded_expansion.rs"].decode()
+        numeric = bounded.split("pub(crate) fn push_numeric", 1)[1].split("pub(crate) fn push_txt", 1)[0]
+        self.assertLess(numeric.index("address.as_ref() == encoded.bytes()"), numeric.index("resolver.permits_address(encoded.bytes())"))
+        self.assertLess(numeric.index("resolver.permits_address(encoded.bytes())"), numeric.index("encoded.address()"))
+        txt = bounded.split("pub(crate) fn push_txt", 1)[1].split("pub(crate) fn parse_txt", 1)[0]
+        self.assertLess(txt.index(".ends_with(suffix.bytes())"), txt.index("resolver.permits_address(encoded.0.bytes())"))
+        self.assertLess(txt.index("address.as_ref() == encoded.0.bytes()"), txt.index("resolver.permits_address(encoded.0.bytes())"))
+        self.assertLess(txt.index("resolver.permits_address(encoded.0.bytes())"), txt.index("encoded.0.address()"))
+        support = (HERE / "support.rs").read_text(encoding="utf-8")
+        default_fake = support.split("impl Resolver for FakeResolver {", 1)[1].split("type Policy =", 1)[0]
+        self.assertNotIn("permits_address", default_fake)
+        root = dns.prepare(ARCHIVE, self.root / "hook")
+        receipt_path = root.parent / "provenance.json"
+        receipt = json.loads(receipt_path.read_text())
+        self.assertEqual(receipt["address_policy_hook"], "Resolver::permits_address")
+        receipt["address_policy_hook"] = "unreviewed"
+        receipt_path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(ValueError, "provenance mismatch"):
+            dns.verify(root)
+
     def test_fixture_only_adds_observations_and_owned_contracts(self):
         before = dns.verify(SOURCE)
         destination = self.root / "fixture"
@@ -128,7 +156,7 @@ class PreparationChecks(unittest.TestCase):
                 for observation in dns.OBSERVATIONS.values():
                     actual = actual.replace(observation.encode(), b"")
             elif name == "src/lib.rs":
-                actual = actual.removesuffix(b"\n#[cfg(test)]\nmod retention_support;\n#[cfg(test)]\nmod retention_tests;\n")
+                actual = actual.removesuffix(b"\n#[cfg(test)]\nmod retention_support;\n#[cfg(test)]\nmod retention_tests;\n#[cfg(test)]\nmod retention_policy_tests;\n")
             self.assertEqual(actual, data, name)
         self.assertEqual(dns.digest((destination / "Cargo.lock").read_bytes()), dns.LOCK_DIGEST)
         with self.assertRaises(FileExistsError):
@@ -186,4 +214,4 @@ class IdentityChecks(unittest.TestCase):
 if __name__ == "__main__":
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=2).run(suite)
-    sys.exit(0 if result.wasSuccessful() and result.testsRun == 9 else 1)
+    sys.exit(0 if result.wasSuccessful() and result.testsRun == 10 else 1)
