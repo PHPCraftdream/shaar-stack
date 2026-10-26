@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 impl Carrier {
     /// Creates one native listener and an immutable allowlist of at most 16 entries.
@@ -36,7 +37,13 @@ impl Carrier {
         if let Some(config) = &discovery {
             config.validate_identities(key.public().to_peer_id(), &allowed)?;
         }
-        let admission = Admission::new(allowed)?;
+        let roles = match &discovery {
+            Some(config) => {
+                let seeds: Vec<PeerId> = config.seed_peers().collect();
+                Some(discovery::roles::Owner::new(&allowed, &seeds)?)
+            }
+            None => None,
+        };
         tokio::runtime::Handle::try_current()
             .map_err(|_| io::Error::other("carrier requires a Tokio runtime"))?;
         let peer = key.public().to_peer_id();
@@ -45,16 +52,47 @@ impl Carrier {
             tcp::Config::default().nodelay(true),
         ));
         let noise = noise::Config::new(&key).map_err(io::Error::other)?;
+        // One gate per carrier: generation counter, staged intents and owners.
+        let gate = relay::gate::Gate::new();
+        let admission = match roles {
+            Some(owner) => Admission::with_authority(
+                allowed,
+                owner,
+                Some(Arc::new({
+                    let gate = gate.clone();
+                    move |peer, address| gate.native_permit(peer, address)
+                })),
+            )?,
+            None => Admission::new(allowed)?,
+        };
+        let mut factory = None;
         let (discovery, transport) = match discovery {
             Some(config) => {
+                let view = admission
+                    .roles_view()
+                    .expect("discovery admission always has authority");
+                factory = Some(gate.factory(view.clone()));
                 let (lifetime, resolver) =
                     OwnedResolver::new(config.nameservers(), executor.handle())?;
-                let transport = NumericOnly(libp2p::dns::Transport::with_resolver(tcp, resolver))
-                    .upgrade(upgrade::Version::V1Lazy)
-                    .authenticate(noise)
-                    .multiplex(yamux::Config::default())
-                    .timeout(DEADLINE)
-                    .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)))
+                // Innermost→outermost, per the destination-guard draft tests: TCP, the
+                // numeric-lease guard (exact-endpoint checks and witness records directly
+                // above the socket), the policy-checked resolver and upgrades, then the
+                // root-lease context guard over the complete upgraded branch. NumericOnly
+                // is not used here: DNS names pass the fail-closed role-aware resolver and
+                // numeric dials pass Guard::numeric instead. Authority errors are flattened
+                // into io::Error so both or_transport branches keep the native error type.
+                let native = Guard::numeric(tcp, view.clone());
+                let upgraded = libp2p::dns::Transport::with_resolver(
+                    native,
+                    resolver.with_roles(view.clone()),
+                )
+                .upgrade(upgrade::Version::V1Lazy)
+                .authenticate(noise)
+                .multiplex(yamux::Config::default())
+                .timeout(DEADLINE)
+                .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)));
+                let transport = Guard::context(upgraded, view)
+                    .map_err(|error| io::Error::other(error))
                     .boxed();
                 (Some(discovery::State::new(config, lifetime)), transport)
             }
@@ -68,7 +106,8 @@ impl Carrier {
                     .boxed(),
             ),
         };
-        let (transport, relays) = relay::transport(transport, &key)?;
+        let relay_roles = admission.roles_view();
+        let (transport, relays) = relay::transport(transport, &key, factory, relay_roles)?;
         let behaviour = Behaviour {
             admission,
             relays,
@@ -98,7 +137,7 @@ impl Carrier {
         let (sender, commands) = mpsc::channel(QUEUE_LIMIT);
         let (incoming, receiver) = mpsc::channel(QUEUE_LIMIT);
         let (listening, ready) = watch::channel(None);
-        let (relay, leases) = relay::State::new();
+        let (relay, leases) = relay::State::new(gate);
         let (links, observed_links) = watch::channel(Vec::new());
         let handle = CarrierHandle {
             commands: sender,
@@ -134,9 +173,15 @@ impl Carrier {
         // Keep field drop order across cancellation: Core closes DNS before executor abort.
         let result = self.core.drive(&mut self.executor, stop).await;
         self.core.commands.close();
+        // Join actual owners: cancel/drop every live relay operation, then
+        // observe release after Swarm/executor drops the last capability clones.
+        let gate = self.core.relay.gate.clone();
+        gate.revoke_all();
         let Self { core, executor } = self;
         drop(core);
         let joined = executor.shutdown().await;
-        result.and(joined)
+        gate.finish_shutdown();
+        let released = gate.join_release().await;
+        result.and(joined).and(released)
     }
 }

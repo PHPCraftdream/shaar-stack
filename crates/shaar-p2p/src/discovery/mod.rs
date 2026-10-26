@@ -6,6 +6,7 @@ use hickory_resolver::proto::rr::Name;
 use libp2p::{Multiaddr, PeerId};
 
 mod address;
+pub(crate) mod roles;
 mod scope;
 
 use address::seed_address;
@@ -86,6 +87,11 @@ impl DiscoveryConfig {
 
     pub(crate) fn nameservers(&self) -> &[SocketAddr] {
         &self.nameservers
+    }
+
+    /// Seed peers only; their addresses stay discovery reservations, never dial authority.
+    pub(crate) fn seed_peers(&self) -> impl Iterator<Item = PeerId> + '_ {
+        self.seeds.iter().map(|(peer, _)| *peer)
     }
 
     fn is_seed(&self, peer: &PeerId) -> bool {

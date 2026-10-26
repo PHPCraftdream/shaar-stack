@@ -387,3 +387,80 @@ async fn stale_or_stopping_acceptances_never_publish_a_lease() {
     assert!(owner.core.relay.records[&relay.peer].control.is_none());
     owner.run(async {}).await.unwrap();
 }
+
+impl Core {
+    pub(in super::super) fn regression_old_acceptance(
+        &mut self,
+        peer: PeerId,
+        control: ConnectionId,
+        old_capability: protocol::client::OperationCapability,
+        old_event: protocol::client::Event,
+    ) {
+        let address = self.relay.records[&peer].address;
+        assert_eq!(
+            self.swarm.behaviour().admission.connection(&peer),
+            Some(control)
+        );
+        let roles = self
+            .swarm
+            .behaviour()
+            .admission
+            .roles_view()
+            .expect("configured role view");
+        let deadline = Instant::now() + DEADLINE;
+        let new_generation = self
+            .relay
+            .gate
+            .stage_reserve(peer, address.socket_addr(), deadline)
+            .unwrap();
+        let factory = self.relay.gate.factory(roles);
+        let capability = factory(
+            peer,
+            &super::super::multiaddr(address.socket_addr()),
+            protocol::client::OperationKind::Reserve,
+        )
+        .unwrap();
+        let issued_generation = capability.generation();
+        assert!(issued_generation.is_some_and(|generation| generation.get() == new_generation));
+        let (reply, mut pending_reply) = tokio::sync::oneshot::channel();
+        let expiry = Instant::now() + Duration::from_secs(900);
+        self.relay
+            .gate
+            .accepted(peer, new_generation, expiry, control);
+        assert!(
+            self.relay
+                .gate
+                .reservation_permit(peer, new_generation, control)
+        );
+        let record = self
+            .relay
+            .records
+            .get_mut(&peer)
+            .expect("captured reservation record");
+        record.ready = Some(reply);
+        record.generation = new_generation;
+        record.control = Some(control);
+        record.expiry = Some(expiry);
+        record.phase = Phase::Pending;
+        assert!(matches!(
+            pending_reply.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(record.ready.is_some());
+        self.relay_event(old_event);
+        let current = self
+            .relay
+            .records
+            .get(&peer)
+            .expect("successor record retained");
+        assert_eq!(current.generation, new_generation);
+        assert_eq!(current.expiry, Some(expiry));
+        assert!(matches!(
+            pending_reply.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(current.ready.is_some());
+        assert!(matches!(self.relay.records[&peer].phase, Phase::Pending));
+        drop(old_capability);
+    }
+}

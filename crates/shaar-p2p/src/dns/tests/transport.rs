@@ -1,4 +1,5 @@
 use super::*;
+use crate::discovery::roles::{Owner, Role, Root};
 use crate::dns::tests::support::*;
 use futures::FutureExt;
 use libp2p::{
@@ -6,6 +7,8 @@ use libp2p::{
     multiaddr::Protocol,
     swarm::{DialError, dummy},
 };
+use std::io;
+use tokio::time::Instant;
 use tokio::{net::TcpListener, sync::oneshot, task::JoinSet};
 
 fn key() -> Keypair {
@@ -100,19 +103,42 @@ async fn owned_dns_private_dns_tcp_noise_path_authenticates_expected_peer_and_de
                     let _ = stopped.await;
                 }));
                 let address = target_handle.local_addr().await.unwrap();
+                let expected = if wrong_peer {
+                    key().public().to_peer_id()
+                } else {
+                    remote_peer
+                };
+                let now = Instant::now();
+                let endpoint = address;
+                let mut owner = Owner::new(&[], &[]).unwrap();
+                owner
+                    .admit_identity(expected, Role::ExplicitRelay(endpoint))
+                    .unwrap();
+                let view = owner.view();
+                let dns: Multiaddr =
+                    format!("/dns4/owned.example./tcp/{}/p2p/{expected}", address.port())
+                        .parse()
+                        .unwrap();
                 let executor = OwnedExecutor::new();
                 let (lifetime, resolver) =
                     OwnedResolver::new(&[server.address], executor.handle()).unwrap();
                 let native = relay::native::FreshPorts(tcp::tokio::Transport::new(
                     tcp::Config::default().nodelay(true),
                 ));
-                // Private fixture only: the sole DNS response points at the owned server above.
-                let transport = libp2p::dns::Transport::with_resolver(native, resolver)
-                    .upgrade(upgrade::Version::V1Lazy)
-                    .authenticate(noise::Config::new(&local).unwrap())
-                    .multiplex(yamux::Config::default())
-                    .timeout(DEADLINE)
-                    .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)))
+                let native = Guard::numeric(native, view.clone());
+                let transport = libp2p::dns::Transport::with_resolver(
+                    native,
+                    resolver.with_roles(view.clone()),
+                )
+                .upgrade(upgrade::Version::V1Lazy)
+                .authenticate(noise::Config::new(&local).unwrap())
+                .multiplex(yamux::Config::default())
+                .timeout(DEADLINE)
+                .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)))
+                .map_err(io::Error::other)
+                .boxed();
+                let transport = Guard::context(transport, view.clone())
+                    .map_err(io::Error::other)
                     .boxed();
                 let mut swarm = Swarm::new(
                     transport,
@@ -121,22 +147,22 @@ async fn owned_dns_private_dns_tcp_noise_path_authenticates_expected_peer_and_de
                     libp2p::swarm::Config::with_executor(executor.handle())
                         .with_idle_connection_timeout(Duration::from_secs(30)),
                 );
-                let expected = if wrong_peer {
-                    key().public().to_peer_id()
-                } else {
-                    remote_peer
-                };
-                let dns: Multiaddr =
-                    format!("/dns4/owned.example./tcp/{}/p2p/{expected}", address.port())
-                        .parse()
-                        .unwrap();
-                swarm
-                    .dial(
-                        DialOpts::peer_id(expected)
-                            .addresses(vec![dns.clone()])
-                            .build(),
+                let options = DialOpts::peer_id(expected)
+                    .addresses(vec![dns.clone()])
+                    .build();
+                let connection = options.connection_id();
+                let key = owner
+                    .admit(expected, connection, now + DEADLINE, now)
+                    .unwrap();
+                owner
+                    .pin_fixture_root(
+                        key,
+                        Root::new(dns.as_ref(), expected).unwrap(),
+                        endpoint,
+                        now,
                     )
                     .unwrap();
+                swarm.dial(options).unwrap();
                 let connected = async {
                     loop {
                         match swarm.select_next_some().await {
@@ -147,6 +173,7 @@ async fn owned_dns_private_dns_tcp_noise_path_authenticates_expected_peer_and_de
                     }
                 };
                 let (result, _) = tokio::join!(connected, server.answer(a()));
+                owner.terminal(key, result.as_ref().ok().copied(), Instant::now());
                 if wrong_peer {
                     assert!(
                         matches!(result, Err(DialError::WrongPeerId { .. })),
