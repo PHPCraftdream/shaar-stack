@@ -219,6 +219,34 @@ jobs:
           cat "$log"
           if [[ "$status" -ne 0 ]]; then exit "$status"; fi
           grep -E "^test result: ok\\. $count passed; 0 failed;" "$log"
+      - name: Verify owned DNS foundation and its single product graph edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=.github/scripts/p2p/discovery/foundation.py
+          if [[ "$RUNNER_OS" == Windows ]]; then host=x86_64-pc-windows-msvc; else host=x86_64-unknown-linux-gnu; fi
+          python -I "$script" baseline --repository . --destination target/owned-dns-baseline
+          cargo metadata --locked --manifest-path target/owned-dns-baseline/Cargo.toml --format-version 1 --filter-platform "$host" > target/owned-dns-baseline/metadata.json
+          python -I "$script" verify --repository . --baseline target/owned-dns-baseline/metadata.json --product target/resolver-locking-baseline.json --receipt target/owned-dns-graph.json
+          python -I .github/scripts/p2p/discovery/foundation_checks.py
+          log="$RUNNER_TEMP/shaar-owned-dns.log"
+          if cargo test -p shaar-p2p --lib --locked owned_dns_ >"$log" 2>&1; then status=0; else status=$?; fi
+          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
+          cat "$log"
+          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+          grep -E '^test result: ok\. 30 passed; 0 failed;' "$log"
+      - name: Preserve owned DNS foundation proof receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: owned-dns-foundation-${{ matrix.os }}
+          path: |
+            target/owned-dns-graph.json
+            target/owned-dns-baseline/metadata.json
+            target/owned-dns-baseline/Cargo.lock
+            target/resolver-locking-baseline.json
+            ${{ runner.temp }}/shaar-owned-dns.log
+          if-no-files-found: warn
       - name: Preserve resolver locking and cache proof receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

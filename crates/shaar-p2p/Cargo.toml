@@ -6,6 +6,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+hickory-resolver = { version = "=0.26.3", default-features = false, features = ["tokio"] }
 libp2p = { version = "=0.57.1", default-features = false, features = ["ed25519", "tokio", "tcp", "dns", "noise", "yamux", "kad", "identify", "relay", "request-response", "macros"] }
 libp2p-swarm = "=0.48.0"
 libp2p-relay = "=0.22.0"

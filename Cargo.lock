@@ -3980,6 +3980,7 @@ version = "0.1.0"
 dependencies = [
  "asynchronous-codec",
  "futures",
+ "hickory-resolver",
  "iroh",
  "iroh-base",
  "libp2p",

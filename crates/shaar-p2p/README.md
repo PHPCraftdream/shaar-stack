@@ -590,6 +590,81 @@ deadline extension, hard-limit suppression or APP policy change is involved.
 Unreachable-path testing now requires observed native transmission and excludes
 arbitrary admission errors. This event/readiness correction still requires CI.
 
+## Carrier-owned DNS foundation — authored, pending CI
+
+`DiscoveryConfig::new` validates one to four pinned TCP/DNS seed descriptors and
+one to four numeric nameserver endpoints, counting inputs before deduplication.
+Addresses are at most 256 encoded bytes; DNS names are absolute, ASCII-canonical,
+and case-normalized. Peer suffixes must match. Numeric resolvers may be private or
+loopback and use custom nonzero ports; unusable, scoped and IPv4-mapped endpoints
+are rejected. `Carrier::bind_with_discovery` rejects local/application/seed identity
+overlap before listener work. The legacy `bind` stays numeric-only and does not
+construct a resolver. Neither constructor queries DNS or starts bootstrap.
+
+Configured carriers retain seed descriptors as infrastructure reservations that
+cannot authorize application packets or link/bridge observations. Their native
+path contains FreshPorts TCP, the prepared DNS transport with a private owned
+resolver, Noise, Yamux and the existing overall timeout; relay composition is
+unchanged. An outer numeric-only gate currently rejects every DNS dial before
+resolution. Real DNS/Noise fixtures are private; there is no public discovery
+command or permissive-address mode. This intentionally keeps untrusted DNS input
+unavailable until the next wire and destination-role unit is integrated.
+
+The resolver uses only explicit in-memory UDP/TCP connections and the supplied
+numeric endpoints. Hosts and search loading, opportunistic encryption, persistence
+and the default spawning provider are not used. The prepared zero-capacity branch
+avoids Moka construction and cache-only copies; this is not zero total allocation
+or removal of the Moka package. Moka 0.12.16 has no maintenance worker to join.
+Four resolver-call permits are shared across clones and retained until each future
+terminates or is destroyed. Admission is immediate, with no waiting queue. Fixed
+options allow one retry, one nameserver request at a time, four requests per TCP
+connection and a two-second per-request timeout; the carrier's complete-dial
+10-second timeout remains outside DNS and authentication.
+
+DNS background work uses exactly the Swarm's existing 64-task executor. A private
+irreversible gate linearizes admission at a sequentially consistent open-state
+load and closure at its swap. Every previously unpolled operation checks admission
+when first polled; socket polls check it too. Work already admitted before closure
+may finish its current poll, so closure is not a destruction barrier. Watch
+cancellation registers before that check and wakes pending lookup, socket-creation
+and background owners. There is no additional task registry, user-defined gate
+mutex or foreign-future polling/destruction under a new guard; dependency-internal
+watch/executor synchronization is not claimed lock-free. UDP validates every send
+against its exact configured server endpoint, not just the socket's bind argument.
+
+Core closes commands and the DNS gate before destroying Swarm, resolver and dial
+owners; `run` then awaits the existing executor shutdown. Whole-carrier field order
+is retained across cancellation. Startup failure, Drop and canceled close remain
+abort-only, never a joined resource claim. Raw lookup futures and sockets are not
+public capabilities. Fixtures retain resolver/provider/submission handles across
+joined close, observe caller-owned UDP socket rebind and pooled TCP EOF, and hold
+a real bound socket in an unpolled TCP-connect future before background spawning.
+That last barrier is not evidence of a kernel-level SYN in flight.
+
+The only product dependency delta is the explicit `shaar-p2p -> hickory-resolver
+0.26.3` edge with default features disabled and `tokio` requested. Package versions,
+identities and other lock edges are unchanged. CI compares full host-resolved
+metadata against the same workspace without that edge, requiring unchanged feature
+unions and rejecting encrypted resolver protocol features. System-configuration
+support remains enabled transitively by libp2p-dns; its presence is not permission
+to call it. The baseline lock reversal is checked against an immutable digest.
+
+The foundation adds 30 owned local Rust fixtures and five graph negative controls
+for CI only; no local Cargo, compilation or tests were run. DNS fixture allocation
+retains TCP while binding UDP at the same endpoint, retries only `AddrInUse` up to
+16 attempts, and propagates other errors. Deterministic controls exercise a real
+UDP collision, retry exhaustion, non-collision errors and occupied TCP admission.
+Endpoint controls distinguish same-IP/different-port from same-port/different-IP
+rejection at UDP bind, TCP connect and repeated UDP sends. Fixtures require real
+`::1` UDP queries and UDP-to-TCP fallback with IPv6 socket-family assertions,
+not merely AAAA answers carried over IPv4. Both local families exercise occupied bind failures and
+incompatible-family errors. UDP remains unconnected: a mismatched local-family
+bind can succeed, while its actual send fails; production semantics are unchanged.
+
+Wire length/header gates, TCP pre-prefix validation, pre-materialization/numeric discovery-role policy, bounded
+Kademlia/Identify ownership, `discover_relay`, SDK forwarding and Amino discovery
+remain unimplemented by this unit. No public-network availability is claimed.
+
 ## Remaining implementation and acceptance
 
 P08 is decomposed into dependency/safety gate, bounded carrier and owned executor,

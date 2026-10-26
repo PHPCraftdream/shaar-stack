@@ -17,7 +17,10 @@ use super::{
     CarrierHandle, Command, Link, PENDING_LIMIT, QUEUE_LIMIT, REQUEST_LIMIT, Received, Reply,
     admission::Admission, capacity, multiaddr, socket_address,
 };
-use crate::{CONTROL_PROTOCOL, Datagram, DatagramCodec, OwnedExecutor};
+use crate::{
+    CONTROL_PROTOCOL, Datagram, DatagramCodec, DiscoveryConfig, OwnedExecutor, discovery,
+    dns::{NumericOnly, OwnedResolver},
+};
 
 const DEADLINE: Duration = Duration::from_secs(10);
 
@@ -41,6 +44,7 @@ pub struct Carrier {
 }
 
 struct Core {
+    discovery: Option<discovery::State>,
     swarm: Swarm<Behaviour>,
     commands: mpsc::Receiver<Command>,
     incoming: mpsc::Sender<Received>,
@@ -80,20 +84,64 @@ impl Carrier {
         bind: SocketAddr,
         allowed: Vec<PeerId>,
     ) -> io::Result<(Self, CarrierHandle, mpsc::Receiver<Received>)> {
+        Self::bind_configured(key, bind, allowed, None)
+    }
+
+    /// Prepares a carrier-owned resolver without querying DNS or starting bootstrap.
+    /// Public connection commands remain numeric-only until discovery policy is installed.
+    pub fn bind_with_discovery(
+        key: Keypair,
+        bind: SocketAddr,
+        allowed: Vec<PeerId>,
+        discovery: DiscoveryConfig,
+    ) -> io::Result<(Self, CarrierHandle, mpsc::Receiver<Received>)> {
+        Self::bind_configured(key, bind, allowed, Some(discovery))
+    }
+
+    fn bind_configured(
+        key: Keypair,
+        bind: SocketAddr,
+        allowed: Vec<PeerId>,
+        discovery: Option<DiscoveryConfig>,
+    ) -> io::Result<(Self, CarrierHandle, mpsc::Receiver<Received>)> {
+        if allowed.len() > super::PEER_LIMIT {
+            return Err(capacity());
+        }
+        if let Some(config) = &discovery {
+            config.validate_identities(key.public().to_peer_id(), &allowed)?;
+        }
         let admission = Admission::new(allowed)?;
         tokio::runtime::Handle::try_current()
             .map_err(|_| io::Error::other("carrier requires a Tokio runtime"))?;
         let peer = key.public().to_peer_id();
         let executor = OwnedExecutor::new();
-        let transport = relay::native::FreshPorts(tcp::tokio::Transport::new(
+        let tcp = relay::native::FreshPorts(tcp::tokio::Transport::new(
             tcp::Config::default().nodelay(true),
-        ))
-        .upgrade(upgrade::Version::V1Lazy)
-        .authenticate(noise::Config::new(&key).map_err(io::Error::other)?)
-        .multiplex(yamux::Config::default())
-        .timeout(DEADLINE)
-        .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)))
-        .boxed();
+        ));
+        let noise = noise::Config::new(&key).map_err(io::Error::other)?;
+        let (discovery, transport) = match discovery {
+            Some(config) => {
+                let (lifetime, resolver) =
+                    OwnedResolver::new(config.nameservers(), executor.handle())?;
+                let transport = NumericOnly(libp2p::dns::Transport::with_resolver(tcp, resolver))
+                    .upgrade(upgrade::Version::V1Lazy)
+                    .authenticate(noise)
+                    .multiplex(yamux::Config::default())
+                    .timeout(DEADLINE)
+                    .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)))
+                    .boxed();
+                (Some(discovery::State::new(config, lifetime)), transport)
+            }
+            None => (
+                None,
+                tcp.upgrade(upgrade::Version::V1Lazy)
+                    .authenticate(noise)
+                    .multiplex(yamux::Config::default())
+                    .timeout(DEADLINE)
+                    .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)))
+                    .boxed(),
+            ),
+        };
         let (transport, relays) = relay::transport(transport, &key)?;
         let behaviour = Behaviour {
             admission,
@@ -109,7 +157,7 @@ impl Carrier {
                     .with_max_concurrent_streams(2),
             ),
         };
-        let mut swarm = Swarm::new(
+        let swarm = Swarm::new(
             transport,
             behaviour,
             peer,
@@ -119,7 +167,8 @@ impl Carrier {
                 .with_max_negotiating_inbound_streams(2)
                 .with_idle_connection_timeout(Duration::from_secs(30)),
         );
-        let native_listener = swarm.listen_on(multiaddr(bind)).map_err(io::Error::other)?;
+        // Construct the close owner before listener work, including failed startup.
+        let native_listener = ListenerId::next();
         let (sender, commands) = mpsc::channel(QUEUE_LIMIT);
         let (incoming, receiver) = mpsc::channel(QUEUE_LIMIT);
         let (listening, ready) = watch::channel(None);
@@ -132,37 +181,34 @@ impl Carrier {
             links: observed_links,
             peer,
         };
-        Ok((
-            Self {
-                core: Core {
-                    swarm,
-                    commands,
-                    incoming,
-                    listening,
-                    links,
-                    native_listener,
-                    relay,
-                    pending: HashMap::with_capacity(PENDING_LIMIT),
-                    requests: HashMap::with_capacity(REQUEST_LIMIT),
-                    closing: HashMap::with_capacity(super::PEER_LIMIT + super::RELAY_LIMIT),
-                },
-                executor,
-            },
-            handle,
-            receiver,
-        ))
+        let mut core = Core {
+            discovery,
+            swarm,
+            commands,
+            incoming,
+            listening,
+            links,
+            native_listener,
+            relay,
+            pending: HashMap::with_capacity(PENDING_LIMIT),
+            requests: HashMap::with_capacity(REQUEST_LIMIT),
+            closing: HashMap::with_capacity(super::PEER_LIMIT + super::RELAY_LIMIT),
+        };
+        core.native_listener = core
+            .swarm
+            .listen_on(multiaddr(bind))
+            .map_err(io::Error::other)?;
+        Ok((Self { core, executor }, handle, receiver))
     }
 
     /// Stops on caller cancellation signal, last submission-handle drop or incoming-consumer drop.
     /// Drops Swarm before aborting and joining every managed connection/listener task.
     /// cancel-safe: NO — dropping this future aborts tasks but cannot join destruction.
-    pub async fn run(self, stop: impl Future<Output = ()>) -> io::Result<()> {
-        let Self {
-            mut core,
-            mut executor,
-        } = self;
-        let result = core.drive(&mut executor, stop).await;
-        core.commands.close();
+    pub async fn run(mut self, stop: impl Future<Output = ()>) -> io::Result<()> {
+        // Keep field drop order across cancellation: Core closes DNS before executor abort.
+        let result = self.core.drive(&mut self.executor, stop).await;
+        self.core.commands.close();
+        let Self { core, executor } = self;
         drop(core);
         let joined = executor.shutdown().await;
         result.and(joined)
@@ -177,14 +223,30 @@ mod tests;
 #[path = "fault_tests.rs"]
 mod fault_tests;
 
+#[cfg(test)]
+#[path = "../dns/tests/transport.rs"]
+mod dns_tests;
+
 impl Drop for Core {
     fn drop(&mut self) {
-        // Synchronous observation revocation only; I/O destruction is joined by Carrier::run.
+        self.commands.close();
+        if let Some(discovery) = &self.discovery {
+            discovery.lifetime.close();
+        }
+        // Close/wake precedes field destruction; only Carrier::run joins the executor.
         self.links.send_replace(Vec::new());
     }
 }
 
 impl Core {
+    fn allows_application(&self, peer: &PeerId) -> bool {
+        self.swarm.behaviour().admission.allows(peer)
+            && !self
+                .discovery
+                .as_ref()
+                .is_some_and(|state| state.is_seed(peer))
+    }
+
     fn publish_links(&self) {
         let mut links: Vec<_> = self
             .swarm
@@ -192,7 +254,7 @@ impl Core {
             .admission
             .application_connections()
             .filter_map(|(peer, connection)| {
-                if self.closing.contains_key(&peer) {
+                if self.closing.contains_key(&peer) || !self.allows_application(&peer) {
                     return None;
                 }
                 self.relay
@@ -309,7 +371,7 @@ impl Core {
         }
         if self.requests.len() >= REQUEST_LIMIT {
             let _ = reply.send(Err(capacity()));
-        } else if !self.swarm.behaviour().admission.allows(&peer)
+        } else if !self.allows_application(&peer)
             || self.closing.contains_key(&peer)
             || !self.swarm.behaviour().packets.is_connected(&peer)
             || expected.is_some_and(|link| {
@@ -346,7 +408,7 @@ impl Core {
                 if reply.is_closed() {
                     return;
                 }
-                if !self.swarm.behaviour().admission.allows(&peer) {
+                if !self.allows_application(&peer) {
                     let _ = reply.send(Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
                         "carrier peer not allowed",
@@ -528,7 +590,7 @@ impl Core {
                 let Some(route) = self.relay.routes.get(&connection_id).copied() else {
                     return;
                 };
-                if !self.swarm.behaviour().admission.allows(&peer)
+                if !self.allows_application(&peer)
                     || self.swarm.behaviour().admission.connection(&peer) != Some(connection_id)
                     || self.closing.contains_key(&peer)
                 {

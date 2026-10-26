@@ -6,10 +6,13 @@
 
 mod bridge;
 mod carrier;
+mod discovery;
+mod dns;
 mod executor;
 mod packet;
 
 pub use bridge::{SignalingPump, SignalingTransport};
 pub use carrier::{Carrier, CarrierHandle, Link, Received, RelayAddr, RelayLease, Route};
+pub use discovery::DiscoveryConfig;
 pub use executor::{ExecutorHandle, OwnedExecutor};
 pub use packet::{CONTROL_PROTOCOL, Datagram, DatagramCodec, MAX_DATAGRAM};
