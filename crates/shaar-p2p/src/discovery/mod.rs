@@ -3,7 +3,12 @@
 use std::{io, net::SocketAddr};
 
 use hickory_resolver::proto::rr::Name;
-use libp2p::{Multiaddr, PeerId, multiaddr::Protocol};
+use libp2p::{Multiaddr, PeerId};
+
+mod address;
+mod scope;
+
+use address::seed_address;
 
 use crate::dns::Lifetime;
 
@@ -17,7 +22,9 @@ pub struct DiscoveryConfig {
 
 impl DiscoveryConfig {
     /// Validates counts before deduplication, seed grammar, identities and numeric resolvers.
-    /// Names must be absolute; ASCII case is normalized. No system defaults are consulted.
+    /// Names must be absolute; ASCII case is normalized. Numeric seeds use strict discovery
+    /// scope, and the 256-byte limit includes the expected peer suffix even when omitted.
+    /// Explicit private/loopback nameservers remain supported. No system defaults are consulted.
     pub fn new(
         mut seeds: Vec<(PeerId, Multiaddr)>,
         mut nameservers: Vec<SocketAddr>,
@@ -116,56 +123,6 @@ pub(crate) fn absolute_name(value: &str) -> io::Result<Name> {
     Ok(name)
 }
 
-fn seed_address(peer: PeerId, address: &Multiaddr) -> io::Result<Multiaddr> {
-    if address.as_ref().len() > 256 {
-        return Err(invalid("discovery.seeds address exceeds 256 encoded bytes"));
-    }
-    let mut parts = address.iter();
-    let first = parts
-        .next()
-        .ok_or_else(|| invalid("discovery.seeds address is empty"))?;
-    let dnsaddr = matches!(first, Protocol::Dnsaddr(_));
-    let first = match first {
-        Protocol::Dns(name) => Protocol::Dns(absolute_name(&name)?.to_ascii().into()),
-        Protocol::Dns4(name) => Protocol::Dns4(absolute_name(&name)?.to_ascii().into()),
-        Protocol::Dns6(name) => Protocol::Dns6(absolute_name(&name)?.to_ascii().into()),
-        Protocol::Dnsaddr(name) => {
-            let name = absolute_name(&name)?.to_ascii();
-            absolute_name(&format!("_dnsaddr.{name}"))?;
-            Protocol::Dnsaddr(name.into())
-        }
-        Protocol::Ip4(ip) if usable(SocketAddr::new(ip.into(), 1)) => Protocol::Ip4(ip),
-        Protocol::Ip6(ip) if usable(SocketAddr::new(ip.into(), 1)) => Protocol::Ip6(ip),
-        _ => {
-            return Err(invalid(
-                "discovery.seeds requires a supported TCP/DNS address",
-            ));
-        }
-    };
-    let mut normalized = Multiaddr::empty().with(first);
-    if !dnsaddr {
-        match parts.next() {
-            Some(Protocol::Tcp(port)) if port != 0 => normalized.push(Protocol::Tcp(port)),
-            _ => return Err(invalid("discovery.seeds requires a nonzero TCP port")),
-        }
-    }
-    match parts.next() {
-        Some(Protocol::P2p(expected)) if expected == peer => normalized.push(Protocol::P2p(peer)),
-        None => {}
-        _ => {
-            return Err(invalid(
-                "discovery.seeds contains an inconsistent peer suffix or grammar",
-            ));
-        }
-    }
-    if parts.next().is_some() || normalized.as_ref().len() > 256 {
-        return Err(invalid(
-            "discovery.seeds contains unsupported components or exceeds 256 bytes",
-        ));
-    }
-    Ok(normalized)
-}
-
 fn usable(endpoint: SocketAddr) -> bool {
     if endpoint.port() == 0 || endpoint.ip().is_unspecified() || endpoint.ip().is_multicast() {
         return false;
@@ -185,5 +142,9 @@ fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 
+#[cfg(test)]
+mod address_tests;
+#[cfg(test)]
+mod scope_tests;
 #[cfg(test)]
 mod tests;

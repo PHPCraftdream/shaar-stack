@@ -1,6 +1,6 @@
 use super::*;
 use crate::Carrier;
-use libp2p::identity::Keypair;
+use libp2p::{identity::Keypair, multiaddr::Protocol};
 
 fn peer() -> PeerId {
     Keypair::generate_ed25519().public().to_peer_id()
@@ -65,7 +65,7 @@ fn owned_dns_config_rejects_unsupported_relative_and_inconsistent_addresses() {
     }
     for numeric in ["/ip4/10.0.0.1/tcp/4001", "/ip6/fd00::1/tcp/4001"] {
         assert!(
-            DiscoveryConfig::new(vec![(expected, numeric.parse().unwrap())], servers()).is_ok()
+            DiscoveryConfig::new(vec![(expected, numeric.parse().unwrap())], servers()).is_err()
         );
     }
     // Construct exact encoded boundaries through the real Multiaddr codec.
