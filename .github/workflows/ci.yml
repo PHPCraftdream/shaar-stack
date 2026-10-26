@@ -271,6 +271,7 @@ jobs:
             target/relay-operation-wire/run-receipt.json
             target/relay-operation-wire/*/fixture-provenance.json
             target/relay-operation-wire/*/graph-receipt.json
+            target/relay-operation-wire/*/metadata.json
             target/relay-operation-wire/*/Cargo.lock
             target/relay-operation-wire/*/compile.jsonl
             target/relay-operation-wire/*/compile-failure.log

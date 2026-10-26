@@ -9,6 +9,26 @@ fn address(peer: PeerId) -> RelayAddr {
     RelayAddr::new(peer, "127.0.0.1:4001".parse().unwrap()).unwrap()
 }
 
+/// Owner-issued reserve capability mirroring what the patched relay transport
+/// captures at the listen boundary; the controller under test does not inspect it.
+fn reserve_operation(
+    relay: &RelayAddr,
+) -> (
+    protocol::client::OperationOwner,
+    protocol::client::OperationCapability,
+) {
+    protocol::client::OperationCapability::owned(
+        protocol::client::OperationDescriptor::new(
+            relay.peer,
+            multiaddr(relay.address),
+            protocol::client::OperationKind::Reserve,
+            std::num::NonZeroU64::new(1).unwrap(),
+        ),
+        |_, _| true,
+        || {},
+    )
+}
+
 #[test]
 fn infrastructure_admission_is_distinct_bounded_and_reclaimable() {
     let app = peer();
@@ -252,6 +272,7 @@ async fn local_expiry_revokes_a_published_lease_and_rejects_late_renewal() {
     )
     .unwrap();
     let relay = address(peer());
+    let (_operation_owner, operation) = reserve_operation(&relay);
     let (reply, result) = oneshot::channel();
     owner.core.reserve_relay(relay, reply);
     let current = ConnectionId::new_unchecked(803);
@@ -284,6 +305,7 @@ async fn local_expiry_revokes_a_published_lease_and_rejects_late_renewal() {
             renewal: false,
             limit: None,
             expires_at: expires.into_std(),
+            operation: operation.clone(),
         });
     let lease = result.await.unwrap().unwrap();
     assert_eq!(owner.core.relay.snapshots.borrow().as_slice(), &[lease]);
@@ -300,6 +322,7 @@ async fn local_expiry_revokes_a_published_lease_and_rejects_late_renewal() {
             renewal: true,
             limit: None,
             expires_at: (Instant::now() + Duration::from_secs(60)).into_std(),
+            operation: operation.clone(),
         });
     assert!(owner.core.relay.snapshots.borrow().is_empty());
     assert_eq!(lease.expires_at(), expires);
@@ -315,6 +338,7 @@ async fn stale_or_stopping_acceptances_never_publish_a_lease() {
     )
     .unwrap();
     let relay = address(peer());
+    let (_operation_owner, operation) = reserve_operation(&relay);
     let (reply, mut pending) = oneshot::channel();
     owner.core.command(Command::Reserve(relay, reply));
     let stale = ConnectionId::new_unchecked(800);
@@ -342,6 +366,7 @@ async fn stale_or_stopping_acceptances_never_publish_a_lease() {
             renewal: false,
             limit: None,
             expires_at: (Instant::now() + Duration::from_secs(60)).into_std(),
+            operation: operation.clone(),
         });
     assert!(owner.core.relay.snapshots.borrow().is_empty());
     assert!(pending.try_recv().is_err());
@@ -356,6 +381,7 @@ async fn stale_or_stopping_acceptances_never_publish_a_lease() {
             renewal: false,
             limit: None,
             expires_at: (Instant::now() + Duration::from_secs(60)).into_std(),
+            operation: operation.clone(),
         });
     assert!(owner.core.relay.snapshots.borrow().is_empty());
     assert!(owner.core.relay.records[&relay.peer].control.is_none());

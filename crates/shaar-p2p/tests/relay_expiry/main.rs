@@ -129,7 +129,7 @@ async fn exercise(
                     assert_eq!(peer_id, server_id);
                     relay_connection = Some(connection_id);
                 }
-                SwarmEvent::Behaviour(relay::client::Event::ReservationReqAccepted { relay_peer_id, connection_id, renewal, limit, expires_at }) => {
+                SwarmEvent::Behaviour(relay::client::Event::ReservationReqAccepted { relay_peer_id, connection_id, renewal, limit, expires_at, .. }) => {
                     assert!(matches!(case, Case::Valid), "hostile reservation accepted: {case:?}");
                     assert_eq!(requests, 1);
                     assert_eq!(relay_peer_id, server_id);
