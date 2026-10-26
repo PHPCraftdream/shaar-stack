@@ -19,11 +19,13 @@ use libp2p::{
 
 use super::{PEER_LIMIT, PENDING_LIMIT, RELAY_LIMIT, capacity};
 
+type NativePermit = Arc<dyn Fn(PeerId, &Multiaddr) -> bool + Send + Sync>;
+
 /// Single Swarm owner; bounds apply before Noise negotiation and handler creation.
 pub(super) struct Admission {
     allowed: Box<[PeerId]>,
     owner: Option<roles::Owner>,
-    native_permit: Option<Arc<dyn Fn(PeerId, &Multiaddr) -> bool + Send + Sync>>,
+    native_permit: Option<NativePermit>,
     pending: HashMap<ConnectionId, Option<PeerId>>,
     connected: HashMap<PeerId, ConnectionId>,
     relays: HashSet<PeerId>,
@@ -49,7 +51,7 @@ impl Admission {
     pub(super) fn with_authority(
         peers: Vec<PeerId>,
         owner: roles::Owner,
-        native_permit: Option<Arc<dyn Fn(PeerId, &Multiaddr) -> bool + Send + Sync>>,
+        native_permit: Option<NativePermit>,
     ) -> io::Result<Self> {
         let mut admission = Self::new(peers)?;
         admission.owner = Some(owner);

@@ -92,7 +92,7 @@ impl Carrier {
                 .timeout(DEADLINE)
                 .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)));
                 let transport = Guard::context(upgraded, view)
-                    .map_err(|error| io::Error::other(error))
+                    .map_err(io::Error::other)
                     .boxed();
                 (Some(discovery::State::new(config, lifetime)), transport)
             }

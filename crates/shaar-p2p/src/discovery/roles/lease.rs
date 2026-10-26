@@ -31,6 +31,7 @@ impl Lease {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn key(&self) -> AttemptKey {
         self.key
     }

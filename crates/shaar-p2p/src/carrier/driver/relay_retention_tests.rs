@@ -423,7 +423,7 @@ mod hostile_carrier_wire {
                     let event = intercepted.unwrap();
                     let error: &(dyn Error + 'static) = match &event {
                         SwarmEvent::ListenerError { error, .. } => error,
-                        SwarmEvent::ListenerClosed { reason, .. } => reason.as_ref().err().expect("closed listener carries typed rejection"),
+                        SwarmEvent::ListenerClosed { reason, .. } => reason.as_ref().expect_err("closed listener carries typed rejection"),
                         _ => unreachable!(),
                     };
                     assert!(invalid_expiry(error), "missing typed invalid-expiration source");

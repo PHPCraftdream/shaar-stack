@@ -173,6 +173,7 @@ impl super::Owner {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn admit_inbound(&mut self, connection: ConnectionId) -> io::Result<()> {
         let mut state = self.view.lock();
         if state.closed {

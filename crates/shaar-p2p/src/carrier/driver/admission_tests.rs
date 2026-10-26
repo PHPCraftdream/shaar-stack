@@ -242,12 +242,12 @@ fn carrier_destination_pending_inbound_release_precedes_terminal() {
         .handle_pending_inbound_connection(id, &local, &remote)
         .unwrap();
     drop(lease);
-    for n in 0..7 {
+    for (n, app) in apps[..7].iter().enumerate() {
         assert!(
             admission
                 .stage_native(
-                    apps[n],
-                    &addr(4300 + n as u16, apps[n]),
+                    *app,
+                    &addr(4300 + n as u16, *app),
                     ConnectionId::new_unchecked(50 + n)
                 )
                 .unwrap()

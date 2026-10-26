@@ -6,6 +6,8 @@ mod sockets;
 #[cfg(test)]
 pub(crate) mod tests;
 pub(crate) mod transport;
+#[cfg(test)]
+pub(crate) use transport::NumericOnly;
 mod wire;
 
 use std::{future::Future, io, net::SocketAddr, sync::Arc, time::Duration};
@@ -26,7 +28,6 @@ use crate::{ExecutorHandle, discovery::absolute_name};
 use lifetime::Gate;
 pub(crate) use lifetime::Lifetime;
 use runtime::Provider;
-pub(crate) use transport::NumericOnly;
 
 #[derive(Clone)]
 pub(crate) struct OwnedResolver {

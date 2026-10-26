@@ -4,4 +4,5 @@ mod numeric_only;
 mod tests;
 
 pub(crate) use guarded::Guard;
+#[cfg(test)]
 pub(crate) use numeric_only::NumericOnly;
