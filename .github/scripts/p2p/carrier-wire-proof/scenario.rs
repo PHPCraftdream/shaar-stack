@@ -11,7 +11,7 @@ use std::{
     task::{Context, Poll},
     time::SystemTime,
 };
-use tokio::time::timeout;
+use tokio::{sync::oneshot, time::timeout};
 
 #[path = "../../../../crates/shaar-p2p/tests/relay_expiry/codec.rs"]
 mod codec;
