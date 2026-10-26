@@ -289,7 +289,7 @@ jobs:
           python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
           cat "$log"
           if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 32 passed; 0 failed;' "$log"
+          grep -E '^test result: ok\. 33 passed; 0 failed;' "$log"
       - name: Preserve owned relay revocation proof receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
