@@ -2,11 +2,12 @@ use super::valid;
 
 pub(super) fn header(queries: u16, answers: u16, authorities: u16, additionals: u16) -> [u8; 12] {
     let mut bytes = [0; 12];
-    for (slot, count) in
-        bytes[4..]
-            .chunks_exact_mut(2)
-            .zip([queries, answers, authorities, additionals])
-    {
+    for (slot, count) in bytes[4..].as_chunks_mut::<2>().0.iter_mut().zip([
+        queries,
+        answers,
+        authorities,
+        additionals,
+    ]) {
         slot.copy_from_slice(&count.to_be_bytes());
     }
     bytes
