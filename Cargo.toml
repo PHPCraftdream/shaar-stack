@@ -16,6 +16,7 @@ edition = "2024"
 publish = false
 
 [patch.crates-io]
+hickory-resolver = { path = "target/p2p/resolver/hickory-resolver-0.26.3" }
 libp2p-dns = { path = "target/p2p/dns/libp2p-dns-0.45.0" }
 libp2p-kad = { path = "target/p2p/kad/libp2p-kad-0.49.0" }
 libp2p-relay = { path = "target/p2p/relay/libp2p-relay-0.22.0" }

@@ -129,11 +129,11 @@ class PreparationChecks(unittest.TestCase):
 
 class IdentityChecks(unittest.TestCase):
     def setUp(self):
-        self.roots = [Path("relay"), Path("swarm"), Path("kad"), Path("dns")]
+        self.roots = [Path("relay"), Path("swarm"), Path("kad"), Path("dns"), Path("resolver")]
         self.old = {"package": [{"name": "unrelated", "version": "1", "source": "registry", "checksum": "keep"}]}
         self.new = copy.deepcopy(self.old)
         self.metadata = {"packages": [], "resolve": {"nodes": []}}
-        paths = dict(zip(("libp2p-relay", "libp2p-swarm", "libp2p-kad", "libp2p-dns"), self.roots))
+        paths = dict(zip(("libp2p-relay", "libp2p-swarm", "libp2p-kad", "libp2p-dns", "hickory-resolver"), self.roots))
         for name, version in graph.FAMILY.items():
             source = None if name in paths else "registry"
             self.new["package"].append({"name": name, "version": version, "source": source})

@@ -138,8 +138,8 @@ class PreparationChecks(unittest.TestCase):
 
 class IdentityChecks(unittest.TestCase):
     def setUp(self):
-        self.roots = [Path(name) for name in ("relay", "swarm", "kad", "dns")]
-        paths = dict(zip(("libp2p-relay", "libp2p-swarm", "libp2p-kad", "libp2p-dns"), self.roots))
+        self.roots = [Path(name) for name in ("relay", "swarm", "kad", "dns", "resolver")]
+        paths = dict(zip(("libp2p-relay", "libp2p-swarm", "libp2p-kad", "libp2p-dns", "hickory-resolver"), self.roots))
         self.old = {"package": [{"name": "unrelated", "version": "1", "source": "registry", "checksum": "keep", "dependencies": ["kept"]}]}
         self.new = copy.deepcopy(self.old)
         self.metadata = {"packages": [], "resolve": {"nodes": []}}

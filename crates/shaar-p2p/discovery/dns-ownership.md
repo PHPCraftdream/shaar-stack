@@ -331,3 +331,163 @@ submission handles retained: prove task destruction, UDP rebind and TCP closure
 on Windows/Linux. Keep the shutdown future owned across observation deadlines;
 never turn dropping it into a joined-close claim. Verify enabled protocol/features
 in CI so later feature unification cannot silently invalidate the UDP/TCP proof.
+
+## Task 97: prepared resolver locking correction
+
+The root patch selects the exact **hickory-resolver 0.26.3** archive identified
+above. Only that package's registry source/checksum is removed from the product
+lock; its version, dependency edges and all other package identities remain
+unchanged. All resolver consumers use this preparation, not only libp2p DNS.
+No runtime provider, protocol configuration, cache policy or public SDK API is
+added or changed.
+
+### Semantics established before the change
+
+Existing-connection selection combines the live connection list with the live
+encrypted-transport history. `ConnectionPolicy::select_connection` preserves its
+protocol policy, encrypted preference, UDP preference, SRTT comparison and tie
+order. In particular, a recent encrypted success can prohibit reusing an existing
+plaintext connection. A copied boolean or transport-state snapshot taken before
+waiting for the connection list would not preserve that decision.
+
+The preparation instead retains two lock futures and polls them together:
+
+1. Poll the connection-list lock.
+2. Once acquired, prune failed connections before polling the transport-state
+   lock, preserving the original destructor lock scope.
+3. If transport state is pending, release the connection guard, reset only its
+   lock future, and return Pending with the transport waiter retained.
+4. Select only when both locks are acquired in the same Ready poll. Release both
+   before any subsequent await.
+
+This uses neither a stale snapshot nor a new version counter. A connection-list
+update while transport state is unavailable is observed when both locks are
+acquired. A transport-state update while the list is unavailable is also observed.
+Neither guard survives a Pending return. Each adapter poll polls each lock future
+at most once; mutex waiters provide wakeups, without a retry spin loop.
+Cancellation drops the pending lock futures without admitting a new connection.
+This removes the original serialization of unrelated list access while waiting
+for transport state; it does not promise FIFO scheduling or starvation freedom.
+
+The pending-future argument depends on the actual mutex, not merely absence of a
+Rust guard. Both fields use `futures_util::lock::Mutex`, not Tokio Mutex
+(`R/name_server.rs:21,55`; `R/name_server_pool.rs:19,492`). Additional archives were
+verified against their respective locks and inspected only as DATA:
+
+| Package | Version / graph | Archive SHA256 |
+| --- | --- | --- |
+| futures-util | 0.3.34 / product | `0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc` |
+| futures-util | 0.3.32 / archive fixture | `389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6` |
+
+Their `src/lock/mutex.rs` files are byte-identical (SHA256
+`9ec6ca7274dbc53b864152e096ecc41709a9875d0612fc3a1b157ed6faaa004b`). At lines
+103-109, `try_lock` sets `IS_LOCKED`; lines 186-193 clear it before notifying a
+waiter. `Waiter::wake` at lines 63-67 only records `Woken` and invokes the waker:
+there is no permit transfer or reservation. `MutexLockFuture::poll` at lines
+338-370 acquires only while polled and immediately returns Ready on success.
+Pending retains only a waiter registration. Drop removes it and forwards a
+consumed wake when necessary (lines 162-181,374-382). The completed connection
+lock future is reset before reuse; the transport future is never polled again
+after Ready. The retained transport waiter therefore holds no lock while a new
+connection-lock wait is pending. This proof must be revisited if that dependency
+implementation changes; it does not generalize to permit-reserving mutexes.
+
+The alternating-contention fixture probes transport `try_lock` both immediately
+after notification, before selector repoll, and while the selector waits for the
+connection list. Cancellation is exercised with both waiter registrations live.
+No copied transport history or version-revalidation assumption is needed. Each
+selection can retain one waiter per mutex; outer lookup admission remains a
+separate, unimplemented cardinality bound. The primitive itself uses a short
+synchronous waiter-registry mutex and explicitly disclaims fairness; neither it
+nor this acquisition protocol is described as lock-free.
+
+Selection policy, configured connection order, error/protocol pairs and the
+existing unlocked new-connection path are unchanged. Pruning runs immediately
+after acquiring the connection list and before polling transport state, as in the
+original lock ordering. It can destroy generic cached connection handles: moving
+it after secondary-lock acquisition would widen their destructor lock scope.
+Reacquiring the list may prune newly failed entries again, without a new allocation
+or snapshot. A closed-handle Drop fixture probes transport state with nonblocking
+`try_lock` while that state is initially free and asserts pruning did not acquire
+it. This does not redesign the original primary-lock destructor scope. Atomic
+status/SRTT observations retain their upstream concurrency semantics; this is not
+a new atomic snapshot of independently changing connection metrics.
+
+`ActiveRequestCleanup::drop` removes the same key under the same mutex, moves the
+removed `SharedLookup` outside an explicit lock scope, and only then destroys it.
+Other shared waiters still retain their future/result. No asynchronous destructor,
+new task, registry or lock-free claim is introduced. The short synchronous map
+mutex still serializes deduplication; foreign-future destruction is outside it.
+
+### Preparation and rollback
+
+`.github/scripts/p2p/discovery/resolver/` holds the exact reversible patch,
+preparer, CI fixtures and checks. Production changes are confined to the two
+locking sites and their imports, the root unsafe prohibition and a standalone
+workspace boundary. The preparer checks archive size/SHA256, package identity,
+MIT/Apache license bytes, manifest, archive lock, VCS identity, the entire original
+file-hash tree and unique anchors. Verification reverses the patch byte-exactly
+and reconstructs the full receipt. Changed recipes, added files, source drift and
+receipt drift fail closed. Existing destinations are never overwritten, including
+a partially prepared destination after interruption.
+
+Full resolved metadata must select
+`target/p2p/resolver/hickory-resolver-0.26.3/Cargo.toml`; registry fallback,
+duplicate resolver packages, wrong paths and altered existing lock edges are
+rejected. Candidate staging rewrites this patch alongside the existing prepared
+signaling packages. Rollback removes only this root patch and restores this exact
+registry source/checksum after coordinated graph validation; it requires no data
+migration or deletion of user data. Do not remove unrelated prepared overrides.
+
+### CI proof scope, not a local pass
+
+Owned Rust tests are appended inside the actual prepared `name_server` and
+`name_server_pool` modules. Held-lock barriers and explicit polling demonstrate
+connection-list availability while transport state is pending, the converse,
+alternating contention/wakeup registration, cancellation, current-list selection,
+policy/order, fresh versus reused connections and preserved errors. Cleanup tests
+use a foreign future whose destructor calls `try_lock` and reenters the actual
+registry without blocking, including retained shared waiters and error results.
+The TLS schedules first allow a snapshot-before-connections implementation to
+read transport state while the connection list remains locked, then mutate that
+state before releasing the list. Both success and failure transitions must affect
+the final selection. Cancellation queues distinct counting-waker survivors behind
+the canceled selector and checks their notifications before repoll/completion:
+before wake, after wake but before repoll, and with both registrations live after
+alternating contention. Uncontended acquisition alone is not a deregistration
+witness.
+
+Separate counterfactual fixtures revert only connection acquisition or only
+shared-lookup cleanup, leaving the other correction intact. Their receipts identify
+the exact production source delta and before/after hashes; controls compare every
+other fixture file byte-for-byte. Each fixture runs its corresponding unchanged
+discriminating test. CI requires the exact assertion marker and failed-test count,
+not merely a nonzero compiler/process result.
+
+CI requires 12 common Rust contracts in the plain/archive and host-product lanes,
+14 with the two additional TLS-state contracts, and 13 Python controls. The
+cached-handle pruning regression is included in every Rust lane.
+
+The archive lane keeps the unchanged published Cargo.lock (SHA256
+`f66318e14be75c418cd2e86705564bd4e6d6cfc6d7ef4ee9456fe91f0105791a`). Its Tokio
+1.52.0 and futures-util 0.3.32 differ from product Tokio 1.54.1/futures-util 0.3.34.
+The published manifest omits `test_support`; only explicitly enumerated upstream
+test modules are disabled in the fixture, never production bodies. This lane is
+not an upstream-suite pass. A separate archive-only `tls-ring` feature lane
+executes live encrypted-success/failure mutations during contention using fake
+connections, not a real TLS handshake; production features are not changed.
+
+The host-product fixture uses the same prepared function bodies and owned tests.
+Its generated manifest selects only product-resolved packages, exact versions and
+resolved feature unions. Dependency anchors reproduce feature unification from
+other product consumers. Verification compares host-filtered package identities,
+features and non-root dependency edges, permits only the documented root anchors
+and host-condition flattening, and rejects new lock identities/checksums. The
+fixture does not inherit upstream dev-dependencies. Receipts distinguish this
+host feature-union proof from the archive/TLS lane and preserve both lock files.
+
+Tests and controls are added for GitHub CI, **not run locally**. Source/data
+transformation, syntax inspection and standalone formatting do not establish a CI
+pass. This correction does not bound lookup cardinality, fix queued DNS exchange
+cancellation, establish cache or socket lifecycle, or implement task admission,
+wire/header limits or discovery destination policy. P08 acceptance remains open.

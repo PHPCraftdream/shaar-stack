@@ -19,11 +19,12 @@ class GraphChecks(unittest.TestCase):
         self.swarm = Path(self.temporary.name) / "swarm"
         self.kad = Path(self.temporary.name) / "kad"
         self.dns = Path(self.temporary.name) / "dns"
+        self.resolver = Path(self.temporary.name) / "resolver"
         self.old = {"package": [{"name": "bytes", "version": "1.12.1", "source": "registry", "checksum": "old"}]}
         self.new = copy.deepcopy(self.old)
         self.metadata = {"packages": [], "resolve": {"nodes": []}}
         for name, version in graph.FAMILY.items():
-            root = {"libp2p-relay": self.relay, "libp2p-swarm": self.swarm, "libp2p-kad": self.kad, "libp2p-dns": self.dns}.get(name)
+            root = {"libp2p-relay": self.relay, "libp2p-swarm": self.swarm, "libp2p-kad": self.kad, "libp2p-dns": self.dns, "hickory-resolver": self.resolver}.get(name)
             local = root is not None
             source = None if local else "registry"
             identity = f"{name}@{version}"
@@ -33,26 +34,26 @@ class GraphChecks(unittest.TestCase):
             self.metadata["resolve"]["nodes"].append({"id": identity})
 
     def test_complete_resolved_family_preserves_existing_identity(self):
-        receipt = graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns)
+        receipt = graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
         self.assertEqual(receipt["retained_package_identities"], 1)
-        self.assertEqual(len(receipt["added_package_identities"]), 6)
+        self.assertEqual(len(receipt["added_package_identities"]), 7)
 
     def test_no_deps_or_empty_resolve_is_rejected(self):
         for resolve in [None, {"nodes": []}]:
             self.metadata["resolve"] = resolve
             with self.assertRaisesRegex(ValueError, "full resolved metadata"):
-                graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns)
+                graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
 
     def test_existing_identity_removal_or_mutation_is_rejected(self):
         for field in ["name", "version", "source", "checksum"]:
             changed = copy.deepcopy(self.new)
             changed["package"][0][field] = "changed"
             with self.assertRaisesRegex(ValueError, "existing package identity"):
-                graph.validate(self.old, changed, self.metadata, self.relay, self.swarm, self.kad, self.dns)
+                graph.validate(self.old, changed, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
         changed = copy.deepcopy(self.new)
         changed["package"].pop(0)
         with self.assertRaisesRegex(ValueError, "existing package identity"):
-            graph.validate(self.old, changed, self.metadata, self.relay, self.swarm, self.kad, self.dns)
+            graph.validate(self.old, changed, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
 
     def test_wrong_unresolved_or_duplicate_family_is_rejected(self):
         for mode in ["version", "unresolved", "duplicate"]:
@@ -64,21 +65,21 @@ class GraphChecks(unittest.TestCase):
             else:
                 metadata["packages"].append(copy.deepcopy(metadata["packages"][0]))
             with self.assertRaisesRegex(ValueError, "reviewed source APIs"):
-                graph.validate(self.old, self.new, metadata, self.relay, self.swarm, self.kad, self.dns)
+                graph.validate(self.old, self.new, metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
 
     def test_candidate_lock_family_must_match_metadata(self):
         self.new["package"][1]["version"] = "0.0.0"
         with self.assertRaisesRegex(ValueError, "candidate lock family"):
-            graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns)
+            graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
 
     def test_stock_or_wrong_path_prepared_sources_are_rejected(self):
-        for name, root in (("libp2p-relay", self.relay), ("libp2p-swarm", self.swarm), ("libp2p-kad", self.kad), ("libp2p-dns", self.dns)):
+        for name, root in (("libp2p-relay", self.relay), ("libp2p-swarm", self.swarm), ("libp2p-kad", self.kad), ("libp2p-dns", self.dns), ("hickory-resolver", self.resolver)):
             for field, value in (("source", "registry"), ("manifest_path", str(root.parent / "other/Cargo.toml"))):
                 metadata = copy.deepcopy(self.metadata)
                 package = next(p for p in metadata["packages"] if p["name"] == name)
                 package[field] = value
                 with self.assertRaisesRegex(ValueError, f"prepared source: {name}"):
-                    graph.validate(self.old, self.new, metadata, self.relay, self.swarm, self.kad, self.dns)
+                    graph.validate(self.old, self.new, metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
 
     def test_source_anchor_drift_is_rejected(self):
         for replace in [graph.replace, prepare.replace]:
@@ -98,6 +99,7 @@ class GraphChecks(unittest.TestCase):
             (source / "Cargo.toml").write_text("source fixture", encoding="utf-8")
             root += f'{name} = {{ path = "{relative}" }}\n'
         if adopted:
+            root += 'hickory-resolver = { path = "target/p2p/resolver/hickory-resolver-0.26.3" }\n'
             root += 'libp2p-dns = { path = "target/p2p/dns/libp2p-dns-0.45.0" }\n'
             root += 'libp2p-kad = { path = "target/p2p/kad/libp2p-kad-0.49.0" }\n'
             root += 'libp2p-relay = { path = "target/p2p/relay/libp2p-relay-0.22.0" }\n'
@@ -115,6 +117,8 @@ version = "=0.4.79"\n''', encoding="utf-8")
         (self.kad / "Cargo.toml").write_text("source fixture", encoding="utf-8")
         self.dns.mkdir(parents=True, exist_ok=True)
         (self.dns / "Cargo.toml").write_text("source fixture", encoding="utf-8")
+        self.resolver.mkdir(parents=True, exist_ok=True)
+        (self.resolver / "Cargo.toml").write_text("source fixture", encoding="utf-8")
         return repository
 
     def test_staging_works_before_and_after_product_adoption_without_duplicate_patches(self):
@@ -122,13 +126,14 @@ version = "=0.4.79"\n''', encoding="utf-8")
             repository = self.repository_fixture(adopted)
             original = (repository / "Cargo.toml").read_bytes()
             destination = repository / "candidate"
-            graph.create(repository, destination, self.relay, self.swarm, self.kad, self.dns)
+            graph.create(repository, destination, self.relay, self.swarm, self.kad, self.dns, self.resolver)
             import tomllib
             staged = tomllib.loads((destination / "Cargo.toml").read_text())
             self.assertEqual(staged["patch"]["crates-io"]["libp2p-relay"]["path"], self.relay.resolve().as_posix())
             self.assertEqual(staged["patch"]["crates-io"]["libp2p-swarm"]["path"], self.swarm.resolve().as_posix())
             self.assertEqual(staged["patch"]["crates-io"]["libp2p-kad"]["path"], self.kad.resolve().as_posix())
             self.assertEqual(staged["patch"]["crates-io"]["libp2p-dns"]["path"], self.dns.resolve().as_posix())
+            self.assertEqual(staged["patch"]["crates-io"]["hickory-resolver"]["path"], self.resolver.resolve().as_posix())
             self.assertEqual((repository / "Cargo.toml").read_bytes(), original)
             self.assertEqual((destination / "baseline.lock").read_bytes(), (repository / "Cargo.lock").read_bytes())
 
@@ -138,7 +143,7 @@ version = "=0.4.79"\n''', encoding="utf-8")
         manifest.write_text(manifest.read_text().replace("=0.57.1", "=0.57.0"), encoding="utf-8")
         destination = repository / "candidate"
         with self.assertRaisesRegex(ValueError, "product dependency family"):
-            graph.create(repository, destination, self.relay, self.swarm, self.kad, self.dns)
+            graph.create(repository, destination, self.relay, self.swarm, self.kad, self.dns, self.resolver)
         self.assertFalse(destination.exists())
 
     def test_prepared_lease_and_monotonic_expiry_provenance_are_exact(self):
