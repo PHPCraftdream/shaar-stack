@@ -590,7 +590,7 @@ deadline extension, hard-limit suppression or APP policy change is involved.
 Unreachable-path testing now requires observed native transmission and excludes
 arbitrary admission errors. This event/readiness correction still requires CI.
 
-## Carrier-owned DNS foundation — authored, pending CI
+## Carrier-owned DNS foundation — verified in CI
 
 `DiscoveryConfig::new` validates one to four pinned TCP/DNS seed descriptors and
 one to four numeric nameserver endpoints, counting inputs before deduplication.
@@ -661,9 +661,21 @@ not merely AAAA answers carried over IPv4. Both local families exercise occupied
 incompatible-family errors. UDP remains unconnected: a mismatched local-family
 bind can succeed, while its actual send fails; production semantics are unchanged.
 
-Wire length/header gates, TCP pre-prefix validation, pre-materialization/numeric discovery-role policy, bounded
-Kademlia/Identify ownership, `discover_relay`, SDK forwarding and Amino discovery
-remain unimplemented by this unit. No public-network availability is claimed.
+CI run `40274751538` at `8677d0b` passed on Linux and Windows: all 30 foundation
+contracts and five graph controls, with the existing 24 DNS expansion and 58 SDK
+contracts preserved. Independently checked host-resolved receipts contain 388 Linux
+and 386 Windows packages, unchanged feature unions and exactly the one direct
+resolver edge. The UDP lifecycle proof correlates query names and transaction IDs
+with distinct live socket generations and their actual local bindings. It requires
+`AddrInUse` before owner destruction, retained lookup charges through cancellation,
+dead lifetime witnesses and exact-local rebind after joined shutdown. Routed packet
+source addresses are not substituted for wildcard socket bindings. No precise
+Windows kernel reuse mechanism is inferred from the earlier failed witness.
+
+Wire length/header gates, TCP pre-prefix validation, pre-materialization/numeric
+discovery-role policy, bounded Kademlia/Identify ownership, `discover_relay`, SDK
+forwarding and Amino discovery remain unimplemented by this unit. No public-network
+availability is claimed.
 
 ## Remaining implementation and acceptance
 
