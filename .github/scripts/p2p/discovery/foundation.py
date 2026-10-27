@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import tomllib
 
-BASELINE_LOCK = "cc48f78b6598afa20c5545073e0663b2cb822b1976bb731c34068246563af0db"
+BASELINE_LOCK = "41971b7e3d9381045d07a0a78c833d35100c57c3ba2b5a0d2ca0cf45a27d5712"
 DEPENDENCY = 'hickory-resolver = { version = "=0.26.3", default-features = false, features = ["tokio"] }\n'
 ANCHOR = 'name = "shaar-p2p"\nversion = "0.1.0"\ndependencies = [\n "asynchronous-codec",\n "futures",\n'
 FORBIDDEN = {"__tls", "__https", "__quic", "__h3", "toml", "recursor"}
