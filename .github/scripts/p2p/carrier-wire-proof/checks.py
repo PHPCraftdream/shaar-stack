@@ -43,8 +43,11 @@ class FixtureContracts(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         self.original = {
-            instrument.GATE: ("prefix\n" + instrument.MARKER + "\nsuffix\n").encode(),
+            instrument.GATE: ("prefix\n" + instrument.CAPABILITY + "\n"
+                              + instrument.MARKER + "\nsuffix\n").encode(),
             instrument.LIBRARY: b"mod operation_gate;\n",
+            instrument.HANDLER: ("prefix\n" + instrument.ERROR_SEND + "\nsuffix\n").encode(),
+            instrument.LISTENER: ("prefix\n" + instrument.LISTENER_POLL + "\nsuffix\n").encode(),
             "Cargo.toml": b"[workspace]\n",
             "untouched.bin": bytes(range(256)),
         }
@@ -92,6 +95,40 @@ class FixtureContracts(unittest.TestCase):
         self.assertIn(b"\r\n", (destination / instrument.GATE).read_bytes())
         self.assertEqual(record["original_source_sha256"][instrument.GATE],
                          graph.digest(self.original[instrument.GATE]))
+
+    def test_listener_counterfactual_changes_only_premature_close(self):
+        baseline, _ = self.transformed("baseline")
+        counterfactual, record = self.transformed("counterfactual-listener")
+        expected = (baseline / instrument.LISTENER).read_text().replace(
+            instrument.LISTENER_HELD, instrument.LISTENER_BROKEN)
+        self.assertEqual((counterfactual / instrument.LISTENER).read_text(), expected)
+        for name in (instrument.GATE, instrument.LIBRARY, instrument.HANDLER):
+            self.assertEqual((baseline / name).read_bytes(), (counterfactual / name).read_bytes())
+        self.assertTrue(record["listener_only_counterfactual"])
+        self.assertFalse(record["guard_only_counterfactual"])
+
+    def test_listener_observer_is_before_reads_without_liveness_check(self):
+        destination, _ = self.transformed("baseline")
+        source = (destination / instrument.LISTENER).read_text()
+        self.assertLess(source.index("before_listener_poll"), source.index("loop {"))
+        self.assertNotIn(".live()", source)
+        self.assertNotIn(".live()", instrument.IDENTITY)
+        self.assertNotIn(".check(", instrument.IDENTITY)
+
+    def test_error_observer_is_only_after_successful_channel_send(self):
+        destination, _ = self.transformed("baseline")
+        source = (destination / instrument.HANDLER).read_text()
+        self.assertIn(instrument.ERROR_OBSERVED, source)
+        self.assertEqual(source.count("typed_error_queued"), 1)
+        self.assertIn("} else {\n                        crate::wire_probe::typed_error_queued", source)
+
+    def test_all_observed_sources_preserve_crlf_bytes(self):
+        for name in (instrument.GATE, instrument.LIBRARY, instrument.HANDLER, instrument.LISTENER):
+            self.original[name] = self.original[name].replace(b"\n", b"\r\n")
+        destination, _ = self.transformed("counterfactual-listener")
+        for name in (instrument.GATE, instrument.LIBRARY, instrument.HANDLER, instrument.LISTENER):
+            source = (destination / name).read_bytes()
+            self.assertNotIn(b"\n", source.replace(b"\r\n", b""))
 
     def test_unknown_variant_is_rejected(self):
         with self.assertRaises(ValueError):

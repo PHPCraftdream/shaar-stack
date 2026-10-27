@@ -19,6 +19,15 @@ CASES = {
                     "CARRIER_PROTOCOL_JOINED_CLEANUP"),
         "barriers": ("CARRIER_PROTOCOL_POSITIVE_ACCEPTED", "CARRIER_PROTOCOL_ENTERED_BOUND"),
     },
+    "queued": {
+        "name": "carrier_protocol_fixture_queued_rejection",
+        "failure": "CARRIER_QUEUED_TYPED_REJECTION_LOST",
+        "markers": ("CARRIER_QUEUED_POSITIVE_ACCEPTED", "CARRIER_QUEUED_ERROR_HELD",
+                    "CARRIER_QUEUED_REVOKED_BEFORE_READ", "CARRIER_QUEUED_TYPED_REJECTION_FORWARDED",
+                    "CARRIER_QUEUED_JOINED_CLEANUP"),
+        "barriers": ("CARRIER_QUEUED_POSITIVE_ACCEPTED", "CARRIER_QUEUED_ERROR_HELD",
+                     "CARRIER_QUEUED_REVOKED_BEFORE_READ"),
+    },
     "deadline": {
         "name": "carrier_protocol_fixture_established_deadline",
         "failure": "CARRIER_ESTABLISHED_DEADLINE_REGRESSION",
@@ -184,7 +193,7 @@ def run(repository, destination):
     product_paths = graph.product_paths(repository, product)
     original_hashes = graph.selected_hashes(repository, product_paths)
     results = {}
-    for variant in ("baseline", "counterfactual", "counterfactual-deadline"):
+    for variant in ("baseline", "counterfactual", "counterfactual-deadline", "counterfactual-listener"):
         directory = destination / variant
         directory.mkdir()
         workspace = directory / "workspace"
@@ -199,8 +208,9 @@ def run(repository, destination):
         write_json(directory / "graph-receipt.json", proof)
         immutable = graph.hashes(workspace)
         executable, selected, witness = compile_fixture(workspace, directory, copied_relay, graph)
-        cases = list(CASES) if variant == "baseline" else [
-            "deadline" if variant == "counterfactual-deadline" else "protocol"]
+        negative_cases = {"counterfactual": "protocol", "counterfactual-deadline": "deadline",
+                          "counterfactual-listener": "queued"}
+        cases = list(CASES) if variant == "baseline" else [negative_cases[variant]]
         outcomes = {case: execute(workspace, directory, executable, selected[case], variant, graph, case)
                     for case in cases}
         if immutable != graph.hashes(workspace):

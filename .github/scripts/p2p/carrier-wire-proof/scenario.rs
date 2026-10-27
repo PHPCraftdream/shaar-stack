@@ -338,3 +338,183 @@ async fn carrier_protocol_fixture_revocation() {
 
 #[path = "deadline.rs"]
 mod deadline;
+
+fn invalid_expiry(mut error: &(dyn std::error::Error + 'static)) -> bool {
+    for _ in 0..16 {
+        if matches!(
+            error.downcast_ref::<libp2p::relay::outbound::hop::ProtocolViolation>(),
+            Some(libp2p::relay::outbound::hop::ProtocolViolation::InvalidReservationExpiration)
+        ) {
+            return true;
+        }
+        if let Some(inner) = error
+            .downcast_ref::<io::Error>()
+            .and_then(io::Error::get_ref)
+        {
+            error = inner;
+        } else if let Some(inner) = error.source() {
+            error = inner;
+        } else {
+            return false;
+        }
+    }
+    false
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn carrier_protocol_fixture_queued_rejection() {
+    timeout(Duration::from_secs(40), async {
+        run_case(false).await;
+        println!("CARRIER_QUEUED_POSITIVE_ACCEPTED");
+        let dns = crate::dns::tests::support::Server::new().await;
+        let key = Keypair::generate_ed25519();
+        let peer = key.public().to_peer_id();
+        let server_executor = OwnedExecutor::new();
+        let mut server = Swarm::new(
+            native(&key),
+            rpc::Behaviour::with_codec(
+                codec::HopCodec,
+                [(libp2p::relay::HOP_PROTOCOL_NAME, rpc::ProtocolSupport::Full)],
+                rpc::Config::default().with_request_timeout(DEADLINE).with_max_concurrent_streams(1),
+            ),
+            peer,
+            libp2p::swarm::Config::with_executor(server_executor.handle()),
+        );
+        server.listen_on("/ip4/127.0.0.1/tcp/0".parse().unwrap()).unwrap();
+        let address = loop {
+            if let SwarmEvent::NewListenAddr { address, .. } = server.select_next_some().await {
+                break address;
+            }
+        };
+        let relay = RelayAddr::new(peer, socket_address(&address).unwrap()).unwrap();
+        let (mut carrier, handle, _incoming) = Carrier::bind_with_discovery(
+            Keypair::generate_ed25519(), "127.0.0.1:0".parse().unwrap(), vec![], discovery(&dns),
+        ).unwrap();
+        probe::arm_listener(peer).unwrap();
+        assert!(probe::arm(peer).is_err());
+        assert!(probe::arm_listener(peer).is_err());
+        let (sender, mut receiver) = oneshot::channel();
+        carrier.core.command(Command::Reserve(relay, sender));
+        let mut requests = 0;
+        let queued = timeout(DEADLINE, async {
+            loop {
+                tokio::select! {
+                    receipt = futures::future::poll_fn(probe::poll_queued_listener) => break receipt,
+                    event = carrier.core.swarm.select_next_some() => {
+                        assert!(!matches!(&event,
+                            SwarmEvent::ListenerError { listener_id, .. }
+                            | SwarmEvent::ListenerClosed { listener_id, .. }
+                            if *listener_id != carrier.core.native_listener),
+                            "typed rejection cannot leave the held Listener");
+                        carrier.core.event(event).unwrap();
+                    }
+                    event = server.select_next_some() => {
+                        if let SwarmEvent::Behaviour(rpc::Event::Message {
+                            peer: source,
+                            message: rpc::Message::Request { request, channel, .. }, ..
+                        }) = event {
+                            assert_eq!(source, *carrier.core.swarm.local_peer_id());
+                            assert_eq!(request.kind, Some(0));
+                            assert!(request.reservation.is_none());
+                            requests += 1;
+                            assert_eq!(requests, 1);
+                            server.behaviour_mut().send_response(channel, codec::Hop {
+                                kind: Some(2), status: Some(100),
+                                reservation: Some(codec::Reservation {
+                                    expire: None,
+                                    addresses: vec![address.clone().with(Protocol::P2p(peer)).to_vec()],
+                                }),
+                                limit: Some(codec::Limit { duration: Some(1), data: Some(4096) }),
+                            }).unwrap();
+                        }
+                    }
+                }
+            }
+        }).await.unwrap();
+        assert_eq!(requests, 1);
+        assert!(queued.listener_held);
+        let (generation, control) = queued.error_queued.unwrap();
+        assert_eq!(queued.listener_entered, Some(generation));
+        assert_eq!(carrier.core.swarm.behaviour().admission.connection(&peer), Some(control));
+        let capability = probe::take_retained().expect("actual successful error-send capability");
+        assert_eq!(capability.generation().unwrap().get(), generation);
+        // Handler cancels after the successful send; Listener has not read that error.
+        assert!(!probe::bound_live(&capability));
+        assert!(matches!(receiver.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+        println!("CARRIER_QUEUED_ERROR_HELD");
+        let gate = carrier.core.relay.gate.clone();
+        let released = gate.released_flag(peer, relay::gate::Slot::Reserve, generation).unwrap();
+        gate.revoke_generation(peer, relay::gate::Slot::Reserve, generation);
+        assert!(!released.load(Ordering::Acquire));
+        assert!(probe::snapshot().listener_held);
+        assert!(handle.relay_leases().borrow().is_empty());
+        println!("CARRIER_QUEUED_REVOKED_BEFORE_READ");
+        probe::release_listener();
+        let mut terminal = false;
+        let mut typed_seen = false;
+        let mut reply = None;
+        timeout(DEADLINE, async {
+            while !terminal || reply.is_none() {
+                tokio::select! {
+                    event = carrier.core.swarm.select_next_some() => {
+                        match &event {
+                            SwarmEvent::ListenerError { listener_id, error }
+                                if *listener_id != carrier.core.native_listener => {
+                                assert!(invalid_expiry(error), "CARRIER_QUEUED_TYPED_REJECTION_LOST");
+                                typed_seen = true;
+                            }
+                            SwarmEvent::ListenerClosed { listener_id, reason, .. }
+                                if *listener_id != carrier.core.native_listener => {
+                                assert!(typed_seen || reason.as_ref().err().is_some_and(|error| invalid_expiry(error)),
+                                    "CARRIER_QUEUED_TYPED_REJECTION_LOST");
+                                terminal = true;
+                            }
+                            _ => {}
+                        }
+                        carrier.core.event(event).unwrap();
+                    }
+                    _ = server.select_next_some() => {}
+                }
+                if reply.is_none() {
+                    match receiver.try_recv() {
+                        Ok(value) => reply = Some(value),
+                        Err(oneshot::error::TryRecvError::Empty) => {}
+                        Err(oneshot::error::TryRecvError::Closed) => panic!("reserve reply lost"),
+                    }
+                }
+            }
+        }).await.unwrap();
+        assert!(reply.unwrap().as_ref().err().is_some_and(|error| invalid_expiry(error)),
+            "CARRIER_QUEUED_TYPED_REJECTION_LOST");
+        assert!(handle.relay_leases().borrow().is_empty());
+        assert!(handle.links().borrow().is_empty());
+        println!("CARRIER_QUEUED_TYPED_REJECTION_FORWARDED");
+        let listening = (*handle.listening.borrow()).unwrap();
+        gate.revoke_all();
+        let Carrier { core, executor } = carrier;
+        drop(core);
+        executor.shutdown().await.unwrap();
+        gate.finish_shutdown();
+        probe::reset();
+        assert!(!released.load(Ordering::Acquire));
+        let mut join = Box::pin(gate.join_release());
+        let wake = Arc::new(ReleaseWake(AtomicUsize::new(0)));
+        let task_waker = waker(wake.clone());
+        let mut cx = Context::from_waker(&task_waker);
+        assert!(join.as_mut().poll(&mut cx).is_pending());
+        let before = wake.0.load(Ordering::SeqCst);
+        drop(capability);
+        assert!(released.load(Ordering::Acquire));
+        assert!(wake.0.load(Ordering::SeqCst) > before);
+        assert!(matches!(join.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
+        drop(join);
+        gate.prune_released();
+        assert_eq!(gate.record_count(), 0);
+        drop(server);
+        server_executor.shutdown().await.unwrap();
+        let listener = tokio::net::TcpListener::bind(listening).await.unwrap();
+        drop(listener);
+        dns.quiet();
+        println!("CARRIER_QUEUED_JOINED_CLEANUP");
+    }).await.unwrap();
+}

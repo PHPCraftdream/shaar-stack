@@ -104,7 +104,7 @@ def create(repository, metadata, root, relay_source, instrument, variant, scenar
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
-    relay_variant = "counterfactual" if variant == "counterfactual" else "baseline"
+    relay_variant = variant if variant in ("counterfactual", "counterfactual-listener") else "baseline"
     relay_record = instrument.instrument(relay_source, root / relay_relative, relay_variant)
     owner_deadline = deadline_counterfactual(root, instrument) if variant == "counterfactual-deadline" else None
     manifest_rebases = rebase_manifests(repository, root)

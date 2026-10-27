@@ -6,13 +6,37 @@ use libp2p_identity::PeerId;
 use libp2p_swarm::ConnectionId;
 use std::{
     io,
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicU8, Ordering},
+    },
     task::{Context, Poll, Waker},
 };
 
 pub const BUILD_VARIANT: &str = "baseline";
 type Identity = (u64, ConnectionId);
 pub(crate) type Descriptor = Option<(PeerId, OperationKind, u64)>;
+static MODE: AtomicU8 = AtomicU8::new(0);
+
+struct ListenerState {
+    peer: Option<PeerId>,
+    generation: Option<u64>,
+    queued: Option<Identity>,
+    held: bool,
+    retained: Option<OperationCapability>,
+    observer: Option<Waker>,
+    barrier: Option<Waker>,
+}
+
+static LISTENER: Mutex<ListenerState> = Mutex::new(ListenerState {
+    peer: None,
+    generation: None,
+    queued: None,
+    held: false,
+    retained: None,
+    observer: None,
+    barrier: None,
+});
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Snapshot {
@@ -20,6 +44,9 @@ pub struct Snapshot {
     pub held: bool,
     pub fresh_inner_polls: usize,
     pub denied_protocol_polls: usize,
+    pub listener_entered: Option<u64>,
+    pub error_queued: Option<Identity>,
+    pub listener_held: bool,
 }
 
 struct State {
@@ -53,6 +80,9 @@ fn state_snapshot(state: &State) -> Snapshot {
         held: state.held,
         fresh_inner_polls: state.polls,
         denied_protocol_polls: state.denied,
+        listener_entered: None,
+        error_queued: None,
+        listener_held: false,
     }
 }
 
@@ -60,7 +90,11 @@ pub fn arm(peer: PeerId) -> io::Result<()> {
     let mut state = STATE
         .lock()
         .map_err(|_| io::Error::other("probe poisoned"))?;
-    if state.peer.is_some() {
+    if state.peer.is_some()
+        || MODE
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+    {
         return Err(io::ErrorKind::WouldBlock.into());
     }
     state.peer = Some(peer);
@@ -69,7 +103,11 @@ pub fn arm(peer: PeerId) -> io::Result<()> {
 }
 
 pub fn snapshot() -> Snapshot {
-    state_snapshot(&STATE.lock().expect("fixture probe lock"))
+    if MODE.load(Ordering::SeqCst) == 2 {
+        listener_snapshot(&LISTENER.lock().expect("fixture listener lock"))
+    } else {
+        state_snapshot(&STATE.lock().expect("fixture probe lock"))
+    }
 }
 
 fn observe(cx: &mut Context<'_>, previous: Option<usize>, resolution: bool) -> Poll<Snapshot> {
@@ -145,9 +183,40 @@ pub fn reset() {
     if let Some(waker) = observer {
         waker.wake();
     }
+    reset_listener();
+}
+
+fn reset_listener() {
+    let (retained, barrier, observer) = {
+        let mut state = LISTENER.lock().expect("fixture listener lock");
+        state.peer = None;
+        state.generation = None;
+        state.queued = None;
+        state.held = false;
+        (
+            state.retained.take(),
+            state.barrier.take(),
+            state.observer.take(),
+        )
+    };
+    MODE.store(0, Ordering::SeqCst);
+    drop(retained);
+    if let Some(waker) = barrier {
+        waker.wake();
+    }
+    if let Some(waker) = observer {
+        waker.wake();
+    }
 }
 
 pub fn take_retained() -> Option<OperationCapability> {
+    if MODE.load(Ordering::SeqCst) == 2 {
+        return LISTENER
+            .lock()
+            .expect("fixture listener lock")
+            .retained
+            .take();
+    }
     let mut state = STATE.lock().expect("fixture probe lock");
     state.retention_taken = true;
     state.retained.take()
@@ -216,6 +285,138 @@ pub(crate) fn inner_poll_started(descriptor: Descriptor, control: Option<Connect
 
 pub(crate) fn protocol_denied(descriptor: Descriptor, control: Option<ConnectionId>) {
     resolution_observed(descriptor, control, true);
+}
+
+fn listener_snapshot(state: &ListenerState) -> Snapshot {
+    Snapshot {
+        entered: None,
+        held: false,
+        fresh_inner_polls: 0,
+        denied_protocol_polls: 0,
+        listener_entered: state.generation,
+        error_queued: state.queued,
+        listener_held: state.held,
+    }
+}
+
+pub fn arm_listener(peer: PeerId) -> io::Result<()> {
+    let mut state = LISTENER
+        .lock()
+        .map_err(|_| io::Error::other("listener probe poisoned"))?;
+    if state.peer.is_some()
+        || MODE
+            .compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+    {
+        return Err(io::ErrorKind::WouldBlock.into());
+    }
+    state.peer = Some(peer);
+    state.held = true;
+    Ok(())
+}
+
+pub fn poll_queued_listener(cx: &mut Context<'_>) -> Poll<Snapshot> {
+    let next = cx.waker().clone();
+    let (result, old, unused) = {
+        let mut state = LISTENER.lock().expect("fixture listener lock");
+        let ready = state.held
+            && state
+                .queued
+                .is_some_and(|(generation, _)| Some(generation) == state.generation);
+        if ready {
+            (
+                Poll::Ready(listener_snapshot(&state)),
+                state.observer.take(),
+                Some(next),
+            )
+        } else {
+            (Poll::Pending, state.observer.replace(next), None)
+        }
+    };
+    drop(old);
+    drop(unused);
+    result
+}
+
+pub fn release_listener() {
+    let (barrier, observer) = {
+        let mut state = LISTENER.lock().expect("fixture listener lock");
+        state.held = false;
+        (state.barrier.take(), state.observer.take())
+    };
+    if let Some(waker) = barrier {
+        waker.wake();
+    }
+    if let Some(waker) = observer {
+        waker.wake();
+    }
+}
+
+pub(crate) fn before_listener_poll(
+    cx: &mut Context<'_>,
+    capability: &OperationCapability,
+) -> Poll<()> {
+    if MODE.load(Ordering::SeqCst) != 2 {
+        return Poll::Ready(());
+    }
+    let Some((peer, OperationKind::Reserve, generation, _)) = capability.proof_identity() else {
+        return Poll::Ready(());
+    };
+    let next = cx.waker().clone();
+    let (held, old, unused, observer) = {
+        let mut state = LISTENER.lock().expect("fixture listener lock");
+        if state.peer != Some(peer) {
+            (false, None, Some(next), None)
+        } else {
+            let first = state.generation.is_none();
+            if let Some(previous) = state.generation {
+                assert_eq!(previous, generation, "one selected listener generation");
+            }
+            state.generation = Some(generation);
+            let (old, unused) = if state.held {
+                (state.barrier.replace(next), None)
+            } else {
+                (state.barrier.take(), Some(next))
+            };
+            let observer = if first { state.observer.take() } else { None };
+            (state.held, old, unused, observer)
+        }
+    };
+    drop(old);
+    drop(unused);
+    if let Some(waker) = observer {
+        waker.wake();
+    }
+    if held { Poll::Pending } else { Poll::Ready(()) }
+}
+
+pub(crate) fn typed_error_queued(capability: &OperationCapability) {
+    if MODE.load(Ordering::SeqCst) != 2 {
+        return;
+    }
+    let Some((peer, OperationKind::Reserve, generation, control)) = capability.proof_identity()
+    else {
+        return;
+    };
+    let control = control.expect("typed rejection belongs to an authenticated control");
+    let retained = capability.clone();
+    let (unused, observer) = {
+        let mut state = LISTENER.lock().expect("fixture listener lock");
+        if state.peer != Some(peer) {
+            (Some(retained), None)
+        } else {
+            assert!(
+                state.queued.is_none(),
+                "one actual successful typed-error send"
+            );
+            state.queued = Some((generation, control));
+            (state.retained.replace(retained), state.observer.take())
+        }
+    };
+    drop(unused);
+    if let Some(waker) = observer {
+        waker.wake();
+    }
 }
 
 fn resolution_observed(descriptor: Descriptor, control: Option<ConnectionId>, denied: bool) {
