@@ -165,12 +165,12 @@ async fn coordinate_until<F: std::future::Future<Output = Result<(), std::io::Er
                 let (stream, _) = match incoming { Ok(value) => value, Err(error) => { failure = Some(Box::new(error)); break; } };
                 // Admission liveness is checked before forwarding begins. If closure
                 // raced with accept, retire this generation and dial for this socket.
-                if let Some(active) = session.clone() {
-                    if !admission_live(&active).await {
-                        session = None;
-                        workers.abort_all();
-                        while workers.join_next().await.is_some() {}
-                    }
+                if let Some(active) = session.clone()
+                    && !admission_live(&active).await
+                {
+                    session = None;
+                    workers.abort_all();
+                    while workers.join_next().await.is_some() {}
                 }
                 if session.is_none() {
                     let connected = tokio::select! {
