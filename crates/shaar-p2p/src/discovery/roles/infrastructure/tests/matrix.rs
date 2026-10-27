@@ -355,11 +355,15 @@ fn matrix_e_wrong_endpoint_and_authentication_never_promote() {
         let p = peer();
         let mut owner = Owner::new(&[], &[p]).unwrap();
         let (key, permit, root_lease, numeric) = key_matrix(&mut owner, p, 250);
-        assert!(
-            numeric
-                .record_numeric("8.8.4.4:4001".parse().unwrap(), Instant::now())
-                .is_err()
-        );
+        for endpoint in ["8.8.4.4:4001", "8.8.8.8:4002"] {
+            let endpoint: SocketAddr = endpoint.parse().unwrap();
+            let address: libp2p::Multiaddr =
+                format!("/ip4/{}/tcp/{}/p2p/{p}", endpoint.ip(), endpoint.port())
+                    .parse()
+                    .unwrap();
+            assert!(!owner.view().permits_address(address.as_ref()));
+            assert!(numeric.record_numeric(endpoint, Instant::now()).is_err());
+        }
         numeric
             .record_numeric("8.8.8.8:4001".parse().unwrap(), Instant::now())
             .unwrap();

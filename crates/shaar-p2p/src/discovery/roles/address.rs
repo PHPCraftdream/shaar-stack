@@ -95,7 +95,13 @@ fn permitted(role: Role, root: &Root, parsed: Parsed) -> bool {
     match role {
         Role::Application => parsed.endpoint.is_some() && parsed.endpoint == root.parsed.endpoint,
         Role::ExplicitRelay(endpoint) => parsed.endpoint == Some(endpoint),
-        Role::Infrastructure => parsed.strict,
+        Role::Infrastructure => {
+            parsed.strict
+                && root
+                    .parsed
+                    .endpoint
+                    .is_none_or(|endpoint| parsed.endpoint == Some(endpoint))
+        }
     }
 }
 
