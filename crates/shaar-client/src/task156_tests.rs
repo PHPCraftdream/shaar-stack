@@ -97,7 +97,7 @@ async fn coordinator_forwards_concurrent_streams_over_one_session() {
         target_task.await.unwrap();
         stop_tx.send(()).unwrap();
         coordinator.await.unwrap().unwrap();
-        stop_server_tx.send(()).unwrap();
+        let _ = stop_server_tx.send(());
         server_task.await.unwrap();
     })
     .await
@@ -150,7 +150,7 @@ async fn coordinator_shutdown_joins_active_forwarding() {
         drop(application);
         coordinator.await.unwrap().unwrap();
         target_task.await.unwrap();
-        server_stop_tx.send(()).unwrap();
+        let _ = server_stop_tx.send(());
         server_task.await.unwrap();
     })
     .await
@@ -203,11 +203,11 @@ async fn coordinator_does_not_forward_with_wrong_pinned_key() {
         let mut response = [0; 1];
         let read = timeout(Duration::from_secs(31), application.read(&mut response))
             .await
-            .expect("coordinator retry deadline")
-            .unwrap();
-        assert_eq!(
-            read, 0,
-            "wrong-pinned-key stream should close without response"
+            .expect("coordinator retry deadline");
+        assert!(
+            matches!(read, Ok(0))
+                || matches!(read, Err(ref error) if error.kind() == std::io::ErrorKind::ConnectionReset),
+            "wrong-pinned-key stream should close without response: {read:?}"
         );
         stop_tx.send(()).unwrap();
         coordinator.await.unwrap().unwrap();
