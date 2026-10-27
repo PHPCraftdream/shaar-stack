@@ -126,16 +126,10 @@ jobs:
         with:
           name: carrier-protocol-proof-${{ matrix.os }}
           path: |
-            target/carrier-wire-proof/product-metadata.json
-            target/carrier-wire-proof/run-receipt.json
-            target/carrier-wire-proof/*/fixture-provenance.json
-            target/carrier-wire-proof/*/graph-receipt.json
-            target/carrier-wire-proof/*/metadata.json
-            target/carrier-wire-proof/*/compile.jsonl
-            target/carrier-wire-proof/*/compile-failure.log
-            target/carrier-wire-proof/*/run.log
-            target/carrier-wire-proof/*/inventory.log
-            target/carrier-wire-proof/*/variant-receipt.json
+            target/carrier-wire-proof/*.json
+            target/carrier-wire-proof/*/*.json
+            target/carrier-wire-proof/*/*.jsonl
+            target/carrier-wire-proof/*/*.log
             target/carrier-wire-proof/*/workspace/Cargo.lock
           if-no-files-found: warn
       - name: Verify resolver locking with archive features and genuine counterfactuals
