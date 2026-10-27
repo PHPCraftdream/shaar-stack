@@ -7,12 +7,18 @@ on:
         description: Reviewed candidate commit in this repository
         required: true
         type: string
+      direct_feedback:
+        description: Run focused SDK/config/server/client feedback instead of resolving a lockfile
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   resolve:
+    if: ${{ !inputs.direct_feedback }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -36,3 +42,82 @@ jobs:
           name: sdk-cargo-lock
           path: Cargo.lock
           if-no-files-found: error
+
+  direct-feedback:
+    if: ${{ inputs.direct_feedback }}
+    name: Direct feedback (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Install Rust 1.99.1
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+      - name: Structural limits
+        run: python -I -X utf8 .github/scripts/check_structure.py
+      - name: Structural guard tests
+        run: python -I -X utf8 -m unittest discover -s .github/scripts/tests
+      - name: Prepare reviewed production backend sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/backend-archives/noq target/backend-archives/iroh target/backend-archives/runtime
+          curl --fail --location --max-time 120 https://static.crates.io/crates/noq-proto/noq-proto-1.3.0.crate --output target/backend-archives/noq/noq-proto.crate
+          curl --fail --location --max-time 120 https://static.crates.io/crates/iroh/iroh-1.3.0.crate --output target/backend-archives/iroh/iroh.crate
+          curl --fail --location --max-time 120 https://static.crates.io/crates/noq/noq-1.3.0.crate --output target/backend-archives/runtime/noq.crate
+          python -I .github/scripts/backend/prepare.py --noq-archive target/backend-archives/noq/noq-proto.crate --iroh-archive target/backend-archives/iroh/iroh.crate --runtime-archive target/backend-archives/runtime/noq.crate --lock .github/probes/iroh-paths/Cargo.lock --destination target/backend
+      - name: Prepare reviewed signaling dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/p2p/relay-archive target/p2p/swarm-archive
+          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-relay/libp2p-relay-0.22.0.crate --output target/p2p/relay-archive/relay.crate
+          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-swarm/libp2p-swarm-0.48.0.crate --output target/p2p/swarm-archive/swarm.crate
+          python -I .github/scripts/p2p/prepare.py --archive target/p2p/relay-archive/relay.crate --destination target/p2p/relay --swarm-archive target/p2p/swarm-archive/swarm.crate --swarm-destination target/p2p/swarm
+      - name: Prepare reviewed DNS expansion boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/p2p/dns-archive
+          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-dns/libp2p-dns-0.45.0.crate --output target/p2p/dns-archive/dns.crate
+          python -I .github/scripts/p2p/discovery/dns/prepare.py prepare --archive target/p2p/dns-archive/dns.crate --destination target/p2p/dns
+      - name: Prepare reviewed resolver locking boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/p2p/resolver-archive
+          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/hickory-resolver/hickory-resolver-0.26.3.crate --output target/p2p/resolver-archive/resolver.crate
+          python -I .github/scripts/p2p/discovery/resolver/prepare.py --archive target/p2p/resolver-archive/resolver.crate --destination target/p2p/resolver
+      - name: Prepare reviewed Kademlia referral retention
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/p2p/kad-archive
+          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-kad/libp2p-kad-0.49.0.crate --output target/p2p/kad-archive/kad.crate
+          python -I .github/scripts/p2p/discovery/kad/kad.py prepare --archive target/p2p/kad-archive/kad.crate --destination target/p2p/kad
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Focused SDK, config, server, and client tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in shaar shaar-platform shaar-server shaar-client shaar-p2p; do
+            log="$RUNNER_TEMP/shaar-$package.log"
+            if cargo test -p "$package" --locked >"$log" 2>&1; then status=0; else status=$?; fi
+            python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
+            cat "$log"
+            if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+          done
