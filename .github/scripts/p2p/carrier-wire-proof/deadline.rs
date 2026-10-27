@@ -1,19 +1,54 @@
 #![forbid(unsafe_code)]
 
 use super::*;
-use libp2p::relay::client::OperationCapability;
+use libp2p::{
+    core::transport::TransportEvent,
+    relay::client::{
+        Behaviour as ClientBehaviour, Connection, OperationCapability, Transport as RelayTransport,
+    },
+};
+use std::pin::Pin;
 use tokio::time::{Instant, advance, pause, resume};
 
 type Server = Swarm<libp2p::relay::Behaviour>;
 type Capture = (PeerId, OperationCapability);
 
+/// A real authenticated relay-control peer that accepts STOP but never answers APP Noise.
+struct NoiseSink {
+    swarm: Swarm<ClientBehaviour>,
+    transport: RelayTransport,
+    stream: Option<Connection>,
+    announced: bool,
+    accepted: bool,
+    noise_seen: bool,
+}
+
+fn poll_noise(
+    stream: &mut Option<Connection>,
+    cx: &mut Context<'_>,
+) -> Poll<std::io::Result<usize>> {
+    let Some(connection) = stream.as_mut() else {
+        return Poll::Pending;
+    };
+    let mut byte = [0; 1];
+    futures::AsyncRead::poll_read(Pin::new(connection), cx, &mut byte)
+}
+
 async fn pump(
     server: &mut Server,
     source: &mut Carrier,
     first: &mut Carrier,
-    second: &mut Carrier,
-    poll_second: bool,
+    sink: &mut NoiseSink,
 ) -> Option<Capture> {
+    let NoiseSink {
+        swarm,
+        transport,
+        stream,
+        announced,
+        accepted,
+        noise_seen,
+    } = sink;
+    let read_enabled = stream.is_some() && !*noise_seen;
     tokio::select! {
         _ = server.select_next_some() => None,
         event = source.core.swarm.select_next_some() => {
@@ -32,8 +67,29 @@ async fn pump(
             first.core.event(event).unwrap();
             None
         }
-        event = second.core.swarm.select_next_some(), if poll_second => {
-            second.core.event(event).unwrap();
+        event = swarm.select_next_some() => {
+            if let SwarmEvent::Behaviour(libp2p::relay::client::Event::ReservationReqAccepted { .. }) = event {
+                *accepted = true;
+            }
+            None
+        }
+        event = futures::future::poll_fn(|cx| Pin::new(&mut *transport).poll(cx)) => {
+            match event {
+                TransportEvent::NewAddress { .. } => *announced = true,
+                TransportEvent::Incoming { upgrade, .. } => {
+                    assert!(stream.is_none(), "one controlled negative circuit");
+                    // The raw relay upgrade is Ready; stream I/O performs real STOP acceptance.
+                    *stream = Some(upgrade.await.unwrap());
+                }
+                TransportEvent::ListenerError { error, .. } => panic!("sink listener error: {error}"),
+                TransportEvent::ListenerClosed { reason, .. } => panic!("sink listener closed: {reason:?}"),
+                _ => {}
+            }
+            None
+        }
+        read = futures::future::poll_fn(|cx| poll_noise(stream, cx)), if read_enabled => {
+            assert_eq!(read.unwrap(), 1, "real source Noise byte after STOP acceptance");
+            *noise_seen = true;
             None
         }
     }
@@ -43,26 +99,24 @@ async fn reserve(
     server: &mut Server,
     source: &mut Carrier,
     first: &mut Carrier,
-    second: &mut Carrier,
+    sink: &mut NoiseSink,
     relay: RelayAddr,
-    reserve_first: bool,
 ) {
     let (sender, mut receiver) = oneshot::channel();
-    if reserve_first {
-        first.core.command(Command::Reserve(relay, sender));
-    } else {
-        second.core.command(Command::Reserve(relay, sender));
-    }
+    first.core.command(Command::Reserve(relay, sender));
+    let mut first_ready = false;
     timeout(DEADLINE, async {
-        loop {
-            assert!(pump(server, source, first, second, true).await.is_none());
-            match receiver.try_recv() {
-                Ok(result) => {
-                    assert_eq!(result.unwrap().relay(), relay);
-                    break;
+        while !first_ready || !sink.announced || !sink.accepted {
+            assert!(pump(server, source, first, sink).await.is_none());
+            if !first_ready {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        assert_eq!(result.unwrap().relay(), relay);
+                        first_ready = true;
+                    }
+                    Err(oneshot::error::TryRecvError::Empty) => {}
+                    Err(oneshot::error::TryRecvError::Closed) => panic!("reservation reply closed"),
                 }
-                Err(oneshot::error::TryRecvError::Empty) => {}
-                Err(oneshot::error::TryRecvError::Closed) => panic!("reservation reply closed"),
             }
         }
     })
@@ -111,14 +165,14 @@ async fn carrier_protocol_fixture_established_deadline() {
         let relay = RelayAddr::new(relay_peer, socket_address(&listen).unwrap()).unwrap();
         let source_key = Keypair::generate_ed25519();
         let first_key = Keypair::generate_ed25519();
-        let second_key = Keypair::generate_ed25519();
+        let sink_key = Keypair::generate_ed25519();
         let source_peer = source_key.public().to_peer_id();
         let first_peer = first_key.public().to_peer_id();
-        let second_peer = second_key.public().to_peer_id();
+        let sink_peer = sink_key.public().to_peer_id();
         let (mut source, source_handle, _source_incoming) = Carrier::bind_with_discovery(
             source_key,
             "127.0.0.1:0".parse().unwrap(),
-            vec![first_peer, second_peer],
+            vec![first_peer, sink_peer],
             discovery(&dns),
         )
         .unwrap();
@@ -129,31 +183,30 @@ async fn carrier_protocol_fixture_established_deadline() {
             discovery(&dns),
         )
         .unwrap();
-        let (mut second, second_handle, _second_incoming) = Carrier::bind_with_discovery(
-            second_key,
-            "127.0.0.1:0".parse().unwrap(),
-            vec![source_peer],
-            discovery(&dns),
-        )
-        .unwrap();
-        reserve(
-            &mut server,
-            &mut source,
-            &mut first,
-            &mut second,
-            relay,
-            true,
-        )
-        .await;
-        reserve(
-            &mut server,
-            &mut source,
-            &mut first,
-            &mut second,
-            relay,
-            false,
-        )
-        .await;
+        let sink_executor = OwnedExecutor::new();
+        let (mut transport, behaviour) = libp2p::relay::client::new(sink_peer);
+        transport
+            .listen_on(
+                ListenerId::next(),
+                listen
+                    .with(Protocol::P2p(relay_peer))
+                    .with(Protocol::P2pCircuit),
+            )
+            .unwrap();
+        let mut sink = NoiseSink {
+            swarm: Swarm::new(
+                native(&sink_key),
+                behaviour,
+                sink_peer,
+                libp2p::swarm::Config::with_executor(sink_executor.handle()),
+            ),
+            transport,
+            stream: None,
+            announced: false,
+            accepted: false,
+            noise_seen: false,
+        };
+        reserve(&mut server, &mut source, &mut first, &mut sink, relay).await;
 
         let (sender, mut receiver) = oneshot::channel();
         source
@@ -164,9 +217,7 @@ async fn carrier_protocol_fixture_established_deadline() {
         let mut established_reply = None;
         timeout(DEADLINE, async {
             while established_capture.is_none() || established_reply.is_none() {
-                if let Some(capture) =
-                    pump(&mut server, &mut source, &mut first, &mut second, true).await
-                {
+                if let Some(capture) = pump(&mut server, &mut source, &mut first, &mut sink).await {
                     assert!(
                         established_capture.is_none(),
                         "only one source Connect operation"
@@ -218,24 +269,23 @@ async fn carrier_protocol_fixture_established_deadline() {
         let (sender, mut pending_reply) = oneshot::channel();
         source
             .core
-            .command(Command::ConnectVia(second_peer, relay, sender));
-        let pending_generation = staged_generation(&source, second_peer);
+            .command(Command::ConnectVia(sink_peer, relay, sender));
+        let pending_generation = staged_generation(&source, sink_peer);
         assert_ne!(pending_generation, established_generation);
-        // Its control handler remains driven by the owned executor, but no second APP
-        // listener upgrade is polled: HOP completes while end-to-end Noise is withheld.
-        let pending = timeout(DEADLINE, async {
-            loop {
-                if let Some(capture) =
-                    pump(&mut server, &mut source, &mut first, &mut second, false).await
-                {
+        let mut pending_capture = None;
+        timeout(DEADLINE, async {
+            while pending_capture.is_none() || !sink.noise_seen {
+                if let Some(capture) = pump(&mut server, &mut source, &mut first, &mut sink).await {
+                    assert!(pending_capture.is_none());
                     assert_eq!(capture.0, relay_peer);
                     assert_eq!(capture.1.generation().unwrap().get(), pending_generation);
-                    break capture.1;
+                    pending_capture = Some(capture.1);
                 }
             }
         })
         .await
         .unwrap();
+        let pending = pending_capture.take().unwrap();
         assert_eq!(
             source
                 .core
@@ -250,14 +300,14 @@ async fn carrier_protocol_fixture_established_deadline() {
                 .core
                 .pending
                 .values()
-                .any(|item| item.peer == second_peer)
+                .any(|item| item.peer == sink_peer)
         );
         assert!(
             !source_handle
                 .links()
                 .borrow()
                 .iter()
-                .any(|link| link.peer == second_peer)
+                .any(|link| link.peer == sink_peer)
         );
         assert!(matches!(
             pending_reply.try_recv(),
@@ -272,8 +322,6 @@ async fn carrier_protocol_fixture_established_deadline() {
         advance(DEADLINE + Duration::from_millis(1)).await;
         assert!(Instant::now() > before + DEADLINE);
         println!("CARRIER_ORIGINAL_DEADLINE_CROSSED");
-        // Both are genuine, control-bound capabilities. Only the first operation
-        // reached the production Swarm/Noise establishment path before expiry.
         assert!(
             probe::bound_live(&established),
             "CARRIER_ESTABLISHED_DEADLINE_REGRESSION"
@@ -287,11 +335,11 @@ async fn carrier_protocol_fixture_established_deadline() {
         let listeners = [
             (*source_handle.listening.borrow()).unwrap(),
             (*first_handle.listening.borrow()).unwrap(),
-            (*second_handle.listening.borrow()).unwrap(),
         ];
+        drop(sink);
+        sink_executor.shutdown().await.unwrap();
         source.run(async {}).await.unwrap();
         first.run(async {}).await.unwrap();
-        second.run(async {}).await.unwrap();
         drop(server);
         server_executor.shutdown().await.unwrap();
         probe::reset();
