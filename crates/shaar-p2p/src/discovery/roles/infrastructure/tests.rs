@@ -304,7 +304,7 @@ fn infrastructure_collector_drop_orders_preserve_four_of_four_capacity() {
             assert_eq!(owner.terminal(key, Some(peers[0]), Instant::now()), None);
         }
         assert_eq!(owner.view.lock().infrastructure.iter().flatten().count(), 4);
-        assert!(notified.load(Ordering::SeqCst));
+        assert!(notified.0.load(Ordering::SeqCst));
         assert!(
             numeric
                 .poll_check(&mut Context::from_waker(&Waker::noop()))

@@ -3,7 +3,7 @@ use crate::dns::tests::support::{Server as DnsServer, a, response};
 use futures::{FutureExt, Stream, future::poll_fn};
 use hickory_resolver::proto::op::ResponseCode;
 use libp2p::{core::transport::Boxed, swarm::dummy};
-use std::{pin::Pin, task::Poll};
+use std::task::Poll;
 use tokio::{sync::oneshot, task::JoinSet, time::timeout};
 
 struct Dns {
@@ -441,7 +441,7 @@ async fn pump_many(source: &mut Carrier, servers: &mut [Server]) {
         event = source.core.swarm.select_next_some() => source.core.event(event).unwrap(),
         _ = poll_fn(|cx| {
             for server in servers.iter_mut() {
-                if let Poll::Ready(Some(event)) = Pin::new(&mut server.swarm).poll_next(cx) {
+                if let Poll::Ready(Some(event)) = std::pin::Pin::new(&mut server.swarm).poll_next(cx) {
                     return Poll::Ready(event);
                 }
             }
