@@ -47,6 +47,11 @@ mod circuit_io;
 mod relay;
 pub use relay::{RelayAddr, RelayLease, Route};
 
+#[path = "runtime/events.rs"]
+mod events;
+#[path = "runtime/infrastructure.rs"]
+mod infrastructure;
+#[path = "runtime/setup.rs"]
 mod setup;
 
 #[derive(NetworkBehaviour)]
@@ -66,6 +71,7 @@ struct Core {
     // Declared first so the authority closes before Swarm and executor teardown.
     discovery: Option<discovery::State>,
     swarm: Swarm<Behaviour>,
+    infrastructure: infrastructure::State,
     commands: mpsc::Receiver<Command>,
     incoming: mpsc::Sender<Received>,
     listening: watch::Sender<Option<SocketAddr>>,
@@ -131,6 +137,7 @@ impl Drop for Core {
         // Cancel and drop every live relay operation owner outside all guards;
         // the Swarm field below drops the last capability clones.
         self.relay.gate.revoke_all();
+        self.withdraw_all_infrastructure();
         self.swarm.behaviour_mut().admission.close_authority();
         if let Some(discovery) = &self.discovery {
             discovery.lifetime.close();
@@ -184,6 +191,7 @@ impl Core {
     ) -> io::Result<()> {
         tokio::pin!(stop);
         loop {
+            self.infrastructure_tick(tokio::time::Instant::now())?;
             self.relay_tick(tokio::time::Instant::now())?;
             // All ledgers have fixed limits; no separately allocated timer queue.
             let deadline = self
@@ -198,6 +206,7 @@ impl Core {
                 )
                 .chain(self.relay.next_deadline())
                 .chain(self.relay.gate.next_deadline())
+                .chain(self.infrastructure.next_deadline())
                 .min();
             let closing_deadline = async {
                 match deadline {
@@ -373,20 +382,8 @@ impl Core {
                     if self.swarm.behaviour().admission.roles_view().is_some() {
                         address = address.with(Protocol::P2p(peer));
                     }
-                    let options = DialOpts::peer_id(peer)
-                        .addresses(vec![address.clone()])
-                        .allocate_new_port()
-                        .build();
-                    let id = options.connection_id();
-                    let attempt = match self.admit_attempt(peer, &address, id) {
-                        Ok(attempt) => attempt,
-                        Err(error) => {
-                            let _ = reply.send(Err(admission_error(error)));
-                            return;
-                        }
-                    };
-                    match self.swarm.dial(options) {
-                        Ok(()) => {
+                    match self.dial_native(peer, &address) {
+                        Ok((id, attempt)) => {
                             self.pending.insert(
                                 id,
                                 Pending {
@@ -399,10 +396,7 @@ impl Core {
                             );
                         }
                         Err(error) => {
-                            if let Some(attempt) = attempt {
-                                self.terminal(attempt, None);
-                            }
-                            let _ = reply.send(Err(io::Error::other(error)));
+                            let _ = reply.send(Err(error));
                         }
                     }
                 }
@@ -433,131 +427,6 @@ impl Core {
             Command::ReleaseRelay(peer, reply) => self.release_relay(peer, reply),
             Command::ConnectVia(peer, relay, reply) => self.connect_via(peer, relay, reply),
         }
-    }
-
-    fn event(&mut self, event: SwarmEvent<BehaviourEvent>) -> io::Result<()> {
-        match event {
-            SwarmEvent::NewListenAddr {
-                listener_id,
-                address,
-            } if listener_id == self.native_listener => {
-                let address = socket_address(&address)
-                    .ok_or_else(|| io::Error::other("unexpected carrier listen address"))?;
-                self.listening.send_replace(Some(address));
-            }
-            SwarmEvent::NewListenAddr {
-                listener_id,
-                address,
-            } => self.relay_listen_address(listener_id, address),
-            SwarmEvent::ListenerError { listener_id, error }
-                if listener_id == self.native_listener =>
-            {
-                return Err(error);
-            }
-            SwarmEvent::ListenerError { listener_id, error } => {
-                self.relay_listener_failed(listener_id, error)
-            }
-            SwarmEvent::ListenerClosed {
-                listener_id,
-                reason,
-                ..
-            } if listener_id == self.native_listener => {
-                return Err(reason
-                    .err()
-                    .unwrap_or_else(|| io::Error::other("carrier listener closed")));
-            }
-            SwarmEvent::ListenerClosed {
-                listener_id,
-                reason,
-                ..
-            } => self.relay_listener_closed(listener_id, reason.err()),
-            SwarmEvent::ConnectionEstablished {
-                peer_id,
-                connection_id,
-                endpoint,
-                ..
-            } => {
-                let pending = self.pending.remove(&connection_id);
-                let intended = pending.as_ref().and_then(|pending| pending.route);
-                let gated = pending.as_ref().and_then(|pending| pending.operation);
-                let result = self.relay_connected(
-                    peer_id,
-                    connection_id,
-                    endpoint.is_relayed(),
-                    intended,
-                    gated.map(|ticket| ticket.generation),
-                    match &endpoint {
-                        libp2p::core::ConnectedPoint::Listener { local_addr, .. } => {
-                            Some(local_addr)
-                        }
-                        _ => None,
-                    },
-                );
-                if result.is_err() {
-                    let _ = self.swarm.disconnect_peer_id(peer_id);
-                    self.relay.routes.remove(&connection_id);
-                } else {
-                    self.publish_links();
-                }
-                if let Some(pending) = pending {
-                    if let Some(ticket) = pending.operation {
-                        if result.is_ok() {
-                            self.relay.gate.establish(ticket);
-                        } else {
-                            self.relay.gate.revoke_generation(
-                                ticket.relay,
-                                relay::gate::Slot::Connect,
-                                ticket.generation,
-                            );
-                        }
-                        self.relay.gate.terminal(ticket);
-                    }
-                    let _ = pending.reply.send(result.map(|()| connection_id));
-                }
-            }
-            SwarmEvent::OutgoingConnectionError {
-                connection_id,
-                error,
-                ..
-            } => {
-                if let Some(pending) = self.pending.remove(&connection_id) {
-                    if let Some(attempt) = pending.attempt {
-                        self.terminal(attempt, None);
-                    }
-                    if let Some(ticket) = pending.operation {
-                        self.relay.gate.revoke_generation(
-                            ticket.relay,
-                            relay::gate::Slot::Connect,
-                            ticket.generation,
-                        );
-                        self.relay.gate.terminal(ticket);
-                    }
-                    let _ = pending.reply.send(Err(io::Error::other(error)));
-                }
-            }
-            SwarmEvent::ConnectionClosed {
-                peer_id,
-                connection_id,
-                num_established,
-                ..
-            } => {
-                self.relay_control_closed(peer_id, connection_id);
-                self.publish_links();
-                if num_established == 0
-                    && let Some(Closing {
-                        reply: Some(reply), ..
-                    }) = self.closing.remove(&peer_id)
-                {
-                    let _ = reply.send(Ok(()));
-                }
-                // Request-response emits terminal failures; request charges stay until then.
-            }
-            SwarmEvent::Behaviour(BehaviourEvent::Relays(event)) => self.relay_event(event),
-            SwarmEvent::Behaviour(BehaviourEvent::Packets(event)) => self.packet(event),
-            SwarmEvent::Behaviour(BehaviourEvent::Admission(event)) => match event {},
-            _ => {} // Other notifications add no carrier state.
-        }
-        Ok(())
     }
 
     fn packet(&mut self, event: rpc::Event<Datagram, ()>) {

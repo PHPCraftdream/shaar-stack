@@ -2,6 +2,7 @@
 
 mod address;
 mod incoming;
+mod infrastructure;
 mod lease;
 mod pending;
 #[cfg(test)]
@@ -19,12 +20,14 @@ use tokio::time::Instant;
 
 pub(crate) use address::Root;
 pub(crate) use incoming::InboundLease;
+pub(crate) use infrastructure::Permit as InfrastructurePermit;
 pub(crate) use lease::Lease;
 
 const IDENTITIES: usize = 56;
 const APPLICATIONS: usize = 16;
 const EXPLICIT: usize = 8;
 const INFRASTRUCTURE: usize = 32;
+pub(crate) const INFRASTRUCTURE_CONNECTIONS: usize = 4;
 const PENDING: usize = 8;
 const ROOTS: usize = 4;
 const LEASES: usize = ROOTS * 2;
@@ -75,6 +78,16 @@ struct Attempt {
     waiters: [Option<Waiter>; LEASES],
 }
 
+struct InfrastructureRow {
+    key: AttemptKey,
+    connection_terminal: bool,
+    native_terminal: bool,
+    authenticated: Option<SocketAddr>,
+    withdrawn: bool,
+    deadline: Instant,
+    permits: usize,
+}
+
 struct Waiter {
     waker: Option<Waker>,
 }
@@ -101,6 +114,7 @@ struct State {
     attempts: HashMap<ConnectionId, Attempt>,
     pub(super) inbound: [Option<incoming::Row>; PENDING],
     pub(super) inbound_count: usize,
+    infrastructure: [Option<InfrastructureRow>; INFRASTRUCTURE_CONNECTIONS],
 }
 
 /// Only this non-cloneable capability admits identities and attempts or revokes authority.
@@ -110,7 +124,7 @@ pub(crate) struct Owner {
 
 /// Synchronous checks and exact-key future accounting, never identity admission.
 #[derive(Clone)]
-pub(crate) struct View(Arc<Mutex<State>>);
+pub(crate) struct View(Arc<Mutex<State>>, Arc<tokio::sync::Notify>);
 
 fn denied() -> io::Error {
     io::Error::new(
@@ -280,15 +294,19 @@ impl Owner {
             );
         }
         Ok(Self {
-            view: View(Arc::new(Mutex::new(State {
-                owner,
-                closed: false,
-                serial: 0,
-                identities,
-                attempts: HashMap::with_capacity(PENDING),
-                inbound: std::array::from_fn(|_| None),
-                inbound_count: 0,
-            }))),
+            view: View(
+                Arc::new(Mutex::new(State {
+                    owner,
+                    closed: false,
+                    serial: 0,
+                    identities,
+                    attempts: HashMap::with_capacity(PENDING),
+                    inbound: std::array::from_fn(|_| None),
+                    inbound_count: 0,
+                    infrastructure: std::array::from_fn(|_| None),
+                })),
+                Arc::new(tokio::sync::Notify::new()),
+            ),
         })
     }
 
@@ -436,9 +454,10 @@ impl Owner {
             if entry.key != key {
                 return None;
             }
-            let witness = if !closed
+            let first_terminal = !entry.terminal;
+            let witness = if first_terminal
+                && !closed
                 && !entry.revoked
-                && !entry.terminal
                 && now < entry.deadline
                 && authenticated == Some(key.peer)
             {
@@ -454,10 +473,24 @@ impl Owner {
             } else {
                 None
             };
+            let infrastructure = state
+                .infrastructure
+                .iter_mut()
+                .flatten()
+                .find(|row| row.key == key);
+            if first_terminal && let Some(row) = infrastructure {
+                row.native_terminal = true;
+                row.authenticated = witness;
+                if witness.is_none() {
+                    row.withdrawn = true;
+                }
+            }
+            infrastructure::collect(&mut state);
             (witness, notify, removed)
         };
         wake(notify);
         drop(removed);
+        self.view.1.notify_waiters();
         witness
     }
 
@@ -468,6 +501,11 @@ impl Owner {
             .get(&peer)
             .is_some_and(|entry| entry.reserved)
             || state.attempts.values().any(|entry| entry.key.peer == peer)
+            || state
+                .infrastructure
+                .iter()
+                .flatten()
+                .any(|row| row.key.peer == peer)
         {
             return Err(denied());
         }
@@ -479,6 +517,10 @@ impl Owner {
         let notifications = {
             let mut state = self.view.lock();
             state.closed = true;
+            for row in state.infrastructure.iter_mut().flatten() {
+                row.withdrawn = true;
+            }
+            infrastructure::collect(&mut state);
             let mut notifications: [Option<[Option<Waker>; LEASES]>; PENDING] =
                 std::array::from_fn(|_| None);
             for (slot, entry) in notifications.iter_mut().zip(state.attempts.values_mut()) {

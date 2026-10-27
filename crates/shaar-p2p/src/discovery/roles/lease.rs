@@ -96,9 +96,11 @@ impl Drop for Lease {
             } else {
                 None
             };
+            super::infrastructure::collect(&mut state);
             (waiter, removed)
         };
         drop(waiter);
         drop(removed);
+        self.view.1.notify_waiters();
     }
 }

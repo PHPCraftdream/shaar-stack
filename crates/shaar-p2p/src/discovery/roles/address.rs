@@ -95,7 +95,13 @@ fn permitted(role: Role, root: &Root, parsed: Parsed) -> bool {
     match role {
         Role::Application => parsed.endpoint.is_some() && parsed.endpoint == root.parsed.endpoint,
         Role::ExplicitRelay(endpoint) => parsed.endpoint == Some(endpoint),
-        Role::Infrastructure => parsed.strict,
+        Role::Infrastructure => {
+            parsed.strict
+                && root
+                    .parsed
+                    .endpoint
+                    .is_none_or(|endpoint| parsed.endpoint == Some(endpoint))
+        }
     }
 }
 
@@ -126,6 +132,43 @@ impl Owner {
         }
         root.fixture_endpoint = Some(endpoint);
         attempt.root = Some(root);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn allow_infrastructure_fixture(
+        &mut self,
+        key: AttemptKey,
+        encoded: &[u8],
+        endpoint: SocketAddr,
+        now: Instant,
+    ) -> io::Result<()> {
+        let mut state = self.view.lock();
+        if state.closed
+            || !endpoint.ip().is_loopback()
+            || endpoint.port() == 0
+            || !state
+                .infrastructure
+                .iter()
+                .flatten()
+                .any(|row| row.key == key)
+        {
+            return Err(denied());
+        }
+        let attempt = state.attempts.get_mut(&key.connection).ok_or_else(denied)?;
+        if attempt.key != key
+            || attempt.revoked
+            || attempt.terminal
+            || now >= attempt.deadline
+            || attempt.role != Role::Infrastructure
+        {
+            return Err(denied());
+        }
+        let root = attempt.root.as_mut().ok_or_else(denied)?;
+        if root.parsed.endpoint.is_some() || !root.matches(encoded) {
+            return Err(denied());
+        }
+        root.fixture_endpoint = Some(endpoint);
         Ok(())
     }
 
@@ -183,6 +226,13 @@ impl View {
             #[cfg(test)]
             {
                 match (root.fixture_endpoint, attempt.role) {
+                    (Some(endpoint), Role::Infrastructure) => {
+                        if initial {
+                            parsed.endpoint.is_none() && root.matches(encoded)
+                        } else {
+                            parsed.endpoint == Some(endpoint)
+                        }
+                    }
                     (Some(endpoint), Role::ExplicitRelay(pinned)) if endpoint == pinned => {
                         if initial {
                             parsed.endpoint.is_none() && root.matches(encoded)
@@ -227,6 +277,10 @@ impl View {
     }
 
     pub(super) fn pinned_numeric(role: Role, root: &Root, endpoint: SocketAddr) -> bool {
+        #[cfg(test)]
+        if role == Role::Infrastructure && root.fixture_endpoint.is_some() {
+            return root.fixture_endpoint == Some(endpoint);
+        }
         permitted(
             role,
             root,

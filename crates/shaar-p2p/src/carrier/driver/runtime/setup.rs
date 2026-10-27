@@ -149,6 +149,7 @@ impl Carrier {
         let mut core = Core {
             discovery,
             swarm,
+            infrastructure: infrastructure::State::new(),
             commands,
             incoming,
             listening,
@@ -177,9 +178,11 @@ impl Carrier {
         // observe release after Swarm/executor drops the last capability clones.
         let gate = self.core.relay.gate.clone();
         gate.revoke_all();
+        let (authority, infrastructure) = self.core.take_infrastructure_shutdown();
         let Self { core, executor } = self;
         drop(core);
         let joined = executor.shutdown().await;
+        infrastructure.finish_shutdown(authority).await;
         gate.finish_shutdown();
         let released = gate.join_release().await;
         result.and(joined).and(released)

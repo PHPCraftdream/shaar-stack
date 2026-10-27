@@ -93,6 +93,49 @@ impl Admission {
         Ok(Some(key))
     }
 
+    pub(super) fn stage_infrastructure(
+        &mut self,
+        peer: PeerId,
+        address: &Multiaddr,
+        id: ConnectionId,
+        deadline: Instant,
+    ) -> io::Result<(AttemptKey, roles::InfrastructurePermit)> {
+        let root = Root::new(address.as_ref(), peer)?;
+        let owner = self.owner.as_mut().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "destination authority unavailable",
+            )
+        })?;
+        owner.stage_infrastructure(peer, id, deadline, Instant::now(), root)
+    }
+
+    #[cfg(test)]
+    pub(super) fn allow_infrastructure_fixture(
+        &mut self,
+        key: AttemptKey,
+        address: &Multiaddr,
+        endpoint: std::net::SocketAddr,
+    ) -> io::Result<()> {
+        self.owner
+            .as_mut()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))?
+            .allow_infrastructure_fixture(key, address.as_ref(), endpoint, Instant::now())
+    }
+
+    pub(super) fn withdraw_infrastructure(&mut self, key: AttemptKey) {
+        if let Some(owner) = &mut self.owner {
+            owner.infrastructure_withdraw(key);
+        }
+    }
+
+    /// Call only after genuine connection finality; native completion is separate.
+    pub(super) fn terminal_infrastructure(&mut self, key: AttemptKey) {
+        if let Some(owner) = &mut self.owner {
+            owner.infrastructure_terminal(key);
+        }
+    }
+
     pub(super) fn terminal(
         &mut self,
         key: AttemptKey,
@@ -107,6 +150,12 @@ impl Admission {
         if let Some(owner) = &mut self.owner {
             owner.close();
         }
+    }
+
+    /// Extract only immediately before Swarm destruction, for post-join reconciliation.
+    pub(super) fn take_authority(&mut self) -> Option<roles::Owner> {
+        self.close_authority();
+        self.owner.take()
     }
 
     pub(super) fn allows(&self, peer: &PeerId) -> bool {
@@ -195,14 +244,39 @@ impl Admission {
         id: ConnectionId,
         peer: PeerId,
     ) -> Result<dummy::ConnectionHandler, ConnectionDenied> {
+        self.established_with_infrastructure(id, peer, None)
+    }
+
+    fn established_with_infrastructure(
+        &mut self,
+        id: ConnectionId,
+        peer: PeerId,
+        infrastructure: Option<AttemptKey>,
+    ) -> Result<dummy::ConnectionHandler, ConnectionDenied> {
         self.pending.remove(&id);
-        if !self.permits(&peer) {
+        let infrastructure = infrastructure.is_some_and(|key| {
+            key.peer == peer
+                && key.connection == id
+                && self.owner.as_ref().is_some_and(|owner| {
+                    let view = owner.view();
+                    view.role(peer) == Some(roles::Role::Infrastructure)
+                        && view.infrastructure_live(key).is_some()
+                })
+        });
+        if !self.permits(&peer) && !infrastructure {
             return Err(ConnectionDenied::new(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "carrier peer not allowed",
             )));
         }
-        if self.connected.len() >= PEER_LIMIT + RELAY_LIMIT || self.connected.contains_key(&peer) {
+        let limit = PEER_LIMIT
+            + RELAY_LIMIT
+            + if self.owner.is_some() {
+                roles::INFRASTRUCTURE_CONNECTIONS
+            } else {
+                0
+            };
+        if self.connected.len() >= limit || self.connected.contains_key(&peer) {
             return Err(ConnectionDenied::new(capacity()));
         }
         Ok(dummy::ConnectionHandler)
@@ -236,7 +310,12 @@ impl NetworkBehaviour for Admission {
         _: Endpoint,
     ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
         if let Some(view) = self.owner.as_ref().map(|owner| owner.view()) {
-            if peer.is_none_or(|peer| !self.permits(&peer)) {
+            if peer.is_none_or(|peer| {
+                !self.permits(&peer)
+                    && !view.attempt_for_connection(id).is_some_and(|key| {
+                        key.peer == peer && view.infrastructure_pending(key, Instant::now())
+                    })
+            }) {
                 return Err(ConnectionDenied::new(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     "carrier peer not allowed",
@@ -350,6 +429,7 @@ impl NetworkBehaviour for Admission {
         _: Endpoint,
         _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
+        let mut infrastructure = None;
         if let Some(owner) = &mut self.owner {
             let now = Instant::now();
             let view = owner.view();
@@ -375,8 +455,11 @@ impl NetworkBehaviour for Admission {
                     "destination authority unavailable",
                 )));
             }
+            if view.role(peer) == Some(roles::Role::Infrastructure) {
+                infrastructure = Some(key);
+            }
         }
-        self.established(id, peer)
+        self.established_with_infrastructure(id, peer, infrastructure)
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {

@@ -98,6 +98,7 @@ async fn destination_guard_strict_numeric_and_all_dns_spellings_share_policy() {
         "/dns6/owned.example./tcp/4001",
         "/dnsaddr/owned.example.",
     ] {
+        let numeric_root = prefix.starts_with("/ip4/");
         let (_owner, view, key, selected) = setup(Role::Infrastructure, prefix);
         let (inner, counts) = Observed::new(true);
         let mut outer = Guard::context(inner, view.clone());
@@ -109,7 +110,10 @@ async fn destination_guard_strict_numeric_and_all_dns_spellings_share_policy() {
             "/ip4/8.8.4.4/tcp/4001",
             "/ip6/2606:4700::1111/tcp/4001",
         ] {
-            assert!(view.permits_address(address(prefix, key.peer).as_ref()));
+            assert_eq!(
+                view.permits_address(address(prefix, key.peer).as_ref()),
+                !numeric_root
+            );
         }
         let (inner, native_counts) = Observed::new(true);
         let mut numeric = Guard::numeric(inner, view.clone());
@@ -124,8 +128,17 @@ async fn destination_guard_strict_numeric_and_all_dns_spellings_share_policy() {
             assert!(numeric.dial(rejected, options()).is_err());
         }
         assert_eq!(count(&native_counts.dials), 0);
+        let endpoint = if numeric_root {
+            for prefix in ["/ip4/8.8.4.4/tcp/4001", "/ip4/8.8.8.8/tcp/4002"] {
+                assert!(numeric.dial(address(prefix, key.peer), options()).is_err());
+            }
+            assert_eq!(count(&native_counts.dials), 0);
+            "/ip4/8.8.8.8/tcp/4001"
+        } else {
+            "/ip4/8.8.4.4/tcp/4001"
+        };
         let _native = numeric
-            .dial(address("/ip4/8.8.4.4/tcp/4001", key.peer), options())
+            .dial(address(endpoint, key.peer), options())
             .unwrap();
         assert_eq!(count(&native_counts.dials), 1);
         assert!(
