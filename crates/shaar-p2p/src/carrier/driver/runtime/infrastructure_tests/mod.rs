@@ -487,7 +487,17 @@ async fn carrier_infrastructure_network_four_controls_keep_retained_slot_charged
         }
         let seeds: Vec<_> = servers
             .iter()
-            .map(|server| (server.peer, root(server.peer, server.address.port())))
+            .enumerate()
+            .map(|(index, server)| {
+                let address = format!(
+                    "/dns4/seed-{index}.owned.example./tcp/{}/p2p/{}",
+                    server.address.port(),
+                    server.peer
+                )
+                .parse()
+                .unwrap();
+                (server.peer, address)
+            })
             .collect();
         let (mut source, handle, _incoming) = carrier(&dns, seeds.clone());
         let mut operations = Vec::new();
