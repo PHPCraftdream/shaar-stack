@@ -478,13 +478,11 @@ impl Owner {
                 .iter_mut()
                 .flatten()
                 .find(|row| row.key == key);
-            if first_terminal {
-                if let Some(row) = infrastructure {
-                    row.native_terminal = true;
-                    row.authenticated = witness;
-                    if witness.is_none() {
-                        row.withdrawn = true;
-                    }
+            if first_terminal && let Some(row) = infrastructure {
+                row.native_terminal = true;
+                row.authenticated = witness;
+                if witness.is_none() {
+                    row.withdrawn = true;
                 }
             }
             infrastructure::collect(&mut state);

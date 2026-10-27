@@ -297,7 +297,7 @@ fn infrastructure_collector_drop_orders_preserve_four_of_four_capacity() {
             assert!(!owner.view().infrastructure_pending(key, Instant::now()));
             assert!(
                 numeric
-                    .poll_check(&mut Context::from_waker(&Waker::noop()))
+                    .poll_check(&mut Context::from_waker(Waker::noop()))
                     .is_err()
             );
             assert!(owner.view.lock().attempts.contains_key(&key.connection));
@@ -307,7 +307,7 @@ fn infrastructure_collector_drop_orders_preserve_four_of_four_capacity() {
         assert!(notified.0.load(Ordering::SeqCst));
         assert!(
             numeric
-                .poll_check(&mut Context::from_waker(&Waker::noop()))
+                .poll_check(&mut Context::from_waker(Waker::noop()))
                 .is_err()
         );
         assert_eq!(owner.view.lock().infrastructure.iter().flatten().count(), 4);

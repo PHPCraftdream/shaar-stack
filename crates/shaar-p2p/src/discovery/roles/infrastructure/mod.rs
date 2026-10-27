@@ -231,9 +231,7 @@ impl super::View {
         }
         let attempt = state.attempts.get(&key.connection);
         if row.native_terminal {
-            if row.authenticated.is_none() {
-                return None;
-            }
+            row.authenticated?;
         } else {
             let attempt = attempt?;
             if attempt.key != key

@@ -400,7 +400,7 @@ fn matrix_h_close_pending_wakes_without_terminal_flags_then_collects_exactly() {
     assert!(notified.load(Ordering::SeqCst));
     assert!(
         numeric
-            .poll_check(&mut Context::from_waker(&Waker::noop()))
+            .poll_check(&mut Context::from_waker(Waker::noop()))
             .is_err()
     );
     {
@@ -538,7 +538,7 @@ fn matrix_f_both_terminal_orders_signal_and_retain_until_exact_last_guard() {
     assert!(notified.load(Ordering::SeqCst));
     assert!(
         numeric
-            .poll_check(&mut Context::from_waker(&Waker::noop()))
+            .poll_check(&mut Context::from_waker(Waker::noop()))
             .is_err()
     );
     assert!(
