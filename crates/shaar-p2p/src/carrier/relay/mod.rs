@@ -1,4 +1,5 @@
 mod controller;
+pub(crate) mod gate;
 pub(super) mod native;
 #[cfg(test)]
 mod tests;
@@ -110,8 +111,17 @@ pub enum Route {
 pub(super) fn transport(
     native: Boxed<(PeerId, StreamMuxerBox)>,
     key: &Keypair,
+    factory: Option<protocol::client::OperationFactory>,
+    roles: Option<crate::discovery::roles::View>,
 ) -> io::Result<(Boxed<(PeerId, StreamMuxerBox)>, protocol::client::Behaviour)> {
-    let (relayed, behaviour) = protocol::client::new(key.public().to_peer_id());
+    // Discovery branch: owner-gated operations from trusted staged intent.
+    // Legacy branch keeps `new` unchanged, byte-for-byte.
+    let (relayed, behaviour) = match factory {
+        Some(factory) => {
+            protocol::client::new_with_operation_factory(key.public().to_peer_id(), factory)
+        }
+        None => protocol::client::new(key.public().to_peer_id()),
+    };
     let relayed = relayed
         .map(|stream, _| {
             super::circuit_io::Budgeted::new(stream, CIRCUIT_BYTES, Instant::now() + CIRCUIT_AGE)
@@ -121,6 +131,13 @@ pub(super) fn transport(
         .multiplex(yamux::Config::default())
         .timeout(DEADLINE)
         .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)));
+    let relayed = if let Some(roles) = roles {
+        crate::dns::transport::Guard::child(relayed, roles)
+            .map_err(io::Error::other)
+            .boxed()
+    } else {
+        relayed.boxed()
+    };
     Ok((
         relayed
             .or_transport(native)
@@ -142,6 +159,7 @@ struct Record {
     listener: Option<ListenerId>,
     control: Option<ConnectionId>,
     expiry: Option<Instant>,
+    // Same number space as capability/route generations (gate counter).
     generation: u64,
     phase: Phase,
     deadline: Instant,
@@ -162,7 +180,7 @@ pub(super) struct State {
     targets: HashMap<PeerId, Target>,
     pub(super) routes: HashMap<ConnectionId, Route>,
     snapshots: watch::Sender<Vec<RelayLease>>,
-    generation: u64,
+    pub(super) gate: gate::Gate,
     jitter: RandomState,
     dirty: bool,
 }
@@ -174,7 +192,7 @@ impl Drop for State {
 }
 
 impl State {
-    pub(super) fn new() -> (Self, watch::Receiver<Vec<RelayLease>>) {
+    pub(super) fn new(gate: gate::Gate) -> (Self, watch::Receiver<Vec<RelayLease>>) {
         let (snapshots, receiver) = watch::channel(Vec::new());
         (
             Self {
@@ -182,16 +200,12 @@ impl State {
                 targets: HashMap::with_capacity(RELAY_LIMIT),
                 routes: HashMap::with_capacity(PEER_LIMIT),
                 snapshots,
-                generation: 0,
+                gate,
                 jitter: RandomState::new(),
                 dirty: false,
             },
             receiver,
         )
-    }
-    fn next_generation(&mut self) -> io::Result<u64> {
-        self.generation = self.generation.checked_add(1).ok_or_else(capacity)?;
-        Ok(self.generation)
     }
     pub(super) fn next_deadline(&self) -> Option<Instant> {
         let now = Instant::now();

@@ -2,6 +2,7 @@
 /target/
 /.claude/
 /.rush/
+__pycache__/
 
 # Isolated /wrush worktrees
 /worktrees/

@@ -7,6 +7,7 @@ use libp2p::{
     PeerId, StreamProtocol, Swarm, Transport,
     core::{muxing::StreamMuxerBox, transport::ListenerId, upgrade},
     identity::Keypair,
+    multiaddr::Protocol,
     noise, request_response as rpc,
     swarm::{ConnectionId, NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
     tcp, yamux,
@@ -17,12 +18,28 @@ use super::{
     CarrierHandle, Command, Link, PEER_LIMIT, PENDING_LIMIT, QUEUE_LIMIT, RELAY_LIMIT,
     REQUEST_LIMIT, Received, Reply, admission::Admission, capacity, multiaddr, socket_address,
 };
+use crate::discovery::roles::AttemptKey;
+#[cfg(test)]
+use std::sync::Arc;
+
+#[cfg(test)]
+use crate::dns::NumericOnly;
 use crate::{
     CONTROL_PROTOCOL, Datagram, DatagramCodec, DiscoveryConfig, OwnedExecutor, discovery,
-    dns::{NumericOnly, OwnedResolver},
+    dns::{OwnedResolver, transport::Guard},
 };
 
 const DEADLINE: Duration = Duration::from_secs(10);
+
+/// Registry capacity exhaustion keeps the carrier's existing capacity error;
+/// policy denials keep the registry's own error.
+fn admission_error(error: io::Error) -> io::Error {
+    if error.kind() == io::ErrorKind::WouldBlock {
+        capacity()
+    } else {
+        error
+    }
+}
 
 #[path = "../circuit_io.rs"]
 mod circuit_io;
@@ -46,6 +63,7 @@ pub struct Carrier {
 }
 
 struct Core {
+    // Declared first so the authority closes before Swarm and executor teardown.
     discovery: Option<discovery::State>,
     swarm: Swarm<Behaviour>,
     commands: mpsc::Receiver<Command>,
@@ -63,6 +81,9 @@ struct Pending {
     peer: PeerId,
     reply: Reply<ConnectionId>,
     route: Option<RelayAddr>,
+    attempt: Option<AttemptKey>,
+    // Gate ticket for relay dials: authenticated control-bound operations.
+    operation: Option<relay::gate::Ticket>,
 }
 
 struct Request {
@@ -88,9 +109,29 @@ mod fault_tests;
 #[path = "../../dns/tests/transport.rs"]
 mod dns_tests;
 
+#[cfg(test)]
+mod roles_gate_tests;
+
+#[cfg(test)]
+mod admission_tests;
+
+#[cfg(test)]
+mod relay_retention_tests;
+
+#[cfg(test)]
+mod relay_roles_tests;
+
+/// Carrier role-integration wiring proofs.
+#[cfg(test)]
+mod roles_tests;
+
 impl Drop for Core {
     fn drop(&mut self) {
         self.commands.close();
+        // Cancel and drop every live relay operation owner outside all guards;
+        // the Swarm field below drops the last capability clones.
+        self.relay.gate.revoke_all();
+        self.swarm.behaviour_mut().admission.close_authority();
         if let Some(discovery) = &self.discovery {
             discovery.lifetime.close();
         }
@@ -156,6 +197,7 @@ impl Core {
                         .map(|request| request.deadline),
                 )
                 .chain(self.relay.next_deadline())
+                .chain(self.relay.gate.next_deadline())
                 .min();
             let closing_deadline = async {
                 match deadline {
@@ -263,6 +305,31 @@ impl Core {
         }
     }
 
+    /// Pins the exact selected root and stages the registry attempt for an explicit dial.
+    /// The registry role predicates enforce endpoint exactness at pinning time.
+    fn admit_attempt(
+        &mut self,
+        peer: PeerId,
+        root: &libp2p::Multiaddr,
+        connection: ConnectionId,
+    ) -> io::Result<Option<AttemptKey>> {
+        self.swarm
+            .behaviour_mut()
+            .admission
+            .stage_native(peer, root, connection)
+    }
+
+    fn terminal(
+        &mut self,
+        attempt: AttemptKey,
+        authenticated: Option<PeerId>,
+    ) -> Option<std::net::SocketAddr> {
+        self.swarm
+            .behaviour_mut()
+            .admission
+            .terminal(attempt, authenticated.filter(|peer| *peer == attempt.peer))
+    }
+
     fn command(&mut self, command: Command) {
         match command {
             Command::Connect(peer, address, reply) => {
@@ -300,11 +367,24 @@ impl Core {
                     let _ = reply.send(Err(capacity()));
                 } else {
                     // Signaling uses explicit TCP dials, not listener-port hole punching.
+                    // In the discovery branch the dial carries the exact selected root;
+                    // hints and discovery paths never call admit or pin_root.
+                    let mut address = multiaddr(address);
+                    if self.swarm.behaviour().admission.roles_view().is_some() {
+                        address = address.with(Protocol::P2p(peer));
+                    }
                     let options = DialOpts::peer_id(peer)
-                        .addresses(vec![multiaddr(address)])
+                        .addresses(vec![address.clone()])
                         .allocate_new_port()
                         .build();
                     let id = options.connection_id();
+                    let attempt = match self.admit_attempt(peer, &address, id) {
+                        Ok(attempt) => attempt,
+                        Err(error) => {
+                            let _ = reply.send(Err(admission_error(error)));
+                            return;
+                        }
+                    };
                     match self.swarm.dial(options) {
                         Ok(()) => {
                             self.pending.insert(
@@ -313,10 +393,15 @@ impl Core {
                                     peer,
                                     reply,
                                     route: None,
+                                    attempt,
+                                    operation: None,
                                 },
                             );
                         }
                         Err(error) => {
+                            if let Some(attempt) = attempt {
+                                self.terminal(attempt, None);
+                            }
                             let _ = reply.send(Err(io::Error::other(error)));
                         }
                     }
@@ -394,13 +479,39 @@ impl Core {
             } => {
                 let pending = self.pending.remove(&connection_id);
                 let intended = pending.as_ref().and_then(|pending| pending.route);
-                let result =
-                    self.relay_connected(peer_id, connection_id, endpoint.is_relayed(), intended);
+                let gated = pending.as_ref().and_then(|pending| pending.operation);
+                let result = self.relay_connected(
+                    peer_id,
+                    connection_id,
+                    endpoint.is_relayed(),
+                    intended,
+                    gated.map(|ticket| ticket.generation),
+                    match &endpoint {
+                        libp2p::core::ConnectedPoint::Listener { local_addr, .. } => {
+                            Some(local_addr)
+                        }
+                        _ => None,
+                    },
+                );
                 if result.is_err() {
                     let _ = self.swarm.disconnect_peer_id(peer_id);
+                    self.relay.routes.remove(&connection_id);
+                } else {
+                    self.publish_links();
                 }
-                self.publish_links();
                 if let Some(pending) = pending {
+                    if let Some(ticket) = pending.operation {
+                        if result.is_ok() {
+                            self.relay.gate.establish(ticket);
+                        } else {
+                            self.relay.gate.revoke_generation(
+                                ticket.relay,
+                                relay::gate::Slot::Connect,
+                                ticket.generation,
+                            );
+                        }
+                        self.relay.gate.terminal(ticket);
+                    }
                     let _ = pending.reply.send(result.map(|()| connection_id));
                 }
             }
@@ -410,6 +521,17 @@ impl Core {
                 ..
             } => {
                 if let Some(pending) = self.pending.remove(&connection_id) {
+                    if let Some(attempt) = pending.attempt {
+                        self.terminal(attempt, None);
+                    }
+                    if let Some(ticket) = pending.operation {
+                        self.relay.gate.revoke_generation(
+                            ticket.relay,
+                            relay::gate::Slot::Connect,
+                            ticket.generation,
+                        );
+                        self.relay.gate.terminal(ticket);
+                    }
                     let _ = pending.reply.send(Err(io::Error::other(error)));
                 }
             }

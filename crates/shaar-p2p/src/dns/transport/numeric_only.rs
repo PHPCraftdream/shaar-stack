@@ -1,8 +1,10 @@
+#[cfg(test)]
 use std::{
     pin::Pin,
     task::{Context, Poll},
 };
 
+#[cfg(test)]
 use libp2p::{
     Multiaddr, Transport,
     core::transport::{DialOpts, ListenerId, TransportError, TransportEvent},
@@ -11,8 +13,10 @@ use libp2p::{
 
 /// Until wire and destination-role gates land, no production caller may submit DNS.
 /// This sits outside the actual DNS transport, not inside the numeric TCP branch.
+#[cfg(test)]
 pub(crate) struct NumericOnly<T>(pub(crate) T);
 
+#[cfg(test)]
 impl<T: Transport + Unpin> Transport for NumericOnly<T> {
     type Output = T::Output;
     type Error = T::Error;

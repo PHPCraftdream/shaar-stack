@@ -1,10 +1,15 @@
 use super::*;
+use crate::discovery::roles::Role;
 
 impl Core {
     fn authorize_relay(&mut self, address: RelayAddr) -> io::Result<()> {
         if address.peer == *self.swarm.local_peer_id() {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
+        self.swarm
+            .behaviour_mut()
+            .admission
+            .admit_identity(address.peer, Role::ExplicitRelay(address.socket_addr()))?;
         if let Some(target) = self.relay.targets.get_mut(&address.peer) {
             if target.address != address {
                 return Err(io::Error::new(
@@ -68,13 +73,20 @@ impl Core {
             let _ = reply.send(Err(error));
             return;
         }
-        let generation = match self.relay.next_generation() {
-            Ok(value) => value,
-            Err(error) => {
-                let _ = reply.send(Err(error));
-                return;
-            }
-        };
+        // Stage the trusted intent before listen_on: the patched transport
+        // invokes the factory synchronously inside listen_on (kind=Reserve).
+        let generation =
+            match self
+                .relay
+                .gate
+                .stage_reserve(address.peer, address.socket_addr(), now + DEADLINE)
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    let _ = reply.send(Err(error));
+                    return;
+                }
+            };
         let attempts = self
             .relay
             .records
@@ -102,12 +114,22 @@ impl Core {
                 );
             }
             Err(error) => {
+                self.relay.gate.revoke_generation(
+                    address.peer,
+                    super::gate::Slot::Reserve,
+                    generation,
+                );
+                self.relay
+                    .gate
+                    .terminal_reservation(address.peer, generation);
                 let _ = reply.send(Err(io::Error::other(error)));
             }
         }
     }
 
     fn stop_reservation(&mut self, peer: PeerId, error: Option<io::Error>) {
+        // Withdraw eligibility before changing listener or connection state.
+        self.relay.gate.revoke(peer, super::gate::Slot::Reserve);
         let Some(record) = self.relay.records.get_mut(&peer) else {
             return;
         };
@@ -125,6 +147,7 @@ impl Core {
                 self.swarm.remove_listener(listener);
             }
         }
+        // ListenerClosed supplies the terminal outcome.
         let _ = self.swarm.disconnect_peer_id(peer);
         self.relay.dirty = true;
         self.relay.publish(Instant::now());
@@ -196,6 +219,20 @@ impl Core {
             let _ = reply.send(Err(error));
             return;
         }
+        // Relay dials carry their own bounded, control-bound gate ticket, not
+        // a registry attempt key; the shared inbound pending budget is unchanged.
+        let ticket = match self.relay.gate.stage_connect(
+            address.peer,
+            address.socket_addr(),
+            peer,
+            Instant::now() + DEADLINE,
+        ) {
+            Ok(ticket) => ticket,
+            Err(error) => {
+                let _ = reply.send(Err(error));
+                return;
+            }
+        };
         let options = DialOpts::peer_id(peer)
             .addresses(vec![address.prefix().with(Protocol::P2p(peer))])
             .allocate_new_port()
@@ -209,10 +246,18 @@ impl Core {
                         peer,
                         reply,
                         route: Some(address),
+                        attempt: None,
+                        operation: Some(ticket),
                     },
                 );
             }
             Err(error) => {
+                self.relay.gate.revoke_generation(
+                    address.peer,
+                    super::gate::Slot::Connect,
+                    ticket.generation,
+                );
+                self.relay.gate.terminal(ticket);
                 let _ = reply.send(Err(io::Error::other(error)));
             }
         }
@@ -224,6 +269,7 @@ impl Core {
                 relay_peer_id,
                 connection_id,
                 expires_at,
+                operation,
                 ..
             } => {
                 if self.swarm.behaviour().admission.connection(&relay_peer_id)
@@ -231,9 +277,22 @@ impl Core {
                 {
                     return;
                 }
+                let configured_roles = self.swarm.behaviour().admission.roles_view().is_some();
                 let Some(record) = self.relay.records.get_mut(&relay_peer_id) else {
                     return;
                 };
+                if configured_roles
+                    && (operation
+                        .generation()
+                        .is_none_or(|generation| generation.get() != record.generation)
+                        || !self.relay.gate.reservation_permit(
+                            relay_peer_id,
+                            record.generation,
+                            connection_id,
+                        ))
+                {
+                    return;
+                }
                 if record.phase == Phase::Stopping
                     || record.phase == Phase::Failed
                     || record.control.is_some_and(|old| old != connection_id)
@@ -250,6 +309,16 @@ impl Core {
                 }
                 record.control = Some(connection_id);
                 record.expiry = Some(expiry);
+                // Generation unification: the accepted operation descriptor's
+                // generation is the same counter value staged at listen_on;
+                // record/route generations are capability generations.
+                if let Some(generation) = operation.generation() {
+                    record.generation = generation.get();
+                }
+                let generation = record.generation;
+                self.relay
+                    .gate
+                    .accepted(relay_peer_id, generation, expiry, connection_id);
                 if !record.addresses.is_empty() {
                     record.phase = Phase::Active;
                 }
@@ -350,7 +419,15 @@ impl Core {
             .iter()
             .find_map(|(peer, record)| (record.listener == Some(listener)).then_some(*peer))
         {
+            let generation = self
+                .relay
+                .records
+                .get(&peer)
+                .map(|record| record.generation);
             self.stop_reservation(peer, Some(error));
+            if let Some(generation) = generation {
+                self.relay.gate.terminal_reservation(peer, generation);
+            }
         }
     }
 
@@ -367,6 +444,11 @@ impl Core {
         else {
             return;
         };
+        let generation = self
+            .relay
+            .records
+            .get(&peer)
+            .map(|record| record.generation);
         self.relay
             .records
             .get_mut(&peer)
@@ -376,6 +458,9 @@ impl Core {
             peer,
             error.or_else(|| Some(io::Error::from(io::ErrorKind::ConnectionAborted))),
         );
+        if let Some(generation) = generation {
+            self.relay.gate.terminal_reservation(peer, generation);
+        }
     }
 
     pub(in super::super) fn relay_connected(
@@ -384,6 +469,8 @@ impl Core {
         id: ConnectionId,
         relayed: bool,
         intended: Option<RelayAddr>,
+        generation: Option<u64>,
+        local_address: Option<&Multiaddr>,
     ) -> io::Result<()> {
         if !self.swarm.behaviour().admission.allows(&peer) {
             if self
@@ -397,20 +484,58 @@ impl Core {
             return Ok(());
         }
         let route = if relayed {
-            if intended.is_none()
-                && !self.relay.records.values().any(|record| {
+            if let Some(address) = intended {
+                let ticket = super::gate::Ticket {
+                    relay: address.peer,
+                    generation: generation
+                        .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))?,
+                };
+                if self.swarm.behaviour().admission.roles_view().is_some()
+                    && !self.relay.gate.connection_permit(ticket, peer)
+                {
+                    return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+                }
+                Route::Relayed {
+                    relay: Some(address.peer),
+                    generation: ticket.generation,
+                }
+            } else if self.swarm.behaviour().admission.roles_view().is_none() {
+                if !self.relay.records.values().any(|record| {
                     record.phase == Phase::Active
                         && record.expiry.is_some_and(|expiry| expiry > Instant::now())
-                })
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "no live relay reservation",
-                ));
-            }
-            Route::Relayed {
-                relay: intended.map(|address| address.peer),
-                generation: self.relay.next_generation()?,
+                }) {
+                    return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+                }
+                Route::Relayed {
+                    relay: None,
+                    generation: self.relay.gate.next()?,
+                }
+            } else {
+                let local = local_address
+                    .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))?;
+                // Incoming transport addresses omit our final advertised peer suffix.
+                let qualified = local
+                    .clone()
+                    .with_p2p(*self.swarm.local_peer_id())
+                    .map_err(|_| io::Error::from(io::ErrorKind::PermissionDenied))?;
+                let now = Instant::now();
+                let provenance = self
+                    .relay
+                    .records
+                    .iter()
+                    .find_map(|(relay, record)| {
+                        (record.phase == Phase::Active
+                            && record.addresses.contains(&qualified)
+                            && record.control.is_some()
+                            && record.expiry.is_some_and(|expiry| expiry > now)
+                            && self.swarm.behaviour().admission.connection(relay) == record.control)
+                            .then_some((*relay, record.generation))
+                    })
+                    .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))?;
+                Route::Relayed {
+                    relay: Some(provenance.0),
+                    generation: provenance.1,
+                }
             }
         } else if intended.is_some() {
             return Err(io::Error::new(
@@ -425,7 +550,18 @@ impl Core {
     }
 
     pub(in super::super) fn relay_control_closed(&mut self, peer: PeerId, id: ConnectionId) {
-        self.relay.routes.remove(&id);
+        let route = self.relay.routes.remove(&id);
+        // A closed relayed circuit retires its connect operation, never a
+        // reservation owner on the unrelated reserve slot.
+        if let Some(Route::Relayed {
+            relay: Some(relay),
+            generation: route_generation,
+        }) = route
+        {
+            self.relay
+                .gate
+                .revoke_generation(relay, super::gate::Slot::Connect, route_generation);
+        }
         if self
             .relay
             .records
@@ -440,6 +576,10 @@ impl Core {
     }
 
     pub(in super::super) fn relay_tick(&mut self, now: Instant) -> io::Result<()> {
+        // Expired unestablished gate intents lose eligibility; owners are
+        // cancelled and dropped outside all guards inside the gate.
+        self.relay.gate.prune_released();
+        self.relay.gate.expire(now);
         let mut peers = [None; RESERVATIONS];
         for (slot, peer) in peers.iter_mut().zip(self.relay.records.keys()) {
             *slot = Some(*peer);

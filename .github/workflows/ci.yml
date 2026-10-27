@@ -114,6 +114,24 @@ jobs:
         run: |
           set -euo pipefail
           python -I .github/scripts/p2p/relay/fixtures/wire/run.py --repository . --source target/p2p/relay/libp2p-relay-0.22.0 --destination target/relay-operation-wire
+      - name: Verify Carrier protocol barrier and isolated guard counterfactual
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I .github/scripts/p2p/carrier-wire-proof/checks.py
+          python -I .github/scripts/p2p/carrier-wire-proof/run.py --repository . --destination target/carrier-wire-proof
+      - name: Preserve Carrier protocol proof receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: carrier-protocol-proof-${{ matrix.os }}
+          path: |
+            target/carrier-wire-proof/*.json
+            target/carrier-wire-proof/*/*.json
+            target/carrier-wire-proof/*/*.jsonl
+            target/carrier-wire-proof/*/*.log
+            target/carrier-wire-proof/*/workspace/Cargo.lock
+          if-no-files-found: warn
       - name: Verify resolver locking with archive features and genuine counterfactuals
         shell: bash
         run: |
@@ -260,6 +278,36 @@ jobs:
           cat "$log"
           if [[ "$status" -ne 0 ]]; then exit "$status"; fi
           grep -E '^test result: ok\. 16 passed; 0 failed;' "$log"
+      - name: Verify owned destination role ledger boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/shaar-destination-roles.log"
+          if cargo test -p shaar-p2p --lib --locked destination_roles_ >"$log" 2>&1; then status=0; else status=$?; fi
+          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
+          cat "$log"
+          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+          grep -E '^test result: ok\. 15 passed; 0 failed;' "$log"
+      - name: Verify guarded DNS transport root pinning
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/shaar-destination-guard.log"
+          if cargo test -p shaar-p2p --lib --locked destination_guard_ >"$log" 2>&1; then status=0; else status=$?; fi
+          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
+          cat "$log"
+          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+          grep -E '^test result: ok\. 22 passed; 0 failed;' "$log"
+      - name: Verify carrier role-integration wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/shaar-carrier-destination.log"
+          if cargo test -p shaar-p2p --lib --locked carrier_destination_ >"$log" 2>&1; then status=0; else status=$?; fi
+          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
+          cat "$log"
+          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+          grep -E '^test result: ok\. 33 passed; 0 failed;' "$log"
       - name: Preserve owned relay revocation proof receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -290,6 +338,9 @@ jobs:
             ${{ runner.temp }}/shaar-owned-dns.log
             ${{ runner.temp }}/shaar-wire-dns.log
             ${{ runner.temp }}/shaar-discovery-address.log
+            ${{ runner.temp }}/shaar-destination-roles.log
+            ${{ runner.temp }}/shaar-destination-guard.log
+            ${{ runner.temp }}/shaar-carrier-destination.log
           if-no-files-found: warn
       - name: Preserve resolver locking and cache proof receipts
         if: always()

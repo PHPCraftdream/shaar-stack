@@ -5,7 +5,9 @@ mod runtime;
 mod sockets;
 #[cfg(test)]
 pub(crate) mod tests;
-mod transport;
+pub(crate) mod transport;
+#[cfg(test)]
+pub(crate) use transport::NumericOnly;
 mod wire;
 
 use std::{future::Future, io, net::SocketAddr, sync::Arc, time::Duration};
@@ -26,13 +28,13 @@ use crate::{ExecutorHandle, discovery::absolute_name};
 use lifetime::Gate;
 pub(crate) use lifetime::Lifetime;
 use runtime::Provider;
-pub(crate) use transport::NumericOnly;
 
 #[derive(Clone)]
 pub(crate) struct OwnedResolver {
     resolver: Resolver<Provider>,
     gate: Gate,
     calls: Arc<Semaphore>,
+    roles: Option<crate::discovery::roles::View>,
 }
 
 impl OwnedResolver {
@@ -76,7 +78,13 @@ impl OwnedResolver {
             resolver,
             gate,
             calls: Arc::new(Semaphore::new(4)),
+            roles: None,
         })
+    }
+
+    pub(crate) fn with_roles(mut self, roles: crate::discovery::roles::View) -> Self {
+        self.roles = Some(roles);
+        self
     }
 
     fn admit(&self, name: &str) -> Result<OwnedSemaphorePermit, NetError> {
@@ -107,6 +115,14 @@ impl OwnedResolver {
 }
 
 impl libp2p::dns::Resolver for OwnedResolver {
+    fn permits_address(&self, encoded: &[u8]) -> bool {
+        self.gate.check().is_ok()
+            && self
+                .roles
+                .as_ref()
+                .is_some_and(|roles| roles.permits_address(encoded))
+    }
+
     fn lookup_ip(&self, name: String) -> impl Future<Output = Result<LookupIp, NetError>> + Send {
         self.lookup(name, async move |resolver, name| {
             resolver.lookup_ip(name).await
