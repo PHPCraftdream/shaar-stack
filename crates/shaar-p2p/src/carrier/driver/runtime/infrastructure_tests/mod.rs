@@ -147,6 +147,33 @@ fn stage(
     (connection, key)
 }
 
+/// cancel-safe: yes — dispatches every selected source event synchronously.
+async fn capture_incoming(
+    source: &mut Carrier,
+    server: &mut Server,
+    key: AttemptKey,
+) -> crate::discovery::roles::Lease {
+    let view = source
+        .core
+        .swarm
+        .behaviour()
+        .admission
+        .roles_view()
+        .unwrap();
+    timeout(DEADLINE, async {
+        loop {
+            tokio::select! {
+                event = source.core.swarm.select_next_some() => source.core.event(event).unwrap(),
+                event = server.swarm.select_next_some() => {
+                    if matches!(event, SwarmEvent::IncomingConnection { .. }) {
+                        return view.lease(key, crate::discovery::roles::LeaseKind::Pending, Instant::now()).unwrap();
+                    }
+                }
+            }
+        }
+    }).await.unwrap()
+}
+
 /// cancel-safe: yes — each selected Swarm event is dispatched synchronously.
 async fn pump(source: &mut Carrier, server: &mut Server) {
     tokio::select! {
@@ -354,8 +381,8 @@ async fn carrier_infrastructure_network_wrong_noise_identity_retires_only_after_
             .admission
             .roles_view()
             .unwrap();
-        let held = view.root_lease(address.as_ref()).unwrap();
         let (connection, _) = source.core.submit_native(options, Some(key)).unwrap();
+        let held = capture_incoming(&mut source, &mut server, key).await;
         gone(&mut source, &mut server, connection).await;
         assert!(view.infrastructure_live(key).is_none());
         assert!(handle.links().borrow().is_empty());
@@ -474,7 +501,7 @@ async fn carrier_infrastructure_network_four_controls_keep_retained_slot_charged
             .admission
             .roles_view()
             .unwrap();
-        let held = view.root_lease(seeds[0].1.as_ref()).unwrap();
+        let held = capture_incoming(&mut source, &mut servers[0], operations[0].1).await;
         timeout(DEADLINE, async {
             while source
                 .core

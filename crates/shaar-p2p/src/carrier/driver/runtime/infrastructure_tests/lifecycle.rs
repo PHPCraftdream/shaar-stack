@@ -15,7 +15,7 @@ async fn carrier_infrastructure_network_reopen_waits_for_retained_guard_and_igno
             .admission
             .roles_view()
             .unwrap();
-        let held = view.root_lease(address.as_ref()).unwrap();
+        let held = capture_incoming(&mut source, &mut server, old_key).await;
         live(&mut source, &mut server, old).await;
         source.core.close_infrastructure(old_key, Instant::now());
         gone(&mut source, &mut server, old).await;
@@ -68,7 +68,6 @@ async fn carrier_infrastructure_network_pending_timeout_and_cancel_reconcile_act
             let (mut source, handle, _incoming) = carrier(&dns, vec![(peer, address.clone())]);
             let (connection, key) = stage(&mut source, peer, &address, endpoint);
             let view = source.core.swarm.behaviour().admission.roles_view().unwrap();
-            let held = view.root_lease(address.as_ref()).unwrap();
             let stream = timeout(DEADLINE, async {
                 loop {
                     tokio::select! {
@@ -78,6 +77,7 @@ async fn carrier_infrastructure_network_pending_timeout_and_cancel_reconcile_act
                 }
             }).await.unwrap();
             assert!(source.core.infrastructure.entries.get(&connection).is_some_and(|entry| entry.phase == Phase::Pending));
+            let held = view.lease(key, crate::discovery::roles::LeaseKind::Pending, Instant::now()).unwrap();
             if expired {
                 tokio::time::pause();
                 tokio::time::advance(DEADLINE + Duration::from_millis(1)).await;
@@ -119,7 +119,7 @@ async fn carrier_infrastructure_network_shutdown_joins_io_then_waits_for_last_gu
         let (mut source, handle, _incoming) = carrier(&dns, vec![(server.peer, address.clone())]);
         let (connection, key) = stage(&mut source, server.peer, &address, server.address);
         let view = source.core.swarm.behaviour().admission.roles_view().unwrap();
-        let held = view.root_lease(address.as_ref()).unwrap();
+        let held = capture_incoming(&mut source, &mut server, key).await;
         live(&mut source, &mut server, connection).await;
         let listening = (*handle.listening.borrow()).unwrap();
         let (entered, mut barrier) = oneshot::channel();
