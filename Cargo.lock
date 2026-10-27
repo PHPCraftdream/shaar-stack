@@ -4005,7 +4005,9 @@ dependencies = [
 name = "shaar-server"
 version = "0.1.0"
 dependencies = [
+ "iroh-base",
  "shaar",
+ "tokio",
 ]
 
 [[package]]
