@@ -4,7 +4,7 @@ use tokio::io::AsyncReadExt;
 
 pub async fn read_allowlist(path: &Path) -> Result<Vec<PublicKey>, String> {
     const MAX_ALLOWLIST_BYTES: usize = 256 * 66;
-    let mut file = tokio::fs::File::open(path)
+    let file = tokio::fs::File::open(path)
         .await
         .map_err(|_| "could not read allowlist".to_owned())?;
     let mut text = String::new();
@@ -41,7 +41,7 @@ fn decode_hex(text: &str) -> Option<[u8; 32]> {
         return None;
     }
     let mut bytes = [0_u8; 32];
-    for (index, pair) in text.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in text.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let digit = |value: u8| match value {
             b'0'..=b'9' => Some(value - b'0'),
             b'a'..=b'f' => Some(value - b'a' + 10),
