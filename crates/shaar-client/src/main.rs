@@ -138,7 +138,7 @@ async fn coordinate(
         tokio::signal::ctrl_c(),
     )
     .await
-    .map_err(Into::into)
+    .map_err(|error| error as Box<dyn Error>)
 }
 
 async fn coordinate_until<F: std::future::Future<Output = Result<(), std::io::Error>>>(
