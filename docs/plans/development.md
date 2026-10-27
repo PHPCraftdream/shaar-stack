@@ -9,7 +9,8 @@ also passed. Native SDK networking (P06) is accepted on Linux and Windows at
 `4259f43`; see [the API, bounds and acceptance matrix](../../crates/shaar/src/network/README.md#consolidated-p06-acceptance).
 The Yggdrasil adapter (P07) remains unaccepted and externally gated.
 P01 contract research is reconciled to the native Rust requirement.
-Date: 2026-10-21. Revised: 2026-10-23 — P03 controlled recovery and P06 native SDK accepted;
+Date: 2026-10-21. Revised: 2026-10-27 — prioritize usable direct Server/Client delivery;
+P03 controlled recovery and P06 native SDK remain accepted;
 native Rust replaces Go/cgo in the intended architecture. Yggdrasil-ng (`yggdrasil` 0.3.1, source revision
 c9a54f1587bb133a06072596484c972a336db0d2) is a candidate, not an integrated
 dependency. Its shutdown/ownership source gate is open; see
@@ -289,7 +290,9 @@ failure is not masked as a defect of the deterministic test.
 
 ### P09. Implement Mainline discovery and address records
 
-Dependencies: P06, P07, P08.
+Dependencies: P06 and the D1 direct application milestone for native address records.
+Custom-address integration additionally requires its corresponding P07/P08 adapter;
+it must not block native signed-address discovery.
 
 Publication and refresh of signed records, address resolution,
 serialization of custom addresses, the record budget, and the IP publication policy.
@@ -314,7 +317,8 @@ and the absence of unbounded state growth.
 
 ### P11. Implement the Server
 
-Dependencies: P05, P06, P10.
+Dependencies: P05 and P06 for the D1 direct-only runtime; P10 only for the later
+multi-path integration. D1 implementation and executable acceptance run first.
 
 Config, allowlist, a fixed target, stream servicing, and a clean stop.
 For the first version the target is restricted to loopback; do not add opening other
@@ -325,7 +329,8 @@ a slow client, limit exhaustion, and shutdown are covered by tests.
 
 ### P12. Implement the Client
 
-Dependencies: P05, P06, P10.
+Dependencies: P05 and P06 for the D1 direct-only runtime; P10 only for the later
+multi-path integration. D1 implementation and executable acceptance run first.
 
 Config, a local loopback listener, verification of the server key, connection
 reuse, and creating a new connection after one closes. Connection-establishment
@@ -385,15 +390,82 @@ Acceptance: all mandatory scenarios are confirmed; no blocking questions remain.
 Publishing crates, a GitHub release, a version change, commit, and push — only
 on a separate explicit user request.
 
-## 6. Order of execution
+## 6. Delivery order and feedback
 
-Critical path:
-P01 → P02 → P03 → P06 → P07/P08 → P09 → P10 → P11/P12 → P13 → P14/P15 → P16.
-P04 and P05 may run after P02 independently of the P03 experiment;
-P06 additionally requires P04, and the Server/Client additionally require P05.
-Task independence does not automatically authorize launching sub-agents.
+### 6.1. Current evidence and immediate priority
 
-Each stage is closed only after its acceptance criteria are met.
-If tests have not yet been run, the implementation is not declared verified.
-For an external blocker, the cause and the required user decision are recorded.
-Work does not proceed through an unconfirmed key assumption.
+P03's strict payload gate, controlled NAT recovery and production dependency delivery,
+and P06's authenticated native forwarding are accepted; they are not current research
+blockers. Server and Client executables are still scaffolds. P08 has accepted Carrier,
+role-guard and owned-relay foundations at `740964d` (Linux/Windows CI `40447870611`),
+but discovery, candidate handoff and consolidated signaling-only acceptance remain
+unfinished. The infrastructure-control candidate is being verified separately; a
+feature branch or a passing subset is not mainline acceptance.
+
+The next usable milestone is **D1: direct-only Server and Client**. Its prerequisites
+are accepted P04/P05/P06, not completion of P07/P08/P09/P10. This is an incremental
+subset of P11/P12/P13, not a new fallback mode or completion of the full first version.
+
+D1 uses the existing identity, ktav 0.8.* configuration and native SDK. The caller
+provides the server's exact public key and numeric native endpoint through the
+existing validated configuration surface. Inspect that surface before implementation;
+if it cannot express the input, make only the minimal documented schema change with
+parser regressions. Do not add a second configuration format, SDK configuration
+loading, public transport traits, automatic discovery or unrelated CLI switches.
+
+D1 acceptance, executed in GitHub CI on Linux and Windows:
+
+- Actual Server and Client programs start from validated configs and forward exact
+  TCP bytes through authenticated direct QUIC to one fixed loopback target.
+- Wrong server key, denied/empty client allowlist and invalid configs fail closed;
+  unauthorized clients produce zero target TCP connections. Validation precedes
+  network startup, and diagnostics never expose private keys.
+- Concurrent local streams have bounded admission/backpressure and preserve half-close.
+  Busy ports, unavailable targets and cancelled setup have explicit outcomes.
+- New local connections can recover after a server/session restart within bounded
+  attempts/deadlines; existing TCP streams are not promised transparent reconnection.
+- Stop closes admission, cancels and joins owned workers, closes the SDK endpoint,
+  and permits immediate socket reuse. CI supervises real child processes with bounded
+  waits and cleanup; no local build, test or smoke execution is authorized.
+- No n0, DHT, libp2p, Yggdrasil, TUN, root, routes or router configuration is required.
+
+Implement the Server runtime and Client runtime as distinct reviewed leaves, then
+verify the composed real-process path. Independent source work may run in isolated
+in-repository worktrees with configured smart/worker; compilation and execution remain
+GitHub CI only. Complete the already-running infrastructure-control verification and
+cleanup in parallel, but do not make further Amino discovery a prerequisite for D1.
+
+### 6.2. Remaining stages
+
+Delivery path: accepted P04/P05/P06 → D1 Server/Client → D1 process acceptance and
+minimal usage documentation. Mainline discovery follows the explicit-address baseline;
+its native signed-address subset needs P06 and D1, not working Yggdrasil or Amino.
+Custom-address serialization and multi-path integration remain dependent on the
+corresponding accepted adapters. P07/P08 and P10 then extend the working applications;
+full P13/P14/P15/P16 acceptance still requires all applicable first-version scenarios.
+
+Strict signaling-only is unchanged: libp2p never becomes an APP Backup path. Yggdrasil
+fallback policy is not widened. Process-isolated Rust Yggdrasil is only a possible
+alternative to investigate after its separate external gate; no child executable,
+IPC API, privilege-free operation or lifecycle guarantee is assumed accepted.
+
+### 6.3. GitHub CI feedback and evidence
+
+Use a focused Linux/Windows GitHub CI lane for the changed product packages and their
+relevant regressions. Run source/structure checks, formatting and Clippy early, before
+long unrelated dependency counterfactual suites. Reuse the reviewed dependency
+preparation and immutable lock; never substitute stock sources or a different feature
+graph merely to shorten the run. A focused lane is feedback, not whole-project acceptance.
+
+Full existing Linux/Windows checks, security regressions, required counterfactuals and
+receipt/source-graph verification remain mandatory before integrating executable
+changes. Do not remove assertions, loosen resource limits, or count unrun/skipped
+scenarios as passing. Every push or rerun is followed by one finite background CI watch;
+recover watcher API failures without treating them as test outcomes. The single
+recurring task heartbeat is recovery infrastructure, not a substitute for that watch.
+
+Record decisions, new evidence and remaining limitations once; avoid duplicate
+research reports and status-only product commits. Prefer a testable delivery slice to
+new abstractions or infrastructure polishing without an observable acceptance need.
+Each stage closes only after its own acceptance and integration/cleanup obligations
+are met. External blockers are explicit; no unconfirmed assumption is promoted to fact.
