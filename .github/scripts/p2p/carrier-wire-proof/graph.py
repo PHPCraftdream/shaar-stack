@@ -90,7 +90,7 @@ def deadline_counterfactual(root, instrument):
 
 
 def create(repository, metadata, root, relay_source, instrument, variant, scenario):
-    if variant not in ("baseline", "counterfactual", "counterfactual-deadline"):
+    if variant not in ("baseline", "counterfactual", "counterfactual-deadline", "counterfactual-listener"):
         raise ValueError("unknown Carrier fixture variant")
     paths = product_paths(repository, metadata)
     originals = selected_hashes(repository, paths)

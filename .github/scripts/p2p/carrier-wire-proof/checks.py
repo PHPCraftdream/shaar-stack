@@ -106,6 +106,10 @@ class FixtureContracts(unittest.TestCase):
             self.assertEqual((baseline / name).read_bytes(), (counterfactual / name).read_bytes())
         self.assertTrue(record["listener_only_counterfactual"])
         self.assertFalse(record["guard_only_counterfactual"])
+        with patch.object(graph, "product_paths", side_effect=LookupError("variant accepted")):
+            with self.assertRaisesRegex(LookupError, "variant accepted"):
+                graph.create(self.root, self.product, self.root / "copied", self.root / "relay",
+                             instrument, "counterfactual-listener", HERE / "scenario.rs")
 
     def test_listener_observer_is_before_reads_without_liveness_check(self):
         destination, _ = self.transformed("baseline")
