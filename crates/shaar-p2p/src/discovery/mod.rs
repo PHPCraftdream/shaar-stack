@@ -114,6 +114,13 @@ impl State {
     pub(crate) fn is_seed(&self, peer: &PeerId) -> bool {
         self.config.is_seed(peer)
     }
+
+    pub(crate) fn seed_address(&self, peer: PeerId) -> Option<&Multiaddr> {
+        self.config
+            .seeds
+            .iter()
+            .find_map(|(seed, address)| (*seed == peer).then_some(address))
+    }
 }
 
 pub(crate) fn absolute_name(value: &str) -> io::Result<Name> {

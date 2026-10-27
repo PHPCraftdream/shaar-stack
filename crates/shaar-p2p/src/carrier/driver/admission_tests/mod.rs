@@ -323,3 +323,5 @@ fn carrier_destination_terminal_requires_exact_numeric_witness() {
     admission.terminal(key, None);
     drop((root, numeric));
 }
+
+mod infrastructure;
