@@ -159,7 +159,7 @@ async fn coordinator_shutdown_joins_active_forwarding() {
 
 #[tokio::test]
 async fn coordinator_does_not_forward_with_wrong_pinned_key() {
-    timeout(Duration::from_secs(35), async {
+    timeout(Duration::from_secs(50), async {
         let client_id = Identity::from_seed([81; 32]);
         let server_id = Identity::from_seed([82; 32]);
         let wrong_id = Identity::from_seed([83; 32]);
@@ -218,6 +218,39 @@ async fn coordinator_does_not_forward_with_wrong_pinned_key() {
                 .await
                 .is_err()
         );
+
+        let client = endpoint(&client_id, Allowlist::default()).await;
+        let mut server = endpoint(&server_id, Allowlist::new(&[client.id()]).unwrap()).await;
+        let server_address = server.local_addr();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+        let serve = async {
+            let mut session = server.accept().await.unwrap();
+            let _ = session.serve(target_address, std::future::pending()).await;
+            server.close().await;
+        };
+        let target_response = async {
+            let (mut stream, _) = target.accept().await.unwrap();
+            let mut request = [0; 4];
+            stream.read_exact(&mut request).await.unwrap();
+            assert_eq!(&request, b"ping");
+            stream.write_all(b"pong").await.unwrap();
+        };
+        let application = async {
+            let mut stream = TcpStream::connect(address).await.unwrap();
+            stream.write_all(b"ping").await.unwrap();
+            let mut response = [0; 4];
+            stream.read_exact(&mut response).await.unwrap();
+            assert_eq!(&response, b"pong");
+            stop_tx.send(()).unwrap();
+        };
+        let coordinator = coordinate_until(listener, client, key(&server_id), server_address, async {
+            let _ = stop_rx.await;
+            Ok(())
+        });
+        let (_, _, _, result) = tokio::join!(serve, target_response, application, coordinator);
+        result.unwrap();
     })
     .await
     .expect("wrong-key coordinator deadline");
