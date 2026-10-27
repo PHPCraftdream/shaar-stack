@@ -27,11 +27,11 @@ use std::path::Path;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use super::MAX_CONFIG_BYTES;
-use super::client::{ClientConfig, ClientOverrides};
+use super::client::{ClientConfig, ClientEndpointOverrides, ClientOverrides};
 use super::error::{ConfigError, LoadKind};
-use super::server::{ServerConfig, ServerOverrides};
+use super::server::{ServerConfig, ServerEndpointOverrides, ServerOverrides};
 
-/// Load and validate a server configuration file, applying overrides.
+/// Load and validate a server configuration file, applying legacy overrides.
 pub async fn load_server(
     path: impl AsRef<Path>,
     over: &ServerOverrides,
@@ -42,6 +42,20 @@ pub async fn load_server(
         .await
         .map_err(|kind| ConfigError::loading(path.to_path_buf(), kind))?;
     ServerConfig::from_text(&text, over)
+}
+
+/// Load and validate a server configuration file with endpoint overrides.
+pub async fn load_server_with_endpoint_overrides(
+    path: impl AsRef<Path>,
+    over: &ServerOverrides,
+    endpoint_overrides: &ServerEndpointOverrides,
+) -> Result<ServerConfig, ConfigError> {
+    let path = path.as_ref();
+    let file = open(path).await?;
+    let text = read_bounded(file)
+        .await
+        .map_err(|kind| ConfigError::loading(path.to_path_buf(), kind))?;
+    ServerConfig::from_text_with_endpoint_overrides(&text, over, endpoint_overrides)
 }
 
 /// Load and validate a client configuration file, applying overrides.
@@ -55,6 +69,20 @@ pub async fn load_client(
         .await
         .map_err(|kind| ConfigError::loading(path.to_path_buf(), kind))?;
     ClientConfig::from_text(&text, over)
+}
+
+/// Load and validate a client configuration file with endpoint overrides.
+pub async fn load_client_with_endpoint_overrides(
+    path: impl AsRef<Path>,
+    over: &ClientOverrides,
+    endpoint_overrides: &ClientEndpointOverrides,
+) -> Result<ClientConfig, ConfigError> {
+    let path = path.as_ref();
+    let file = open(path).await?;
+    let text = read_bounded(file)
+        .await
+        .map_err(|kind| ConfigError::loading(path.to_path_buf(), kind))?;
+    ClientConfig::from_text_with_endpoint_overrides(&text, over, endpoint_overrides)
 }
 
 async fn open(path: &Path) -> Result<tokio::fs::File, ConfigError> {

@@ -6,8 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use shaar::config::{
-    ClientConfig, ClientOverrides, ConfigError, Fallback, MAX_CONFIG_BYTES, ServerConfig,
-    ServerOverrides, ValidationKind,
+    ClientConfig, ClientEndpointOverrides, ClientOverrides, ConfigError, Fallback,
+    MAX_CONFIG_BYTES, ServerConfig, ServerEndpointOverrides, ServerOverrides, ValidationKind,
 };
 
 // RFC 8032 § 7.1 test-vector 1 Ed25519 public key.
@@ -51,6 +51,158 @@ fn server_fixture_parses_with_concrete_values() {
     assert_eq!(cfg.key_file(), Path::new("keys/identity.key"));
     assert_eq!(cfg.allowlist_path(), Path::new("conf/allowed.txt"));
     assert_eq!(cfg.fallback(), Fallback::Signal);
+}
+
+#[test]
+fn server_bind_defaults_parses_numeric_and_override_precedes_validation() {
+    let cfg =
+        ServerConfig::from_text("target: 127.0.0.1:9000\n", &ServerOverrides::default()).unwrap();
+    assert_eq!(cfg.bind().to_string(), "0.0.0.0:0");
+
+    let cfg = ServerConfig::from_text(
+        "target: 127.0.0.1:9000\nbind: [::1]:0\n",
+        &ServerOverrides::default(),
+    )
+    .unwrap();
+    assert_eq!(cfg.bind().to_string(), "[::1]:0");
+    let bind_invalid = "target: 127.0.0.1:9000\n}\n";
+    assert!(matches!(
+        ServerConfig::from_text(bind_invalid, &ServerOverrides::default()),
+        Err(ConfigError::Parsing { kind: "syntax", .. })
+    ));
+
+    for address in ["[::]:0", "[::1]:0"] {
+        let file = format!("target: 127.0.0.1:9000\nbind: {address}\n");
+        let cfg = ServerConfig::from_text(&file, &ServerOverrides::default()).unwrap();
+        assert_eq!(cfg.bind().to_string(), address);
+    }
+
+    let server_overrides = ServerEndpointOverrides {
+        bind: Some("192.0.2.4:4567".to_string()),
+    };
+    let cfg = ServerConfig::from_text_with_endpoint_overrides(
+        "target: 127.0.0.1:9000\nbind: not-an-address\n",
+        &ServerOverrides::default(),
+        &server_overrides,
+    )
+    .unwrap();
+    assert_eq!(cfg.bind().to_string(), "192.0.2.4:4567");
+
+    let err = ServerConfig::from_text(
+        "target: 127.0.0.1:9000\nbind: not-an-address\n",
+        &ServerOverrides::default(),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        ConfigError::Validation {
+            field: "bind",
+            kind: ValidationKind::InvalidAddress
+        }
+    ));
+}
+
+#[test]
+fn client_server_address_is_optional_and_numeric_when_present() {
+    let absent = format!("server: {RFC8032_PUB_HEX}\n");
+    let cfg = ClientConfig::from_text(&absent, &ClientOverrides::default()).unwrap();
+    assert_eq!(cfg.server_address(), None);
+
+    let valid = format!("server: {RFC8032_PUB_HEX}\nserver_address: 192.0.2.4:443\n");
+    let cfg = ClientConfig::from_text(&valid, &ClientOverrides::default()).unwrap();
+    assert_eq!(cfg.server_address().unwrap().to_string(), "192.0.2.4:443");
+    for address in ["[::1]:80", "127.0.0.1:80"] {
+        let file = format!("server: {RFC8032_PUB_HEX}\nserver_address: {address}\n");
+        let cfg = ClientConfig::from_text(&file, &ClientOverrides::default()).unwrap();
+        assert_eq!(cfg.server_address().unwrap().to_string(), address);
+    }
+
+    let syntax_invalid = "server: x\n}\n";
+    assert!(matches!(
+        ClientConfig::from_text(syntax_invalid, &ClientOverrides::default()),
+        Err(ConfigError::Parsing { kind: "syntax", .. })
+    ));
+}
+
+#[test]
+fn client_server_address_rejects_invalid_destinations_and_override_repairs_file() {
+    for address in [
+        "192.0.2.1:0",
+        "0.0.0.0:80",
+        "224.0.0.1:80",
+        "255.255.255.255:80",
+        "[::]:80",
+        "[ff02::1]:80",
+        "[::ffff:255.255.255.255]:80",
+        "[::ffff:0.0.0.0]:80",
+        "[fd15:070a:510b::1]:443",
+        "bad",
+    ] {
+        let file = format!("server: {RFC8032_PUB_HEX}\nserver_address: {address}\n");
+        let err = ClientConfig::from_text(&file, &ClientOverrides::default()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ConfigError::Validation {
+                    field: "server_address",
+                    ..
+                }
+            ),
+            "{address}: {err:?}"
+        );
+    }
+
+    let client_overrides = ClientEndpointOverrides {
+        server_address: Some("198.51.100.8:8443".to_string()),
+    };
+    let cfg = ClientConfig::from_text_with_endpoint_overrides(
+        &format!("server: {RFC8032_PUB_HEX}\nserver_address: 0.0.0.0:80\n"),
+        &ClientOverrides::default(),
+        &client_overrides,
+    )
+    .unwrap();
+    assert_eq!(
+        cfg.server_address().unwrap().to_string(),
+        "198.51.100.8:8443"
+    );
+    let invalid_over = ClientEndpointOverrides {
+        server_address: Some("[::ffff:224.0.0.1]:443".to_string()),
+    };
+    let valid_file = format!("server: {RFC8032_PUB_HEX}\nserver_address: 192.0.2.4:443\n");
+    let err = ClientConfig::from_text_with_endpoint_overrides(
+        &valid_file,
+        &ClientOverrides::default(),
+        &invalid_over,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        ConfigError::Validation {
+            field: "server_address",
+            kind: ValidationKind::InvalidAddress
+        }
+    ));
+}
+
+#[test]
+fn address_fields_remain_strict_schema_fields() {
+    let server = ServerConfig::from_text(
+        "target: 127.0.0.1:9000\nbind: 0.0.0.0:0\nextra: value\n",
+        &ServerOverrides::default(),
+    );
+    assert!(matches!(
+        server,
+        Err(ConfigError::Parsing { kind: "schema", .. })
+    ));
+
+    let client = ClientConfig::from_text(
+        &format!("server: {RFC8032_PUB_HEX}\nserver_address: 192.0.2.1:80\nextra: value\n"),
+        &ClientOverrides::default(),
+    );
+    assert!(matches!(
+        client,
+        Err(ConfigError::Parsing { kind: "schema", .. })
+    ));
 }
 
 #[test]

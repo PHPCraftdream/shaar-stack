@@ -7,7 +7,8 @@ use serde::Deserialize;
 
 use super::error::{ConfigError, ValidationKind};
 use super::raw::{
-    Fallback, merge, parse_fallback, parse_socket_addr, require_loopback, require_nonempty_path,
+    Fallback, merge, parse_fallback, parse_socket_addr, require_dial_destination, require_loopback,
+    require_nonempty_path,
 };
 use super::server::DEFAULT_KEY_FILE;
 
@@ -16,6 +17,8 @@ use super::server::DEFAULT_KEY_FILE;
 pub(crate) struct ClientFile {
     #[serde(default)]
     server: Option<String>,
+    #[serde(default)]
+    server_address: Option<String>,
     #[serde(default)]
     listen: Option<String>,
     #[serde(default)]
@@ -39,6 +42,13 @@ pub struct ClientOverrides {
     /// Override for the fallback transport selection.
     pub fallback: Option<Fallback>,
 }
+/// Optional endpoint override kept separate to preserve exhaustive legacy override literals.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientEndpointOverrides {
+    /// Override for the numeric server destination address.
+    pub server_address: Option<String>,
+}
+
 /// Validated client startup configuration.
 ///
 /// The server endpoint key is validated at construction via the real
@@ -50,6 +60,7 @@ pub struct ClientOverrides {
 pub struct ClientConfig {
     server_key: [u8; 32],
     listen: SocketAddr,
+    server_address: Option<SocketAddr>,
     key_file: PathBuf,
     fallback: Fallback,
 }
@@ -65,6 +76,11 @@ impl ClientConfig {
         self.listen
     }
 
+    /// Optional numeric server destination; present values must be usable by the SDK dial boundary.
+    pub fn server_address(&self) -> Option<SocketAddr> {
+        self.server_address
+    }
+
     /// Identity key file path (borrowed view).
     pub fn key_file(&self) -> &Path {
         &self.key_file
@@ -75,10 +91,17 @@ impl ClientConfig {
         self.fallback
     }
 
-    /// Merge file values (already deserialized from `text`) with
-    /// overrides, then validate. Syntax and schema errors are rejected
-    /// before merging, even when overrides supply every required field.
+    /// Merge file values with legacy and endpoint overrides before validation.
+    /// Syntax and schema errors are rejected before merging.
     pub fn from_text(text: &str, over: &ClientOverrides) -> Result<ClientConfig, ConfigError> {
+        Self::from_text_with_endpoint_overrides(text, over, &ClientEndpointOverrides::default())
+    }
+
+    pub fn from_text_with_endpoint_overrides(
+        text: &str,
+        over: &ClientOverrides,
+        endpoint_overrides: &ClientEndpointOverrides,
+    ) -> Result<ClientConfig, ConfigError> {
         if text.len() > super::MAX_CONFIG_BYTES {
             // Same byte bound as file loading; the path is empty
             // because the text never came from a file.
@@ -90,6 +113,10 @@ impl ClientConfig {
         let file: ClientFile = ktav::from_str(text).map_err(|e| ConfigError::from_ktav(&e))?;
         let server_raw = merge(file.server, over.server.clone());
         let listen_raw = merge(file.listen, over.listen.clone());
+        let server_address_raw = merge(
+            file.server_address,
+            endpoint_overrides.server_address.clone(),
+        );
         let key_raw = merge(file.key_file.map(PathBuf::from), over.key_file.clone());
         let fallback = parse_fallback(file.fallback.as_deref(), over.fallback)?;
 
@@ -104,12 +131,21 @@ impl ClientConfig {
         let listen = parse_socket_addr("listen", listen_text)?;
         require_loopback("listen", listen)?;
 
+        let server_address = server_address_raw
+            .map(|value| {
+                let address = parse_socket_addr("server_address", &value)?;
+                require_dial_destination("server_address", address)?;
+                Ok(address)
+            })
+            .transpose()?;
+
         let key_file = key_raw.unwrap_or_else(|| PathBuf::from(DEFAULT_KEY_FILE));
         require_nonempty_path("key_file", &key_file)?;
 
         Ok(ClientConfig {
             server_key: *key.as_bytes(),
             listen,
+            server_address,
             key_file,
             fallback,
         })
