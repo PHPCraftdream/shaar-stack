@@ -335,3 +335,6 @@ async fn carrier_protocol_fixture_revocation() {
     .await
     .unwrap();
 }
+
+#[path = "deadline.rs"]
+mod deadline;

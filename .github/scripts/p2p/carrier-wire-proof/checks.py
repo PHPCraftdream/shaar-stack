@@ -158,6 +158,26 @@ class FixtureContracts(unittest.TestCase):
         with self.assertRaises(ValueError):
             graph.rebase_manifests(self.root / "origin", self.workspace)
 
+    def test_deadline_counterfactual_removes_only_established_exemption(self):
+        path = self.workspace / "crates/shaar-p2p/src/carrier/relay/gate_factory.rs"
+        path.parent.mkdir(parents=True)
+        guard = "if !matches!(record.state, RecordState::Established) && Instant::now() >= record.deadline {"
+        original = ("unchanged prefix\n" + guard + "\nreturn false;\n}\nunchanged suffix\n").encode()
+        path.write_bytes(original)
+        record = graph.deadline_counterfactual(self.workspace, instrument)
+        self.assertEqual(path.read_bytes(), original.replace(guard.encode(),
+                         b"if Instant::now() >= record.deadline {"))
+        self.assertEqual(record["original_sha256"], graph.digest(original))
+        self.assertEqual(record["counterfactual_sha256"], graph.digest(path.read_bytes()))
+
+    def test_deadline_counterfactual_rejects_anchor_drift(self):
+        path = self.workspace / "crates/shaar-p2p/src/carrier/relay/gate_factory.rs"
+        path.parent.mkdir(parents=True)
+        path.write_text("no reviewed guard\n", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            graph.deadline_counterfactual(self.workspace, instrument)
+        self.assertEqual(path.read_text(), "no reviewed guard\n")
+
 
 if __name__ == "__main__":
     if os.environ.get("CI", "").lower() != "true":

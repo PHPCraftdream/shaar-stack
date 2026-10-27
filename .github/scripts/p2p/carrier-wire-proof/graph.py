@@ -76,7 +76,22 @@ def rebase_manifests(repository, root):
     return records
 
 
+def deadline_counterfactual(root, instrument):
+    path = root / "crates/shaar-p2p/src/carrier/relay/gate_factory.rs"
+    original = path.read_bytes()
+    guard = "if !matches!(record.state, RecordState::Established) && Instant::now() >= record.deadline {"
+    changed = "if Instant::now() >= record.deadline {"
+    text = instrument.replace_once(original.decode(), guard, changed)
+    if instrument.replace_once(text, changed, guard).encode() != original:
+        raise ValueError("deadline counterfactual changed more than its established exemption")
+    path.write_bytes(text.encode())
+    return {"original_sha256": digest(original), "counterfactual_sha256": digest(path.read_bytes()),
+            "defect": "established admission deadline exemption removed only"}
+
+
 def create(repository, metadata, root, relay_source, instrument, variant, scenario):
+    if variant not in ("baseline", "counterfactual", "counterfactual-deadline"):
+        raise ValueError("unknown Carrier fixture variant")
     paths = product_paths(repository, metadata)
     originals = selected_hashes(repository, paths)
     root.mkdir(parents=True, exist_ok=False)
@@ -89,7 +104,9 @@ def create(repository, metadata, root, relay_source, instrument, variant, scenar
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
-    relay_record = instrument.instrument(relay_source, root / relay_relative, variant)
+    relay_variant = "counterfactual" if variant == "counterfactual" else "baseline"
+    relay_record = instrument.instrument(relay_source, root / relay_relative, relay_variant)
+    owner_deadline = deadline_counterfactual(root, instrument) if variant == "counterfactual-deadline" else None
     manifest_rebases = rebase_manifests(repository, root)
     scenario_relative = scenario.relative_to(repository)
     scenario_target = root / scenario_relative
@@ -118,6 +135,7 @@ def create(repository, metadata, root, relay_source, instrument, variant, scenar
         "scenario_sha256": digest(scenario.read_bytes()),
         "relay_relative": relay_relative.as_posix(),
         "manifest_path_rebases": manifest_rebases,
+        "owner_deadline_counterfactual": owner_deadline,
         "relay": relay_record,
     }
     return record, paths

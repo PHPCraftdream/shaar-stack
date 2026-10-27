@@ -10,15 +10,25 @@ import sys
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
-CASE = "carrier_protocol_fixture_revocation"
-FAILURE = "CARRIER_PROTOCOL_POLL_AFTER_REVOCATION"
-MARKERS = (
-    "CARRIER_PROTOCOL_ENTERED_BOUND",
-    "CARRIER_PROTOCOL_POSITIVE_ACCEPTED",
-    "CARRIER_PROTOCOL_REVOKED_NO_INNER_POLL",
-    "CARRIER_PROTOCOL_RETAINED_UNTIL_LAST_DROP",
-    "CARRIER_PROTOCOL_JOINED_CLEANUP",
-)
+CASES = {
+    "protocol": {
+        "name": "carrier_protocol_fixture_revocation",
+        "failure": "CARRIER_PROTOCOL_POLL_AFTER_REVOCATION",
+        "markers": ("CARRIER_PROTOCOL_ENTERED_BOUND", "CARRIER_PROTOCOL_POSITIVE_ACCEPTED",
+                    "CARRIER_PROTOCOL_REVOKED_NO_INNER_POLL", "CARRIER_PROTOCOL_RETAINED_UNTIL_LAST_DROP",
+                    "CARRIER_PROTOCOL_JOINED_CLEANUP"),
+        "barriers": ("CARRIER_PROTOCOL_POSITIVE_ACCEPTED", "CARRIER_PROTOCOL_ENTERED_BOUND"),
+    },
+    "deadline": {
+        "name": "carrier_protocol_fixture_established_deadline",
+        "failure": "CARRIER_ESTABLISHED_DEADLINE_REGRESSION",
+        "markers": ("CARRIER_ESTABLISHED_CAPTURED", "CARRIER_UNESTABLISHED_CAPTURED",
+                    "CARRIER_ORIGINAL_DEADLINE_CROSSED", "CARRIER_ESTABLISHED_DEADLINE_LIVE",
+                    "CARRIER_DEADLINE_JOINED_CLEANUP"),
+        "barriers": ("CARRIER_ESTABLISHED_CAPTURED", "CARRIER_UNESTABLISHED_CAPTURED",
+                     "CARRIER_ORIGINAL_DEADLINE_CROSSED"),
+    },
+}
 
 
 def module(name):
@@ -88,15 +98,18 @@ def compile_fixture(workspace, directory, relay, graph):
     names = [line.removesuffix(": test") for line in listing.splitlines() if line.endswith(": test")]
     if len(names) != len(set(names)):
         raise ValueError("duplicate Carrier executable test names")
-    selected = [name for name in names if name.endswith("::" + CASE)
-                and "carrier_protocol_fixture" in name.split("::")]
-    if len(selected) != 1:
-        raise ValueError("Carrier protocol test must be included exactly once")
+    selected = {}
+    for case, specification in CASES.items():
+        matches = [name for name in names if name.endswith("::" + specification["name"])
+                   and "carrier_protocol_fixture" in name.split("::")]
+        if len(matches) != 1:
+            raise ValueError("Carrier fixture case must be included exactly once: " + case)
+        selected[case] = matches[0]
     for prefix, count in (("destination_roles_", 15), ("destination_guard_", 22),
                           ("carrier_destination_", 33)):
         if sum(name.split("::")[-1].startswith(prefix) for name in names) != count:
             raise ValueError("existing source inventory changed: " + prefix)
-    return executable, selected[0], {
+    return executable, selected, {
         "fresh_relay": True,
         "fresh_carrier_unit": True,
         "relay_package_id": relay_witness[0]["package_id"],
@@ -105,42 +118,43 @@ def compile_fixture(workspace, directory, relay, graph):
         "relay_source_sha256": graph.digest((relay / "src/lib.rs").read_bytes()),
         "carrier_source_sha256": graph.digest(unit_source.read_bytes()),
         "unit_inventory": names,
-        "selected_test": selected[0],
+        "selected_tests": selected,
     }
 
 
-def execute(workspace, directory, executable, test, variant, graph):
+def execute(workspace, directory, executable, test, variant, graph, case):
+    specification = CASES[case]
+    log = directory / (case + "-run.log")
     try:
         result = subprocess.run([str(executable), "--test-threads=1", "--show-output", test, "--exact"],
                                 cwd=workspace, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, encoding="utf-8", errors="replace", timeout=90, check=False)
     except subprocess.TimeoutExpired as error:
-        (directory / "run.log").write_text("scenario outer timeout\n" + str(error), encoding="utf-8")
+        log.write_text("scenario outer timeout\n" + str(error), encoding="utf-8")
         raise RuntimeError("scenario timeout is not a phase counterfactual") from error
     output = result.stdout
-    (directory / "run.log").write_text(output, encoding="utf-8")
+    log.write_text(output, encoding="utf-8")
     print(output)
     command([sys.executable, "-I", str(workspace / ".github/scripts/scan_identity_output.py"),
-             str(directory / "run.log")], workspace, timeout=30)
+             str(log)], workspace, timeout=30)
     if variant == "baseline":
         if result.returncode or not re.search(r"test result: ok\. 1 passed; 0 failed;", output):
-            raise ValueError("Carrier protocol baseline failed")
-        if any(output.count(marker) != 1 for marker in MARKERS):
-            raise ValueError("Carrier baseline did not witness every asserted phase exactly once")
-        if FAILURE in output:
+            raise ValueError("Carrier baseline failed: " + case)
+        if any(output.count(marker) != 1 for marker in specification["markers"]):
+            raise ValueError("Carrier baseline missed an asserted phase: " + case)
+        if specification["failure"] in output:
             raise ValueError("Carrier baseline emitted its negative assertion marker")
     else:
-        if result.returncode == 0 or FAILURE not in output:
-            raise ValueError("Carrier counterfactual missed its protocol-poll assertion")
+        if result.returncode == 0 or specification["failure"] not in output:
+            raise ValueError("Carrier counterfactual missed its named assertion: " + case)
         if f"test {test} ... FAILED" not in output:
             raise ValueError("counterfactual did not fail the selected Carrier test")
         if not re.search(r"test result: FAILED\. 0 passed; 1 failed;", output):
             raise ValueError("counterfactual failed outside its scenario")
-        for marker in ("CARRIER_PROTOCOL_POSITIVE_ACCEPTED", "CARRIER_PROTOCOL_ENTERED_BOUND"):
-            if output.count(marker) != 1:
-                raise ValueError("counterfactual did not reach its positive control and bound barrier")
+        if any(output.count(marker) != 1 for marker in specification["barriers"]):
+            raise ValueError("counterfactual missed its genuine setup/control barriers: " + case)
     return {"exit_code": result.returncode, "phase_failure_expected": variant != "baseline",
-            "output_sha256": graph.digest(output.encode())}
+            "output_sha256": graph.digest(output.encode()), "log": log.name, "test": test}
 
 
 def run(repository, destination):
@@ -170,7 +184,7 @@ def run(repository, destination):
     product_paths = graph.product_paths(repository, product)
     original_hashes = graph.selected_hashes(repository, product_paths)
     results = {}
-    for variant in ("baseline", "counterfactual"):
+    for variant in ("baseline", "counterfactual", "counterfactual-deadline"):
         directory = destination / variant
         directory.mkdir()
         workspace = directory / "workspace"
@@ -184,17 +198,22 @@ def run(repository, destination):
         proof = graph.verify(product, fixture, product_lock, workspace, copied_relay)
         write_json(directory / "graph-receipt.json", proof)
         immutable = graph.hashes(workspace)
-        executable, test, witness = compile_fixture(workspace, directory, copied_relay, graph)
-        outcome = execute(workspace, directory, executable, test, variant, graph)
+        executable, selected, witness = compile_fixture(workspace, directory, copied_relay, graph)
+        cases = list(CASES) if variant == "baseline" else [
+            "deadline" if variant == "counterfactual-deadline" else "protocol"]
+        outcomes = {case: execute(workspace, directory, executable, selected[case], variant, graph, case)
+                    for case in cases}
         if immutable != graph.hashes(workspace):
             raise ValueError("Carrier fixture source or lock changed during compilation/execution")
-        results[variant] = {**witness, **outcome, "fixture_lock_sha256": graph.digest(product_lock)}
+        results[variant] = {**witness, "cases": outcomes, "fixture_lock_sha256": graph.digest(product_lock)}
         write_json(directory / "variant-receipt.json", results[variant])
-    if results["baseline"]["unit_inventory"] != results["counterfactual"]["unit_inventory"]:
+    if any(result["unit_inventory"] != results["baseline"]["unit_inventory"]
+           for result in results.values()):
         raise ValueError("counterfactual changed the executable test inventory")
     if original_hashes != graph.selected_hashes(repository, product_paths):
         raise ValueError("Carrier proof changed original product sources or lock")
     write_json(destination / "run-receipt.json", {
+        "schema": 2,
         "host": host,
         "runtime_verified": True,
         "product_lock_sha256": graph.digest(product_lock),
