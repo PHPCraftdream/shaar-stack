@@ -379,11 +379,11 @@ mod tests {
         )
         .await
         .unwrap();
-        let connected = client
-            .connect(server.id(), server.local_addr())
-            .await
-            .unwrap();
-        let accepted = server.accept().await.unwrap();
+        let (connected, accepted) = tokio::try_join!(
+            client.connect(server.id(), server.local_addr()),
+            server.accept(),
+        )
+        .unwrap();
 
         accepted.close();
         // This await synchronizes on the SDK closure event; the subsequent gate
