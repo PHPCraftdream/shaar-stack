@@ -7,3 +7,4 @@ publish.workspace = true
 
 [dependencies]
 shaar = { path = "../shaar" }
+tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "net", "io-util", "signal", "time", "fs"] }
