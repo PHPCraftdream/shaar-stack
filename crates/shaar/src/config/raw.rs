@@ -78,6 +78,30 @@ pub(crate) fn require_loopback(
     }
 }
 
+/// Require that a numeric destination is usable by the SDK dial boundary.
+pub(crate) fn require_dial_destination(
+    field: &'static str,
+    addr: std::net::SocketAddr,
+) -> Result<(), ConfigError> {
+    let ip = addr.ip().to_canonical();
+    if addr.port() != 0
+        && !ip.is_unspecified()
+        && !ip.is_multicast()
+        && ip != std::net::IpAddr::V4(std::net::Ipv4Addr::BROADCAST)
+        && match ip {
+            std::net::IpAddr::V4(_) => true,
+            std::net::IpAddr::V6(ip) => ip.octets()[..6] != [0xfd, 0x15, 0x07, 0x0a, 0x51, 0x0b],
+        }
+    {
+        Ok(())
+    } else {
+        Err(ConfigError::validation(
+            field,
+            ValidationKind::InvalidAddress,
+        ))
+    }
+}
+
 /// Reject empty path values after merging (a present-but-empty path is
 /// semantically invalid, not a missing field).
 pub(crate) fn require_nonempty_path(

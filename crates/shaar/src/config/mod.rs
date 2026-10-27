@@ -18,11 +18,14 @@ mod load;
 mod raw;
 mod server;
 
-pub use client::{ClientConfig, ClientOverrides};
+pub use client::{ClientConfig, ClientEndpointOverrides, ClientOverrides};
 pub use error::{ConfigError, LoadKind, ValidationKind};
-pub use load::{load_client, load_server};
+pub use load::{
+    load_client, load_client_with_endpoint_overrides, load_server,
+    load_server_with_endpoint_overrides,
+};
 pub use raw::Fallback;
-pub use server::{ServerConfig, ServerOverrides};
+pub use server::{ServerConfig, ServerEndpointOverrides, ServerOverrides};
 
 /// Hard upper bound on configuration file size in bytes (1 MiB).
 ///

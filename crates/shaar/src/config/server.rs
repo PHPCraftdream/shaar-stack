@@ -21,6 +21,8 @@ pub(crate) struct ServerFile {
     #[serde(default)]
     target: Option<String>,
     #[serde(default)]
+    bind: Option<String>,
+    #[serde(default)]
     key_file: Option<String>,
     #[serde(default)]
     allowlist_path: Option<String>,
@@ -44,10 +46,18 @@ pub struct ServerOverrides {
     pub fallback: Option<Fallback>,
 }
 
+/// Optional bind override kept separate to preserve exhaustive legacy override literals.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerEndpointOverrides {
+    /// Override for the server bind address.
+    pub bind: Option<String>,
+}
+
 /// Validated server startup configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
     target: SocketAddr,
+    bind: SocketAddr,
     key_file: PathBuf,
     allowlist_path: PathBuf,
     fallback: Fallback,
@@ -57,6 +67,11 @@ impl ServerConfig {
     /// Loopback address the forwarded traffic is directed at.
     pub fn target(&self) -> SocketAddr {
         self.target
+    }
+
+    /// Server bind address; port zero requests an OS-selected port.
+    pub fn bind(&self) -> SocketAddr {
+        self.bind
     }
 
     /// Identity key file path (borrowed view).
@@ -78,6 +93,14 @@ impl ServerConfig {
     /// overrides, then validate. Syntax and schema errors are rejected
     /// before merging, even when overrides supply every required field.
     pub fn from_text(text: &str, over: &ServerOverrides) -> Result<ServerConfig, ConfigError> {
+        Self::from_text_with_endpoint_overrides(text, over, &ServerEndpointOverrides::default())
+    }
+
+    pub fn from_text_with_endpoint_overrides(
+        text: &str,
+        over: &ServerOverrides,
+        endpoint_overrides: &ServerEndpointOverrides,
+    ) -> Result<ServerConfig, ConfigError> {
         if text.len() > super::MAX_CONFIG_BYTES {
             // Same byte bound as file loading; the path is empty
             // because the text never came from a file.
@@ -88,6 +111,7 @@ impl ServerConfig {
         }
         let file: ServerFile = ktav::from_str(text).map_err(|e| ConfigError::from_ktav(&e))?;
         let target_raw = merge(file.target, over.target.clone());
+        let bind_raw = merge(file.bind, endpoint_overrides.bind.clone());
         let key_raw = merge(file.key_file.map(PathBuf::from), over.key_file.clone());
         let allow_raw = merge(
             file.allowlist_path.map(PathBuf::from),
@@ -106,6 +130,9 @@ impl ServerConfig {
             ));
         }
 
+        let bind_text = bind_raw.as_deref().unwrap_or("0.0.0.0:0");
+        let bind = parse_socket_addr("bind", bind_text)?;
+
         let key_file = key_raw.unwrap_or_else(|| PathBuf::from(DEFAULT_KEY_FILE));
         require_nonempty_path("key_file", &key_file)?;
         let allowlist_path = allow_raw.unwrap_or_else(|| PathBuf::from(DEFAULT_ALLOWLIST_PATH));
@@ -113,6 +140,7 @@ impl ServerConfig {
 
         Ok(ServerConfig {
             target,
+            bind,
             key_file,
             allowlist_path,
             fallback,

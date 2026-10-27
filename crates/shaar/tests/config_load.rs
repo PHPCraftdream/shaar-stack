@@ -5,8 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use shaar::config::{
-    ClientOverrides, ConfigError, Fallback, MAX_CONFIG_BYTES, ServerOverrides, load_client,
-    load_server,
+    ClientEndpointOverrides, ClientOverrides, ConfigError, Fallback, MAX_CONFIG_BYTES,
+    ServerEndpointOverrides, ServerOverrides, load_client, load_client_with_endpoint_overrides,
+    load_server, load_server_with_endpoint_overrides,
 };
 
 const RFC8032_PUB_HEX: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
@@ -34,6 +35,64 @@ fn unique_path(tag: &str) -> PathBuf {
         std::process::id()
     ));
     p
+}
+
+#[tokio::test]
+async fn endpoint_loaders_apply_overrides_before_validation() {
+    let server_path = temp_file(
+        "endpoint-server",
+        b"target: 127.0.0.1:9000\nbind: invalid\n",
+    );
+    let server_endpoint = ServerEndpointOverrides {
+        bind: Some("[::]:0".to_string()),
+    };
+    let server = load_server_with_endpoint_overrides(
+        &server_path,
+        &ServerOverrides::default(),
+        &server_endpoint,
+    )
+    .await
+    .unwrap();
+    assert_eq!(server.bind().to_string(), "[::]:0");
+    std::fs::remove_file(&server_path).ok();
+
+    let client_path = temp_file(
+        "endpoint-client",
+        format!("server: {RFC8032_PUB_HEX}\nserver_address: 0.0.0.0:80\n").as_bytes(),
+    );
+    let client_endpoint = ClientEndpointOverrides {
+        server_address: Some("127.0.0.1:443".to_string()),
+    };
+    let client = load_client_with_endpoint_overrides(
+        &client_path,
+        &ClientOverrides::default(),
+        &client_endpoint,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        client.server_address().unwrap().to_string(),
+        "127.0.0.1:443"
+    );
+
+    let invalid_endpoint = ClientEndpointOverrides {
+        server_address: Some("[::]:443".to_string()),
+    };
+    let err = load_client_with_endpoint_overrides(
+        &client_path,
+        &ClientOverrides::default(),
+        &invalid_endpoint,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        ConfigError::Validation {
+            field: "server_address",
+            kind: shaar::config::ValidationKind::InvalidAddress
+        }
+    ));
+    std::fs::remove_file(&client_path).ok();
 }
 
 #[tokio::test]
