@@ -60,7 +60,7 @@ fn server_bind_defaults_parses_numeric_and_override_precedes_validation() {
     assert_eq!(cfg.bind().to_string(), "0.0.0.0:0");
 
     let cfg = ServerConfig::from_text(
-        "target: 127.0.0.1:9000\nbind: [::1]:0\n",
+        "target: 127.0.0.1:9000\nbind:: [::1]:0\n",
         &ServerOverrides::default(),
     )
     .unwrap();
@@ -72,7 +72,7 @@ fn server_bind_defaults_parses_numeric_and_override_precedes_validation() {
     ));
 
     for address in ["[::]:0", "[::1]:0"] {
-        let file = format!("target: 127.0.0.1:9000\nbind: {address}\n");
+        let file = format!("target: 127.0.0.1:9000\nbind:: {address}\n");
         let cfg = ServerConfig::from_text(&file, &ServerOverrides::default()).unwrap();
         assert_eq!(cfg.bind().to_string(), address);
     }
@@ -112,7 +112,7 @@ fn client_server_address_is_optional_and_numeric_when_present() {
     let cfg = ClientConfig::from_text(&valid, &ClientOverrides::default()).unwrap();
     assert_eq!(cfg.server_address().unwrap().to_string(), "192.0.2.4:443");
     for address in ["[::1]:80", "127.0.0.1:80"] {
-        let file = format!("server: {RFC8032_PUB_HEX}\nserver_address: {address}\n");
+        let file = format!("server: {RFC8032_PUB_HEX}\nserver_address:: {address}\n");
         let cfg = ClientConfig::from_text(&file, &ClientOverrides::default()).unwrap();
         assert_eq!(cfg.server_address().unwrap().to_string(), address);
     }
@@ -138,7 +138,7 @@ fn client_server_address_rejects_invalid_destinations_and_override_repairs_file(
         "[fd15:070a:510b::1]:443",
         "bad",
     ] {
-        let file = format!("server: {RFC8032_PUB_HEX}\nserver_address: {address}\n");
+        let file = format!("server: {RFC8032_PUB_HEX}\nserver_address:: {address}\n");
         let err = ClientConfig::from_text(&file, &ClientOverrides::default()).unwrap_err();
         assert!(
             matches!(
