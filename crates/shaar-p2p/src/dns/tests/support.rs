@@ -78,7 +78,7 @@ async fn socket_pair<F: Future<Output = io::Result<UdpSocket>>>(
 ) -> io::Result<Server> {
     socket_pair_with_diagnostic(
         local,
-        |address| TcpListener::bind(address),
+        TcpListener::bind,
         bind_udp,
         |stage, address, error| {
             eprintln!(
@@ -159,12 +159,14 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
     )
     .await;
     let tcp_error = tcp_result.err().unwrap();
-    let tcp_diagnostic = tcp_diagnostics.borrow();
-    assert_eq!(tcp_diagnostic.len(), 1);
-    assert_eq!(tcp_diagnostic[0].0, "TCP");
-    assert_eq!(tcp_diagnostic[0].1, loopback());
-    assert_eq!(tcp_diagnostic[0].2, expected_kind);
-    assert_eq!(tcp_diagnostic[0].3, Some(raw_code));
+    {
+        let tcp_diagnostic = tcp_diagnostics.borrow();
+        assert_eq!(tcp_diagnostic.len(), 1);
+        assert_eq!(tcp_diagnostic[0].0, "TCP");
+        assert_eq!(tcp_diagnostic[0].1, loopback());
+        assert_eq!(tcp_diagnostic[0].2, expected_kind);
+        assert_eq!(tcp_diagnostic[0].3, Some(raw_code));
+    }
     assert_eq!(tcp_error.kind(), expected_kind);
     assert_eq!(tcp_error.raw_os_error(), Some(raw_code));
     assert_eq!(
@@ -178,7 +180,7 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
     let udp_diagnostics = std::cell::RefCell::new(Vec::new());
     let result = socket_pair_with_diagnostic(
         loopback(),
-        |address| TcpListener::bind(address),
+        TcpListener::bind,
         |address| {
             udp_attempts.set(udp_attempts.get() + 1);
             attempted_address.set(Some(address));
