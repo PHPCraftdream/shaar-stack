@@ -11,8 +11,8 @@ Save as `server.ktav`:
 target: 127.0.0.1:8080
 ## Bind the direct endpoint. Port 0 asks the OS to choose one.
 bind: 0.0.0.0:0
-key_file: "server.key"
-allowlist_path: "allowed.txt"
+key_file:: server.key
+allowlist_path:: allowed.txt
 fallback: signal
 ```
 
@@ -28,13 +28,13 @@ Create `allowed.txt` with one client **public key** per line as exactly 64 hexad
 
 ## 3. Client configuration
 
-Save as `client.ktav`, substituting the server's printed public key and an actual numeric address/port reachable from the client (the address below is deliberately illustrative, not a usable endpoint):
+Save as `client.ktav`, replacing the example public key with the server's printed public key and the documentation-only address with an actual numeric address/port reachable from the client:
 
 ```ktav
-server: "<server-public-key>"
-server_address: "198.51.100.8:49152"
+server: d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+server_address: 198.51.100.8:49152
 listen: 127.0.0.1:2222
-key_file: "client.key"
+key_file:: client.key
 fallback: signal
 ```
 
@@ -49,7 +49,7 @@ shaar-server --config server.ktav
 shaar-client --config client.ktav
 ```
 
-The client also accepts no arguments, in which case it reads `client.ktav`. Connect a local application to `127.0.0.1:2222`; its TCP streams are forwarded through the authenticated direct session to the server's configured loopback `target`. The client retries failed dials up to three times with bounded timeouts/backoff; access-denied and peer-mismatch errors are not retried. A live session is reused. If it closes, workers for that session are retired and a later accepted local connection initiates a new dial. This is not a promise that existing streams survive reconnection.
+The client also accepts no arguments, in which case it reads `client.ktav`. Connect a local application to `127.0.0.1:2222`; its TCP streams are forwarded through the authenticated direct session to the server's configured loopback `target`. The client retries failed dials up to three times with bounded timeouts/backoff. Errors classified as access-denied or peer-mismatch are not retried, but a wrong pinned key can surface as a generic connection failure and consume the retry budget. A live session is reused. If it closes, workers for that session are retired and a later accepted local connection initiates a new dial. This is not a promise that existing streams survive reconnection.
 
 ## 5. Limits and transport restrictions
 
