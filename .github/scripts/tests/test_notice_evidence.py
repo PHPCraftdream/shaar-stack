@@ -75,6 +75,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             _, metadata, sources, source = self.fixture(root)
             directory = source / "junction-simulated"
             directory.mkdir()
+            directory = directory.resolve(strict=True)
             real_lstat = Path.lstat
             def simulated_lstat(path, *args, **kwargs):
                 info = real_lstat(path, *args, **kwargs)
