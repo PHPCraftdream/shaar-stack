@@ -405,6 +405,20 @@ async fn scenario(
                 .map_err(|error| error.to_string())?;
             stream.shutdown().await.map_err(|error| error.to_string())?;
         }
+        let (mut stream, _) = target.accept().await.map_err(|error| error.to_string())?;
+        let mut payload = [0; REQUEST.len()];
+        stream
+            .read_exact(&mut payload)
+            .await
+            .map_err(|error| error.to_string())?;
+        if payload != REQUEST {
+            return Err("target received incorrect post-restart bytes".into());
+        }
+        stream
+            .write_all(REPLY)
+            .await
+            .map_err(|error| error.to_string())?;
+        stream.shutdown().await.map_err(|error| error.to_string())?;
         Ok(())
     });
     let server = Identity::from_seed([0x31; 32]);
@@ -494,6 +508,50 @@ async fn scenario(
         .map_err(|error: std::io::Error| error.to_string())
     }))
     .await?;
+    processes.0[client_index]
+        .child
+        .start_kill()
+        .map_err(|error| error.to_string())?;
+    timeout(CLEANUP_TIMEOUT, processes.0[client_index].child.wait())
+        .await
+        .map_err(|_| "client reap deadline")?
+        .map_err(|error| error.to_string())?;
+    if processes.0[server_index]
+        .child
+        .try_wait()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Err("server exited before client restart".into());
+    }
+    let restarted = processes.spawn(&client_exe, &client_config, &temp.0)?;
+    let line = ready_line(&mut processes.0[restarted].stdout).await?;
+    let address: SocketAddr = line
+        .trim()
+        .strip_prefix("listening=")
+        .ok_or("invalid restarted client readiness")?
+        .parse()
+        .map_err(|error: std::net::AddrParseError| error.to_string())?;
+    if !address.ip().is_loopback() || address.port() == 0 {
+        return Err("unexpected restarted client bind address".into());
+    }
+    timeout(IO_TIMEOUT, async {
+        let mut stream = TcpStream::connect(address).await?;
+        stream.write_all(REQUEST).await?;
+        let mut reply = [0; REPLY.len()];
+        stream.read_exact(&mut reply).await?;
+        if reply != REPLY {
+            return Err(std::io::Error::other("post-restart reply bytes differ"));
+        }
+        let mut extra = [0; 1];
+        if stream.read(&mut extra).await? != 0 {
+            return Err(std::io::Error::other("unexpected post-restart reply bytes"));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| "post-restart forwarding deadline")?
+    .map_err(|error: std::io::Error| error.to_string())?;
     match tasks.join_next().await {
         Some(Ok(Ok(()))) => Ok(()),
         Some(Ok(Err(error))) => Err(error),
