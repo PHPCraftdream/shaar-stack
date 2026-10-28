@@ -7,7 +7,7 @@ use std::{
 use shaar::{
     config::{ClientConfig, ClientEndpointOverrides, ClientOverrides, Fallback, MAX_CONFIG_BYTES},
     identity::Identity,
-    network::{Allowlist, Endpoint, Limits, NetworkError, Session},
+    network::{Allowlist, Endpoint, ForwardError, Limits, NetworkError, Session},
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -97,8 +97,36 @@ async fn admission_live(session: &Session) -> bool {
     }
 }
 
-async fn handle_stream(session: Arc<Session>, stream: TcpStream) {
-    let _ = session.forward(stream).await;
+async fn handle_stream(session: Arc<Session>, stream: TcpStream) -> Result<(), ForwardError> {
+    session.forward(stream).await.map(|_| ())
+}
+
+fn worker_failure(
+    result: Result<Result<(), ForwardError>, tokio::task::JoinError>,
+    cancelling: bool,
+) -> Option<Box<dyn Error + Send + Sync>> {
+    match result {
+        Ok(Err(ForwardError::TaskFailure)) => Some(Box::new(ForwardError::TaskFailure)),
+        Err(error) if !cancelling || !error.is_cancelled() => Some(Box::new(error)),
+        Ok(Err(error)) => {
+            eprintln!("shaar-client: stream ended: {error}");
+            None
+        }
+        _ => None,
+    }
+}
+
+async fn abort_workers(
+    workers: &mut JoinSet<Result<(), ForwardError>>,
+) -> Option<Box<dyn Error + Send + Sync>> {
+    workers.abort_all();
+    let mut failure = None;
+    while let Some(result) = workers.join_next().await {
+        if let Some(error) = worker_failure(result, true) {
+            failure.get_or_insert(error);
+        }
+    }
+    failure
 }
 
 async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
@@ -158,9 +186,12 @@ async fn coordinate_until<F: std::future::Future<Output = Result<(), std::io::Er
             biased;
             signal = &mut stopping => { if let Err(error) = signal { failure = Some(Box::new(error)); } break; }
             _ = async { if let Some(active) = monitored { active.closed().await; } }, if session.is_some() => {
-                session = None; workers.abort_all(); while workers.join_next().await.is_some() {}
+                session = None;
+                if let Some(error) = abort_workers(&mut workers).await { failure = Some(error); break; }
             }
-            result = workers.join_next(), if !workers.is_empty() => { if let Some(Err(error)) = result { failure = Some(Box::new(error)); break; } }
+            result = workers.join_next(), if !workers.is_empty() => {
+                if let Some(error) = result.and_then(|result| worker_failure(result, false)) { failure = Some(error); break; }
+            }
             incoming = listener.accept(), if workers.len() < MAX_CLIENTS => {
                 let (stream, _) = match incoming { Ok(value) => value, Err(error) => { failure = Some(Box::new(error)); break; } };
                 // Admission liveness is checked before forwarding begins. If closure
@@ -169,8 +200,10 @@ async fn coordinate_until<F: std::future::Future<Output = Result<(), std::io::Er
                     && !admission_live(&active).await
                 {
                     session = None;
-                    workers.abort_all();
-                    while workers.join_next().await.is_some() {}
+                    if let Some(error) = abort_workers(&mut workers).await {
+                        failure = Some(error);
+                        break 'coordinator;
+                    }
                 }
                 if session.is_none() {
                     let connected = tokio::select! {
@@ -190,8 +223,9 @@ async fn coordinate_until<F: std::future::Future<Output = Result<(), std::io::Er
             }
         }
     }
-    workers.abort_all();
-    while workers.join_next().await.is_some() {}
+    if let Some(error) = abort_workers(&mut workers).await {
+        failure.get_or_insert(error);
+    }
     if let Some(session) = session.take() {
         drop(session);
     }

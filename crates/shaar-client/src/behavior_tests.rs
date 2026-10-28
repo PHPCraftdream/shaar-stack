@@ -42,6 +42,22 @@ async fn shutdown_releases_listener_port() {
     .expect("shutdown/port-reuse test timed out");
 }
 
+#[tokio::test]
+async fn worker_failures_are_reported_and_cancelled_workers_are_joined() {
+    assert!(worker_failure(Ok(Err(ForwardError::TaskFailure)), false).is_some());
+    assert!(worker_failure(Ok(Err(ForwardError::PathUnavailable)), false).is_none());
+    assert!(worker_failure(Ok(Ok(())), false).is_none());
+
+    let mut workers = JoinSet::new();
+    workers.spawn(async { std::future::pending::<Result<(), ForwardError>>().await });
+    assert!(abort_workers(&mut workers).await.is_none());
+    assert!(workers.is_empty());
+
+    workers.spawn(async { panic!("worker failure") });
+    let result = workers.join_next().await.unwrap();
+    assert!(worker_failure(result, false).is_some());
+}
+
 #[test]
 fn invalid_configuration_text_is_rejected() {
     let result = ClientConfig::from_text_with_endpoint_overrides(
