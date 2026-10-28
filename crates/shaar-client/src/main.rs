@@ -176,8 +176,26 @@ async fn coordinate_until<F: std::future::Future<Output = Result<(), std::io::Er
     address: SocketAddr,
     shutdown: F,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    coordinate_with_workers(
+        listener,
+        endpoint,
+        key_hex,
+        address,
+        shutdown,
+        JoinSet::new(),
+    )
+    .await
+}
+
+async fn coordinate_with_workers<F: std::future::Future<Output = Result<(), std::io::Error>>>(
+    listener: TcpListener,
+    endpoint: Endpoint,
+    key_hex: String,
+    address: SocketAddr,
+    shutdown: F,
+    mut workers: JoinSet<Result<(), ForwardError>>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut session: Option<Arc<Session>> = None;
-    let mut workers = JoinSet::new();
     let mut stopping = Box::pin(shutdown);
     let mut failure: Option<Box<dyn Error + Send + Sync>> = None;
     'coordinator: loop {
