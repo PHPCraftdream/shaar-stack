@@ -29,4 +29,4 @@ n0-future = "=0.3.2"
 netwatch = "=0.19.3"
 tokio-util = { version = "=0.7.20", features = ["rt"] }
 # Multi-thread execution and deterministic test coordination only.
-tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
+tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "process"] }

@@ -149,6 +149,7 @@ async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
         "[::]:0".parse()?
     };
     let endpoint = Endpoint::bind(&identity, bind, Allowlist::default(), Limits::new(1)?).await?;
+    println!("listening={}", listener.local_addr()?);
     coordinate(listener, endpoint, key_hex, address).await
 }
 

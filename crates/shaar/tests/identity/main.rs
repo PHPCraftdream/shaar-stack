@@ -9,6 +9,7 @@
 
 mod common;
 mod process;
+mod process_smoke;
 mod security;
 mod storage;
 mod vectors;
