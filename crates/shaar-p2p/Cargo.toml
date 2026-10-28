@@ -4,6 +4,7 @@ name = "shaar-p2p"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 hickory-resolver = { version = "=0.26.3", default-features = false, features = ["tokio"] }
