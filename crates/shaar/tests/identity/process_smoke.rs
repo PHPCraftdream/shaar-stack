@@ -21,6 +21,7 @@ use tokio::{
 
 const DEADLINE: Duration = Duration::from_secs(45);
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
+const PARALLEL_STREAMS: usize = 8;
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST: &[u8] = b"D1-unique-\0\xff\x17";
 const REPLY: &[u8] = b"D1-reply-\xfe\0";
@@ -384,6 +385,26 @@ async fn scenario(
                 .map_err(|error| error.to_string())?;
             stream.shutdown().await.map_err(|error| error.to_string())?;
         }
+        let mut concurrent = Vec::with_capacity(PARALLEL_STREAMS);
+        for _ in 0..PARALLEL_STREAMS {
+            let (mut stream, _) = target.accept().await.map_err(|error| error.to_string())?;
+            let mut payload = [0; REQUEST.len()];
+            stream
+                .read_exact(&mut payload)
+                .await
+                .map_err(|error| error.to_string())?;
+            if payload != REQUEST {
+                return Err("target received incorrect concurrent bytes".into());
+            }
+            concurrent.push(stream);
+        }
+        for mut stream in concurrent {
+            stream
+                .write_all(REPLY)
+                .await
+                .map_err(|error| error.to_string())?;
+            stream.shutdown().await.map_err(|error| error.to_string())?;
+        }
         Ok(())
     });
     let server = Identity::from_seed([0x31; 32]);
@@ -453,6 +474,26 @@ async fn scenario(
         .map_err(|_| "forwarding deadline")?
         .map_err(|error: std::io::Error| error.to_string())?;
     }
+    futures::future::try_join_all((0..PARALLEL_STREAMS).map(|_| async move {
+        timeout(IO_TIMEOUT, async {
+            let mut stream = TcpStream::connect(client_addr).await?;
+            stream.write_all(REQUEST).await?;
+            let mut reply = [0; REPLY.len()];
+            stream.read_exact(&mut reply).await?;
+            if reply != REPLY {
+                return Err(std::io::Error::other("concurrent reply bytes differ"));
+            }
+            let mut extra = [0; 1];
+            if stream.read(&mut extra).await? != 0 {
+                return Err(std::io::Error::other("unexpected concurrent reply bytes"));
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| "concurrent forwarding deadline".to_owned())?
+        .map_err(|error: std::io::Error| error.to_string())
+    }))
+    .await?;
     match tasks.join_next().await {
         Some(Ok(Ok(()))) => Ok(()),
         Some(Ok(Err(error))) => Err(error),
