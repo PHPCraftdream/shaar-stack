@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -58,6 +59,18 @@ class DependencyLicenseTests(unittest.TestCase):
              mock.patch.object(licenses.subprocess, "run", side_effect=lambda args, **kwargs: real_run([os.sys.executable, "-c", "import sys; print('denied'); sys.exit(17)"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=kwargs["timeout"])):
             self.assertEqual(licenses.check(), 17)
             self.assertEqual((Path(tmp) / "dependency-licenses.log").read_text().strip(), "denied")
+
+    def test_check_preserves_unicode_report_with_cp1252_stdout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+            result = subprocess.CompletedProcess([], 4, stdout="denied ├── package\n".encode("utf-8"))
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": tmp, "RUNNER_OS": "Windows"}), \
+                 mock.patch.object(licenses.subprocess, "run", return_value=result), \
+                 mock.patch.object(licenses.sys, "stdout", output):
+                self.assertEqual(licenses.check(), 4)
+                self.assertIn("\\u251c\\u2500\\u2500", output.buffer.getvalue().decode("cp1252"))
+                self.assertEqual((Path(tmp) / "dependency-licenses.log").read_text(encoding="utf-8"), "denied ├── package\n")
+            output.close()
 
     def test_action_keeps_check_and_report_upload_failures_gating(self):
         action = (SCRIPT.parents[1] / "actions" / "dependency-license" / "action.yml").read_text()
