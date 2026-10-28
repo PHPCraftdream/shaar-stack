@@ -219,6 +219,82 @@ async fn cleanup_reaps_a_running_child() {
 }
 
 #[tokio::test]
+async fn finalize_reaps_child_and_joins_worker_after_error_and_panic() {
+    struct DropNotice(Option<tokio::sync::oneshot::Sender<()>>);
+    impl Drop for DropNotice {
+        fn drop(&mut self) {
+            if let Some(sender) = self.0.take() {
+                let _ = sender.send(());
+            }
+        }
+    }
+    for panic_case in [false, true] {
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "process_smoke::child_cleanup_fixture",
+                "--nocapture",
+            ])
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut processes = Processes(vec![Process { child, stdout }]);
+        let observed = timeout(IO_TIMEOUT, async {
+            for _ in 0..8 {
+                if ready_line(&mut processes.0[0].stdout)
+                    .await?
+                    .contains("CHILD_CLEANUP_READY")
+                {
+                    return Ok::<(), String>(());
+                }
+            }
+            Err("child readiness marker missing".into())
+        })
+        .await;
+        if !matches!(observed, Ok(Ok(()))) {
+            let cleanup = processes.cleanup().await;
+            panic!("child readiness failed; cleanup: {cleanup:?}");
+        }
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel();
+        let mut tasks = JoinSet::new();
+        tasks.spawn(async move {
+            let _notice = DropNotice(Some(dropped_tx));
+            let _ = started_tx.send(());
+            std::future::pending::<()>().await;
+            Ok(())
+        });
+        let started = timeout(IO_TIMEOUT, started_rx).await;
+        let result = std::panic::AssertUnwindSafe(timeout(DEADLINE, async {
+            assert!(!panic_case, "injected scenario panic");
+            Err::<(), String>("injected scenario error".into())
+        }))
+        .catch_unwind()
+        .await;
+        let outcome = finalize(&mut processes, &mut tasks, result).await;
+        assert!(
+            started.is_ok_and(|value| value.is_ok()),
+            "worker never started"
+        );
+        let expected = if panic_case {
+            "smoke panicked"
+        } else {
+            "smoke: injected scenario error"
+        };
+        assert_eq!(outcome.unwrap_err(), expected);
+        assert!(processes.0[0].child.try_wait().unwrap().is_some());
+        assert!(tasks.is_empty());
+        assert!(
+            dropped_rx.await.is_ok(),
+            "worker was not dropped before finalize returned"
+        );
+    }
+}
+
+#[tokio::test]
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
 async fn real_server_client_forward_exact_loopback_bytes() {
     run().await.unwrap();
@@ -234,6 +310,17 @@ async fn run() -> Result<(), String> {
     ))
     .catch_unwind()
     .await;
+    finalize(&mut processes, &mut tasks, result).await
+}
+
+type ScenarioResult =
+    Result<Result<Result<(), String>, tokio::time::error::Elapsed>, Box<dyn std::any::Any + Send>>;
+
+async fn finalize(
+    processes: &mut Processes,
+    tasks: &mut JoinSet<Result<(), String>>,
+    result: ScenarioResult,
+) -> Result<(), String> {
     let mut errors = Vec::new();
     match result {
         Ok(Ok(Ok(()))) => {}
