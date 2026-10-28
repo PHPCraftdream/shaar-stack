@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 
@@ -54,8 +55,9 @@ def check():
     executable = Path(os.environ["RUNNER_TEMP"]) / ("cargo-deny-bin.exe" if os.environ["RUNNER_OS"] == "Windows" else "cargo-deny-bin")
     result = subprocess.run([str(executable), "--locked", "--config", ".github/deny.toml", "check", "licenses"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=SUBPROCESS_TIMEOUT)
     output = result.stdout.decode("utf-8", errors="replace")
-    print(output, end="", flush=True)
     (Path(os.environ["RUNNER_TEMP"]) / "dependency-licenses.log").write_text(output, encoding="utf-8")
+    printable = output.encode(sys.stdout.encoding or "utf-8", errors="backslashreplace").decode(sys.stdout.encoding or "utf-8")
+    print(printable, end="", flush=True)
     return result.returncode
 
 
