@@ -132,7 +132,8 @@ where
 }
 
 #[tokio::test]
-async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_retrying_other_errors() {
+async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_retrying_other_errors()
+ {
     use std::cell::Cell;
 
     let raw_code = if cfg!(windows) { 10013 } else { 13 };
@@ -148,9 +149,12 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
         },
         |_| std::future::ready(Err(io::Error::other("UDP must not be reached"))),
         |stage, address, error| {
-            tcp_diagnostics
-                .borrow_mut()
-                .push((stage.to_owned(), address, error.kind(), error.raw_os_error()));
+            tcp_diagnostics.borrow_mut().push((
+                stage.to_owned(),
+                address,
+                error.kind(),
+                error.raw_os_error(),
+            ));
         },
     )
     .await;
@@ -163,7 +167,11 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
     assert_eq!(tcp_diagnostic[0].3, Some(raw_code));
     assert_eq!(tcp_error.kind(), expected_kind);
     assert_eq!(tcp_error.raw_os_error(), Some(raw_code));
-    assert_eq!(tcp_attempts.get(), 1, "PAIR_RETRIED_NON_COLLISION_TCP_ERROR");
+    assert_eq!(
+        tcp_attempts.get(),
+        1,
+        "PAIR_RETRIED_NON_COLLISION_TCP_ERROR"
+    );
 
     let udp_attempts = Cell::new(0);
     let attempted_address = std::cell::Cell::new(None);
@@ -177,16 +185,23 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
             std::future::ready(Err(io::Error::from_raw_os_error(raw_code)))
         },
         |stage, address, error| {
-            udp_diagnostics
-                .borrow_mut()
-                .push((stage.to_owned(), address, error.kind(), error.raw_os_error()));
+            udp_diagnostics.borrow_mut().push((
+                stage.to_owned(),
+                address,
+                error.kind(),
+                error.raw_os_error(),
+            ));
         },
     )
     .await;
     let error = result.err().unwrap();
     let diagnostics = udp_diagnostics.borrow();
     let actual_address = attempted_address.get().unwrap();
-    assert_eq!(udp_attempts.get(), 1, "PAIR_RETRIED_NON_COLLISION_UDP_ERROR");
+    assert_eq!(
+        udp_attempts.get(),
+        1,
+        "PAIR_RETRIED_NON_COLLISION_UDP_ERROR"
+    );
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].0, "UDP");
     assert_eq!(diagnostics[0].1, actual_address);
