@@ -82,7 +82,16 @@ async fn server_loop(
     session_limit: usize,
     shutdown: &mut std::pin::Pin<Box<impl std::future::Future<Output = std::io::Result<()>>>>,
 ) -> Result<(), String> {
-    let mut sessions = JoinSet::new();
+    server_loop_with_sessions(endpoint, target, session_limit, shutdown, JoinSet::new()).await
+}
+
+async fn server_loop_with_sessions(
+    endpoint: &mut Endpoint,
+    target: std::net::SocketAddr,
+    session_limit: usize,
+    shutdown: &mut std::pin::Pin<Box<impl std::future::Future<Output = std::io::Result<()>>>>,
+    mut sessions: JoinSet<Result<ServeReport, ForwardError>>,
+) -> Result<(), String> {
     let (stop_sender, stop_receiver) = watch::channel(false);
     let outcome = 'run: loop {
         while let Some(result) = sessions.try_join_next() {
