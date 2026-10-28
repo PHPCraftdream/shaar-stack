@@ -357,20 +357,33 @@ async fn scenario(
         .map_err(|error| error.to_string())?;
     let target_addr = target.local_addr().map_err(|error| error.to_string())?;
     tasks.spawn(async move {
-        let (mut stream, _) = target.accept().await.map_err(|error| error.to_string())?;
-        let mut payload = [0; REQUEST.len()];
-        stream
-            .read_exact(&mut payload)
-            .await
-            .map_err(|error| error.to_string())?;
-        if payload != REQUEST {
-            return Err("target received incorrect bytes".into());
+        for half_close in [false, true] {
+            let (mut stream, _) = target.accept().await.map_err(|error| error.to_string())?;
+            let mut payload = [0; REQUEST.len()];
+            stream
+                .read_exact(&mut payload)
+                .await
+                .map_err(|error| error.to_string())?;
+            if payload != REQUEST {
+                return Err("target received incorrect bytes".into());
+            }
+            if half_close {
+                let mut extra = [0; 1];
+                if stream
+                    .read(&mut extra)
+                    .await
+                    .map_err(|error| error.to_string())?
+                    != 0
+                {
+                    return Err("target received unexpected bytes after request".into());
+                }
+            }
+            stream
+                .write_all(REPLY)
+                .await
+                .map_err(|error| error.to_string())?;
+            stream.shutdown().await.map_err(|error| error.to_string())?;
         }
-        stream
-            .write_all(REPLY)
-            .await
-            .map_err(|error| error.to_string())?;
-        stream.shutdown().await.map_err(|error| error.to_string())?;
         Ok(())
     });
     let server = Identity::from_seed([0x31; 32]);
@@ -415,26 +428,31 @@ async fn scenario(
     if !client_addr.ip().is_loopback() || client_addr.port() == 0 {
         return Err("unexpected client bind address".into());
     }
-    let mut stream = timeout(IO_TIMEOUT, TcpStream::connect(client_addr))
+    for half_close in [false, true] {
+        let mut stream = timeout(IO_TIMEOUT, TcpStream::connect(client_addr))
+            .await
+            .map_err(|_| "client connect deadline")?
+            .map_err(|error| error.to_string())?;
+        timeout(IO_TIMEOUT, async {
+            stream.write_all(REQUEST).await?;
+            if half_close {
+                stream.shutdown().await?;
+            }
+            let mut reply = [0; REPLY.len()];
+            stream.read_exact(&mut reply).await?;
+            if reply != REPLY {
+                return Err(std::io::Error::other("reply bytes differ"));
+            }
+            let mut extra = [0; 1];
+            if stream.read(&mut extra).await? != 0 {
+                return Err(std::io::Error::other("unexpected bytes after exact reply"));
+            }
+            Ok(())
+        })
         .await
-        .map_err(|_| "client connect deadline")?
-        .map_err(|error| error.to_string())?;
-    timeout(IO_TIMEOUT, async {
-        stream.write_all(REQUEST).await?;
-        let mut reply = [0; REPLY.len()];
-        stream.read_exact(&mut reply).await?;
-        if reply != REPLY {
-            return Err(std::io::Error::other("reply bytes differ"));
-        }
-        let mut extra = [0; 1];
-        if stream.read(&mut extra).await? != 0 {
-            return Err(std::io::Error::other("unexpected bytes after exact reply"));
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|_| "forwarding deadline")?
-    .map_err(|error: std::io::Error| error.to_string())?;
+        .map_err(|_| "forwarding deadline")?
+        .map_err(|error: std::io::Error| error.to_string())?;
+    }
     match tasks.join_next().await {
         Some(Ok(Ok(()))) => Ok(()),
         Some(Ok(Err(error))) => Err(error),
