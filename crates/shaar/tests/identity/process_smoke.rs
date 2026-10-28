@@ -538,6 +538,7 @@ async fn rejection_scenario(
         terminal = stream.read(&mut byte) => match terminal {
             Ok(0) => {},
             Ok(_) => return Err("rejected peer received application bytes".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {},
             Err(error) => return Err(format!("client terminal read failed: {error}")),
         },
     }
@@ -559,9 +560,10 @@ async fn rejection_scenario(
         .await
         .map_err(|_| "server reap deadline")?
         .map_err(|error| error.to_string())?;
-    match target.accept().now_or_never() {
-        None => Ok(()),
-        Some(Ok(_)) => Err("rejected peer reached target before server exit".into()),
-        Some(Err(error)) => Err(error.to_string()),
+    let target = target.into_std().map_err(|error| error.to_string())?;
+    match target.accept() {
+        Ok(_) => Err("rejected peer reached target before server exit".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(()),
+        Err(error) => Err(error.to_string()),
     }
 }
