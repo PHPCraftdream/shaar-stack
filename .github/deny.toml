@@ -1,0 +1,24 @@
+# Provisional cargo-deny configuration used by the CI dependency-license gate.
+# This policy is not legal advice or a determination of license compliance.
+[graph]
+all-features = true
+
+[advisories]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+]
+# A matching license allowlist uses SPDX expressions; do not treat an expression
+# as a plain string. Missing/unrecognized licenses should remain denied by the
+# tool's policy rather than being allowed via an exception.
+include-dev = true
+include-build = true
+
+[bans]
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
