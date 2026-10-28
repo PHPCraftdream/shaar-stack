@@ -8,7 +8,9 @@ runs:
   steps:
     - name: Test dependency-license regressions
       shell: bash
-      run: python -I -X utf8 .github/scripts/tests/test_dependency_licenses.py
+      run: |
+        python -I -X utf8 .github/scripts/tests/test_dependency_licenses.py
+        python -I -X utf8 .github/scripts/tests/test_notice_evidence.py
     - name: Install checksum-verified cargo-deny
       shell: bash
       run: python -I .github/scripts/dependency_licenses.py install
