@@ -110,6 +110,18 @@ jobs:
         run: cargo fmt --all -- --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Focused real-process D1 loopback forwarding
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p shaar-server -p shaar-client
+          export SHAAR_SERVER_EXE="$PWD/target/debug/shaar-server"
+          export SHAAR_CLIENT_EXE="$PWD/target/debug/shaar-client"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            export SHAAR_SERVER_EXE="${SHAAR_SERVER_EXE}.exe"
+            export SHAAR_CLIENT_EXE="${SHAAR_CLIENT_EXE}.exe"
+          fi
+          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_server_client_forward_exact_loopback_bytes --nocapture
       - name: Focused SDK, config, server, and client tests
         shell: bash
         run: |
