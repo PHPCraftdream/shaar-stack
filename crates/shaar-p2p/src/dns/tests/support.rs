@@ -102,22 +102,22 @@ where
     FU: Future<Output = io::Result<UdpSocket>>,
 {
     for _ in 0..PAIR_ATTEMPTS {
-        let tcp = match bind_tcp(local).await {
-            Ok(tcp) => tcp,
+        let udp = match bind_udp(local).await {
+            Ok(udp) => udp,
             Err(error) => {
-                diagnostic("TCP", local, &error);
+                diagnostic("UDP", local, &error);
                 if error.kind() == io::ErrorKind::AddrInUse {
                     continue;
                 }
                 return Err(error);
             }
         };
-        let address = tcp.local_addr()?;
-        // TCP does not reserve UDP's port namespace; retain it until UDP succeeds.
-        match bind_udp(address).await {
-            Ok(udp) => return Ok(Server { udp, tcp, address }),
+        let address = udp.local_addr()?;
+        // Retain the UDP reservation while binding the same TCP port.
+        match bind_tcp(address).await {
+            Ok(tcp) => return Ok(Server { udp, tcp, address }),
             Err(error) => {
-                diagnostic("UDP", address, &error);
+                diagnostic("TCP", address, &error);
                 if error.kind() == io::ErrorKind::AddrInUse {
                     continue;
                 }
@@ -140,14 +140,16 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
     let expected_kind = io::Error::from_raw_os_error(raw_code).kind();
 
     let tcp_attempts = Cell::new(0);
+    let attempted_tcp = Cell::new(None);
     let tcp_diagnostics = std::cell::RefCell::new(Vec::new());
     let tcp_result = socket_pair_with_diagnostic(
         loopback(),
-        |_| {
+        |address| {
             tcp_attempts.set(tcp_attempts.get() + 1);
+            attempted_tcp.set(Some(address));
             std::future::ready(Err(io::Error::from_raw_os_error(raw_code)))
         },
-        |_| std::future::ready(Err(io::Error::other("UDP must not be reached"))),
+        UdpSocket::bind,
         |stage, address, error| {
             tcp_diagnostics.borrow_mut().push((
                 stage.to_owned(),
@@ -163,7 +165,8 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
     let tcp_diagnostic = tcp_diagnostics.into_inner();
     assert_eq!(tcp_diagnostic.len(), 1);
     assert_eq!(tcp_diagnostic[0].0, "TCP");
-    assert_eq!(tcp_diagnostic[0].1, loopback());
+    assert_eq!(tcp_diagnostic[0].1, attempted_tcp.get().unwrap());
+    assert_ne!(tcp_diagnostic[0].1.port(), 0);
     assert_eq!(tcp_diagnostic[0].2, expected_kind);
     assert_eq!(tcp_diagnostic[0].3, Some(raw_code));
     assert_eq!(tcp_error.kind(), expected_kind);
@@ -175,11 +178,15 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
     );
 
     let udp_attempts = Cell::new(0);
-    let attempted_address = std::cell::Cell::new(None);
+    let tcp_reached = Cell::new(0);
+    let attempted_address = Cell::new(None);
     let udp_diagnostics = std::cell::RefCell::new(Vec::new());
     let result = socket_pair_with_diagnostic(
         loopback(),
-        TcpListener::bind,
+        |_| {
+            tcp_reached.set(tcp_reached.get() + 1);
+            std::future::ready(Err(io::Error::other("TCP must not be reached")))
+        },
         |address| {
             udp_attempts.set(udp_attempts.get() + 1);
             attempted_address.set(Some(address));
@@ -206,7 +213,12 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].0, "UDP");
     assert_eq!(diagnostics[0].1, actual_address);
-    assert_ne!(actual_address.port(), 0);
+    assert_eq!(actual_address, loopback());
+    assert_eq!(
+        tcp_reached.get(),
+        0,
+        "TCP_BIND_AFTER_FAILED_UDP_RESERVATION"
+    );
     assert_eq!(diagnostics[0].2, expected_kind);
     assert_eq!(diagnostics[0].3, Some(raw_code));
     assert_eq!(error.kind(), expected_kind);
@@ -214,42 +226,71 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
 }
 
 #[tokio::test]
-async fn owned_dns_pair_allocator_retries_udp_collision_while_retaining_tcp() {
+async fn owned_dns_pair_allocator_retries_tcp_collision_while_retaining_udp() {
     use std::cell::Cell;
     let attempts = Cell::new(0);
     let collision = Cell::new(false);
-    let server = socket_pair(loopback(), |address| {
-        attempts.set(attempts.get() + 1);
-        let collision = &collision;
-        async move {
-            assert_eq!(
-                TcpListener::bind(address).await.err().unwrap().kind(),
-                io::ErrorKind::AddrInUse,
-                "PAIR_TCP_RESERVATION_RELEASED_EARLY"
-            );
-            if !collision.get() {
-                let occupied = UdpSocket::bind(address).await?;
-                collision.set(true);
-                let result = UdpSocket::bind(address).await;
+    let server = socket_pair_with_diagnostic(
+        loopback(),
+        |address| {
+            attempts.set(attempts.get() + 1);
+            let collision = &collision;
+            async move {
                 assert_eq!(
-                    result.as_ref().err().unwrap().kind(),
-                    io::ErrorKind::AddrInUse
+                    UdpSocket::bind(address).await.err().unwrap().kind(),
+                    io::ErrorKind::AddrInUse,
+                    "PAIR_UDP_RESERVATION_RELEASED_EARLY"
                 );
-                drop(occupied);
-                result
-            } else {
-                UdpSocket::bind(address).await
+                if !collision.get() {
+                    let occupied = TcpListener::bind(address).await?;
+                    collision.set(true);
+                    let result = TcpListener::bind(address).await;
+                    assert_eq!(
+                        result.as_ref().err().unwrap().kind(),
+                        io::ErrorKind::AddrInUse
+                    );
+                    drop(occupied);
+                    result
+                } else {
+                    TcpListener::bind(address).await
+                }
             }
-        }
-    })
+        },
+        UdpSocket::bind,
+        |_, _, _| {},
+    )
     .await
     .unwrap();
-    assert!(collision.get(), "CONTROLLED_UDP_COLLISION_NOT_EXERCISED");
+    assert!(collision.get(), "CONTROLLED_TCP_COLLISION_NOT_EXERCISED");
     assert!((2..=PAIR_ATTEMPTS).contains(&attempts.get()));
     assert_eq!(
         server.tcp.local_addr().unwrap(),
         server.udp.local_addr().unwrap()
     );
+}
+
+#[tokio::test]
+async fn owned_dns_pair_selects_ephemeral_udp_port_before_tcp() {
+    use std::cell::Cell;
+    let calls = Cell::new(0);
+    let server = socket_pair(loopback(), |address| {
+        calls.set(calls.get() + 1);
+        async move {
+            if address.port() != 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "chosen UDP port denied",
+                ));
+            }
+            UdpSocket::bind(address).await
+        }
+    })
+    .await
+    .unwrap();
+    assert!((1..=PAIR_ATTEMPTS).contains(&calls.get()));
+    assert_ne!(server.address.port(), 0);
+    assert_eq!(server.address, server.udp.local_addr().unwrap());
+    assert_eq!(server.address, server.tcp.local_addr().unwrap());
 }
 
 #[tokio::test]
@@ -275,18 +316,23 @@ async fn owned_dns_pair_allocator_bounds_collisions_and_propagates_other_errors(
             assert_eq!(error.to_string(), "allocator control failure");
         }
     }
-    let occupied = TcpListener::bind(loopback()).await.unwrap();
-    let udp_attempts = Cell::new(0);
-    let result = socket_pair(occupied.local_addr().unwrap(), |_| {
-        udp_attempts.set(udp_attempts.get() + 1);
-        std::future::ready(Err(io::Error::other("unexpected UDP bind")))
-    })
+    let occupied = UdpSocket::bind(loopback()).await.unwrap();
+    let tcp_attempts = Cell::new(0);
+    let result = socket_pair_with_diagnostic(
+        occupied.local_addr().unwrap(),
+        |_| {
+            tcp_attempts.set(tcp_attempts.get() + 1);
+            std::future::ready(Err(io::Error::other("unexpected TCP bind")))
+        },
+        UdpSocket::bind,
+        |_, _, _| {},
+    )
     .await;
     assert_eq!(result.err().unwrap().kind(), io::ErrorKind::AddrInUse);
     assert_eq!(
-        udp_attempts.get(),
+        tcp_attempts.get(),
         0,
-        "UDP_BIND_AFTER_FAILED_TCP_RESERVATION"
+        "TCP_BIND_AFTER_FAILED_UDP_RESERVATION"
     );
 }
 
