@@ -58,6 +58,50 @@ async fn worker_failures_are_reported_and_cancelled_workers_are_joined() {
     assert!(worker_failure(result, false).is_some());
 }
 
+#[tokio::test]
+async fn coordinator_reports_worker_failure_after_joining_other_workers() {
+    timeout(Duration::from_secs(15), async {
+        let identity = Identity::from_seed([132; 32]);
+        let endpoint = Endpoint::bind(
+            &identity,
+            "127.0.0.1:0".parse().unwrap(),
+            Allowlist::default(),
+            Limits::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
+        let endpoint_address = endpoint.local_addr();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener_address = listener.local_addr().unwrap();
+        let (held_tx, held_rx) = oneshot::channel::<()>();
+        let mut workers = JoinSet::new();
+        workers.spawn(async move {
+            let _held = held_tx;
+            std::future::pending::<Result<(), ForwardError>>().await
+        });
+        workers.spawn(async { Err(ForwardError::TaskFailure) });
+        let result = coordinate_with_workers(
+            listener,
+            endpoint,
+            String::new(),
+            "127.0.0.1:9".parse().unwrap(),
+            std::future::pending(),
+            workers,
+        )
+        .await;
+        let error = result.expect_err("worker failure must be returned");
+        assert!(matches!(
+            error.downcast_ref::<ForwardError>(),
+            Some(ForwardError::TaskFailure)
+        ));
+        assert!(held_rx.await.is_err());
+        TcpListener::bind(listener_address).await.unwrap();
+        tokio::net::UdpSocket::bind(endpoint_address).await.unwrap();
+    })
+    .await
+    .expect("worker failure cleanup deadline");
+}
+
 #[test]
 fn invalid_configuration_text_is_rejected() {
     let result = ClientConfig::from_text_with_endpoint_overrides(
