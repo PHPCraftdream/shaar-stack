@@ -252,18 +252,7 @@ jobs:
           cargo metadata --locked --manifest-path target/owned-dns-baseline/Cargo.toml --format-version 1 --filter-platform "$host" > target/owned-dns-baseline/metadata.json
           python -I "$script" verify --repository . --baseline target/owned-dns-baseline/metadata.json --product target/resolver-locking-baseline.json --receipt target/owned-dns-graph.json
           python -I .github/scripts/p2p/discovery/foundation_checks.py
-          python -I .github/scripts/p2p/discovery/owned_dns/checks.py
-          work="$RUNNER_TEMP/shaar-owned-dns"
-          mkdir -p "$work"
-          build_log="$work/build.jsonl"
-          if cargo test -p shaar-p2p --lib --locked --no-run --message-format=json >"$build_log" 2>"$work/build.stderr"; then build_status=0; else build_status=$?; fi
-          if [[ "$build_status" -ne 0 ]]; then
-            if python -I -X utf8 .github/scripts/scan_identity_output.py "$build_log" && python -I -X utf8 .github/scripts/scan_identity_output.py "$work/build.stderr"; then cat "$work/build.stderr" "$build_log"; fi
-            exit "$build_status"
-          fi
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$build_log"
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$work/build.stderr"
-          python -I .github/scripts/p2p/discovery/owned_dns/verify.py --artifacts "$build_log" --target-dir target --directory "$work" --status "$build_status" --scanner .github/scripts/scan_identity_output.py
+          bash .github/scripts/p2p/discovery/owned_dns/run.sh
       - name: Verify private DNS wire input envelopes
         shell: bash
         run: |
