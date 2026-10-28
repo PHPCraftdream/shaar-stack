@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod rejection;
+mod startup;
 
 use std::{
     fs,
@@ -560,6 +561,21 @@ async fn scenario(
         Some(Err(error)) => Err(format!("target task: {error}")),
         None => Err("target task missing".into()),
     }
+}
+
+#[tokio::test]
+#[ignore = "requires CI-built shaar-server and shaar-client executables"]
+async fn real_process_startup_validation_and_busy_listener() {
+    let temp = Temp::new().unwrap();
+    let mut processes = Processes::default();
+    let mut tasks = JoinSet::new();
+    let result = std::panic::AssertUnwindSafe(timeout(
+        DEADLINE,
+        startup::startup_scenario(&temp, &mut processes),
+    ))
+    .catch_unwind()
+    .await;
+    finalize(&mut processes, &mut tasks, result).await.unwrap();
 }
 
 #[tokio::test]
