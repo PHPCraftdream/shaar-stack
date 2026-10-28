@@ -7,6 +7,91 @@ use shaar::{
 use tokio::{sync::watch, task::JoinSet, time::timeout};
 
 #[tokio::test]
+async fn server_loop_joins_a_served_session_before_returning() {
+    timeout(Duration::from_secs(30), async {
+        use std::{future::Future, task::Poll};
+        use tokio::net::{TcpListener, TcpStream, UdpSocket};
+
+        let client_identity = Identity::from_seed([98; 32]);
+        let client = Endpoint::bind(
+            &client_identity,
+            "127.0.0.1:0".parse().unwrap(),
+            Allowlist::default(),
+            Limits::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
+        let mut server = Endpoint::bind(
+            &Identity::from_seed([99; 32]),
+            "127.0.0.1:0".parse().unwrap(),
+            Allowlist::new(&[client.id()]).unwrap(),
+            Limits::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
+        let server_address = server.local_addr();
+        let (client_session, mut server_session) = tokio::try_join!(
+            client.connect(server.id(), server_address),
+            server.accept(),
+        )
+        .unwrap();
+        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_address = target.local_addr().unwrap();
+        let local = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (application, bridge) = tokio::join!(
+            TcpStream::connect(local.local_addr().unwrap()),
+            local.accept(),
+        );
+        let application = application.unwrap();
+        let bridge = bridge.unwrap().0;
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let mut workers = JoinSet::new();
+        workers.spawn(async move {
+            let result = server_session.serve(target_address, async {
+                let _ = stop_rx.await;
+            }).await;
+            let _ = finished_tx.send(());
+            let _ = release_rx.await;
+            result
+        });
+        let forwarding = client_session.forward(bridge);
+        tokio::pin!(forwarding);
+        let (target_stream, _) = tokio::select! {
+            result = target.accept() => result.unwrap(),
+            result = &mut forwarding => panic!("forwarding ended before target connection: {result:?}"),
+        };
+        let _ = stop_tx.send(());
+        let mut shutdown = Box::pin(std::future::ready(Ok(())));
+        let loop_result = {
+            let loop_future = super::super::server_loop_with_sessions(
+                &mut server, target_address, 1, &mut shutdown, workers,
+            );
+            tokio::pin!(loop_future);
+            tokio::select! {
+                result = &mut loop_future => panic!("server returned before worker barrier: {result:?}"),
+                result = finished_rx => result.unwrap(),
+            }
+            let pending = std::future::poll_fn(|cx| Poll::Ready(loop_future.as_mut().poll(cx).is_pending())).await;
+            let _ = release_tx.send(());
+            let result = loop_future.await;
+            (pending, result)
+        };
+        drop(target_stream);
+        drop(application);
+        let _ = forwarding.await;
+        server.close().await;
+        client.close().await;
+        UdpSocket::bind(server_address).await.unwrap();
+        assert!(loop_result.0, "server returned before the served session worker finished");
+        assert!(loop_result.1.is_ok());
+    })
+    .await
+    .expect("served session shutdown deadline");
+}
+
+#[tokio::test]
 async fn server_loop_waits_for_worker_and_reports_failure_on_shutdown() {
     timeout(Duration::from_secs(15), async {
         use std::{future::Future, task::Poll};
