@@ -399,8 +399,11 @@ and P06's authenticated native forwarding are accepted; they are not current res
 blockers. Server and Client executables are still scaffolds. P08 has accepted Carrier,
 role-guard and owned-relay foundations at `740964d` (Linux/Windows CI `40447870611`),
 but discovery, candidate handoff and consolidated signaling-only acceptance remain
-unfinished. The infrastructure-control candidate is being verified separately; a
-feature branch or a passing subset is not mainline acceptance.
+unfinished. Infrastructure-control foundations and validated direct endpoint inputs
+have since been integrated. The combined direct application snapshot `259a7a0`
+passed full Linux/Windows CI `40659189547`, but remains outside `develop` and has
+not passed real-process D1 acceptance. A feature branch or a passing component
+suite is not delivered application acceptance.
 
 The next usable milestone is **D1: direct-only Server and Client**. Its prerequisites
 are accepted P04/P05/P06, not completion of P07/P08/P09/P10. This is an incremental
@@ -432,8 +435,10 @@ D1 acceptance, executed in GitHub CI on Linux and Windows:
 Implement the Server runtime and Client runtime as distinct reviewed leaves, then
 verify the composed real-process path. Independent source work may run in isolated
 in-repository worktrees with configured smart/worker; compilation and execution remain
-GitHub CI only. Complete the already-running infrastructure-control verification and
-cleanup in parallel, but do not make further Amino discovery a prerequisite for D1.
+GitHub CI only. Freeze new P08/Amino/discovery work until D1 is delivered and its
+bounded process acceptance is complete. Preserve existing P08 code and evidence;
+fix concrete failures affecting current CI, but do not expand that work into new
+capabilities or proof frameworks.
 
 ### 6.2. Remaining stages
 
@@ -469,3 +474,60 @@ research reports and status-only product commits. Prefer a testable delivery sli
 new abstractions or infrastructure polishing without an observable acceptance need.
 Each stage closes only after its own acceptance and integration/cleanup obligations
 are met. External blockers are explicit; no unconfirmed assumption is promoted to fact.
+
+### 6.4. Bounded delivery commitment after the second process review
+
+The immediate outcome is runnable direct-only Server and Client in `develop`, not
+additional feature branches or another general research phase. Work proceeds in
+this order:
+
+1. **Review and integrate the existing D1 implementation.** Reconcile the combined
+   snapshot with current `develop`, including project license metadata, both direct
+   dependency edges and the exact DNS graph baseline. Review concrete defects and
+   known limitations; fix product correctness/security blockers and observed CI
+   failures. Run the full Linux/Windows checks for the exact integration candidate.
+   Integrate it as an explicitly limited direct-only implementation once those
+   checks pass. Do not require completion of P08 or every proposed test-infrastructure
+   enhancement before making the implementation available in `develop`.
+2. **Complete the finite D1 process acceptance in section 6.1.** Exercise real
+   binaries, provisioned keys/configs, authorized exact-byte forwarding, denied and
+   wrong-key attempts with zero target connections, concurrent streams, half-close,
+   new streams after reconnect, shutdown and socket reuse. Include the specified
+   startup/error cases and bounded child cleanup. Record each result and any gap.
+   Source integration and accepted D1 are separate milestones; do not close D1
+   acceptance merely because the source or component tests were integrated. A new
+   proof mechanism is justified only by a specific unmet case in this list.
+3. **Consolidate delivered work.** Remove worktrees and local branches only after
+   their intended changes are reviewed, committed into the destination and checked
+   for untransferred work. Preserve unfinished changes. Fold overlapping drafts into
+   one implementation rather than creating successive integration branches. Review
+   an eventual `develop` to `main` integration after the integrated checks and D1
+   acceptance; no blanket merge, release or publication is implied.
+4. **Resume extensions only after D1 acceptance.** Native Mainline may follow D1;
+   P08 discovery and other transport extensions remain held until then. A local
+   ThinkPad demonstration requires separate permission under the existing local
+   execution rule; it is not an implicit new prerequisite or authorization.
+
+Keep the already requested license work bounded: finish and validate the current
+license gate, report actual policy findings, and retain the distinction between
+SPDX acceptance, notice evidence and distribution obligations. Do not start further
+notice-generator features or redesign the whole CI while D1 is undelivered. Finish
+or diagnose existing CI runs; a failure must be fixed, not hidden by another green
+branch or postponed as an unrelated backlog item. Broader dynamic test-inventory
+migration follows validation of the current implementation and D1 delivery, except
+where a concrete existing failure requires it sooner.
+
+For I5, preserve strict signaling-only. The threat model already distinguishes a
+routing/metadata/resource-policy violation from decryption with intact QUIC/TLS.
+A later concise clarification should document the policy's purpose, the maintenance
+cost of the downstream noq/iroh patches, and the exact accepted evidence scope.
+Do not downgrade the invariant or imply native Yggdrasil acceptance. Preparing an
+upstream pre-packetization path-policy hook proposal is follow-up work, not a D1
+prerequisite; posting an issue externally requires explicit authorization. An
+upstream hook could reduce patch maintenance but would not automatically remove
+all local patches or their verification obligations.
+
+Track executable leaves and actual blockers in the session task list. Pending
+extensions are held, not falsely reported as running. A ready implementation is
+not complete until reviewed integration and cleanup; acceptance requires executed
+results. Parallel work must shorten this delivery path, not enlarge its scope.
