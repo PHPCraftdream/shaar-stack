@@ -122,6 +122,7 @@ jobs:
             export SHAAR_CLIENT_EXE="${SHAAR_CLIENT_EXE}.exe"
           fi
           cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_server_client_forward_exact_loopback_bytes --nocapture
+          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_rejects_empty_allowlist_and_wrong_pin --nocapture
       - name: Focused SDK, config, server, and client tests
         shell: bash
         run: |
