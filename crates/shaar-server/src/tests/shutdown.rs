@@ -7,6 +7,51 @@ use shaar::{
 use tokio::{sync::watch, task::JoinSet, time::timeout};
 
 #[tokio::test]
+async fn server_loop_waits_for_worker_and_reports_failure_on_shutdown() {
+    timeout(Duration::from_secs(15), async {
+        use std::{future::Future, task::Poll};
+
+        let mut endpoint = Endpoint::bind(
+            &Identity::from_seed([100; 32]),
+            "127.0.0.1:0".parse().unwrap(),
+            Allowlist::default(),
+            Limits::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
+        let address = endpoint.local_addr();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let mut workers = JoinSet::new();
+        workers.spawn(async move {
+            let _ = release_rx.await;
+            Err(ForwardError::TaskFailure)
+        });
+        let mut shutdown = Box::pin(std::future::ready(Ok(())));
+        let pending = {
+            let server = super::super::server_loop_with_sessions(
+                &mut endpoint,
+                "127.0.0.1:9".parse().unwrap(),
+                1,
+                &mut shutdown,
+                workers,
+            );
+            tokio::pin!(server);
+            let pending =
+                std::future::poll_fn(|cx| Poll::Ready(server.as_mut().poll(cx).is_pending())).await;
+            let _ = release_tx.send(());
+            let result = server.await;
+            (pending, result)
+        };
+        endpoint.close().await;
+        tokio::net::UdpSocket::bind(address).await.unwrap();
+        assert!(pending.0, "shutdown returned before the worker completed");
+        assert!(pending.1.is_err(), "worker failure must be returned");
+    })
+    .await
+    .expect("server loop shutdown deadline");
+}
+
+#[tokio::test]
 async fn shutdown_drain_reports_join_panic_without_detaching_other_jobs() {
     timeout(Duration::from_secs(5), async {
         let mut workers: JoinSet<Result<ServeReport, ForwardError>> = JoinSet::new();
