@@ -175,10 +175,10 @@ async fn ready_session_waits_for_server_worker_capacity() {
     workers.abort_all();
     let drained = timeout(Duration::from_secs(15), async {
         while let Some(result) = workers.join_next().await {
-            if let Err(error) = result {
-                if !error.is_cancelled() {
-                    return Err(error.to_string());
-                }
+            if let Err(error) = result
+                && !error.is_cancelled()
+            {
+                return Err(error.to_string());
             }
         }
         Ok::<(), String>(())
