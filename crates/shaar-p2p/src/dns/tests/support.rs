@@ -101,12 +101,14 @@ where
     FT: Future<Output = io::Result<TcpListener>>,
     FU: Future<Output = io::Result<UdpSocket>>,
 {
+    let mut last_retry_error = None;
     for _ in 0..PAIR_ATTEMPTS {
         let udp = match bind_udp(local).await {
             Ok(udp) => udp,
             Err(error) => {
                 diagnostic("UDP", local, &error);
                 if error.kind() == io::ErrorKind::AddrInUse {
+                    last_retry_error = Some(error);
                     continue;
                 }
                 return Err(error);
@@ -118,17 +120,24 @@ where
             Ok(tcp) => return Ok(Server { udp, tcp, address }),
             Err(error) => {
                 diagnostic("TCP", address, &error);
-                if error.kind() == io::ErrorKind::AddrInUse {
+                // A UDP-selected ephemeral port may be unavailable for TCP on Windows.
+                if error.kind() == io::ErrorKind::AddrInUse
+                    || (cfg!(windows) && local.port() == 0 && error.raw_os_error() == Some(10013))
+                {
+                    last_retry_error = Some(error);
                     continue;
                 }
                 return Err(error);
             }
         }
     }
-    Err(io::Error::new(
-        io::ErrorKind::AddrInUse,
-        "owned DNS socket pair allocation exhausted",
-    ))
+    match last_retry_error {
+        Some(error) if error.kind() != io::ErrorKind::AddrInUse => Err(error),
+        _ => Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
+            "owned DNS socket pair allocation exhausted",
+        )),
+    }
 }
 
 #[tokio::test]
@@ -138,6 +147,8 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
 
     let raw_code = if cfg!(windows) { 10013 } else { 13 };
     let expected_kind = io::Error::from_raw_os_error(raw_code).kind();
+    let tcp_raw_code = if cfg!(windows) { 10047 } else { raw_code };
+    let tcp_expected_kind = io::Error::from_raw_os_error(tcp_raw_code).kind();
 
     let tcp_attempts = Cell::new(0);
     let attempted_tcp = Cell::new(None);
@@ -147,7 +158,7 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
         |address| {
             tcp_attempts.set(tcp_attempts.get() + 1);
             attempted_tcp.set(Some(address));
-            std::future::ready(Err(io::Error::from_raw_os_error(raw_code)))
+            std::future::ready(Err(io::Error::from_raw_os_error(tcp_raw_code)))
         },
         UdpSocket::bind,
         |stage, address, error| {
@@ -167,10 +178,10 @@ async fn owned_dns_pair_diagnostics_identify_failed_stage_and_address_without_re
     assert_eq!(tcp_diagnostic[0].0, "TCP");
     assert_eq!(tcp_diagnostic[0].1, attempted_tcp.get().unwrap());
     assert_ne!(tcp_diagnostic[0].1.port(), 0);
-    assert_eq!(tcp_diagnostic[0].2, expected_kind);
-    assert_eq!(tcp_diagnostic[0].3, Some(raw_code));
-    assert_eq!(tcp_error.kind(), expected_kind);
-    assert_eq!(tcp_error.raw_os_error(), Some(raw_code));
+    assert_eq!(tcp_diagnostic[0].2, tcp_expected_kind);
+    assert_eq!(tcp_diagnostic[0].3, Some(tcp_raw_code));
+    assert_eq!(tcp_error.kind(), tcp_expected_kind);
+    assert_eq!(tcp_error.raw_os_error(), Some(tcp_raw_code));
     assert_eq!(
         tcp_attempts.get(),
         1,
@@ -334,6 +345,110 @@ async fn owned_dns_pair_allocator_bounds_collisions_and_propagates_other_errors(
         0,
         "TCP_BIND_AFTER_FAILED_UDP_RESERVATION"
     );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn owned_dns_pair_retries_tcp_access_denied_on_udp_selected_ephemeral_port() {
+    let attempts = std::cell::Cell::new(0);
+    let diagnostics = std::cell::RefCell::new(Vec::new());
+    let server = socket_pair_with_diagnostic(
+        loopback(),
+        |address| {
+            let attempts = &attempts;
+            async move {
+                attempts.set(attempts.get() + 1);
+                if attempts.get() == 1 {
+                    Err(io::Error::from_raw_os_error(10013))
+                } else {
+                    TcpListener::bind(address).await
+                }
+            }
+        },
+        UdpSocket::bind,
+        |stage, address, error| {
+            diagnostics
+                .borrow_mut()
+                .push((stage.to_owned(), address, error.raw_os_error()));
+        },
+    )
+    .await
+    .unwrap();
+    assert!((2..=PAIR_ATTEMPTS).contains(&attempts.get()));
+    let diagnostics = diagnostics.into_inner();
+    assert_eq!(diagnostics[0].0, "TCP");
+    assert_ne!(diagnostics[0].1.port(), 0);
+    assert_eq!(diagnostics[0].2, Some(10013));
+    assert_eq!(
+        server.tcp.local_addr().unwrap(),
+        server.udp.local_addr().unwrap()
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn owned_dns_pair_bounds_tcp_access_denied_retries_and_preserves_os_error() {
+    let attempts = std::cell::Cell::new(0);
+    let result = socket_pair_with_diagnostic(
+        loopback(),
+        |_| {
+            attempts.set(attempts.get() + 1);
+            std::future::ready(Err(io::Error::from_raw_os_error(10013)))
+        },
+        UdpSocket::bind,
+        |_, _, _| {},
+    )
+    .await;
+    assert_eq!(attempts.get(), PAIR_ATTEMPTS);
+    let error = result.err().unwrap();
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(error.raw_os_error(), Some(10013));
+}
+
+#[tokio::test]
+async fn owned_dns_pair_fixed_tcp_access_denied_and_generic_permission_errors_are_terminal() {
+    let udp = UdpSocket::bind(loopback()).await.unwrap();
+    let address = udp.local_addr().unwrap();
+    let mut reserved = Some(udp);
+    let attempts = std::cell::Cell::new(0);
+    let result = socket_pair_with_diagnostic(
+        address,
+        |_| {
+            attempts.set(attempts.get() + 1);
+            std::future::ready(Err(io::Error::from_raw_os_error(10013)))
+        },
+        |requested| {
+            assert_eq!(requested, address);
+            std::future::ready(
+                reserved
+                    .take()
+                    .ok_or_else(|| io::Error::other("unexpected UDP retry")),
+            )
+        },
+        |_, _, _| {},
+    )
+    .await;
+    assert_eq!(attempts.get(), 1);
+    assert_eq!(result.err().unwrap().raw_os_error(), Some(10013));
+
+    attempts.set(0);
+    let result = socket_pair_with_diagnostic(
+        loopback(),
+        |_| {
+            attempts.set(attempts.get() + 1);
+            std::future::ready(Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "not a port-specific OS error",
+            )))
+        },
+        UdpSocket::bind,
+        |_, _, _| {},
+    )
+    .await;
+    assert_eq!(attempts.get(), 1);
+    let error = result.err().unwrap();
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(error.raw_os_error(), None);
 }
 
 pub(crate) fn a() -> RData {
