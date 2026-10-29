@@ -159,15 +159,25 @@ async fn coordinate(
     key_hex: String,
     address: SocketAddr,
 ) -> Result<(), Box<dyn Error>> {
-    coordinate_until(
-        listener,
-        endpoint,
-        key_hex,
-        address,
-        tokio::signal::ctrl_c(),
-    )
-    .await
-    .map_err(|error| error as Box<dyn Error>)
+    coordinate_until(listener, endpoint, key_hex, address, shutdown_signal())
+        .await
+        .map_err(|error| error as Box<dyn Error>)
+}
+
+/// cancel-safe: NO — dropping a listener can discard a notification.
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        let mut ctrl_break = tokio::signal::windows::ctrl_break()?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            event = ctrl_break.recv() => event.ok_or_else(|| std::io::Error::other("ctrl-break listener closed")),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        tokio::signal::ctrl_c().await
+    }
 }
 
 async fn coordinate_until<F: std::future::Future<Output = Result<(), std::io::Error>>>(

@@ -125,7 +125,7 @@ jobs:
           cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_rejects_empty_allowlist_and_wrong_pin --nocapture
           cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_startup_validation_and_busy_listener --nocapture
           cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_recovers_after_target_becomes_available --nocapture
-          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_server_console_shutdown_releases_udp_after_active_stream --nocapture
+          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_console_shutdown_rebind_and_server_restart --nocapture
       - name: Focused SDK, config, server, and client tests
         shell: bash
         run: |

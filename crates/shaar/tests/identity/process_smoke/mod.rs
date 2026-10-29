@@ -574,12 +574,12 @@ async fn scenario(
 #[cfg(any(unix, windows))]
 #[tokio::test]
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
-async fn real_process_server_console_shutdown_releases_udp_after_active_stream() {
+async fn real_process_console_shutdown_rebind_and_server_restart() {
     let temp = Temp::new().unwrap();
     let mut processes = Processes::default();
     let mut tasks = JoinSet::new();
     let result = std::panic::AssertUnwindSafe(timeout(
-        DEADLINE,
+        Duration::from_secs(70),
         shutdown::shutdown_scenario(&temp, &mut processes, &mut tasks),
     ))
     .catch_unwind()
