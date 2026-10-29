@@ -80,3 +80,29 @@ Initial domains are intentionally conservative. Narrow them only with an explici
 cross-layer coverage argument and a regression in the selection policy tests.
 Caching and parallel sharding are separate optimizations, not prerequisites and
 not substitutes for selecting the correct tests.
+
+## Operator commands
+
+Normal feature pushes and upstream integration pushes select their domains
+without a manual dispatch. Documentation-only pushes still run planner policy
+regressions and structural checks on both operating systems, but skip Rust
+installation, source preparation, lint and product/proof execution.
+
+For an explicit targeted comparison, replace `feature-branch` and `BASE_SHA`
+with the published candidate branch and the full comparison commit SHA:
+
+```sh
+gh workflow run ci.yml --repo rmyva/shaar-stack --ref feature-branch -f scope=targeted -f base=BASE_SHA
+```
+
+At the end of a sprint, replace `sprint-candidate` with its published branch:
+
+```sh
+gh workflow run ci.yml --repo rmyva/shaar-stack --ref sprint-candidate -f scope=full
+```
+
+Install a finite `gh run watch RUN_ID --repo rmyva/shaar-stack --exit-status`
+watcher after dispatch. Inspect the selection receipt and both OS conclusions;
+never infer full acceptance from the workflow name or a targeted green check.
+Candidate `3aca1b3` passed the initial broad targeted migration validation on
+Linux and Windows in fork run `40967908637`; no full sprint run was requested.
