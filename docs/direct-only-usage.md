@@ -61,7 +61,16 @@ Stop either process with Ctrl-C; on Windows both also handle Ctrl-Break. The ser
 
 ## 7. Acceptance status
 
-This guide documents source behavior and config syntax, not real-process acceptance. End-to-end acceptance for this operating setup remains pending; passing component CI does not establish production readiness. Earlier P03 evidence covers the scoped signaling-only and controlled NAT experiments; it does not establish this direct-only application's real-process acceptance or operation on every home or mobile network. See the path verification document for the evidence and its limits.
+D1 (the direct-only Server/Client milestone) has real-process acceptance. The tests in `crates/shaar/tests/identity/process_smoke*` start the actual `shaar-server` and `shaar-client` binaries with ktav config files and key files, and cover:
+
+- byte-exact loopback forwarding through the client's local port to the server's target;
+- startup validation (bad config, busy listener) and rejection of an empty allowlist or a wrong server pin, with zero connections reaching the target;
+- recovery after the target becomes available, and cancellation of an active native dial;
+- console shutdown, rebinding the same port, and a server restart with the client reconnecting.
+
+They passed in GitHub CI on Linux and Windows for `341e14b` (`direct-d1-complete-152`, run 40807774299; `develop`, run 40813234362) and for `86080b9` (`license-d1-combined-166`, run 40814009922).
+
+This acceptance is scoped: it runs on loopback inside CI runners. It does not establish operation on every home or mobile network, the Yggdrasil adapter (P07), or production readiness. Earlier P03 evidence covers the scoped signaling-only and controlled NAT experiments; see the path verification document for its limits.
 
 ## Source references
 
