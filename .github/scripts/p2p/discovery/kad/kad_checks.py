@@ -38,6 +38,7 @@ class PreparationChecks(unittest.TestCase):
         self.assertEqual(kad.digest(prepared["Cargo.lock"]), kad.LOCK_DIGEST)
         self.assertFalse(receipt["fixture_instrumentation"])
         self.assertFalse(receipt["global_operation_contact_bound"])
+        self.assertTrue(receipt["query_referral_filter_api"])
 
     def test_repeat_preparation_is_byte_identical_and_existing_tree_is_never_overwritten(self):
         first = kad.prepare(ARCHIVE, self.root / "first")
@@ -93,6 +94,9 @@ class PreparationChecks(unittest.TestCase):
         self.assertIn("+ bounded.len() >= 4", discovery)
         self.assertIn("SmallVec::<[PeerId; 32]>", discovery)
         self.assertNotIn("others_iter.clone()", discovery)
+        self.assertLess(discovery.index("self.query_referral_filter"), discovery.index(".entry(peer.node_id)"))
+        self.assertLess(discovery.index("self.query_referral_filter"), discovery.index("query.on_success"))
+        self.assertIn("pub fn set_query_referral_filter(", behaviour)
         self.assertIn("    pub fn set_automatic_bootstrap_throttle(", behaviour)
         self.assertNotIn("#[cfg(test)]\n    pub fn set_automatic_bootstrap_throttle", behaviour)
         closest = files["src/query/peers/closest.rs"].decode().split("for peer in closer_peers {", 1)[1]

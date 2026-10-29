@@ -46,6 +46,11 @@ DISCOVERED_NEW = '''            if query.is_finished() {
                 {
                     continue;
                 }
+                if self.query_referral_filter.as_ref().is_some_and(|filter| {
+                    !(filter.0)(*query_id, *source, peer.node_id, &peer.multiaddrs)
+                }) {
+                    continue;
+                }
                 let mut bounded = smallvec::SmallVec::<[&Multiaddr; 4]>::new();
                 let previous = query.peers.addresses.get(&peer.node_id);
                 for address in &peer.multiaddrs {
@@ -86,6 +91,43 @@ ADDRESS_NEW = '''                if old != new {
                 }'''
 
 
+REFERRAL_FILTER = '''type ReferralPredicate = dyn Fn(QueryId, PeerId, PeerId, &[Multiaddr]) -> bool + Send + Sync;
+
+#[derive(Clone)]
+struct ReferralFilter(std::sync::Arc<ReferralPredicate>);
+
+impl std::fmt::Debug for ReferralFilter {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ReferralFilter(..)")
+    }
+}
+
+'''
+REFERRAL_SETTER = '''    /// Filters referrals before query address and closest-peer retention.
+    /// The predicate receives the query, reporting peer, candidate and addresses.
+    /// It runs synchronously without Kademlia locks; it must not block or re-enter.
+    /// Existing cached addresses are not revoked by rejecting a later referral.
+    /// No predicate preserves the default per-query retention policy.
+    pub fn set_query_referral_filter(
+        &mut self,
+        filter: impl Fn(QueryId, PeerId, PeerId, &[Multiaddr]) -> bool + Send + Sync + 'static,
+    ) -> &mut Self {
+        self.query_referral_filter = Some(ReferralFilter(std::sync::Arc::new(filter)));
+        self
+    }
+
+'''
+
+
+def referral_filter(behaviour):
+    behaviour = replace(behaviour, "    queries: QueryPool,", "    queries: QueryPool,\n    query_referral_filter: Option<ReferralFilter>,")
+    behaviour = replace(behaviour, "    query_config: QueryConfig,", "    query_config: QueryConfig,\n    query_referral_filter: Option<ReferralFilter>,")
+    behaviour = replace(behaviour, "            query_config: QueryConfig::default(),", "            query_config: QueryConfig::default(),\n            query_referral_filter: None,")
+    behaviour = replace(behaviour, "            queries: QueryPool::new(config.query_config),", "            queries: QueryPool::new(config.query_config),\n            query_referral_filter: config.query_referral_filter,")
+    behaviour = replace(behaviour, "/// The configuration for the `Kademlia` behaviour.", REFERRAL_FILTER + "/// The configuration for the `Kademlia` behaviour.")
+    return replace(behaviour, "impl Config {", "impl Config {\n" + REFERRAL_SETTER)
+
+
 def transform(files):
     """Return only reviewed production deltas; all other archive bytes stay intact."""
     manifest = tomllib.loads(files["Cargo.toml"].decode())
@@ -103,6 +145,7 @@ def transform(files):
         raise ValueError("Kademlia archive test lock changed")
     behaviour = replace(files["src/behaviour.rs"].decode(), DISCOVERED_OLD, DISCOVERED_NEW)
     behaviour = replace(behaviour, ADDRESS_OLD, ADDRESS_NEW)
+    behaviour = referral_filter(behaviour)
     behaviour = replace(behaviour, "    #[cfg(test)]\n    pub(crate) fn set_automatic_bootstrap_throttle(",
                         "    pub fn set_automatic_bootstrap_throttle(")
     closest = replace(files["src/query/peers/closest.rs"].decode(),
@@ -163,6 +206,7 @@ def prepare(archive, destination):
         "original_files": hashes(files), "changed_files": sorted(changes),
         "query_referral_peers": 32, "addresses_per_peer": 4, "encoded_address_bytes": 256,
         "states_per_closest_iterator": 32, "global_operation_contact_bound": False,
+        "query_referral_filter_api": True,
         "fixture_instrumentation": False,
     }
     files.update(changes)
