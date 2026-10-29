@@ -137,7 +137,9 @@ fn stage(
     let key = attempt.unwrap();
     source
         .core
+        .swarm
         .behaviour_mut()
+        .inner
         .admission
         .allow_infrastructure_fixture(key, address, endpoint)
         .unwrap();
@@ -250,7 +252,9 @@ async fn carrier_infrastructure_network_authenticates_without_app_authority_or_d
         assert_eq!(
             source
                 .core
+                .swarm
                 .behaviour()
+                .inner
                 .admission
                 .roles_view()
                 .unwrap()
@@ -369,7 +373,9 @@ async fn carrier_infrastructure_network_wrong_noise_identity_retires_only_after_
         let key = attempt.unwrap();
         source
             .core
+            .swarm
             .behaviour_mut()
+            .inner
             .admission
             .allow_infrastructure_fixture(key, &address, server.address)
             .unwrap();
@@ -442,7 +448,9 @@ async fn carrier_infrastructure_network_rejects_authenticated_unsolicited_inboun
         assert!(
             source
                 .core
+                .swarm
                 .behaviour()
+                .inner
                 .admission
                 .connection(&server.peer)
                 .is_none()

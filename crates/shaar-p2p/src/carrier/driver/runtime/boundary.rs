@@ -95,4 +95,5 @@ impl<B: NetworkBehaviour> NetworkBehaviour for Boundary<B> {
 }
 
 #[cfg(test)]
+#[path = "boundary/tests.rs"]
 mod tests;
