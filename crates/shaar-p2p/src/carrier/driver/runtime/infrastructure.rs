@@ -67,7 +67,13 @@ impl Core {
         peer: PeerId,
         address: &libp2p::Multiaddr,
     ) -> io::Result<(DialOpts, Option<AttemptKey>)> {
-        if self.swarm.behaviour().admission.connection(&peer).is_some()
+        if self
+            .swarm
+            .behaviour()
+            .inner
+            .admission
+            .connection(&peer)
+            .is_some()
             || self.pending.values().any(|pending| pending.peer == peer)
             || self
                 .infrastructure
@@ -80,6 +86,7 @@ impl Core {
         let infrastructure = self
             .swarm
             .behaviour()
+            .inner
             .admission
             .roles_view()
             .is_some_and(|view| view.role(peer) == Some(roles::Role::Infrastructure));
@@ -113,6 +120,7 @@ impl Core {
             let (key, permit) = self
                 .swarm
                 .behaviour_mut()
+                .inner
                 .admission
                 .stage_infrastructure(peer, address, id, deadline)
                 .map_err(admission_error)?;
@@ -177,6 +185,7 @@ impl Core {
         }
         self.swarm
             .behaviour_mut()
+            .inner
             .admission
             .withdraw_infrastructure(key);
         // Pending dials stop at their revoked guard; established connections close by ID.
@@ -209,7 +218,7 @@ impl Core {
 
     fn finish_infrastructure(&mut self, connection: ConnectionId) {
         if let Some(entry) = self.infrastructure.entries.remove(&connection) {
-            let admission = &mut self.swarm.behaviour_mut().admission;
+            let admission = &mut self.swarm.behaviour_mut().inner.admission;
             admission.terminal(entry.key, None);
             admission.terminal_infrastructure(entry.key);
             drop(entry.permit);
@@ -231,6 +240,7 @@ impl Core {
                         && self
                             .swarm
                             .behaviour()
+                            .inner
                             .admission
                             .roles_view()
                             .is_some_and(|view| view.infrastructure_live(key).is_some());
@@ -248,6 +258,7 @@ impl Core {
                 if self
                     .swarm
                     .behaviour()
+                    .inner
                     .admission
                     .roles_view()
                     .is_some_and(|view| view.role(*peer_id) == Some(roles::Role::Infrastructure))
@@ -283,6 +294,7 @@ impl Core {
         for entry in self.infrastructure.entries.values() {
             self.swarm
                 .behaviour_mut()
+                .inner
                 .admission
                 .withdraw_infrastructure(entry.key);
         }
@@ -290,7 +302,7 @@ impl Core {
 
     pub(super) fn take_infrastructure_shutdown(&mut self) -> (Option<Owner>, State) {
         self.withdraw_all_infrastructure();
-        let authority = self.swarm.behaviour_mut().admission.take_authority();
+        let authority = self.swarm.behaviour_mut().inner.admission.take_authority();
         (authority, std::mem::take(&mut self.infrastructure))
     }
 }

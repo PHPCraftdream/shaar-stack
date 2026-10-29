@@ -8,6 +8,7 @@ impl Core {
         }
         self.swarm
             .behaviour_mut()
+            .inner
             .admission
             .admit_identity(address.peer, Role::ExplicitRelay(address.socket_addr()))?;
         if let Some(target) = self.relay.targets.get_mut(&address.peer) {
@@ -25,6 +26,7 @@ impl Core {
         }
         self.swarm
             .behaviour_mut()
+            .inner
             .admission
             .authorize_relay(address.peer)?;
         self.relay.targets.insert(
@@ -51,7 +53,13 @@ impl Core {
                 && let (Some(expiry), Some(control)) = (record.expiry, record.control)
                 && expiry > now
                 && !record.addresses.is_empty()
-                && self.swarm.behaviour().admission.connection(&address.peer) == Some(control)
+                && self
+                    .swarm
+                    .behaviour()
+                    .inner
+                    .admission
+                    .connection(&address.peer)
+                    == Some(control)
             {
                 let _ = reply.send(Ok(RelayLease {
                     relay: address,
@@ -176,7 +184,7 @@ impl Core {
         if reply.is_closed() {
             return;
         }
-        if !self.swarm.behaviour().admission.allows(&peer) {
+        if !self.swarm.behaviour().inner.admission.allows(&peer) {
             let _ = reply.send(Err(io::Error::from(io::ErrorKind::PermissionDenied)));
             return;
         }
@@ -196,7 +204,7 @@ impl Core {
             )));
             return;
         }
-        if let Some(id) = self.swarm.behaviour().admission.connection(&peer) {
+        if let Some(id) = self.swarm.behaviour().inner.admission.connection(&peer) {
             let result = match self.relay.routes.get(&id) {
                 Some(Route::Relayed {
                     relay: Some(relay), ..
@@ -272,12 +280,17 @@ impl Core {
                 operation,
                 ..
             } => {
-                if self.swarm.behaviour().admission.connection(&relay_peer_id)
+                if self
+                    .swarm
+                    .behaviour()
+                    .inner
+                    .admission
+                    .connection(&relay_peer_id)
                     != Some(connection_id)
                 {
                     return;
                 }
-                let configured_roles = self.swarm.behaviour().admission.roles_view().is_some();
+                let configured_roles = self.swarm.behaviour().inner.admission.has_authority();
                 let Some(record) = self.relay.records.get_mut(&relay_peer_id) else {
                     return;
                 };
@@ -472,7 +485,7 @@ impl Core {
         generation: Option<u64>,
         local_address: Option<&Multiaddr>,
     ) -> io::Result<()> {
-        if !self.swarm.behaviour().admission.allows(&peer) {
+        if !self.swarm.behaviour().inner.admission.allows(&peer) {
             if self
                 .relay
                 .records
@@ -490,7 +503,7 @@ impl Core {
                     generation: generation
                         .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))?,
                 };
-                if self.swarm.behaviour().admission.roles_view().is_some()
+                if self.swarm.behaviour().inner.admission.has_authority()
                     && !self.relay.gate.connection_permit(ticket, peer)
                 {
                     return Err(io::Error::from(io::ErrorKind::PermissionDenied));
@@ -499,7 +512,7 @@ impl Core {
                     relay: Some(address.peer),
                     generation: ticket.generation,
                 }
-            } else if self.swarm.behaviour().admission.roles_view().is_none() {
+            } else if !self.swarm.behaviour().inner.admission.has_authority() {
                 if !self.relay.records.values().any(|record| {
                     record.phase == Phase::Active
                         && record.expiry.is_some_and(|expiry| expiry > Instant::now())
@@ -528,7 +541,8 @@ impl Core {
                             && record.addresses.contains(&qualified)
                             && record.control.is_some()
                             && record.expiry.is_some_and(|expiry| expiry > now)
-                            && self.swarm.behaviour().admission.connection(relay) == record.control)
+                            && self.swarm.behaviour().inner.admission.connection(relay)
+                                == record.control)
                             .then_some((*relay, record.generation))
                     })
                     .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))?;
@@ -601,8 +615,14 @@ impl Core {
                 }
                 Phase::Stopping => {
                     let gone = record.listener.is_none()
-                        && self.swarm.behaviour().admission.connection(&peer).is_none()
-                        && !self.swarm.behaviour().admission.pending_peer(peer);
+                        && self
+                            .swarm
+                            .behaviour()
+                            .inner
+                            .admission
+                            .connection(&peer)
+                            .is_none()
+                        && !self.swarm.behaviour().inner.admission.pending_peer(peer);
                     if gone {
                         let mut record = self.relay.records.remove(&peer).expect("same task");
                         if let Some(reply) = record.released.take() {
@@ -646,7 +666,14 @@ impl Core {
             }
         }
         for peer in stale.into_iter().flatten() {
-            if self.swarm.behaviour().admission.connection(&peer).is_some() {
+            if self
+                .swarm
+                .behaviour()
+                .inner
+                .admission
+                .connection(&peer)
+                .is_some()
+            {
                 if let std::collections::hash_map::Entry::Vacant(entry) = self.closing.entry(peer) {
                     entry.insert(super::Closing {
                         deadline: now + DEADLINE,
@@ -654,8 +681,12 @@ impl Core {
                     });
                     let _ = self.swarm.disconnect_peer_id(peer);
                 }
-            } else if !self.swarm.behaviour().admission.pending_peer(peer) {
-                self.swarm.behaviour_mut().admission.forget_relay(peer);
+            } else if !self.swarm.behaviour().inner.admission.pending_peer(peer) {
+                self.swarm
+                    .behaviour_mut()
+                    .inner
+                    .admission
+                    .forget_relay(peer);
                 self.relay.targets.remove(&peer);
             }
         }

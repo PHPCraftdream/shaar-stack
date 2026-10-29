@@ -163,7 +163,7 @@ async fn run_case(revoked: bool) {
         carrier
             .core
             .swarm
-            .behaviour()
+            .behaviour().inner
             .admission
             .connection(&relay_peer),
         Some(control)
@@ -435,7 +435,7 @@ async fn carrier_protocol_fixture_queued_rejection() {
         assert!(queued.listener_held);
         let (generation, control) = queued.error_queued.unwrap();
         assert_eq!(queued.listener_entered, Some(generation));
-        assert_eq!(carrier.core.swarm.behaviour().admission.connection(&peer), Some(control));
+        assert_eq!(carrier.core.swarm.behaviour().inner.admission.connection(&peer), Some(control));
         let capability = probe::take_retained().expect("actual successful error-send capability");
         assert_eq!(capability.generation().unwrap().get(), generation);
         // Handler cancels after the successful send; Listener has not read that error.
