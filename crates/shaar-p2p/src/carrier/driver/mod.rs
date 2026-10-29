@@ -56,7 +56,10 @@ mod infrastructure;
 #[path = "runtime/setup.rs"]
 mod setup;
 
+// Preserve the derived behaviour's bounded inline packet storage; boxing would
+// allocate for every signaling packet. The dial handoff adds no larger payload.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum BehaviourEvent {
     Relays(libp2p::relay::client::Event),
     Packets(rpc::Event<Datagram, ()>),
