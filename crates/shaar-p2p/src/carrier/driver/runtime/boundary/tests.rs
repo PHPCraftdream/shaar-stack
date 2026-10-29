@@ -3,6 +3,79 @@ use crate::{carrier::admission::Admission, discovery::roles};
 use libp2p::swarm::dummy;
 use std::{convert::Infallible, time::Duration};
 
+#[tokio::test(start_paused = true)]
+async fn rootless_infrastructure_requires_exact_pending_owner_authority() {
+    let peer = peer(1);
+    let address: Multiaddr = format!("/ip4/8.8.8.8/tcp/1/p2p/{peer}").parse().unwrap();
+    let id = ConnectionId::new_unchecked(1);
+    let owner = roles::Owner::new(&[], &[peer]).unwrap();
+    let mut admission = Admission::with_authority(vec![], owner, None).unwrap();
+    let view = admission.roles_view().unwrap();
+    let now = tokio::time::Instant::now();
+    let (key, _permit) = admission
+        .stage_infrastructure(peer, &address, id, now + Duration::from_secs(10))
+        .unwrap();
+    assert_eq!(
+        view.pending_infrastructure_root(key, now),
+        Some(address.clone())
+    );
+    assert_eq!(
+        admission
+            .handle_pending_outbound_connection(id, Some(peer), &[], Endpoint::Dialer,)
+            .unwrap(),
+        vec![address]
+    );
+    assert!(
+        admission
+            .handle_pending_outbound_connection(
+                ConnectionId::new_unchecked(2),
+                Some(peer),
+                &[],
+                Endpoint::Dialer,
+            )
+            .is_err()
+    );
+    assert!(
+        admission
+            .handle_pending_outbound_connection(id, None, &[], Endpoint::Dialer,)
+            .is_err()
+    );
+    tokio::time::advance(Duration::from_secs(10)).await;
+    assert!(
+        view.pending_infrastructure_root(key, tokio::time::Instant::now())
+            .is_none()
+    );
+    assert!(
+        admission
+            .handle_pending_outbound_connection(id, Some(peer), &[], Endpoint::Dialer,)
+            .is_err()
+    );
+}
+
+#[test]
+fn rootless_infrastructure_withdrawal_does_not_grant_app_root_discovery() {
+    let peer = peer(1);
+    let address: Multiaddr = format!("/ip4/8.8.8.8/tcp/1/p2p/{peer}").parse().unwrap();
+    let id = ConnectionId::new_unchecked(1);
+    let owner = roles::Owner::new(&[], &[peer]).unwrap();
+    let mut admission = Admission::with_authority(vec![], owner, None).unwrap();
+    let now = tokio::time::Instant::now();
+    let (key, _permit) = admission
+        .stage_infrastructure(peer, &address, id, now + Duration::from_secs(10))
+        .unwrap();
+    admission.withdraw_infrastructure(key);
+    assert!(
+        admission
+            .handle_pending_outbound_connection(id, Some(peer), &[], Endpoint::Dialer,)
+            .is_err()
+    );
+    let (mut app, peer, id, _) = composed(true, vec![]);
+    assert!(
+        app.handle_pending_outbound_connection(id, Some(peer), &[], Endpoint::Dialer,)
+            .is_err()
+    );
+}
+
 struct Offers {
     addresses: Vec<Multiaddr>,
     calls: usize,
