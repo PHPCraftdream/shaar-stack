@@ -119,9 +119,28 @@ async fn server_loop_with_sessions(
     .await
 }
 
+trait SessionSource: Send {
+    /// cancel-safe: NO — dropping an accept may reject the incoming attempt.
+    fn next_session(
+        &mut self,
+    ) -> impl std::future::Future<
+        Output = Result<shaar::network::Session, shaar::network::NetworkError>,
+    > + Send;
+}
+
+impl SessionSource for Endpoint {
+    fn next_session(
+        &mut self,
+    ) -> impl std::future::Future<
+        Output = Result<shaar::network::Session, shaar::network::NetworkError>,
+    > + Send {
+        self.accept()
+    }
+}
+
 /// cancel-safe: NO — the caller must abort and join retained session tasks.
 async fn server_loop_with_gate<F, G>(
-    endpoint: &mut Endpoint,
+    endpoint: &mut impl SessionSource,
     target: std::net::SocketAddr,
     session_limit: usize,
     shutdown: &mut std::pin::Pin<Box<impl std::future::Future<Output = std::io::Result<()>>>>,
@@ -161,7 +180,7 @@ where
                     None => {},
                 }
             }
-            accepted = endpoint.accept(), if sessions.len() < session_limit => {
+            accepted = endpoint.next_session(), if sessions.len() < session_limit => {
                 match accepted {
                     Ok(mut session) => {
                         let mut stop = stop_receiver.clone();
