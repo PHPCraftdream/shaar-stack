@@ -59,6 +59,10 @@ impl Admission {
         Ok(admission)
     }
 
+    pub(super) fn has_authority(&self) -> bool {
+        self.owner.is_some()
+    }
+
     pub(super) fn roles_view(&self) -> Option<roles::View> {
         self.owner.as_ref().map(roles::Owner::view)
     }
@@ -218,6 +222,52 @@ impl Admission {
                 self.relays.remove(&peer);
             }
         }
+    }
+
+    pub(super) fn validate_additional(
+        &self,
+        id: ConnectionId,
+        peer: Option<PeerId>,
+        original: &[Multiaddr],
+        additional: &[Multiaddr],
+    ) -> Result<(), ConnectionDenied> {
+        let Some(view) = self.roles_view() else {
+            return Ok(());
+        };
+        if additional.is_empty() {
+            return Ok(());
+        }
+        let denied = || {
+            ConnectionDenied::new(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "aggregate destination authority unavailable",
+            ))
+        };
+        if original.len() > 4 || additional.len() > 4 - original.len() {
+            return Err(denied());
+        }
+        let peer = peer.ok_or_else(denied)?;
+        let now = Instant::now();
+        let key = view.current(peer, now).ok_or_else(denied)?;
+        if key.connection != id {
+            return Err(denied());
+        }
+        for address in additional {
+            if address.as_ref().len() > 256 {
+                return Err(denied());
+            }
+            let qualified = address.clone().with_p2p(peer).map_err(|_| denied())?;
+            if !view.matches_root(key, qualified.as_ref(), now)
+                && !(view.is_child(key)
+                    && self
+                        .native_permit
+                        .as_ref()
+                        .is_some_and(|permit| permit(peer, &qualified)))
+            {
+                return Err(denied());
+            }
+        }
+        Ok(())
     }
 
     fn permits(&self, peer: &PeerId) -> bool {

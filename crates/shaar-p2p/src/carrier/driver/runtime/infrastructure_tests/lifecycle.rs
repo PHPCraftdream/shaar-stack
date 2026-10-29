@@ -12,6 +12,7 @@ async fn carrier_infrastructure_network_reopen_waits_for_retained_guard_and_igno
             .core
             .swarm
             .behaviour()
+            .inner
             .admission
             .roles_view()
             .unwrap();
@@ -67,7 +68,7 @@ async fn carrier_infrastructure_network_pending_timeout_and_cancel_reconcile_act
             let address = root(peer, endpoint.port());
             let (mut source, handle, _incoming) = carrier(&dns, vec![(peer, address.clone())]);
             let (connection, key) = stage(&mut source, peer, &address, endpoint);
-            let view = source.core.swarm.behaviour().admission.roles_view().unwrap();
+            let view = source.core.swarm.behaviour().inner.admission.roles_view().unwrap();
             let stream = timeout(DEADLINE, async {
                 loop {
                     tokio::select! {
@@ -118,7 +119,7 @@ async fn carrier_infrastructure_network_shutdown_joins_io_then_waits_for_last_gu
         let address = root(server.peer, server.address.port());
         let (mut source, handle, _incoming) = carrier(&dns, vec![(server.peer, address.clone())]);
         let (connection, key) = stage(&mut source, server.peer, &address, server.address);
-        let view = source.core.swarm.behaviour().admission.roles_view().unwrap();
+        let view = source.core.swarm.behaviour().inner.admission.roles_view().unwrap();
         let held = capture_incoming(&mut source, &mut server, key).await;
         live(&mut source, &mut server, connection).await;
         let listening = (*handle.listening.borrow()).unwrap();

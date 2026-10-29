@@ -226,8 +226,13 @@ async fn a_closing_circuit_cannot_be_reused() {
         role_override: libp2p::core::Endpoint::Dialer,
         port_use: libp2p::core::transport::PortUse::New,
     };
-    owner.core.swarm.behaviour_mut().admission.on_swarm_event(
-        libp2p::swarm::behaviour::FromSwarm::ConnectionEstablished(
+    owner
+        .core
+        .swarm
+        .behaviour_mut()
+        .inner
+        .admission
+        .on_swarm_event(libp2p::swarm::behaviour::FromSwarm::ConnectionEstablished(
             libp2p::swarm::behaviour::ConnectionEstablished {
                 peer_id: app,
                 connection_id: current,
@@ -235,8 +240,7 @@ async fn a_closing_circuit_cannot_be_reused() {
                 failed_addresses: &[],
                 other_established: 0,
             },
-        ),
-    );
+        ));
     owner.core.relay.routes.insert(
         current,
         Route::Relayed {
@@ -280,8 +284,13 @@ async fn local_expiry_revokes_a_published_lease_and_rejects_late_renewal() {
         local_addr: multiaddr(relay.address),
         send_back_addr: multiaddr(relay.address),
     };
-    owner.core.swarm.behaviour_mut().admission.on_swarm_event(
-        libp2p::swarm::behaviour::FromSwarm::ConnectionEstablished(
+    owner
+        .core
+        .swarm
+        .behaviour_mut()
+        .inner
+        .admission
+        .on_swarm_event(libp2p::swarm::behaviour::FromSwarm::ConnectionEstablished(
             libp2p::swarm::behaviour::ConnectionEstablished {
                 peer_id: relay.peer,
                 connection_id: current,
@@ -289,8 +298,7 @@ async fn local_expiry_revokes_a_published_lease_and_rejects_late_renewal() {
                 failed_addresses: &[],
                 other_established: 0,
             },
-        ),
-    );
+        ));
     let listener = owner.core.relay.records[&relay.peer].listener.unwrap();
     let advertised = relay
         .prefix()
@@ -347,8 +355,13 @@ async fn stale_or_stopping_acceptances_never_publish_a_lease() {
         local_addr: multiaddr(relay.address),
         send_back_addr: multiaddr(relay.address),
     };
-    owner.core.swarm.behaviour_mut().admission.on_swarm_event(
-        libp2p::swarm::behaviour::FromSwarm::ConnectionEstablished(
+    owner
+        .core
+        .swarm
+        .behaviour_mut()
+        .inner
+        .admission
+        .on_swarm_event(libp2p::swarm::behaviour::FromSwarm::ConnectionEstablished(
             libp2p::swarm::behaviour::ConnectionEstablished {
                 peer_id: relay.peer,
                 connection_id: current,
@@ -356,8 +369,7 @@ async fn stale_or_stopping_acceptances_never_publish_a_lease() {
                 failed_addresses: &[],
                 other_established: 0,
             },
-        ),
-    );
+        ));
     owner
         .core
         .relay_event(protocol::client::Event::ReservationReqAccepted {
@@ -398,12 +410,13 @@ impl Core {
     ) {
         let address = self.relay.records[&peer].address;
         assert_eq!(
-            self.swarm.behaviour().admission.connection(&peer),
+            self.swarm.behaviour().inner.admission.connection(&peer),
             Some(control)
         );
         let roles = self
             .swarm
             .behaviour()
+            .inner
             .admission
             .roles_view()
             .expect("configured role view");

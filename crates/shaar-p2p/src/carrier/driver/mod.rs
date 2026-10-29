@@ -47,6 +47,8 @@ mod circuit_io;
 mod relay;
 pub use relay::{RelayAddr, RelayLease, Route};
 
+#[path = "runtime/boundary.rs"]
+mod boundary;
 #[path = "runtime/events.rs"]
 mod events;
 #[path = "runtime/infrastructure.rs"]
@@ -70,7 +72,7 @@ pub struct Carrier {
 struct Core {
     // Declared first so the authority closes before Swarm and executor teardown.
     discovery: Option<discovery::State>,
-    swarm: Swarm<Behaviour>,
+    swarm: Swarm<boundary::Boundary<Behaviour>>,
     infrastructure: infrastructure::State,
     commands: mpsc::Receiver<Command>,
     incoming: mpsc::Sender<Received>,
@@ -138,7 +140,7 @@ impl Drop for Core {
         // the Swarm field below drops the last capability clones.
         self.relay.gate.revoke_all();
         self.withdraw_all_infrastructure();
-        self.swarm.behaviour_mut().admission.close_authority();
+        self.swarm.behaviour_mut().inner.admission.close_authority();
         if let Some(discovery) = &self.discovery {
             discovery.lifetime.close();
         }
@@ -149,7 +151,7 @@ impl Drop for Core {
 
 impl Core {
     fn allows_application(&self, peer: &PeerId) -> bool {
-        self.swarm.behaviour().admission.allows(peer)
+        self.swarm.behaviour().inner.admission.allows(peer)
             && !self
                 .discovery
                 .as_ref()
@@ -160,6 +162,7 @@ impl Core {
         let mut links: Vec<_> = self
             .swarm
             .behaviour()
+            .inner
             .admission
             .application_connections()
             .filter_map(|(peer, connection)| {
@@ -285,9 +288,9 @@ impl Core {
             let _ = reply.send(Err(capacity()));
         } else if !self.allows_application(&peer)
             || self.closing.contains_key(&peer)
-            || !self.swarm.behaviour().packets.is_connected(&peer)
+            || !self.swarm.behaviour().inner.packets.is_connected(&peer)
             || expected.is_some_and(|link| {
-                self.swarm.behaviour().admission.connection(&peer) != Some(link.connection)
+                self.swarm.behaviour().inner.admission.connection(&peer) != Some(link.connection)
                     || self.relay.routes.get(&link.connection) != Some(&link.route)
             })
         {
@@ -301,6 +304,7 @@ impl Core {
             let id = self
                 .swarm
                 .behaviour_mut()
+                .inner
                 .packets
                 .send_request(&peer, packet);
             self.requests.insert(
@@ -324,6 +328,7 @@ impl Core {
     ) -> io::Result<Option<AttemptKey>> {
         self.swarm
             .behaviour_mut()
+            .inner
             .admission
             .stage_native(peer, root, connection)
     }
@@ -335,6 +340,7 @@ impl Core {
     ) -> Option<std::net::SocketAddr> {
         self.swarm
             .behaviour_mut()
+            .inner
             .admission
             .terminal(attempt, authenticated.filter(|peer| *peer == attempt.peer))
     }
@@ -360,7 +366,7 @@ impl Core {
                     )));
                 } else if self.closing.contains_key(&peer) {
                     let _ = reply.send(Err(capacity()));
-                } else if let Some(id) = self.swarm.behaviour().admission.connection(&peer) {
+                } else if let Some(id) = self.swarm.behaviour().inner.admission.connection(&peer) {
                     let result = if self.relay.routes.get(&id) == Some(&Route::Direct) {
                         Ok(id)
                     } else {
@@ -379,7 +385,14 @@ impl Core {
                     // In the discovery branch the dial carries the exact selected root;
                     // hints and discovery paths never call admit or pin_root.
                     let mut address = multiaddr(address);
-                    if self.swarm.behaviour().admission.roles_view().is_some() {
+                    if self
+                        .swarm
+                        .behaviour()
+                        .inner
+                        .admission
+                        .roles_view()
+                        .is_some()
+                    {
                         address = address.with(Protocol::P2p(peer));
                     }
                     match self.dial_native(peer, &address) {
@@ -443,7 +456,8 @@ impl Core {
                     return;
                 };
                 if !self.allows_application(&peer)
-                    || self.swarm.behaviour().admission.connection(&peer) != Some(connection_id)
+                    || self.swarm.behaviour().inner.admission.connection(&peer)
+                        != Some(connection_id)
                     || self.closing.contains_key(&peer)
                 {
                     return;
@@ -462,6 +476,7 @@ impl Core {
                     let _ = self
                         .swarm
                         .behaviour_mut()
+                        .inner
                         .packets
                         .send_response(channel, ());
                 }

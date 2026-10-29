@@ -122,6 +122,14 @@ impl Carrier {
                     .with_max_concurrent_streams(2),
             ),
         };
+        let behaviour = boundary::Boundary {
+            inner: behaviour,
+            validate: |inner, id, peer, original, additional| {
+                inner
+                    .admission
+                    .validate_additional(id, peer, original, additional)
+            },
+        };
         let swarm = Swarm::new(
             transport,
             behaviour,

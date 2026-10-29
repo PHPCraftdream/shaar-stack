@@ -442,7 +442,7 @@ mod hostile_carrier_wire {
                     assert!(lease.generation() > 0);
                     let control = lease.connection_id();
                     assert!(carrier.core.relay.gate.reservation_permit(server_peer, lease.generation(), control));
-                    assert_eq!(carrier.core.swarm.behaviour().admission.connection(&server_peer), Some(control));
+                    assert_eq!(carrier.core.swarm.behaviour().inner.admission.connection(&server_peer), Some(control));
                 }
                 let listening = (*handle.listening.borrow()).expect("native listener observed");
                 let run = carrier.run(async {}).await;

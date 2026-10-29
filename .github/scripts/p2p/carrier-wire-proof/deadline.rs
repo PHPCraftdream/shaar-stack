@@ -260,7 +260,7 @@ async fn carrier_protocol_fixture_established_deadline() {
         let control = source
             .core
             .swarm
-            .behaviour()
+            .behaviour().inner
             .admission
             .connection(&relay_peer)
             .unwrap();
@@ -290,7 +290,7 @@ async fn carrier_protocol_fixture_established_deadline() {
             source
                 .core
                 .swarm
-                .behaviour()
+                .behaviour().inner
                 .admission
                 .connection(&relay_peer),
             Some(control)
