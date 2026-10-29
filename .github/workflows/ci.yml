@@ -8,6 +8,15 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      scope:
+        description: Targeted checks or explicit end-of-sprint full campaign
+        type: choice
+        options: [targeted, full]
+        default: targeted
+      base:
+        description: Comparison base SHA for a manual targeted campaign (empty selects all domains)
+        type: string
+        default: ''
       p08_graph:
         description: Resolve and compile the reviewed P08 candidate graph without changing the product lock
         type: boolean
@@ -21,7 +30,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      selection: ${{ steps.plan.outputs.selection }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - run: python -I -m unittest discover -s .github/ci
+      - id: plan
+        run: python -I .github/ci/plan.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ci-selection
+          path: ci-plan.json
+          if-no-files-found: error
   checks:
+    needs: plan
     name: fmt+clippy+test+structure (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -31,6 +62,9 @@ jobs:
     timeout-minutes: 90
     env:
       RUSTUP_TOOLCHAIN: "1.99.1"
+      CI_P2P: ${{ fromJSON(needs.plan.outputs.selection).p2p }}
+      CI_SDK: ${{ fromJSON(needs.plan.outputs.selection).sdk }}
+      CI_APPS: ${{ fromJSON(needs.plan.outputs.selection).apps }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -40,86 +74,27 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install Rust 1.99.1
+        if: fromJSON(needs.plan.outputs.selection).prepare
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
-      - name: Prepare reviewed production backend sources
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/backend-archives/noq target/backend-archives/iroh target/backend-archives/runtime
-          curl --fail --location --max-time 120 \
-            https://static.crates.io/crates/noq-proto/noq-proto-1.3.0.crate \
-            --output target/backend-archives/noq/noq-proto.crate
-          curl --fail --location --max-time 120 \
-            https://static.crates.io/crates/iroh/iroh-1.3.0.crate \
-            --output target/backend-archives/iroh/iroh.crate
-          curl --fail --location --max-time 120 \
-            https://static.crates.io/crates/noq/noq-1.3.0.crate \
-            --output target/backend-archives/runtime/noq.crate
-          python -I .github/scripts/backend/prepare.py \
-            --noq-archive target/backend-archives/noq/noq-proto.crate \
-            --iroh-archive target/backend-archives/iroh/iroh.crate \
-            --runtime-archive target/backend-archives/runtime/noq.crate \
-            --lock .github/probes/iroh-paths/Cargo.lock --destination target/backend
-      - name: Prepare reviewed signaling dependencies and expiry controls
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/p2p/relay-archive target/p2p/swarm-archive
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-relay/libp2p-relay-0.22.0.crate --output target/p2p/relay-archive/relay.crate
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-swarm/libp2p-swarm-0.48.0.crate --output target/p2p/swarm-archive/swarm.crate
-          python -I .github/scripts/p2p/prepare.py --archive target/p2p/relay-archive/relay.crate --destination target/p2p/relay --swarm-archive target/p2p/swarm-archive/swarm.crate --swarm-destination target/p2p/swarm
-          python -I .github/scripts/p2p/checks.py
-          if [[ "$RUNNER_OS" == Windows ]]; then binary="$RUNNER_TEMP/p2p-lease.exe"; else binary="$RUNNER_TEMP/p2p-lease"; fi
-          rustc --edition 2024 --test -D warnings .github/scripts/p2p/lease.rs -o "$binary"
-          "$binary"
-      - name: Prepare reviewed DNS expansion boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/p2p/dns-archive
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-dns/libp2p-dns-0.45.0.crate --output target/p2p/dns-archive/dns.crate
-          python -I .github/scripts/p2p/discovery/dns/prepare.py prepare --archive target/p2p/dns-archive/dns.crate --destination target/p2p/dns
-          python -I .github/scripts/p2p/discovery/dns/checks.py
-          python -I .github/scripts/p2p/discovery/dns/prepare.py fixture --source target/p2p/dns/libp2p-dns-0.45.0 --destination target/dns-retention/libp2p-dns-0.45.0
-      - name: Prepare reviewed resolver locking boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/p2p/resolver-archive
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/hickory-resolver/hickory-resolver-0.26.3.crate --output target/p2p/resolver-archive/resolver.crate
-          script=.github/scripts/p2p/discovery/resolver
-          rustfmt --edition 2021 --config skip_children=true --check "$script/tests/connections.rs" "$script/tests/cleanup.rs" "$script"/tests/cache/*.rs
-          python -I "$script/prepare.py" --archive target/p2p/resolver-archive/resolver.crate --destination target/p2p/resolver
-          python -I "$script/checks.py"
-          python -I "$script/tests/cache/checks.py"
-          python -I "$script/fixture.py" --source target/p2p/resolver/hickory-resolver-0.26.3 --destination target/resolver-locking-archive
-          for mechanism in connections cleanup cache_constructor cache_positive cache_error cache_alias cache_storage; do
-            python -I "$script/fixture.py" --source target/p2p/resolver/hickory-resolver-0.26.3 --destination "target/resolver-locking-counterfactual-$mechanism" --counterfactual "$mechanism"
-          done
-      - name: Prepare reviewed Kademlia referral retention
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/p2p/kad-archive
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-kad/libp2p-kad-0.49.0.crate --output target/p2p/kad-archive/kad.crate
-          python -I .github/scripts/p2p/discovery/kad/kad.py prepare --archive target/p2p/kad-archive/kad.crate --destination target/p2p/kad
-          python -I .github/scripts/p2p/discovery/kad/kad_checks.py
-          python -I .github/scripts/p2p/discovery/kad/kad.py fixture --source target/p2p/kad/libp2p-kad-0.49.0 --destination target/kad-retention/libp2p-kad-0.49.0
-          cargo metadata --locked --format-version 1 > target/p2p/metadata.json
-          python -I .github/scripts/p2p/graph.py verify --workspace . --baseline Cargo.lock --metadata target/p2p/metadata.json --relay-source target/p2p/relay/libp2p-relay-0.22.0 --swarm-source target/p2p/swarm/libp2p-swarm-0.48.0 --kad-source target/p2p/kad/libp2p-kad-0.49.0 --dns-source target/p2p/dns/libp2p-dns-0.45.0 --resolver-source target/p2p/resolver/hickory-resolver-0.26.3 --receipt target/p2p/graph-receipt.json
+      - uses: ./.github/actions/prepare-sources
+        if: fromJSON(needs.plan.outputs.selection).prepare
+        with:
+          selection: ${{ needs.plan.outputs.selection }}
       - name: Verify relay operation units, wire cases and isolated counterfactuals
+        if: fromJSON(needs.plan.outputs.selection).relay
         shell: bash
         run: |
           set -euo pipefail
           python -I .github/scripts/p2p/relay/fixtures/wire/run.py --repository . --source target/p2p/relay/libp2p-relay-0.22.0 --destination target/relay-operation-wire
       - name: Verify Carrier protocol barrier and isolated guard counterfactual
+        if: fromJSON(needs.plan.outputs.selection).carrier
         shell: bash
         run: |
           set -euo pipefail
           python -I .github/scripts/p2p/carrier-wire-proof/checks.py
           python -I .github/scripts/p2p/carrier-wire-proof/run.py --repository . --destination target/carrier-wire-proof
       - name: Preserve Carrier protocol proof receipts
-        if: always()
+        if: always() && fromJSON(needs.plan.outputs.selection).carrier
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: carrier-protocol-proof-${{ matrix.os }}
@@ -131,6 +106,7 @@ jobs:
             target/carrier-wire-proof/*/workspace/Cargo.lock
           if-no-files-found: warn
       - name: Verify resolver locking with archive features and genuine counterfactuals
+        if: fromJSON(needs.plan.outputs.selection).resolver
         shell: bash
         run: |
           set -euo pipefail
@@ -158,6 +134,7 @@ jobs:
             grep -E '^test result: FAILED\. 0 passed; 1 failed;' "$log"
           done
       - name: Verify zero-capacity cache contracts and isolated counterfactuals
+        if: fromJSON(needs.plan.outputs.selection).resolver
         shell: bash
         run: |
           set -euo pipefail
@@ -200,6 +177,7 @@ jobs:
             grep -E '^test result: FAILED\. 0 passed; 1 failed;' "$log"
           done
       - name: Verify resolver locking with product identities and host feature unions
+        if: fromJSON(needs.plan.outputs.selection).resolver
         shell: bash
         run: |
           set -euo pipefail
@@ -213,6 +191,7 @@ jobs:
           log="$RUNNER_TEMP/shaar-resolver-product.log"
           bash .github/scripts/p2p/discovery/owned_dns/cargo.sh locking_ resolver-product "$log" hickory_resolver target/resolver-locking-product/src/lib.rs target normal --locked --target-dir target --manifest-path target/resolver-locking-product/Cargo.toml --no-default-features --features "$features" --lib
       - name: Verify no-cache contracts with the unchanged product feature union
+        if: fromJSON(needs.plan.outputs.selection).resolver
         shell: bash
         run: |
           set -euo pipefail
@@ -220,6 +199,7 @@ jobs:
           log="$RUNNER_TEMP/shaar-resolver-cache-product.log"
           bash .github/scripts/p2p/discovery/owned_dns/cargo.sh no_cache_ resolver-cache-product "$log" hickory_resolver target/resolver-locking-product/src/lib.rs target normal --locked --target-dir target --manifest-path target/resolver-locking-product/Cargo.toml --no-default-features --features "$features" --lib
       - name: Verify owned DNS foundation and its single product graph edge
+        if: fromJSON(needs.plan.outputs.selection).dns
         shell: bash
         run: |
           set -euo pipefail
@@ -231,33 +211,38 @@ jobs:
           python -I .github/scripts/p2p/discovery/foundation_checks.py
           bash .github/scripts/p2p/discovery/owned_dns/run.sh
       - name: Verify private DNS wire input envelopes
+        if: fromJSON(needs.plan.outputs.selection).dns
         shell: bash
         run: |
           set -euo pipefail
           bash .github/scripts/p2p/discovery/owned_dns/run.sh wire_dns_ wire-dns "$RUNNER_TEMP/shaar-wire-dns.log"
       - name: Verify strict discovery address scope and complete grammar
+        if: fromJSON(needs.plan.outputs.selection).discovery
         shell: bash
         run: |
           set -euo pipefail
           bash .github/scripts/p2p/discovery/owned_dns/run.sh discovery_address_ discovery-address "$RUNNER_TEMP/shaar-discovery-address.log"
       - name: Verify owned destination role ledger boundaries
+        if: fromJSON(needs.plan.outputs.selection).discovery
         shell: bash
         run: |
           set -euo pipefail
           bash .github/scripts/p2p/discovery/owned_dns/run.sh destination_roles_ destination-roles "$RUNNER_TEMP/shaar-destination-roles.log"
           bash .github/scripts/verify_infrastructure_registry.sh
       - name: Verify guarded DNS transport root pinning
+        if: fromJSON(needs.plan.outputs.selection).discovery
         shell: bash
         run: |
           set -euo pipefail
           bash .github/scripts/p2p/discovery/owned_dns/run.sh destination_guard_ destination-guard "$RUNNER_TEMP/shaar-destination-guard.log"
       - name: Verify carrier role-integration wiring
+        if: fromJSON(needs.plan.outputs.selection).discovery
         shell: bash
         run: |
           set -euo pipefail
           bash .github/scripts/p2p/discovery/owned_dns/run.sh carrier_destination_ carrier-destination "$RUNNER_TEMP/shaar-carrier-destination.log"
       - name: Preserve owned relay revocation proof receipts
-        if: always()
+        if: always() && fromJSON(needs.plan.outputs.selection).relay
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: relay-operation-proof-${{ matrix.os }}
@@ -274,7 +259,7 @@ jobs:
             target/relay-operation-wire/*/run.log
           if-no-files-found: warn
       - name: Preserve owned DNS foundation proof receipts
-        if: always()
+        if: always() && (fromJSON(needs.plan.outputs.selection).dns || fromJSON(needs.plan.outputs.selection).discovery)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: owned-dns-foundation-${{ matrix.os }}
@@ -292,7 +277,7 @@ jobs:
             ${{ runner.temp }}/shaar-carrier-destination.log
           if-no-files-found: warn
       - name: Preserve resolver locking and cache proof receipts
-        if: always()
+        if: always() && fromJSON(needs.plan.outputs.selection).resolver
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: resolver-locking-proof-${{ matrix.os }}
@@ -309,18 +294,21 @@ jobs:
             ${{ runner.temp }}/shaar-resolver-*.log
           if-no-files-found: warn
       - name: Verify Kademlia internal retention with the unchanged archive lock
+        if: fromJSON(needs.plan.outputs.selection).kad
         shell: bash
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/shaar-kad-retention.log"
           bash .github/scripts/p2p/discovery/owned_dns/cargo.sh retention_ kad-retention "$log" libp2p_kad target/kad-retention/libp2p-kad-0.49.0/src/lib.rs target/kad-retention/libp2p-kad-0.49.0/target normal --locked --manifest-path target/kad-retention/libp2p-kad-0.49.0/Cargo.toml --lib
       - name: Verify DNS expansion with the unchanged archive lock
+        if: fromJSON(needs.plan.outputs.selection).dns
         shell: bash
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/shaar-dns-retention.log"
           bash .github/scripts/p2p/discovery/owned_dns/cargo.sh retention_ dns-retention "$log" libp2p_dns target/dns-retention/libp2p-dns-0.45.0/src/lib.rs target/dns-retention/libp2p-dns-0.45.0/target normal --locked --manifest-path target/dns-retention/libp2p-dns-0.45.0/Cargo.toml --lib
       - name: Verify ingress ownership and budget boundaries
+        if: fromJSON(needs.plan.outputs.selection).backend
         shell: bash
         run: |
           set -euo pipefail
@@ -330,6 +318,7 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then binary="$binary.exe"; fi
           "$binary"
       - name: Verify Noq fatal driver exit and cancellation
+        if: fromJSON(needs.plan.outputs.selection).backend
         shell: bash
         run: |
           set -euo pipefail
@@ -357,6 +346,7 @@ jobs:
           if grep -E 'Elapsed\(\(\)\)|OUTER_DEADLINE|HANDSHAKE_DEADLINE|RETAINED_STREAM_DEADLINE|TRANSMIT_BARRIER_DEADLINE|FATAL_DRIVER_JOIN_DEADLINE|ENDPOINT_IDLE_DEADLINE|SLOT_REUSE(_DATA)?_DEADLINE|CLEANUP_DEADLINE' "$log"; then exit 1; fi
           grep -E '^test result: FAILED\. 0 passed; 1 failed;' "$log"
       - name: Verify identical driver fixture with product dependency identities
+        if: fromJSON(needs.plan.outputs.selection).backend
         shell: bash
         run: |
           set -euo pipefail
@@ -370,7 +360,7 @@ jobs:
           log="$RUNNER_TEMP/shaar-driver-product.log"
           bash .github/scripts/p2p/discovery/owned_dns/cargo.sh suite:: driver-product "$log" noq_driver_product_proof target/noq-driver-product/src/lib.rs target normal --locked --target-dir target --manifest-path target/noq-driver-product/Cargo.toml --lib
       - name: Preserve Noq driver proof receipts
-        if: always()
+        if: always() && fromJSON(needs.plan.outputs.selection).backend
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: noq-driver-proof-${{ matrix.os }}
@@ -387,12 +377,22 @@ jobs:
       # --locked rejects mismatches with the lock graph without regenerating it.
       # Full test runs are executed only in CI.
       - name: cargo fmt
+        if: fromJSON(needs.plan.outputs.selection).rust
         run: cargo fmt --all -- --check
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        if: fromJSON(needs.plan.outputs.selection).rust
+        shell: bash
+        run: |
+          if ${{ fromJSON(needs.plan.outputs.selection).full }}; then
+            cargo clippy --workspace --all-targets --locked -- -D warnings
+          else
+            bash .github/ci/product.sh lint
+          fi
       - name: Verify actor abort joins native resource destruction
+        if: fromJSON(needs.plan.outputs.selection).sdk
         run: cargo test -p shaar --locked --test backend_gate actor_shutdown::tests
       - name: Verify native path retention against the reviewed protocol archive lock
+        if: fromJSON(needs.plan.outputs.selection).backend
         shell: bash
         run: |
           set -euo pipefail
@@ -420,7 +420,7 @@ jobs:
           log="$RUNNER_TEMP/shaar-native-retention.log"
           bash .github/scripts/p2p/discovery/owned_dns/cargo.sh tests::native_retention:: native-retention "$log" noq_proto target/native-retention/noq-proto-1.3.0/src/lib.rs target/native-retention/noq-proto-1.3.0/target normal --locked --manifest-path target/native-retention/noq-proto-1.3.0/Cargo.toml --lib
       - name: Diagnose native-after-signaling path lifecycle (Windows only)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && fromJSON(needs.plan.outputs.selection).full
         shell: bash
         run: |
           set -euo pipefail
@@ -439,7 +439,7 @@ jobs:
             grep -Fx "test $test_name ... ok" "$log"
           done
       - name: Diagnose unreachable native lifecycle under SDK parallelism (Windows only)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && fromJSON(needs.plan.outputs.selection).full
         shell: bash
         run: |
           set -euo pipefail
@@ -449,6 +449,7 @@ jobs:
             bash .github/scripts/p2p/discovery/owned_dns/cargo.sh '' "sdk-lifecycle-$trial" "$log" shaar crates/shaar/src/lib.rs target show-output -p shaar --lib --locked
           done
       - name: cargo test
+        if: fromJSON(needs.plan.outputs.selection).full
         shell: bash
         run: |
           set -euo pipefail
@@ -461,13 +462,17 @@ jobs:
           if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
           cat "$log"
           exit "$status"
+      - name: Targeted product package tests
+        if: fromJSON(needs.plan.outputs.selection).rust && !fromJSON(needs.plan.outputs.selection).full
+        shell: bash
+        run: bash .github/ci/product.sh test
       # SEC-KEY-02: explicit run of the ignored sudo probe. Fail-closed: the
       # step passes only if the standard non-quiet harness prints the exact
       # success line for the fully qualified test name, so a run selecting
       # zero tests, or missing sudo/setup, can never false-pass.
       - name: SEC-KEY-02 unprivileged reader probe (Ubuntu only)
         shell: bash
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && (fromJSON(needs.plan.outputs.selection).sdk || fromJSON(needs.plan.outputs.selection).apps)
         env:
           TEST_NAME: identity::store::tests::unprivileged_reader::identity_unprivileged_uid_cannot_read_seed_file
         run: |
@@ -491,6 +496,7 @@ jobs:
       - name: Structural guard tests
         run: python -I -X utf8 -m unittest discover -s .github/scripts/tests
       - name: Verify high-PTO shutdown negative control after production proofs
+        if: fromJSON(needs.plan.outputs.selection).backend
         shell: bash
         run: |
           set -euo pipefail
@@ -561,7 +567,7 @@ jobs:
               raise ValueError("counterfactual changed the product lock")
           PY
       - name: Preserve bounded protocol-close negative-control evidence
-        if: always()
+        if: always() && fromJSON(needs.plan.outputs.selection).backend
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: protocol-close-proof-${{ matrix.os }}
@@ -607,4 +613,4 @@ jobs:
           if-no-files-found: warn
 
       - uses: ./.github/actions/dependency-license
-        if: always()
+        if: always() && fromJSON(needs.plan.outputs.selection).license
