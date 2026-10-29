@@ -54,6 +54,134 @@ mod retention_behaviour {
         (behaviour, query, source)
     }
 
+    fn filtered_lookup(
+        filter: impl Fn(QueryId, PeerId, PeerId, &[Multiaddr]) -> bool + Send + Sync + 'static,
+    ) -> (Behaviour<MemoryStore>, QueryId, PeerId) {
+        let mut config = crate::Config::new(crate::PROTOCOL_NAME);
+        config.set_periodic_bootstrap_interval(None);
+        config.set_automatic_bootstrap_throttle(None);
+        config.set_kbucket_inserts(BucketInserts::Manual);
+        config.set_query_referral_filter(filter);
+        let mut behaviour =
+            crate::Behaviour::with_config(peer(0), MemoryStore::new(peer(0)), config);
+        behaviour.set_mode(Some(Mode::Client));
+        behaviour.add_address(&peer(1), address(1));
+        let query = behaviour.get_closest_peers(vec![42]);
+        let source = match behaviour.queries.poll(Instant::now()) {
+            QueryPoolState::Waiting(Some((_, source))) => source,
+            _ => panic!("seed must be scheduled"),
+        };
+        (behaviour, query, source)
+    }
+
+    #[test]
+    fn referral_filter_denies_retention_and_iterator_scheduling() {
+        let (mut behaviour, query, source) = filtered_lookup(|_, _, _, _| false);
+        let input = [referral(2, vec![address(2)])];
+        behaviour.discovered(&query, &source, input.iter());
+        assert!(
+            behaviour
+                .queries
+                .get(&query)
+                .unwrap()
+                .peers
+                .addresses
+                .is_empty()
+        );
+        match behaviour.queries.poll(Instant::now()) {
+            QueryPoolState::Finished(finished) => {
+                let peers: Vec<_> = finished.peers.into_peerids_iter().collect();
+                assert_eq!(peers, vec![source]);
+            }
+            _ => panic!("denied referral must not be scheduled"),
+        }
+    }
+
+    #[test]
+    fn referral_filter_receives_query_source_and_can_revoke_later_responses() {
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let allowed = Arc::new(AtomicBool::new(true));
+        let observed = calls.clone();
+        let current = allowed.clone();
+        let (mut behaviour, query, source) =
+            filtered_lookup(move |query, source, candidate, addresses| {
+                observed
+                    .lock()
+                    .unwrap()
+                    .push((query, source, candidate, addresses.to_vec()));
+                current.load(Ordering::SeqCst)
+            });
+        let input = [referral(2, vec![address(2)])];
+        behaviour.discovered(&query, &source, input.iter());
+        assert_eq!(
+            calls.lock().unwrap().as_slice(),
+            &[(query, source, peer(2), vec![address(2)])]
+        );
+        assert_eq!(
+            behaviour.queries.get(&query).unwrap().peers.addresses.len(),
+            1
+        );
+        let next = match behaviour.queries.poll(Instant::now()) {
+            QueryPoolState::Waiting(Some((_, source))) => source,
+            _ => panic!("allowed referral must be scheduled"),
+        };
+        assert_eq!(next, peer(2));
+        allowed.store(false, Ordering::SeqCst);
+        behaviour.discovered(&query, &next, [referral(3, vec![address(3)])].iter());
+        assert!(
+            !behaviour
+                .queries
+                .get(&query)
+                .unwrap()
+                .peers
+                .addresses
+                .contains_key(&peer(3))
+        );
+        behaviour.query_mut(&query).unwrap().finish();
+        let count = calls.lock().unwrap().len();
+        behaviour.discovered(&query, &next, input.iter());
+        assert_eq!(calls.lock().unwrap().len(), count);
+    }
+
+    #[test]
+    fn referral_filter_shares_one_caller_budget_across_queries() {
+        use std::{
+            collections::HashSet,
+            sync::{Arc, Mutex},
+        };
+        let retained = Arc::new(Mutex::new(HashSet::from([peer(1)])));
+        let budget = retained.clone();
+        let (mut behaviour, first, source) = filtered_lookup(move |_, _, candidate, _| {
+            let mut retained = budget.lock().unwrap();
+            if retained.contains(&candidate) {
+                return true;
+            }
+            if retained.len() == 2 {
+                return false;
+            }
+            retained.insert(candidate);
+            true
+        });
+        behaviour.discovered(&first, &source, [referral(2, vec![address(2)])].iter());
+        let second = behaviour.get_closest_peers(vec![43]);
+        assert_ne!(first, second);
+        behaviour.discovered(&second, &source, [referral(3, vec![address(3)])].iter());
+        assert!(
+            behaviour
+                .queries
+                .get(&second)
+                .unwrap()
+                .peers
+                .addresses
+                .is_empty()
+        );
+        assert_eq!(*retained.lock().unwrap(), HashSet::from([peer(1), peer(2)]));
+    }
+
     #[test]
     fn referral_map_is_bounded_before_completion_across_responses() {
         let (mut behaviour, query, source) = lookup();
