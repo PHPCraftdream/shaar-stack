@@ -108,6 +108,30 @@ async fn server_loop_with_sessions(
     shutdown: &mut std::pin::Pin<Box<impl std::future::Future<Output = std::io::Result<()>>>>,
     mut sessions: JoinSet<Result<ServeReport, ForwardError>>,
 ) -> Result<(), String> {
+    server_loop_with_gate(
+        endpoint,
+        target,
+        session_limit,
+        shutdown,
+        &mut sessions,
+        || std::future::ready(()),
+    )
+    .await
+}
+
+/// cancel-safe: NO — the caller must abort and join retained session tasks.
+async fn server_loop_with_gate<F, G>(
+    endpoint: &mut Endpoint,
+    target: std::net::SocketAddr,
+    session_limit: usize,
+    shutdown: &mut std::pin::Pin<Box<impl std::future::Future<Output = std::io::Result<()>>>>,
+    sessions: &mut JoinSet<Result<ServeReport, ForwardError>>,
+    after_serve: F,
+) -> Result<(), String>
+where
+    F: Fn() -> G + Clone + Send + 'static,
+    G: std::future::Future<Output = ()> + Send + 'static,
+{
     let (stop_sender, stop_receiver) = watch::channel(false);
     let outcome = 'run: loop {
         while let Some(result) = sessions.try_join_next() {
@@ -141,11 +165,14 @@ async fn server_loop_with_sessions(
                 match accepted {
                     Ok(mut session) => {
                         let mut stop = stop_receiver.clone();
+                        let after_serve = after_serve.clone();
                         sessions.spawn(async move {
-                            session.serve(target, async move {
+                            let result = session.serve(target, async move {
                                 if *stop.borrow() { return; }
                                 let _ = stop.changed().await;
-                            }).await
+                            }).await;
+                            after_serve().await;
+                            result
                         });
                     }
                     Err(shaar::network::NetworkError::Closed) => break 'run Err("SDK endpoint closed unexpectedly".into()),
@@ -155,7 +182,7 @@ async fn server_loop_with_sessions(
         }
     };
     let _ = stop_sender.send(true);
-    let drain_error = drain_sessions(&mut sessions).await;
+    let drain_error = drain_sessions(sessions).await;
     match (outcome, drain_error) {
         (Err(error), _) => Err(error),
         (Ok(()), Some(error)) => Err(error),
