@@ -372,6 +372,14 @@ impl NetworkBehaviour for Admission {
                 )));
             }
             let peer = peer.expect("checked above");
+            if addresses.is_empty()
+                && let Some(key) = view.attempt_for_connection(id)
+                && key.peer == peer
+                && let Some(root) = view.pending_infrastructure_root(key, Instant::now())
+            {
+                // Dependency dials borrow an exact pre-staged root, never cache authority.
+                return Ok(vec![root]);
+            }
             if addresses.len() != 1 {
                 return Err(ConnectionDenied::new(io::Error::from(
                     io::ErrorKind::PermissionDenied,

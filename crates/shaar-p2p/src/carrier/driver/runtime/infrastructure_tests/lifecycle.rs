@@ -1,6 +1,48 @@
 use super::*;
 
 #[tokio::test(flavor = "current_thread")]
+async fn carrier_infrastructure_network_rootless_dependency_dial_uses_staged_native_root() {
+    timeout(Duration::from_secs(35), async {
+        let dns = Dns::new().await;
+        let mut server = Server::new().await;
+        let address = root(server.peer, server.address.port());
+        let (mut source, handle, _incoming) = carrier(&dns, vec![(server.peer, address.clone())]);
+        let options = DialOpts::peer_id(server.peer).allocate_new_port().build();
+        let connection = options.connection_id();
+        let deadline = Instant::now() + DEADLINE;
+        let admission = &mut source.core.swarm.behaviour_mut().inner.admission;
+        let (key, permit) = admission
+            .stage_infrastructure(server.peer, &address, connection, deadline)
+            .unwrap();
+        admission
+            .allow_infrastructure_fixture(key, &address, server.address)
+            .unwrap();
+        source.core.infrastructure.entries.insert(
+            connection,
+            Entry {
+                key,
+                permit,
+                deadline,
+                phase: Phase::Pending,
+            },
+        );
+        source
+            .core
+            .event(SwarmEvent::Behaviour(BehaviourEvent::Dial(options)))
+            .unwrap();
+        live(&mut source, &mut server, connection).await;
+        assert!(handle.links().borrow().is_empty());
+        source.core.close_infrastructure(key, Instant::now());
+        gone(&mut source, &mut server, connection).await;
+        shutdown(source, &handle).await;
+        server.shutdown().await;
+        assert!(dns.shutdown().await > 0);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn carrier_infrastructure_network_reopen_waits_for_retained_guard_and_ignores_old_key() {
     timeout(Duration::from_secs(35), async {
         let dns = Dns::new().await;

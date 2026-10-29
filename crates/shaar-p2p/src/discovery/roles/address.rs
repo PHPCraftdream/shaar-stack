@@ -196,6 +196,34 @@ impl Owner {
 }
 
 impl View {
+    pub(crate) fn pending_infrastructure_root(
+        &self,
+        key: AttemptKey,
+        now: Instant,
+    ) -> Option<libp2p::Multiaddr> {
+        let (bytes, length) = {
+            let state = self.lock();
+            state.infrastructure.iter().flatten().find(|row| {
+                row.key == key
+                    && !row.withdrawn
+                    && !row.connection_terminal
+                    && !row.native_terminal
+                    && now < row.deadline
+            })?;
+            let attempt = state.attempts.get(&key.connection)?;
+            if attempt.key != key
+                || attempt.role != Role::Infrastructure
+                || !live(&state, attempt, now)
+            {
+                return None;
+            }
+            let root = attempt.root.as_ref()?;
+            (root.bytes, root.length)
+        };
+        // Copy the fixed snapshot under the lock; allocate and parse only after unlock.
+        libp2p::Multiaddr::try_from(bytes[..length].to_vec()).ok()
+    }
+
     pub(crate) fn matches_root(&self, key: AttemptKey, encoded: &[u8], now: Instant) -> bool {
         let state = self.lock();
         state.attempts.get(&key.connection).is_some_and(|attempt| {
