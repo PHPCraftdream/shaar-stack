@@ -129,7 +129,11 @@ exit "$RUN_STATUS"
 ''', encoding="utf-8", newline="\n")
             python = bin_dir / "python"
             python.write_text('''#!/bin/bash
-case "$*" in
+script=""
+for argument in "$@"; do
+  if [[ "$argument" == *.py ]]; then script="$argument"; break; fi
+done
+case "$script" in
   *scan_identity_output.py*)
     if [[ "$SCAN_FAIL" == build && "$*" == *build.stderr* ]] ||
        [[ "$SCAN_FAIL" == run && "$*" == *combined.log* && -f "$RUNNER_TEMP/shaar-inventory-case/cargo-run.log" ]]; then
