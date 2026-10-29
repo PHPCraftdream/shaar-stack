@@ -1,0 +1,34 @@
+# Provisional cargo-deny configuration used by the CI dependency-license gate.
+# This policy is not legal advice or a determination of license compliance.
+[graph]
+all-features = true
+
+[advisories]
+
+[licenses]
+# Permissive licenses compatible with distributing this project under
+# MIT OR Apache-2.0. Each still requires keeping license texts and copyright
+# notices when distributing; see docs/verification/dependency-licenses.md.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+]
+# A matching license allowlist uses SPDX expressions; do not treat an expression
+# as a plain string. Missing/unrecognized licenses should remain denied by the
+# tool's policy rather than being allowed via an exception.
+include-dev = true
+include-build = true
+
+[bans]
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

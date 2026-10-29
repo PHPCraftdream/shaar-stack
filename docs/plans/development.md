@@ -8,6 +8,8 @@ and automatic re-punch; see [the proof boundary](../verification/iroh-paths.md#1
 also passed. Native SDK networking (P06) is accepted on Linux and Windows at
 `4259f43`; see [the API, bounds and acceptance matrix](../../crates/shaar/src/network/README.md#consolidated-p06-acceptance).
 The Yggdrasil adapter (P07) remains unaccepted and externally gated.
+D1 (direct-only Server/Client) passed real-process acceptance on Linux and Windows at
+`341e14b` and `86080b9`; see [the usage guide](../direct-only-usage.md#7-acceptance-status).
 P01 contract research is reconciled to the native Rust requirement.
 Date: 2026-10-21. Revised: 2026-10-27 — prioritize usable direct Server/Client delivery;
 P03 controlled recovery and P06 native SDK remain accepted;
