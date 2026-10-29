@@ -76,6 +76,55 @@ fn rootless_infrastructure_withdrawal_does_not_grant_app_root_discovery() {
     );
 }
 
+#[test]
+fn infrastructure_cache_addresses_cannot_widen_the_selected_root() {
+    for explicit in [false, true] {
+        let peer = peer(1);
+        let selected: Multiaddr = format!("/ip4/8.8.8.8/tcp/1/p2p/{peer}").parse().unwrap();
+        let foreign = root(self::peer(2), 1);
+        for include_selected in [false, true] {
+            let mut cached = vec![foreign.clone(); 5];
+            if include_selected {
+                cached.extend([selected.clone(), selected.clone()]);
+            }
+            let (mut boundary, _, id, _) = composed(false, cached);
+            let owner = roles::Owner::new(&[], &[peer]).unwrap();
+            let mut admission = Admission::with_authority(vec![], owner, None).unwrap();
+            let (key, _permit) = admission
+                .stage_infrastructure(
+                    peer,
+                    &selected,
+                    id,
+                    tokio::time::Instant::now() + Duration::from_secs(10),
+                )
+                .unwrap();
+            boundary.inner.admission = admission;
+            let original = if explicit {
+                vec![selected.clone()]
+            } else {
+                vec![]
+            };
+            let additional = boundary
+                .handle_pending_outbound_connection(id, Some(peer), &original, Endpoint::Dialer)
+                .unwrap();
+            let expected = if !explicit || include_selected {
+                vec![selected.clone()]
+            } else {
+                vec![]
+            };
+            assert_eq!(additional, expected);
+            assert_eq!(boundary.inner.offers.calls, 1);
+            assert!(!boundary.inner.admission.allows(&peer));
+            boundary.inner.admission.withdraw_infrastructure(key);
+            assert!(
+                boundary
+                    .handle_pending_outbound_connection(id, Some(peer), &[], Endpoint::Dialer,)
+                    .is_err()
+            );
+        }
+    }
+}
+
 struct Offers {
     addresses: Vec<Multiaddr>,
     calls: usize,
@@ -243,10 +292,10 @@ fn composed(
                 close: None,
             },
         },
-        validate: |inner, id, peer, original, additional| {
+        constrain: |inner, id, peer, original, additional| {
             inner
                 .admission
-                .validate_additional(id, peer, original, additional)
+                .constrain_additional(id, peer, original, additional)
         },
     };
     (boundary, peer, id, original)

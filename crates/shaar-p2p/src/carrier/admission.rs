@@ -224,12 +224,12 @@ impl Admission {
         }
     }
 
-    pub(super) fn validate_additional(
+    pub(super) fn constrain_additional(
         &self,
         id: ConnectionId,
         peer: Option<PeerId>,
         original: &[Multiaddr],
-        additional: &[Multiaddr],
+        additional: &mut Vec<Multiaddr>,
     ) -> Result<(), ConnectionDenied> {
         let Some(view) = self.roles_view() else {
             return Ok(());
@@ -243,13 +243,28 @@ impl Admission {
                 "aggregate destination authority unavailable",
             ))
         };
-        if original.len() > 4 || additional.len() > 4 - original.len() {
-            return Err(denied());
-        }
         let peer = peer.ok_or_else(denied)?;
         let now = Instant::now();
         let key = view.current(peer, now).ok_or_else(denied)?;
         if key.connection != id {
+            return Err(denied());
+        }
+        if view.role(peer) == Some(roles::Role::Infrastructure) {
+            if !view.infrastructure_pending(key, now) {
+                return Err(denied());
+            }
+            // Cached alternatives cannot widen the owner's exact selected root.
+            let mut retained = false;
+            additional.retain(|address| {
+                if retained || !view.matches_root(key, address.as_ref(), now) {
+                    return false;
+                }
+                retained = true;
+                true
+            });
+            return Ok(());
+        }
+        if original.len() > 4 || additional.len() > 4 - original.len() {
             return Err(denied());
         }
         for address in additional {

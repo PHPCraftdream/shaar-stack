@@ -8,18 +8,18 @@ use libp2p::{
 };
 use std::task::{Context, Poll};
 
-type Validate<B> = fn(
+type Constrain<B> = fn(
     &B,
     ConnectionId,
     Option<PeerId>,
     &[Multiaddr],
-    &[Multiaddr],
+    &mut Vec<Multiaddr>,
 ) -> Result<(), ConnectionDenied>;
 
 /// Checks child addresses and hands dependency dials to the carrier owner.
 pub(super) struct Boundary<B: NetworkBehaviour> {
     pub(super) inner: B,
-    pub(super) validate: Validate<B>,
+    pub(super) constrain: Constrain<B>,
     pub(super) dial_event: fn(DialOpts) -> B::ToSwarm,
 }
 
@@ -55,10 +55,10 @@ impl<B: NetworkBehaviour> NetworkBehaviour for Boundary<B> {
         addresses: &[Multiaddr],
         role: Endpoint,
     ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
-        let additional = self
+        let mut additional = self
             .inner
             .handle_pending_outbound_connection(id, peer, addresses, role)?;
-        (self.validate)(&self.inner, id, peer, addresses, &additional)?;
+        (self.constrain)(&self.inner, id, peer, addresses, &mut additional)?;
         Ok(additional)
     }
 
