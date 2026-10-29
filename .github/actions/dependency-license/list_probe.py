@@ -70,11 +70,18 @@ def summarize(raw):
             raise ValueError(f"prepared {name} missing or ambiguous in license list")
         if not unquote(matches[0]).replace("\\", "/").endswith("/" + suffix):
             raise ValueError(f"prepared {name} has unexpected source path")
-    return {"package_count": len(data), "selected": selected}
+    return {"package_count": len(data), "selected": selected,
+            "package_ids": sorted(data)}
 
 
 if __name__ == "__main__":
     with Path(".github/deny.toml").open("rb") as policy_file:
         validate_policy(policy_file.read(MAX_POLICY_BYTES + 1))
     raw = sys.stdin.buffer.read(MAX_BYTES + 1)
-    print(json.dumps(summarize(raw), sort_keys=True, ensure_ascii=True))
+    summary = summarize(raw)
+    if len(sys.argv) == 2:
+        with Path(sys.argv[1]).open("xb") as output:
+            output.write(raw)
+    elif len(sys.argv) != 1:
+        raise ValueError("expected optional list output path")
+    print(json.dumps(summary, sort_keys=True, ensure_ascii=True))

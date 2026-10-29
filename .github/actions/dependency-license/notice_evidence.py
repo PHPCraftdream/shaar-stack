@@ -118,7 +118,7 @@ def _load_json(path: Path, max_bytes: int):
         raise EvidenceError(f"invalid metadata/source map: {exc}") from exc
 
 
-def collect(metadata_path: Path, source_map_path: Path) -> tuple[dict, dict[str, Path]]:
+def collect(metadata_path: Path, source_map_path: Path, selected_ids: set[str] | None = None) -> tuple[dict, dict[str, Path]]:
     metadata = _load_json(metadata_path, MAX_METADATA_BYTES)
     source_map = _load_json(source_map_path, MAX_SOURCE_MAP_BYTES)
     packages = metadata.get("packages")
@@ -158,12 +158,14 @@ def collect(metadata_path: Path, source_map_path: Path) -> tuple[dict, dict[str,
     if not workspace_ids.issubset(node_ids):
         raise EvidenceError("workspace member missing from resolved graph")
 
+    if selected_ids is not None and (not selected_ids or not selected_ids.issubset(node_ids)):
+        raise EvidenceError("selected package IDs are missing from metadata")
     entries, excluded_workspace = [], []
     roots_by_id = {}
     collected_bytes = 0
     # These counters are shared across every source tree visited by this collection.
     file_count = directory_count = 0
-    for package_id in sorted(node_ids, key=lambda x: x.encode("utf-8")):
+    for package_id in sorted(node_ids if selected_ids is None else selected_ids, key=lambda x: x.encode("utf-8")):
         package = by_id[package_id]
         if not isinstance(package.get("manifest_path"), str):
             raise EvidenceError("package lacks manifest_path")
@@ -300,13 +302,7 @@ def _write_output(output: Path, data: bytes, inputs: list[Path], source_roots: l
             os.unlink(temporary)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("metadata", type=Path, help="actual cargo metadata --format-version 1 JSON")
-    parser.add_argument("source_map", type=Path, help="JSON object mapping exact package IDs to prepared source roots")
-    parser.add_argument("output", type=Path)
-    args = parser.parse_args()
-    manifest, roots_by_id = collect(args.metadata, args.source_map)
+def write_manifest(output_path: Path, manifest: dict, inputs: list[Path], roots: list[Path]) -> None:
     encoder = json.JSONEncoder(sort_keys=True, ensure_ascii=True, separators=(",", ":"))
     output = bytearray()
     for chunk in encoder.iterencode(manifest):
@@ -315,7 +311,17 @@ def main() -> int:
             raise EvidenceError("serialized manifest exceeds size limit")
         output.extend(encoded)
     output.extend(b"\n")
-    _write_output(args.output, bytes(output), [args.metadata, args.source_map], list(roots_by_id.values()))
+    _write_output(output_path, bytes(output), inputs, roots)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("metadata", type=Path, help="actual cargo metadata --format-version 1 JSON")
+    parser.add_argument("source_map", type=Path, help="JSON object mapping exact package IDs to prepared source roots")
+    parser.add_argument("output", type=Path)
+    args = parser.parse_args()
+    manifest, roots_by_id = collect(args.metadata, args.source_map)
+    write_manifest(args.output, manifest, [args.metadata, args.source_map], list(roots_by_id.values()))
     return 0
 
 

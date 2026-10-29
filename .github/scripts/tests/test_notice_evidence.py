@@ -12,6 +12,9 @@ SCRIPT = Path(__file__).resolve().parents[2] / "actions" / "dependency-license" 
 spec = importlib.util.spec_from_file_location("notice_evidence", SCRIPT)
 collector = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(collector)
+selected_spec = importlib.util.spec_from_file_location("selected_evidence", SCRIPT.with_name("selected_evidence.py"))
+selected = importlib.util.module_from_spec(selected_spec)
+selected_spec.loader.exec_module(selected)
 
 
 class NoticeEvidenceTests(unittest.TestCase):
@@ -29,6 +32,64 @@ class NoticeEvidenceTests(unittest.TestCase):
         m.write_text(json.dumps(metadata), encoding="utf-8")
         s.write_text(json.dumps({pkg_id: str(source)}), encoding="utf-8")
         return pkg_id, m, s, source
+
+    def test_selected_identity_matching_and_unsupported_cases(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            pkg_id, metadata, sources, source = self.fixture(root)
+            data = json.loads(metadata.read_text(encoding="utf-8"))
+            item = "pkg 1.0.0 registry+https://example.invalid"
+            self.assertEqual(selected.select(data, {"package_ids": [item]}), {pkg_id})
+            for bad in ("pkg 1.0.0 registry+https://other.invalid", "pkg 1.0.0 unsupported:source"):
+                with self.assertRaises(selected.evidence.EvidenceError):
+                    selected.select(data, {"package_ids": [bad]})
+            data["packages"].append(dict(data["packages"][0], id="duplicate"))
+            with self.assertRaisesRegex(selected.evidence.EvidenceError, "ambiguous"):
+                selected.select(data, {"package_ids": [item]})
+            result, _ = collector.collect(metadata, sources, {pkg_id})
+            self.assertEqual(result["entries"][0]["package_id"], pkg_id)
+            with self.assertRaisesRegex(collector.EvidenceError, "missing from metadata"):
+                collector.collect(metadata, sources, {"missing"})
+
+    def test_selected_subgraph_collects_path_and_git_but_not_excluded_package(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            pkg_id, metadata, _, source = self.fixture(root)
+            data = json.loads(metadata.read_text(encoding="utf-8"))
+            data["packages"][0]["source"] = None
+            git_root = root / "git source"
+            git_root.mkdir()
+            (git_root / "Cargo.toml").write_text("manifest", encoding="utf-8")
+            (git_root / "LICENSE").write_bytes(b"git license")
+            git_source = "git+https://example.invalid/repo?rev=abc#abc"
+            git_id = git_source + "#gitpkg@2.0.0"
+            data["packages"].append(dict(data["packages"][0], id=git_id, name="gitpkg", version="2.0.0", source=git_source, manifest_path=str(git_root / "Cargo.toml")))
+            excluded_root = root / "excluded"
+            excluded_root.mkdir()
+            (excluded_root / "Cargo.toml").write_text("manifest", encoding="utf-8")
+            excluded_id = "excluded-id"
+            data["packages"].append(dict(data["packages"][0], id=excluded_id, name="excluded", manifest_path=str(excluded_root / "Cargo.toml")))
+            data["resolve"]["nodes"] = [
+                {"id": pkg_id, "deps": [{"pkg": git_id, "dep_kinds": []}, {"pkg": excluded_id, "dep_kinds": []}]},
+                {"id": git_id, "deps": []}, {"id": excluded_id, "deps": []},
+            ]
+            metadata.write_text(json.dumps(data), encoding="utf-8")
+            path_item = "pkg 1.0.0 path+" + source.absolute().as_uri()
+            git_item = "gitpkg 2.0.0 " + git_source
+            listing = root / "list.json"
+            listing.write_text("{}", encoding="utf-8")
+            output, mapping = root / "evidence.json", root / "map.json"
+            self.assertEqual(selected.select(data, {"package_ids": [path_item, git_item]}), {pkg_id, git_id})
+            with self.assertRaisesRegex(selected.evidence.EvidenceError, "missing or ambiguous"):
+                selected.select(data, {"package_ids": [git_item.replace("#abc", "#other")]})
+            with mock.patch.object(selected.list_probe, "summarize", return_value={"package_ids": [path_item, git_item]}):
+                selected.collect_selected(metadata, listing, output, mapping)
+            result = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(result["selection"], {"kind": "cargo-deny-list", "package_count": 2})
+            self.assertEqual({entry["package_id"] for entry in result["entries"]}, {pkg_id, git_id})
+            self.assertEqual(set(json.loads(mapping.read_text(encoding="utf-8"))), {pkg_id, git_id, excluded_id})
+            git_entry = next(entry for entry in result["entries"] if entry["package_id"] == git_id)
+            self.assertEqual(bytes.fromhex(git_entry["materials"][0]["bytes_hex"]), b"git license")
 
     def test_preserves_exact_bytes_identity_and_limits(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -213,6 +274,38 @@ class NoticeEvidenceTests(unittest.TestCase):
                 self.skipTest("hard links unavailable")
             with self.assertRaisesRegex(collector.EvidenceError, "hard-linked legal-material"):
                 collector.collect(metadata, sources)
+
+    def test_workspace_root_protects_manifest_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            pkg_id, metadata, sources, source = self.fixture(root, False)
+            data = json.loads(metadata.read_text(encoding="utf-8"))
+            data["workspace_members"] = [pkg_id]
+            metadata.write_text(json.dumps(data), encoding="utf-8")
+            manifest, roots = collector.collect(metadata, sources)
+            self.assertIn(pkg_id, roots)
+            output = source / "evidence.json"
+            with self.assertRaisesRegex(collector.EvidenceError, "inside source root"):
+                collector.write_manifest(output, manifest, [metadata, sources], list(roots.values()))
+            self.assertFalse(output.exists())
+
+    def test_selected_source_map_rejects_source_and_output_aliases(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            pkg_id, metadata, _, source = self.fixture(root)
+            data = json.loads(metadata.read_text(encoding="utf-8"))
+            data["workspace_members"] = [pkg_id]
+            metadata.write_text(json.dumps(data), encoding="utf-8")
+            listing = root / "list.json"
+            listing.write_text("{}", encoding="utf-8")
+            summary = {"package_ids": ["pkg 1.0.0 registry+https://example.invalid"]}
+            with mock.patch.object(selected.list_probe, "summarize", return_value=summary):
+                with self.assertRaisesRegex(selected.evidence.EvidenceError, "inside source root"):
+                    selected.collect_selected(metadata, listing, root / "output.json", source / "map.json")
+                with self.assertRaisesRegex(selected.evidence.EvidenceError, "aliases output"):
+                    selected.collect_selected(metadata, listing, root / "same.json", root / "same.json")
+            self.assertFalse((source / "map.json").exists())
+            self.assertFalse((root / "same.json").exists())
 
     def test_workspace_packages_are_recorded_as_excluded(self):
         with tempfile.TemporaryDirectory() as temp:

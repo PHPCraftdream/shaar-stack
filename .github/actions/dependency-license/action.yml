@@ -28,7 +28,14 @@ runs:
           executable="$(cygpath -u "$RUNNER_TEMP")/cargo-deny-bin.exe"
         fi
         "$executable" --locked --config .github/deny.toml --all-features list --format json --layout crate |
-          python -I -X utf8 .github/actions/dependency-license/list_probe.py
+          python -I -X utf8 .github/actions/dependency-license/list_probe.py "$RUNNER_TEMP/dependency-license-list.json"
+    - name: Collect selected third-party notice evidence
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -I -X utf8 .github/actions/dependency-license/selected_evidence.py \
+          target/p2p/metadata.json "$RUNNER_TEMP/dependency-license-list.json" \
+          "$RUNNER_TEMP/dependency-notice-evidence.json" "$RUNNER_TEMP/dependency-notice-sources.json"
     - name: Preserve dependency license report
       if: always()
       shell: bash

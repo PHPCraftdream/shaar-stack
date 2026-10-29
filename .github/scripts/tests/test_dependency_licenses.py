@@ -45,6 +45,8 @@ class DependencyLicenseTests(unittest.TestCase):
                 Path("Cargo.lock").write_text("lock")
                 Path("Cargo.toml").write_text("manifest")
                 Path(tmp, "dependency-licenses.log").write_text("ok")
+                for name in ("dependency-license-list.json", "dependency-notice-evidence.json"):
+                    Path(tmp, name).write_text("{}")
                 with mock.patch.dict(os.environ, {"RUNNER_TEMP": tmp}):
                     with self.assertRaisesRegex(FileNotFoundError, "missing required"):
                         licenses.report()
@@ -54,6 +56,44 @@ class DependencyLicenseTests(unittest.TestCase):
                         path.write_text("not-json" if rel == licenses.RECEIPTS[0] else "{}")
                     with self.assertRaises(json.JSONDecodeError):
                         licenses.report()
+            finally:
+                os.chdir(old)
+
+    def test_report_success_and_missing_inputs_preserve_only_current_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old = Path.cwd()
+            try:
+                os.chdir(tmp)
+                runner = Path(tmp) / "runner"
+                runner.mkdir()
+                inputs = [Path("Cargo.lock"), Path("Cargo.toml"), Path("target/p2p/metadata.json"), Path("target/p2p/graph-receipt.json"), *(Path(p) for p in licenses.RECEIPTS)]
+                for path in inputs:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("{}", encoding="utf-8")
+                for name in ("dependency-licenses.log", "dependency-license-list.json", "dependency-notice-evidence.json"):
+                    (runner / name).write_text(name, encoding="utf-8")
+                out = Path("target/dependency-license-report")
+                with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(runner)}):
+                    licenses.report()
+                    provenance = json.loads((out / "provenance.json").read_text(encoding="utf-8"))
+                    self.assertEqual(provenance["evidence_sha256"]["Cargo.lock"], hashlib.sha256(b"{}").hexdigest())
+                    self.assertEqual(len(provenance["prepared_source_receipts"]), len(licenses.RECEIPTS))
+                    (runner / "dependency-notice-evidence.json").unlink()
+                    Path(licenses.RECEIPTS[0]).unlink()
+                    with self.assertRaisesRegex(FileNotFoundError, "missing required"):
+                        licenses.report()
+                    self.assertEqual((out / "dependency-licenses.log").read_text(encoding="utf-8"), "dependency-licenses.log")
+                    self.assertTrue((out / "dependency-license-list.json").is_file())
+                    self.assertTrue((out / "Cargo.lock").is_file())
+                    self.assertFalse((out / "dependency-notice-evidence.json").exists())
+                    self.assertFalse((out / "target-backend-provenance.json").exists())
+                    self.assertFalse((out / "provenance.json").exists())
+                    Path(licenses.RECEIPTS[0]).write_text("invalid", encoding="utf-8")
+                    (runner / "dependency-notice-evidence.json").write_text("{}", encoding="utf-8")
+                    with self.assertRaises(json.JSONDecodeError):
+                        licenses.report()
+                    self.assertTrue((out / "target-backend-provenance.json").is_file())
+                    self.assertFalse((out / "provenance.json").exists())
             finally:
                 os.chdir(old)
 
@@ -155,6 +195,8 @@ class DependencyLicenseTests(unittest.TestCase):
         enforce = by_name["Enforce dependency license gate result"]
         self.assertIn("continue-on-error: true", check)
         self.assertIn("--all-features list --format json --layout crate", selected_graph)
+        self.assertIn("selected_evidence.py", by_name["Collect selected third-party notice evidence"])
+        self.assertNotIn("continue-on-error", by_name["Collect selected third-party notice evidence"])
         self.assertNotIn("continue-on-error", selected_graph)
         self.assertNotIn("continue-on-error", report)
         self.assertNotIn("continue-on-error", upload)

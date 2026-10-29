@@ -65,15 +65,21 @@ def report():
     out = Path("target/dependency-license-report")
     out.mkdir(parents=True, exist_ok=True)
     required = [Path(os.environ["RUNNER_TEMP"]) / "dependency-licenses.log", Path("Cargo.lock"), Path("Cargo.toml"), Path("target/p2p/metadata.json"), Path("target/p2p/graph-receipt.json"), *(Path(p) for p in RECEIPTS)]
-    missing = [str(path) for path in required if not path.is_file()]
+    notice_files = [Path(os.environ["RUNNER_TEMP"]) / name for name in ("dependency-license-list.json", "dependency-notice-evidence.json")]
+    destinations = [(path, out / path.name) for path in required[:5] + notice_files]
+    destinations += [(path, out / (path.parent.parent.name + "-" + path.parent.name + "-provenance.json")) for path in required[5:]]
+    # Remove prior report outputs before copying, so a failed rerun cannot upload
+    # stale evidence or a provenance summary that appears complete.
+    for destination in [out / "provenance.json", *(dest for _, dest in destinations)]:
+        destination.unlink(missing_ok=True)
+    missing = []
+    for path, destination in destinations:
+        if path.is_file():
+            shutil.copy2(path, destination)
+        else:
+            missing.append(str(path))
     if missing:
         raise FileNotFoundError("missing required license evidence: " + ", ".join(missing))
-    for path in required:
-        if path.name in ("metadata.json", "graph-receipt.json") or path.name in ("Cargo.lock", "Cargo.toml"):
-            shutil.copy2(path, out / path.name)
-    shutil.copy2(required[0], out / required[0].name)
-    for path in required[5:]:
-        shutil.copy2(path, out / (path.parent.parent.name + "-" + path.parent.name + "-provenance.json"))
     receipts = {str(path): json.loads(path.read_text(encoding="utf-8")) for path in required[5:]}
     hashes = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in required[1:5]}
     (out / "provenance.json").write_text(json.dumps({"evidence_sha256": hashes, "prepared_source_receipts": receipts, "note": "Receipt provenance does not establish graph coverage or legal compliance."}, indent=2) + "\n", encoding="utf-8")
