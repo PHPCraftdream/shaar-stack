@@ -1,0 +1,46 @@
+name: Dependency license gate
+outputs:
+  gate-outcome:
+    description: cargo-deny check outcome
+    value: ${{ steps.check.outcome }}
+runs:
+  using: composite
+  steps:
+    - name: Test dependency-license regressions
+      shell: bash
+      run: |
+        python -I -X utf8 .github/scripts/tests/test_dependency_licenses.py
+        python -I -X utf8 .github/scripts/tests/test_notice_evidence.py
+    - name: Install checksum-verified cargo-deny
+      shell: bash
+      run: python -I .github/scripts/dependency_licenses.py install
+    - name: Check dependency licenses (locked graph)
+      id: check
+      continue-on-error: true
+      shell: bash
+      run: python -I .github/scripts/dependency_licenses.py check
+    - name: Inspect selected license graph
+      shell: bash
+      run: |
+        set -euo pipefail
+        executable="$RUNNER_TEMP/cargo-deny-bin"
+        if [[ "$RUNNER_OS" == Windows ]]; then
+          executable="$(cygpath -u "$RUNNER_TEMP")/cargo-deny-bin.exe"
+        fi
+        "$executable" --locked --config .github/deny.toml --all-features list --format json --layout crate |
+          python -I -X utf8 .github/actions/dependency-license/list_probe.py
+    - name: Preserve dependency license report
+      if: always()
+      shell: bash
+      run: python -I .github/scripts/dependency_licenses.py report
+    - name: Upload dependency license report
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: dependency-license-report-${{ runner.os }}
+        path: target/dependency-license-report/
+        if-no-files-found: error
+    - name: Enforce dependency license gate result
+      if: always()
+      shell: bash
+      run: test "${{ steps.check.outcome }}" = success
