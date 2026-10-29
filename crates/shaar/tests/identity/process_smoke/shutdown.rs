@@ -217,7 +217,7 @@ pub(super) async fn shutdown_scenario(
 }
 
 /// cancel-safe: NO — the caller must reap the tracked signal helper.
-async fn signal_owned(processes: &mut Processes, index: usize) -> Result<(), String> {
+pub(super) async fn signal_owned(processes: &mut Processes, index: usize) -> Result<(), String> {
     if processes.0[index]
         .child
         .try_wait()
