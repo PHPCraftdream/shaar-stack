@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod rejection;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod shutdown;
 mod startup;
 mod unavailable;
@@ -59,15 +59,20 @@ struct Process {
 struct Processes(Vec<Process>);
 impl Processes {
     fn spawn(&mut self, exe: &str, config: &Path, working_dir: &Path) -> Result<usize, String> {
-        let mut child = Command::new(exe)
+        let mut command = Command::new(exe);
+        command
             .arg("--config")
             .arg(config)
             .current_dir(working_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|error| error.to_string())?;
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        {
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
+        let mut child = command.spawn().map_err(|error| error.to_string())?;
         let stdout = child.stdout.take().ok_or("piped stdout unavailable")?;
         self.0.push(Process {
             child,
@@ -566,10 +571,10 @@ async fn scenario(
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
-async fn real_process_server_sigint_releases_udp_after_active_stream() {
+async fn real_process_server_console_shutdown_releases_udp_after_active_stream() {
     let temp = Temp::new().unwrap();
     let mut processes = Processes::default();
     let mut tasks = JoinSet::new();

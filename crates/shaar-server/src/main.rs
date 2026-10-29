@@ -70,10 +70,26 @@ async fn run() -> Result<(), String> {
     );
 
     let target = config.target();
-    let mut shutdown = Box::pin(tokio::signal::ctrl_c());
+    let mut shutdown = Box::pin(shutdown_signal());
     let outcome = server_loop(&mut endpoint, target, MAX_SESSIONS, &mut shutdown).await;
     endpoint.close().await;
     outcome
+}
+
+/// cancel-safe: NO — dropping a listener can discard a notification.
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        let mut ctrl_break = tokio::signal::windows::ctrl_break()?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            event = ctrl_break.recv() => event.ok_or_else(|| std::io::Error::other("ctrl-break listener closed")),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        tokio::signal::ctrl_c().await
+    }
 }
 
 async fn server_loop(
@@ -109,7 +125,7 @@ async fn server_loop_with_sessions(
             biased;
             signal = shutdown.as_mut() => match signal {
                 Ok(()) => break 'run Ok(()),
-                Err(error) => break 'run Err(format!("ctrl-c handler failed: {error}")),
+                Err(error) => break 'run Err(format!("console signal handler failed: {error}")),
             },
             result = sessions.join_next(), if sessions.len() >= session_limit => {
                 match result {

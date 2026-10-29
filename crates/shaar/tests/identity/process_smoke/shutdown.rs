@@ -95,9 +95,24 @@ pub(super) async fn shutdown_scenario(
         .child
         .id()
         .ok_or("server PID unavailable")?;
-    let mut signal = Command::new("/bin/kill")
-        .arg("-INT")
-        .arg(pid.to_string())
+    #[cfg(unix)]
+    let mut signal_command = {
+        let mut command = Command::new("/bin/kill");
+        command.arg("-INT").arg(pid.to_string());
+        command
+    };
+    #[cfg(windows)]
+    let mut signal_command = {
+        let mut command = Command::new("python");
+        command.args([
+            "-I",
+            "-c",
+            "import os, signal, sys; os.kill(int(sys.argv[1]), signal.CTRL_BREAK_EVENT)",
+        ]);
+        command.arg(pid.to_string());
+        command
+    };
+    let mut signal = signal_command
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
