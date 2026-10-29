@@ -124,6 +124,7 @@ impl Carrier {
         };
         let behaviour = boundary::Boundary {
             inner: behaviour,
+            dial_event: BehaviourEvent::Dial,
             validate: |inner, id, peer, original, additional| {
                 inner
                     .admission

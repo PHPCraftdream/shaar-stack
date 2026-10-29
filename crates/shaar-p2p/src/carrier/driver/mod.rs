@@ -56,7 +56,33 @@ mod infrastructure;
 #[path = "runtime/setup.rs"]
 mod setup;
 
+#[derive(Debug)]
+enum BehaviourEvent {
+    Relays(libp2p::relay::client::Event),
+    Packets(rpc::Event<Datagram, ()>),
+    Dial(DialOpts),
+}
+
+impl From<std::convert::Infallible> for BehaviourEvent {
+    fn from(event: std::convert::Infallible) -> Self {
+        match event {}
+    }
+}
+
+impl From<libp2p::relay::client::Event> for BehaviourEvent {
+    fn from(event: libp2p::relay::client::Event) -> Self {
+        Self::Relays(event)
+    }
+}
+
+impl From<rpc::Event<Datagram, ()>> for BehaviourEvent {
+    fn from(event: rpc::Event<Datagram, ()>) -> Self {
+        Self::Packets(event)
+    }
+}
+
 #[derive(NetworkBehaviour)]
+#[behaviour(to_swarm = "BehaviourEvent")]
 struct Behaviour {
     admission: Admission,
     relays: libp2p::relay::client::Behaviour,

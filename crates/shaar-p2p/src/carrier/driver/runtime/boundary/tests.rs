@@ -6,6 +6,8 @@ use std::{convert::Infallible, time::Duration};
 struct Offers {
     addresses: Vec<Multiaddr>,
     calls: usize,
+    dial: Option<DialOpts>,
+    close: Option<PeerId>,
 }
 
 impl NetworkBehaviour for Offers {
@@ -56,14 +58,78 @@ impl NetworkBehaviour for Offers {
     }
 
     fn poll(&mut self, _: &mut Context<'_>) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+        if let Some(opts) = self.dial.take() {
+            return Poll::Ready(ToSwarm::Dial { opts });
+        }
+        if let Some(peer_id) = self.close.take() {
+            return Poll::Ready(ToSwarm::CloseConnection {
+                peer_id,
+                connection: libp2p::swarm::CloseConnection::All,
+            });
+        }
         Poll::Pending
     }
 }
 
+#[derive(Debug)]
+enum ComposedEvent {
+    Dial(DialOpts),
+}
+
+impl From<Infallible> for ComposedEvent {
+    fn from(event: Infallible) -> Self {
+        match event {}
+    }
+}
+
 #[derive(NetworkBehaviour)]
+#[behaviour(to_swarm = "ComposedEvent")]
 struct Composed {
     admission: Admission,
     offers: Offers,
+}
+
+#[test]
+fn dependency_dial_handoff_preserves_original_options_and_emits_once() {
+    let (mut boundary, peer, _, address) = composed(true, vec![]);
+    let opts = DialOpts::peer_id(peer)
+        .addresses(vec![address])
+        .condition(libp2p::swarm::dial_opts::PeerCondition::Always)
+        .allocate_new_port()
+        .build();
+    let id = opts.connection_id();
+    let expected = format!("{opts:?}");
+    boundary.inner.offers.dial = Some(opts);
+    let mut context = Context::from_waker(std::task::Waker::noop());
+    match boundary.poll(&mut context) {
+        Poll::Ready(ToSwarm::GenerateEvent(ComposedEvent::Dial(actual))) => {
+            assert_eq!(actual.connection_id(), id);
+            assert_eq!(actual.get_peer_id(), Some(peer));
+            assert_eq!(format!("{actual:?}"), expected);
+        }
+        other => panic!("dependency dial must reach owner, not Swarm: {other:?}"),
+    }
+    assert!(boundary.poll(&mut context).is_pending());
+}
+
+#[test]
+fn dependency_dial_handoff_preserves_non_dial_actions_and_progress() {
+    let (mut boundary, peer, _, address) = composed(true, vec![]);
+    boundary.inner.offers.dial = Some(DialOpts::peer_id(peer).addresses(vec![address]).build());
+    boundary.inner.offers.close = Some(peer);
+    let mut context = Context::from_waker(std::task::Waker::noop());
+    assert!(matches!(
+        boundary.poll(&mut context),
+        Poll::Ready(ToSwarm::GenerateEvent(ComposedEvent::Dial(_)))
+    ));
+    match boundary.poll(&mut context) {
+        Poll::Ready(ToSwarm::CloseConnection {
+            peer_id,
+            connection: libp2p::swarm::CloseConnection::All,
+        }) => assert_eq!(peer_id, peer),
+        other => panic!("non-dial action must pass through: {other:?}"),
+    }
+    assert!(boundary.poll(&mut context).is_pending());
 }
 
 fn peer(value: u8) -> PeerId {
@@ -94,11 +160,14 @@ fn composed(
     };
     admission.stage_native(peer, &original, id).unwrap();
     let boundary = Boundary {
+        dial_event: ComposedEvent::Dial,
         inner: Composed {
             admission,
             offers: Offers {
                 addresses: additional,
                 calls: 0,
+                dial: None,
+                close: None,
             },
         },
         validate: |inner, id, peer, original, additional| {
