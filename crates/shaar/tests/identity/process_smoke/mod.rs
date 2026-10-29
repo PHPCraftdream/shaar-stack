@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod rejection;
+#[cfg(unix)]
+mod shutdown;
 mod startup;
 mod unavailable;
 
@@ -562,6 +564,22 @@ async fn scenario(
         Some(Err(error)) => Err(format!("target task: {error}")),
         None => Err("target task missing".into()),
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires CI-built shaar-server and shaar-client executables"]
+async fn real_process_server_sigint_releases_udp_after_active_stream() {
+    let temp = Temp::new().unwrap();
+    let mut processes = Processes::default();
+    let mut tasks = JoinSet::new();
+    let result = std::panic::AssertUnwindSafe(timeout(
+        DEADLINE,
+        shutdown::shutdown_scenario(&temp, &mut processes, &mut tasks),
+    ))
+    .catch_unwind()
+    .await;
+    finalize(&mut processes, &mut tasks, result).await.unwrap();
 }
 
 #[tokio::test]
