@@ -123,7 +123,11 @@ impl Core {
             }
             SwarmEvent::Behaviour(BehaviourEvent::Relays(event)) => self.relay_event(event),
             SwarmEvent::Behaviour(BehaviourEvent::Packets(event)) => self.packet(event),
-            SwarmEvent::Behaviour(BehaviourEvent::Admission(event)) => match event {},
+            SwarmEvent::Behaviour(BehaviourEvent::Dial(options)) => {
+                // Swarm reports synchronous rejection to every child via DialFailure.
+                // Preserve the original connection ID, condition and address selection.
+                let _ = self.swarm.dial(options);
+            }
             _ => {} // Other notifications add no carrier state.
         }
         Ok(())

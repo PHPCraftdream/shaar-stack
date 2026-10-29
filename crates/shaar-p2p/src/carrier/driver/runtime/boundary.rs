@@ -3,7 +3,7 @@ use libp2p::{
     core::{Endpoint, transport::PortUse},
     swarm::{
         ConnectionDenied, ConnectionId, NetworkBehaviour, THandler, THandlerInEvent,
-        THandlerOutEvent, ToSwarm, behaviour::FromSwarm,
+        THandlerOutEvent, ToSwarm, behaviour::FromSwarm, dial_opts::DialOpts,
     },
 };
 use std::task::{Context, Poll};
@@ -16,10 +16,11 @@ type Validate<B> = fn(
     &[Multiaddr],
 ) -> Result<(), ConnectionDenied>;
 
-/// Checks the complete child address contribution before Swarm consumes it.
-pub(super) struct Boundary<B> {
+/// Checks child addresses and hands dependency dials to the carrier owner.
+pub(super) struct Boundary<B: NetworkBehaviour> {
     pub(super) inner: B,
     pub(super) validate: Validate<B>,
+    pub(super) dial_event: fn(DialOpts) -> B::ToSwarm,
 }
 
 impl<B: NetworkBehaviour> NetworkBehaviour for Boundary<B> {
@@ -90,7 +91,12 @@ impl<B: NetworkBehaviour> NetworkBehaviour for Boundary<B> {
         &mut self,
         context: &mut Context<'_>,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
-        self.inner.poll(context)
+        match self.inner.poll(context) {
+            Poll::Ready(ToSwarm::Dial { opts }) => {
+                Poll::Ready(ToSwarm::GenerateEvent((self.dial_event)(opts)))
+            }
+            other => other,
+        }
     }
 }
 
