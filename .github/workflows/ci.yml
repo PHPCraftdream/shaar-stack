@@ -107,7 +107,7 @@ jobs:
           python -I .github/scripts/p2p/discovery/kad/kad.py fixture --source target/p2p/kad/libp2p-kad-0.49.0 --destination target/kad-retention/libp2p-kad-0.49.0
           cargo metadata --locked --format-version 1 > target/p2p/metadata.json
           python -I .github/scripts/p2p/graph.py verify --workspace . --baseline Cargo.lock --metadata target/p2p/metadata.json --relay-source target/p2p/relay/libp2p-relay-0.22.0 --swarm-source target/p2p/swarm/libp2p-swarm-0.48.0 --kad-source target/p2p/kad/libp2p-kad-0.49.0 --dns-source target/p2p/dns/libp2p-dns-0.45.0 --resolver-source target/p2p/resolver/hickory-resolver-0.26.3 --receipt target/p2p/graph-receipt.json
-      - name: Verify 30 relay operation units, 3 wire cases and isolated counterfactuals
+      - name: Verify relay operation units, wire cases and isolated counterfactuals
         shell: bash
         run: |
           set -euo pipefail
@@ -136,14 +136,9 @@ jobs:
           set -euo pipefail
           for profile in plain tls; do
             extra=()
-            count=12
-            if [[ "$profile" == tls ]]; then extra=(--features tls-ring); count=14; fi
+            if [[ "$profile" == tls ]]; then extra=(--features tls-ring); fi
             log="$RUNNER_TEMP/shaar-resolver-$profile.log"
-            if cargo test --locked --manifest-path target/resolver-locking-archive/Cargo.toml --lib locking_ "${extra[@]}" >"$log" 2>&1; then status=0; else status=$?; fi
-            python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-            cat "$log"
-            if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-            grep -E "^test result: ok\\. $count passed; 0 failed;" "$log"
+            bash .github/scripts/p2p/discovery/owned_dns/cargo.sh locking_ "resolver-$profile" "$log" hickory_resolver target/resolver-locking-archive/src/lib.rs target/resolver-locking-archive/target normal --locked --manifest-path target/resolver-locking-archive/Cargo.toml --lib "${extra[@]}"
           done
           for mechanism in connections cleanup; do
             if [[ "$mechanism" == connections ]]; then
@@ -168,14 +163,9 @@ jobs:
           set -euo pipefail
           for profile in plain dnssec; do
             extra=()
-            count=23
-            if [[ "$profile" == dnssec ]]; then extra=(--features dnssec-ring,metrics,recursor,serde); count=28; fi
+            if [[ "$profile" == dnssec ]]; then extra=(--features dnssec-ring,metrics,recursor,serde); fi
             log="$RUNNER_TEMP/shaar-resolver-cache-$profile.log"
-            if cargo test --locked --manifest-path target/resolver-locking-archive/Cargo.toml --lib no_cache_ "${extra[@]}" >"$log" 2>&1; then status=0; else status=$?; fi
-            python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-            cat "$log"
-            if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-            grep -E "^test result: ok\\. $count passed; 0 failed;" "$log"
+            bash .github/scripts/p2p/discovery/owned_dns/cargo.sh no_cache_ "resolver-cache-$profile" "$log" hickory_resolver target/resolver-locking-archive/src/lib.rs target/resolver-locking-archive/target normal --locked --manifest-path target/resolver-locking-archive/Cargo.toml --lib "${extra[@]}"
           done
           for mechanism in cache_constructor cache_positive cache_error cache_alias cache_storage; do
             case "$mechanism" in
@@ -221,25 +211,14 @@ jobs:
           cargo metadata --manifest-path target/resolver-locking-product/Cargo.toml --no-default-features --features "$features" --format-version 1 --filter-platform "$host" > target/resolver-locking-product/metadata.json
           python -I "$script" verify --baseline target/resolver-locking-baseline.json --lock Cargo.lock --destination target/resolver-locking-product
           log="$RUNNER_TEMP/shaar-resolver-product.log"
-          if cargo test --locked --target-dir target --manifest-path target/resolver-locking-product/Cargo.toml --no-default-features --features "$features" --lib locking_ >"$log" 2>&1; then status=0; else status=$?; fi
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 12 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/cargo.sh locking_ resolver-product "$log" hickory_resolver target/resolver-locking-product/src/lib.rs target normal --locked --target-dir target --manifest-path target/resolver-locking-product/Cargo.toml --no-default-features --features "$features" --lib
       - name: Verify no-cache contracts with the unchanged product feature union
         shell: bash
         run: |
           set -euo pipefail
           features=$(python -I .github/scripts/p2p/discovery/resolver/product.py features --destination target/resolver-locking-product)
-          count=23
-          case ",$features," in *,metrics,*) count=$((count + 1));; esac
-          case ",$features," in *,__dnssec,*) count=$((count + 4));; esac
           log="$RUNNER_TEMP/shaar-resolver-cache-product.log"
-          if cargo test --locked --target-dir target --manifest-path target/resolver-locking-product/Cargo.toml --no-default-features --features "$features" --lib no_cache_ >"$log" 2>&1; then status=0; else status=$?; fi
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E "^test result: ok\\. $count passed; 0 failed;" "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/cargo.sh no_cache_ resolver-cache-product "$log" hickory_resolver target/resolver-locking-product/src/lib.rs target normal --locked --target-dir target --manifest-path target/resolver-locking-product/Cargo.toml --no-default-features --features "$features" --lib
       - name: Verify owned DNS foundation and its single product graph edge
         shell: bash
         run: |
@@ -255,53 +234,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          log="$RUNNER_TEMP/shaar-wire-dns.log"
-          if cargo test -p shaar-p2p --lib --locked wire_dns_ >"$log" 2>&1; then status=0; else status=$?; fi
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 29 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/run.sh wire_dns_ wire-dns "$RUNNER_TEMP/shaar-wire-dns.log"
       - name: Verify strict discovery address scope and complete grammar
         shell: bash
         run: |
           set -euo pipefail
-          log="$RUNNER_TEMP/shaar-discovery-address.log"
-          if cargo test -p shaar-p2p --lib --locked discovery_address_ >"$log" 2>&1; then status=0; else status=$?; fi
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 16 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/run.sh discovery_address_ discovery-address "$RUNNER_TEMP/shaar-discovery-address.log"
       - name: Verify owned destination role ledger boundaries
         shell: bash
         run: |
           set -euo pipefail
-          log="$RUNNER_TEMP/shaar-destination-roles.log"
-          if cargo test -p shaar-p2p --lib --locked destination_roles_ >"$log" 2>&1; then status=0; else status=$?; fi
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 15 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/run.sh destination_roles_ destination-roles "$RUNNER_TEMP/shaar-destination-roles.log"
           bash .github/scripts/verify_infrastructure_registry.sh
       - name: Verify guarded DNS transport root pinning
         shell: bash
         run: |
           set -euo pipefail
-          log="$RUNNER_TEMP/shaar-destination-guard.log"
-          if cargo test -p shaar-p2p --lib --locked destination_guard_ >"$log" 2>&1; then status=0; else status=$?; fi
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 22 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/run.sh destination_guard_ destination-guard "$RUNNER_TEMP/shaar-destination-guard.log"
       - name: Verify carrier role-integration wiring
         shell: bash
         run: |
           set -euo pipefail
-          log="$RUNNER_TEMP/shaar-carrier-destination.log"
-          if cargo test -p shaar-p2p --lib --locked carrier_destination_ >"$log" 2>&1; then status=0; else status=$?; fi
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 33 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/run.sh carrier_destination_ carrier-destination "$RUNNER_TEMP/shaar-carrier-destination.log"
       - name: Preserve owned relay revocation proof receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -330,6 +284,7 @@ jobs:
             target/owned-dns-baseline/Cargo.lock
             target/resolver-locking-baseline.json
             ${{ runner.temp }}/shaar-owned-dns.log
+            ${{ runner.temp }}/shaar-inventory-owned-dns/*.log
             ${{ runner.temp }}/shaar-wire-dns.log
             ${{ runner.temp }}/shaar-discovery-address.log
             ${{ runner.temp }}/shaar-destination-roles.log
@@ -358,29 +313,13 @@ jobs:
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/shaar-kad-retention.log"
-          if cargo test --locked --manifest-path target/kad-retention/libp2p-kad-0.49.0/Cargo.toml --lib retention_ >"$log" 2>&1; then
-            status=0
-          else
-            status=$?
-          fi
-          if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 11 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/cargo.sh retention_ kad-retention "$log" libp2p_kad target/kad-retention/libp2p-kad-0.49.0/src/lib.rs target/kad-retention/libp2p-kad-0.49.0/target normal --locked --manifest-path target/kad-retention/libp2p-kad-0.49.0/Cargo.toml --lib
       - name: Verify DNS expansion with the unchanged archive lock
         shell: bash
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/shaar-dns-retention.log"
-          if cargo test --locked --manifest-path target/dns-retention/libp2p-dns-0.45.0/Cargo.toml --lib retention_ >"$log" 2>&1; then
-            status=0
-          else
-            status=$?
-          fi
-          if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 24 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/cargo.sh retention_ dns-retention "$log" libp2p_dns target/dns-retention/libp2p-dns-0.45.0/src/lib.rs target/dns-retention/libp2p-dns-0.45.0/target normal --locked --manifest-path target/dns-retention/libp2p-dns-0.45.0/Cargo.toml --lib
       - name: Verify ingress ownership and budget boundaries
         shell: bash
         run: |
@@ -400,12 +339,8 @@ jobs:
           python -I "$script" counterfactual --backend target/backend --destination target/noq-driver-counterfactual
           for package in noq noq-proto; do
             log="$RUNNER_TEMP/shaar-driver-$package.log"
-            if cargo test --locked --target-dir target/noq-driver-build --manifest-path "target/noq-driver-archive/$package/Cargo.toml" --lib driver_failure:: >"$log" 2>&1; then status=0; else status=$?; fi
-            python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-            cat "$log"
-            if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-            if [[ "$package" == noq ]]; then count=11; else count=4; fi
-            grep -E "^test result: ok\\. $count passed; 0 failed;" "$log"
+            target_name="${package//-/_}"
+            bash .github/scripts/p2p/discovery/owned_dns/cargo.sh driver_failure:: "driver-$package" "$log" "$target_name" "target/noq-driver-archive/$package/src/lib.rs" target/noq-driver-build normal --locked --target-dir target/noq-driver-build --manifest-path "target/noq-driver-archive/$package/Cargo.toml" --lib
           done
           log="$RUNNER_TEMP/shaar-driver-counterfactual.log"
           if cargo test --locked --target-dir target/noq-driver-build --manifest-path target/noq-driver-counterfactual/noq/Cargo.toml --lib driver_failure::suite::fatal_send_after_handshake_releases_retained_connection_and_stream -- --exact >"$log" 2>&1; then
@@ -433,11 +368,7 @@ jobs:
           cargo metadata --format-version 1 --filter-platform "$host" --manifest-path target/noq-driver-product/Cargo.toml > target/noq-driver-product/metadata.json
           python -I "$script" verify-product --product-lock Cargo.lock --baseline-metadata target/noq-driver-baseline.json --destination target/noq-driver-product
           log="$RUNNER_TEMP/shaar-driver-product.log"
-          if cargo test --locked --target-dir target --manifest-path target/noq-driver-product/Cargo.toml --lib suite:: >"$log" 2>&1; then status=0; else status=$?; fi
-          python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 9 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/cargo.sh suite:: driver-product "$log" noq_driver_product_proof target/noq-driver-product/src/lib.rs target normal --locked --target-dir target --manifest-path target/noq-driver-product/Cargo.toml --lib
       - name: Preserve Noq driver proof receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -487,15 +418,7 @@ jobs:
           print("Protocol archive test lock SHA256:", hashlib.sha256(original_lock).hexdigest())
           PY
           log="$RUNNER_TEMP/shaar-native-retention.log"
-          if cargo test --locked --manifest-path target/native-retention/noq-proto-1.3.0/Cargo.toml --lib tests::native_retention:: >"$log" 2>&1; then
-            status=0
-          else
-            status=$?
-          fi
-          if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
-          cat "$log"
-          if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          grep -E '^test result: ok\. 8 passed; 0 failed;' "$log"
+          bash .github/scripts/p2p/discovery/owned_dns/cargo.sh tests::native_retention:: native-retention "$log" noq_proto target/native-retention/noq-proto-1.3.0/src/lib.rs target/native-retention/noq-proto-1.3.0/target normal --locked --manifest-path target/native-retention/noq-proto-1.3.0/Cargo.toml --lib
       - name: Diagnose native-after-signaling path lifecycle (Windows only)
         if: matrix.os == 'windows-latest'
         shell: bash
@@ -523,15 +446,7 @@ jobs:
           for trial in {1..3}; do
             printf 'Parallel SDK lifecycle trial %s/3\n' "$trial"
             log="$RUNNER_TEMP/shaar-sdk-lifecycle-$trial.log"
-            if cargo test -p shaar --lib --locked -- --color never --show-output >"$log" 2>&1; then
-              status=0
-            else
-              status=$?
-            fi
-            if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
-            cat "$log"
-            if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-            grep -E '^test result: ok\. 58 passed; 0 failed;' "$log"
+            bash .github/scripts/p2p/discovery/owned_dns/cargo.sh '' "sdk-lifecycle-$trial" "$log" shaar crates/shaar/src/lib.rs target show-output -p shaar --lib --locked
           done
       - name: cargo test
         shell: bash

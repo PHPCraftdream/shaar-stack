@@ -68,11 +68,19 @@ def compile_fixture(root, variant, unit_inventory=None):
         raise ValueError("wire executable came from a different target")
     listed = command([str(executable), "--list", "--format=terse"], root, timeout=30)
     names = unit_inventory if unit_inventory is not None else [name for name, _ in CASES.values()]
-    expected = {name + ": test" for name in names}
-    inventory = {line for line in listed.splitlines() if line.endswith(": test")}
-    other = {line for line in listed.splitlines() if line and not line.endswith(": test")}
-    if inventory != expected or not other <= {f"{len(names)} tests, 0 benchmarks"}:
-        raise ValueError("wire fixture test inventory changed")
+    if unit_inventory is not None:
+        spec = importlib.util.spec_from_file_location("inventory_verify", HERE.parents[2] / "discovery/owned_dns/verify.py")
+        verifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier)
+        inventory = verifier.parse_listing(listed, "")
+        if set(inventory) != set(names) or len(inventory) != len(names):
+            raise ValueError("wire fixture test inventory changed")
+    else:
+        expected = {name + ": test" for name in names}
+        inventory = {line for line in listed.splitlines() if line.endswith(": test")}
+        other = {line for line in listed.splitlines() if line and not line.endswith(": test")}
+        if inventory != expected or not other <= {f"{len(names)} tests, 0 benchmarks"}:
+            raise ValueError("wire fixture test inventory changed")
     return executable, {"variant": variant, "fresh_relay": True, "fresh_test": True,
                         "relay_source_sha256": prepare.digest((root / "relay/src/lib.rs").read_bytes()),
                         "executable_sha256": prepare.digest(executable.read_bytes()),
@@ -84,7 +92,7 @@ def compile_fixture(root, variant, unit_inventory=None):
 
 def execute(root, executable, variant):
     args = [str(executable), "--test-threads=1", "--show-output"]
-    expected_count = 3
+    expected_count = len(CASES)
     if variant != "baseline":
         args += [CASES[variant][0], "--exact"]
         expected_count = 1
@@ -98,9 +106,12 @@ def execute(root, executable, variant):
     if output.count("RELAY_WIRE_POSITIVE_INITIAL_AND_AUTOMATIC_RENEWAL_SAME_CONTROL") != expected_count:
         raise ValueError("wire fixture lacked its positive control")
     if variant == "baseline":
-        if result.returncode or not re.search(r"test result: ok\. 3 passed; 0 failed;", output):
-            raise ValueError("owned relay wire baseline failed")
-        if output.count("RELAY_WIRE_JOINED_CLEANUP") != 3:
+        spec = importlib.util.spec_from_file_location("inventory_verify", HERE.parents[2] / "discovery/owned_dns/verify.py")
+        verifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier)
+        listing = "".join(name + ": test\n" for name, _ in CASES.values())
+        verifier.verify({"wire": listing}, {"wire": (output, result.returncode)}, "", True)
+        if output.count("RELAY_WIRE_JOINED_CLEANUP") != expected_count:
             raise ValueError("baseline did not join cleanup")
         if "RELAY_WIRE_INDEPENDENT_RESERVATION_SURVIVED" not in output:
             raise ValueError("independent reservation positive control missing")
@@ -117,8 +128,8 @@ def execute(root, executable, variant):
 
 
 def execute_units(root, executable, inventory):
-    if len(inventory) != 30 or len(set(inventory)) != 30:
-        raise ValueError("unit run requires exactly 30 distinct owned cases")
+    if not inventory or len(set(inventory)) != len(inventory):
+        raise ValueError("unit run requires distinct owned cases")
     result = subprocess.run([str(executable), "--test-threads=1", "--show-output"], cwd=root,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8", errors="replace", timeout=180, check=False)
@@ -126,14 +137,17 @@ def execute_units(root, executable, inventory):
     (root / "run.log").write_text(output, encoding="utf-8")
     print(output)
     completed = re.findall(r"^RELAY_UNIT_COMPLETED=(.+)$", output, re.MULTILINE)
-    if result.returncode or not re.search(r"test result: ok\. 30 passed; 0 failed; 0 ignored;", output):
-        raise ValueError("owned operation unit suite did not pass exactly 30 cases")
-    if len(completed) != 30 or set(completed) != set(inventory):
+    spec = importlib.util.spec_from_file_location("inventory_verify", HERE.parents[2] / "discovery/owned_dns/verify.py")
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    listing = "".join(name + ": test\n" for name in inventory)
+    verifier.verify({"units": listing}, {"units": (output, result.returncode)}, "", True)
+    if len(completed) != len(inventory) or set(completed) != set(inventory):
         raise ValueError("unit dispatch did not execute every unchanged body exactly once")
     for name in inventory:
         if f"test {name} ... ok" not in output:
             raise ValueError("unit result missing: " + name)
-    return {"expected_tests": 30, "exit_code": result.returncode, "unit_inventory": inventory,
+    return {"expected_tests": len(inventory), "exit_code": result.returncode, "unit_inventory": inventory,
             "output_sha256": prepare.digest(output.encode()), "unit_bodies_unchanged": True}
 
 
@@ -184,8 +198,8 @@ def run(repository, source, destination):
         results[variant] = {**witness, **outcome, "lock_sha256": prepare.digest(lock)}
     if product_lock.read_bytes() != lock_before or prepare.hashes(prepare.files(source)) != product_sources:
         raise ValueError("wire fixtures changed production source or lock")
-    receipt = {"host": host, "unit_tests": 30, "units": units,
-               "baseline_wire_tests": 3, "counterfactual_runs": 3,
+    receipt = {"host": host, "unit_tests": len(units["unit_inventory"]), "units": units,
+               "baseline_wire_tests": len(CASES), "counterfactual_runs": len(CASES),
                "runner_sha256": prepare.digest(Path(__file__).read_bytes()),
                "runtime_verified": True, "product_lock_sha256": prepare.digest(lock_before),
                "production_files": product_sources, "results": results}
