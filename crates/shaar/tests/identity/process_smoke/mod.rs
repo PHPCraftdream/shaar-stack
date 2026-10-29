@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+#[cfg(any(unix, windows))]
+mod cancellation;
 mod rejection;
 #[cfg(any(unix, windows))]
 mod shutdown;
@@ -569,6 +571,22 @@ async fn scenario(
         Some(Err(error)) => Err(format!("target task: {error}")),
         None => Err("target task missing".into()),
     }
+}
+
+#[cfg(any(unix, windows))]
+#[tokio::test]
+#[ignore = "requires CI-built shaar-server and shaar-client executables"]
+async fn real_process_client_cancels_active_native_dial() {
+    let temp = Temp::new().unwrap();
+    let mut processes = Processes::default();
+    let mut tasks = JoinSet::new();
+    let result = std::panic::AssertUnwindSafe(timeout(
+        DEADLINE,
+        cancellation::cancel_pending_dial(&temp, &mut processes),
+    ))
+    .catch_unwind()
+    .await;
+    finalize(&mut processes, &mut tasks, result).await.unwrap();
 }
 
 #[cfg(any(unix, windows))]
