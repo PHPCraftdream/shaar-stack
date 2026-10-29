@@ -16,6 +16,10 @@ SCRIPT = Path(__file__).resolve().parents[1] / "dependency_licenses.py"
 spec = importlib.util.spec_from_file_location("dependency_licenses", SCRIPT)
 licenses = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(licenses)
+probe_path = SCRIPT.parents[1] / "actions" / "dependency-license" / "list_probe.py"
+probe_spec = importlib.util.spec_from_file_location("license_list_probe", probe_path)
+probe = importlib.util.module_from_spec(probe_spec)
+probe_spec.loader.exec_module(probe)
 
 
 class DependencyLicenseTests(unittest.TestCase):
@@ -71,6 +75,32 @@ class DependencyLicenseTests(unittest.TestCase):
                 self.assertIn("\\u251c\\u2500\\u2500", output.buffer.getvalue().decode("cp1252"))
                 self.assertEqual((Path(tmp) / "dependency-licenses.log").read_text(encoding="utf-8"), "denied ├── package\n")
             output.close()
+
+    def test_list_probe_checks_bounds_schema_duplicates_and_selection(self):
+        iroh = "iroh 1.3.0 path+file:///work/target/backend/iroh/iroh-1.3.0"
+        atto = "attohttpc 0.30.1 registry+https://example.invalid/index"
+        raw = json.dumps({iroh: {"licenses": ["MIT"]}, atto: {"licenses": ["MPL-2.0"]}}).encode()
+        summary = probe.summarize(raw)
+        self.assertEqual(summary["package_count"], 2)
+        self.assertEqual(summary["selected"]["iroh"], [iroh])
+        self.assertEqual(summary["selected"]["attohttpc"], [atto])
+        with mock.patch.object(probe, "MAX_BYTES", 1):
+            with self.assertRaisesRegex(ValueError, "exceeds limit"):
+                probe.summarize(raw)
+        with mock.patch.object(probe, "MAX_PACKAGES", 1):
+            with self.assertRaisesRegex(ValueError, "invalid license package list"):
+                probe.summarize(raw)
+        with mock.patch.object(probe, "MAX_ID_LENGTH", 1):
+            with self.assertRaisesRegex(ValueError, "invalid package identifier"):
+                probe.summarize(raw)
+        with self.assertRaisesRegex(ValueError, "invalid license package list"):
+            probe.summarize(b"[]")
+        with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
+            probe.summarize(b'{"x":{},"x":{}}')
+        with self.assertRaisesRegex(ValueError, "invalid package license entry"):
+            probe.summarize(json.dumps({iroh: {"licenses": None}}).encode())
+        with self.assertRaisesRegex(ValueError, "prepared iroh missing"):
+            probe.summarize(json.dumps({atto: {"licenses": ["MPL-2.0"]}}).encode())
 
     def test_action_keeps_check_and_report_upload_failures_gating(self):
         action = (SCRIPT.parents[1] / "actions" / "dependency-license" / "action.yml").read_text()
