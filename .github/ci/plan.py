@@ -37,7 +37,11 @@ def changes(event_name, event, head):
         if end != head:
             raise ValueError("push head differs from checkout identity")
         if event["before"] == "0" * 40 and event.get("ref") != "refs/heads/develop":
-            base = commit(git("merge-base", "refs/remotes/origin/develop", end).decode("ascii").strip())
+            try:
+                reference = commit(git("rev-parse", "--verify", "refs/remotes/ci-upstream/develop^{commit}").decode("ascii").strip())
+            except subprocess.CalledProcessError:
+                reference = commit(git("rev-parse", "--verify", "refs/remotes/origin/develop^{commit}").decode("ascii").strip())
+            base = commit(git("merge-base", reference, end).decode("ascii").strip())
         else:
             base = commit(event["before"])
     elif event_name == "workflow_dispatch":

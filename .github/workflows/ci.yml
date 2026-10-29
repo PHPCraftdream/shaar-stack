@@ -43,6 +43,13 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
+      - name: Fetch upstream comparison base for a new feature branch
+        if: github.event_name == 'push' && github.event.before == '0000000000000000000000000000000000000000' && github.ref != 'refs/heads/develop'
+        shell: bash
+        run: |
+          if ! git fetch --no-tags https://github.com/PHPCraftdream/shaar-stack.git refs/heads/develop:refs/remotes/ci-upstream/develop; then
+            printf 'Upstream comparison unavailable; planner will use local history or conservative selection\n'
+          fi
       - run: python -I -m unittest discover -s .github/ci
       - id: plan
         run: python -I .github/ci/plan.py

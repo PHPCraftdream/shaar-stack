@@ -14,8 +14,11 @@ A stdlib-only planner selects the union of domains affected by changed paths.
 Pushes compare the event's `before` and `after` commits; pull requests compare the
 merge base of the event's base and head with that head. Both sides of renames are
 included. Deletions are classified by their old paths. A newly created feature
-branch uses its merge base with the fetched `origin/develop`; when that comparison
-cannot be established it falls back conservatively. Missing history, unknown paths
+branch uses its merge base with the integration `develop`. CI fetches that ref
+from the fixed project upstream into `refs/remotes/ci-upstream/develop`, so a fork
+without its own `develop` does not force a broad campaign. A local `origin/develop`
+is the secondary option; when neither comparison can be established the planner
+falls back conservatively. Missing history, unknown paths
 and shared build/CI configuration select a broad targeted campaign, never an empty
 success and never an automatic full run.
 Documentation-only changes run policy and structural checks without building Rust.

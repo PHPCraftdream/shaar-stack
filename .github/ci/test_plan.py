@@ -135,6 +135,21 @@ class GitComparisonTests(unittest.TestCase):
         self.assertEqual(actual_base, base)
         self.assertFalse(PLAN.plan("push", event, head)["selection"]["backend"])
 
+    def test_fork_prefers_upstream_base_without_requiring_local_develop(self):
+        older = self.commit_file("common.rs", "one")
+        base = self.commit_file(".github/scripts/backend/policy.py", "two")
+        self.run_git("update-ref", "refs/remotes/ci-upstream/develop", base)
+        head = self.commit_file("crates/shaar-p2p/src/dns/tests/support.rs", "three")
+        event = {"before": "0" * 40, "after": head, "ref": "refs/heads/feature"}
+        for stale_origin in (False, True):
+            if stale_origin:
+                self.run_git("update-ref", "refs/remotes/origin/develop", older)
+            result = PLAN.plan("push", event, head)
+            self.assertIsNone(result["fallback"])
+            self.assertEqual(result["base"], base)
+            self.assertTrue(result["selection"]["dns"])
+            self.assertFalse(result["selection"]["backend"])
+
     def test_new_branch_and_missing_history_do_not_false_pass_docs(self):
         head = self.commit_file("docs/new.md", "one")
         for base in ("0" * 40, "a" * 40):
