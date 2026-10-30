@@ -4,7 +4,7 @@ use iroh_base::PublicKey;
 use shaar_p2p::{Carrier, CarrierHandle, SignalingPump, SignalingTransport};
 use tokio::{sync::oneshot, task::JoinHandle};
 
-use super::bind_signaling;
+use super::{DiscoveryConfig, bind_signaling, bind_signaling_with_discovery};
 use crate::{identity::Identity, network::NetworkError};
 
 pub(super) struct Owned {
@@ -19,8 +19,12 @@ impl Owned {
         identity: &Identity,
         address: SocketAddr,
         peers: &[PublicKey],
+        discovery: Option<DiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
-        let (carrier, handle, incoming) = bind_signaling(identity, address, peers)?;
+        let (carrier, handle, incoming) = match discovery {
+            Some(discovery) => bind_signaling_with_discovery(identity, address, peers, discovery),
+            None => bind_signaling(identity, address, peers),
+        }?;
         let (factory, pump) = SignalingTransport::attach(handle.clone(), incoming)
             .map_err(NetworkError::Signaling)?;
         let (stop, stopped) = oneshot::channel();
