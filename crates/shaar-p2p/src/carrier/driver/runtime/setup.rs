@@ -40,7 +40,11 @@ impl Carrier {
         let roles = match &discovery {
             Some(config) => {
                 let seeds: Vec<PeerId> = config.seed_peers().collect();
-                Some(discovery::roles::Owner::new(&allowed, &seeds)?)
+                let mut owner = discovery::roles::Owner::new(&allowed, &seeds)?;
+                for (peer, address) in config.seed_descriptors() {
+                    owner.reserve_discovery_address(*peer, address)?;
+                }
+                Some(owner)
             }
             None => None,
         };
@@ -159,6 +163,9 @@ impl Carrier {
         };
         let mut core = Core {
             discovery,
+            discovery_operation: None,
+            #[cfg(test)]
+            discovery_witnesses: [None; 4],
             swarm,
             infrastructure: infrastructure::State::new(),
             commands,

@@ -25,6 +25,8 @@ async fn carrier_infrastructure_network_rootless_dependency_dial_uses_staged_nat
                 deadline,
                 phase: Phase::Pending,
                 protocols: 0,
+                identified: false,
+                epoch: None,
             },
         );
         source

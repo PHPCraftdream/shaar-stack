@@ -20,7 +20,7 @@ use tokio::time::Instant;
 
 pub(crate) use address::Root;
 pub(crate) use incoming::InboundLease;
-pub(crate) use infrastructure::Permit as InfrastructurePermit;
+pub(crate) use infrastructure::{Epoch as DiscoveryEpoch, Permit as InfrastructurePermit};
 pub(crate) use lease::Lease;
 
 const IDENTITIES: usize = 56;
@@ -113,6 +113,9 @@ struct State {
     identities: HashMap<PeerId, Identity>,
     // Lifetime charges survive identity retirement without retaining dial authority.
     contacts: [Option<PeerId>; INFRASTRUCTURE],
+    query_admission: Option<infrastructure::Admission>,
+    // Four lifetime address slots per contact; stale provenance never grants a new slot.
+    query_hints: [[Option<infrastructure::Hint>; ROOTS]; INFRASTRUCTURE],
     attempts: HashMap<ConnectionId, Attempt>,
     pub(super) inbound: [Option<incoming::Row>; PENDING],
     pub(super) inbound_count: usize,
@@ -307,6 +310,8 @@ impl Owner {
                     serial: 0,
                     identities,
                     contacts,
+                    query_admission: None,
+                    query_hints: [[None; ROOTS]; INFRASTRUCTURE],
                     attempts: HashMap::with_capacity(PENDING),
                     inbound: std::array::from_fn(|_| None),
                     inbound_count: 0,
@@ -532,6 +537,7 @@ impl Owner {
         let notifications = {
             let mut state = self.view.lock();
             state.closed = true;
+            state.query_admission = None;
             for row in state.infrastructure.iter_mut().flatten() {
                 row.withdrawn = true;
             }
