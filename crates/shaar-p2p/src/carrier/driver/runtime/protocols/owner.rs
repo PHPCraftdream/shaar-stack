@@ -14,6 +14,10 @@ pub(in super::super) struct Operation {
 }
 
 impl Operation {
+    pub(in super::super) fn handoff_epoch(&self, now: Instant) -> Option<DiscoveryEpoch> {
+        (self.delivered && now < self.deadline).then_some(self.epoch)
+    }
+
     /// cancel-safe: yes — observes receiver cancellation without mutating admission.
     pub(in super::super) async fn waiter_closed(&mut self) {
         if let Some(reply) = &mut self.reply {

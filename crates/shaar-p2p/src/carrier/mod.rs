@@ -68,6 +68,7 @@ enum Command {
     SendOn(Link, Datagram, Reply<()>),
     Disconnect(PeerId, Reply<()>),
     Reserve(RelayAddr, Reply<RelayLease>),
+    ReserveDiscovered(DiscoveredRelay, Reply<RelayLease>),
     ReleaseRelay(PeerId, Reply<()>),
     ConnectVia(PeerId, RelayAddr, Reply<ConnectionId>),
 }
@@ -79,6 +80,18 @@ impl CarrierHandle {
     pub async fn discover_relays(&self) -> io::Result<Vec<DiscoveredRelay>> {
         let (reply, result) = oneshot::channel();
         self.submit(Command::Discover(reply))?;
+        result.await.map_err(|_| closed())?
+    }
+
+    /// Consumes an observed candidate; the owner revalidates its exact live control.
+    /// Pending admission retains the discovery deadline; an accepted lease owns its expiry.
+    /// cancel-safe: NO — admitted reservation cleanup follows owner cancellation observation.
+    pub async fn reserve_discovered_relay(
+        &self,
+        candidate: DiscoveredRelay,
+    ) -> io::Result<RelayLease> {
+        let (reply, result) = oneshot::channel();
+        self.submit(Command::ReserveDiscovered(candidate, reply))?;
         result.await.map_err(|_| closed())?
     }
 

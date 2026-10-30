@@ -23,11 +23,11 @@ impl GateCore {
         let Some(parsed) = endpoint(address) else {
             return Err(denied());
         };
-        // Authoritative registry role checks: exact pinned relay endpoint, and
-        // for circuits an application-allowlisted destination only.
-        if roles.role(peer) != Some(Role::ExplicitRelay(parsed)) {
+        let role = roles.role(peer);
+        if role != Some(Role::Infrastructure) && role != Some(Role::ExplicitRelay(parsed)) {
             return Err(denied());
         }
+        // Circuit destinations remain application-allowlisted under either provenance.
         if destination.is_some_and(|destination| roles.role(destination) != Some(Role::Application))
         {
             return Err(denied());
@@ -51,9 +51,9 @@ impl GateCore {
         // transport-passed address must be byte-identical so the patched
         // `capture` equality check passes.
         let expected = multiaddr(parsed);
-        let mut records = lock(&self.records);
+        let records = lock(&self.records);
         let mut candidate: Option<Key> = None;
-        let mut claimed = false;
+        let mut claimed = None;
         for (key, record) in records.iter() {
             if key.0 != peer || key.1 != slot {
                 continue;
@@ -72,24 +72,44 @@ impl GateCore {
                 // Live but already claimed (Issued, or Established without a
                 // stored capability): a duplicate take is backpressure, while
                 // retired tombstones simply do not match.
-                claimed = true;
+                claimed.get_or_insert(record.authority);
             }
         }
-        let key = candidate.ok_or_else(|| {
-            if claimed {
-                super::super::capacity()
-            } else {
-                denied()
+        let key = match candidate {
+            Some(key) => key,
+            None => {
+                drop(records);
+                return Err(
+                    if claimed.is_some_and(|authority| authority.permits(roles, peer, parsed)) {
+                        super::super::capacity()
+                    } else {
+                        denied()
+                    },
+                );
             }
-        })?;
+        };
         if *address != expected {
             return Err(denied());
         }
-        if Instant::now() >= records.get(&key).ok_or_else(denied)?.deadline {
+        let authority = records.get(&key).ok_or_else(denied)?.authority;
+        drop(records);
+        if !authority.permits(roles, peer, parsed) {
             return Err(denied());
         }
+        let mut records = lock(&self.records);
         let record = records.get_mut(&key).ok_or_else(denied)?;
-        let capability = record.capability.take().ok_or_else(denied)?;
+        if record.retired()
+            || record.authority != authority
+            || record.endpoint != parsed
+            || record.destination != destination
+            || Instant::now() >= record.deadline
+        {
+            return Err(denied());
+        }
+        let capability = record
+            .capability
+            .take()
+            .ok_or_else(super::super::capacity)?;
         let hold = record.pending_hold.clone();
         if matches!(record.state, RecordState::Staged) {
             record.state = RecordState::Issued;
@@ -125,6 +145,19 @@ impl GateCore {
             return false;
         };
         let key = (descriptor.peer(), slot, descriptor.generation().get());
+        let authority = {
+            let records = lock(&self.records);
+            let Some(record) = records.get(&key) else {
+                return false;
+            };
+            record.authority
+        };
+        if !authority.permits(&view, descriptor.peer(), parsed)
+            || !authority.accepts_control(control)
+            || matches!(descriptor.kind(), OperationKind::Connect { destination } if view.role(destination) != Some(Role::Application))
+        {
+            return false;
+        }
         let mut records = lock(&self.records);
         let Some(record) = records.get_mut(&key) else {
             return false;
@@ -132,7 +165,7 @@ impl GateCore {
         // Retired tombstones (revoked/expired/replaced) admit nothing, and a
         // re-staged generation carries a fresh number: stale tickets fail
         // closed here.
-        if record.retired() || record.endpoint != parsed {
+        if record.retired() || record.endpoint != parsed || record.authority != authority {
             return false;
         }
         match (descriptor.kind(), record.destination) {
@@ -141,14 +174,6 @@ impl GateCore {
             _ => return false,
         }
         if !matches!(record.state, RecordState::Established) && Instant::now() >= record.deadline {
-            return false;
-        }
-        if view.role(descriptor.peer()) != Some(Role::ExplicitRelay(parsed)) {
-            return false;
-        }
-        if let OperationKind::Connect { destination } = descriptor.kind()
-            && view.role(destination) != Some(Role::Application)
-        {
             return false;
         }
         match (record.control, control) {

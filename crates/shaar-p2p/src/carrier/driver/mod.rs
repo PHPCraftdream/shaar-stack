@@ -490,6 +490,9 @@ impl Core {
             }
             Command::Discover(reply) => self.start_discovery(reply),
             Command::Reserve(relay, reply) => self.reserve_relay(relay, reply),
+            Command::ReserveDiscovered(candidate, reply) => {
+                self.reserve_discovered_relay(candidate, reply)
+            }
             Command::ReleaseRelay(peer, reply) => self.release_relay(peer, reply),
             Command::ConnectVia(peer, relay, reply) => self.connect_via(peer, relay, reply),
         }

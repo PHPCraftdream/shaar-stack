@@ -1,51 +1,22 @@
 use super::*;
-use crate::discovery::roles::Role;
 
 impl Core {
-    fn authorize_relay(&mut self, address: RelayAddr) -> io::Result<()> {
-        if address.peer == *self.swarm.local_peer_id() {
-            return Err(io::Error::from(io::ErrorKind::InvalidInput));
-        }
-        self.swarm
-            .behaviour_mut()
-            .inner
-            .admission
-            .admit_identity(address.peer, Role::ExplicitRelay(address.socket_addr()))?;
-        if let Some(target) = self.relay.targets.get_mut(&address.peer) {
-            if target.address != address {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "relay address already pinned",
-                ));
-            }
-            target.used = Instant::now();
-            return Ok(());
-        }
-        if self.relay.targets.len() >= RELAY_LIMIT {
-            return Err(capacity());
-        }
-        self.swarm
-            .behaviour_mut()
-            .inner
-            .admission
-            .authorize_relay(address.peer)?;
-        self.relay.targets.insert(
-            address.peer,
-            Target {
-                address,
-                used: Instant::now(),
-            },
-        );
-        Ok(())
+    pub(in super::super) fn reserve_relay(&mut self, address: RelayAddr, reply: Reply<RelayLease>) {
+        self.reserve_relay_from(address, reply, None);
     }
 
-    pub(in super::super) fn reserve_relay(&mut self, address: RelayAddr, reply: Reply<RelayLease>) {
+    pub(super) fn reserve_relay_from(
+        &mut self,
+        address: RelayAddr,
+        reply: Reply<RelayLease>,
+        discovered: Option<crate::discovery::roles::AttemptKey>,
+    ) {
         if reply.is_closed() {
             return;
         }
         let now = Instant::now();
         if let Some(record) = self.relay.records.get(&address.peer) {
-            if record.address != address {
+            if record.address != address || record.discovered != discovered {
                 let _ = reply.send(Err(io::Error::from(io::ErrorKind::AlreadyExists)));
                 return;
             }
@@ -77,24 +48,41 @@ impl Core {
             let _ = reply.send(Err(capacity()));
             return;
         }
-        if let Err(error) = self.authorize_relay(address) {
+        let deadline = match self.reserve_admission_deadline(discovered, now) {
+            Ok(deadline) => deadline,
+            Err(error) => {
+                let _ = reply.send(Err(error));
+                return;
+            }
+        };
+        let authorized = match discovered {
+            Some(key) => self.authorize_discovered_relay(address, key),
+            None => self.authorize_relay(address),
+        };
+        if let Err(error) = authorized {
             let _ = reply.send(Err(error));
             return;
         }
         // Stage the trusted intent before listen_on: the patched transport
         // invokes the factory synchronously inside listen_on (kind=Reserve).
-        let generation =
-            match self
+        let staged = match discovered {
+            Some(key) => {
+                self.relay
+                    .gate
+                    .stage_discovered_reserve(key, address.socket_addr(), deadline)
+            }
+            None => self
                 .relay
                 .gate
-                .stage_reserve(address.peer, address.socket_addr(), now + DEADLINE)
-            {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = reply.send(Err(error));
-                    return;
-                }
-            };
+                .stage_reserve(address.peer, address.socket_addr(), deadline),
+        };
+        let generation = match staged {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = reply.send(Err(error));
+                return;
+            }
+        };
         let attempts = self
             .relay
             .records
@@ -106,12 +94,13 @@ impl Core {
                     address.peer,
                     Record {
                         address,
+                        discovered,
                         listener: Some(listener),
                         control: None,
                         expiry: None,
                         generation,
                         phase: Phase::Pending,
-                        deadline: now + DEADLINE,
+                        deadline,
                         forget_at: now + HISTORY_AGE,
                         attempts,
                         failed: false,
@@ -135,8 +124,16 @@ impl Core {
         }
     }
 
-    fn stop_reservation(&mut self, peer: PeerId, error: Option<io::Error>) {
+    pub(super) fn stop_reservation(&mut self, peer: PeerId, error: Option<io::Error>) {
         // Withdraw eligibility before changing listener or connection state.
+        if self
+            .relay
+            .records
+            .get(&peer)
+            .is_some_and(|record| record.discovered.is_some())
+        {
+            self.relay.gate.revoke(peer, super::gate::Slot::Connect);
+        }
         self.relay.gate.revoke(peer, super::gate::Slot::Reserve);
         let Some(record) = self.relay.records.get_mut(&peer) else {
             return;
@@ -576,12 +573,9 @@ impl Core {
                 .gate
                 .revoke_generation(relay, super::gate::Slot::Connect, route_generation);
         }
-        if self
-            .relay
-            .records
-            .get(&peer)
-            .is_some_and(|record| record.control == Some(id))
-        {
+        if self.relay.records.get(&peer).is_some_and(|record| {
+            record.control == Some(id) || record.discovered.is_some_and(|key| key.connection == id)
+        }) {
             self.stop_reservation(
                 peer,
                 Some(io::Error::from(io::ErrorKind::ConnectionAborted)),

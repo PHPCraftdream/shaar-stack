@@ -167,6 +167,7 @@ impl Core {
     ) {
         let changed = self.record_infrastructure_protocols(peer, connection, advertised);
         if let Some(capabilities) = changed {
+            self.relay_discovery_claim(peer, connection, capabilities);
             if capabilities & protocols::DHT == 0 {
                 self.discovery_identified_control(peer, connection);
             }

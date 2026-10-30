@@ -68,6 +68,52 @@ impl Core {
         self.infrastructure.entries.is_empty()
     }
 
+    pub(super) fn infrastructure_control(&self, key: AttemptKey) -> Option<protocols::Control> {
+        let entry = self
+            .infrastructure
+            .entries
+            .get(&key.connection)
+            .filter(|entry| entry.key == key)?;
+        let live = entry.phase == Phase::Live
+            && self
+                .swarm
+                .behaviour()
+                .inner
+                .admission
+                .roles_view()
+                .is_some_and(|view| view.infrastructure_live(key).is_some());
+        Some(protocols::Control {
+            key,
+            live,
+            pending: entry.phase == Phase::Pending,
+            identified: entry.identified,
+            protocols: entry.protocols,
+        })
+    }
+
+    pub(super) fn adopt_discovery_control(
+        &mut self,
+        key: AttemptKey,
+        epoch: roles::DiscoveryEpoch,
+    ) -> bool {
+        if !self
+            .infrastructure_control(key)
+            .is_some_and(|control| control.live)
+        {
+            return false;
+        }
+        let Some(entry) = self
+            .infrastructure
+            .entries
+            .get_mut(&key.connection)
+            .filter(|entry| entry.key == key && entry.epoch == Some(epoch))
+        else {
+            return false;
+        };
+        entry.epoch = None;
+        true
+    }
+
     pub(super) fn discovery_owned_controls(
         &self,
         epoch: roles::DiscoveryEpoch,
@@ -320,6 +366,7 @@ impl Core {
     }
 
     pub(super) fn close_infrastructure(&mut self, key: AttemptKey, now: Instant) {
+        self.relay_control_closed(key.peer, key.connection);
         self.discovery_lost_control(key);
         let Some(entry) = self
             .infrastructure
@@ -375,6 +422,7 @@ impl Core {
 
     fn finish_infrastructure(&mut self, connection: ConnectionId) {
         if let Some(entry) = self.infrastructure.entries.remove(&connection) {
+            self.relay_control_closed(entry.key.peer, entry.key.connection);
             self.discovery_lost_control(entry.key);
             let admission = &mut self.swarm.behaviour_mut().inner.admission;
             admission.terminal(entry.key, None);
