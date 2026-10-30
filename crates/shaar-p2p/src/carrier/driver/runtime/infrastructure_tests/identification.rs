@@ -140,9 +140,18 @@ async fn carrier_infrastructure_network_identify_binds_capabilities_to_exact_liv
         let (mut source, handle, _incoming) = carrier(&dns, vec![(server.peer, address.clone())]);
         let (connection, key) = stage(&mut source, server.peer, &address, server.address);
         let mut client_public = None;
+        let mut source_received = false;
+        let exchanged = timeout(Duration::from_secs(25), async {
         loop {
             tokio::select! {
-                event = source.core.swarm.select_next_some() => source.core.event(event).unwrap(),
+                event = source.core.swarm.select_next_some() => {
+                    if let SwarmEvent::Behaviour(BehaviourEvent::Protocols(protocols::Event::Identify(identify::Event::Received { info, .. }))) = &event {
+                        source_received = true;
+                        assert_eq!(protocols::capabilities(&info.protocols), protocols::DHT | protocols::HOP,
+                            "owned fixture protocol advertisement: {:?}", info.protocols);
+                    }
+                    source.core.event(event).unwrap();
+                },
                 event = server.swarm.select_next_some() => {
                     if let SwarmEvent::Behaviour(MetadataEvent(Some(event))) = event {
                         match event {
@@ -164,6 +173,12 @@ async fn carrier_infrastructure_network_identify_binds_capabilities_to_exact_liv
                 break;
             }
         }
+        }).await;
+        assert!(exchanged.is_ok(), "owned Identify exchange boundary: native_live={}, phase_live={}, capabilities={:?}, source_received={}, server_received={}",
+            source.core.swarm.behaviour().inner.admission.roles_view().unwrap().infrastructure_live(key).is_some(),
+            source.core.infrastructure.entries.get(&connection).is_some_and(|entry| entry.phase == Phase::Live),
+            source.core.infrastructure.entries.get(&connection).map(|entry| entry.protocols),
+            source_received, client_public.is_some());
         assert!(handle.links().borrow().is_empty());
         let unchanged = [StreamProtocol::new("/ipfs/kad/1.0.0"), StreamProtocol::new("/libp2p/circuit/relay/0.2.0/hop")];
         assert!(source.core.record_infrastructure_protocols(server.peer, connection, Some(&unchanged)).is_none());
@@ -215,7 +230,8 @@ async fn carrier_infrastructure_network_app_connection_rejects_identify_at_proto
             Keypair::generate_ed25519(), "127.0.0.1:0".parse().unwrap(), vec![server.peer],
             DiscoveryConfig::new(vec![(seed, root(seed, server.address.port()))], vec![dns.address]).unwrap(),
         ).unwrap();
-        source.core.dial_native(server.peer, &multiaddr(server.address)).unwrap();
+        let address = multiaddr(server.address).with(Protocol::P2p(server.peer));
+        source.core.dial_native(server.peer, &address).unwrap();
         let mut rejected = false;
         loop {
             tokio::select! {
