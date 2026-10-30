@@ -35,5 +35,5 @@ def apply(root: Path):
     if packet_text.count(call) != 1 or qlog_text.count(before) != 1:
         raise ValueError("pinned Noq encrypted-packet identity boundary changed")
     packet.write_text(packet_text.replace(call,
-        "        self.qlog.finalize(packet_len, &self.buf.as_mut_slice()[encode_start..]);"), encoding="utf-8")
-    qlog.write_text(qlog_text.replace(before, after), encoding="utf-8")
+        "        self.qlog.finalize(packet_len, &self.buf.as_mut_slice()[encode_start..]);"), encoding="utf-8", newline="\n")
+    qlog.write_text(qlog_text.replace(before, after), encoding="utf-8", newline="\n")

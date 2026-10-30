@@ -48,6 +48,11 @@ Base implementation revision: `07a9a9c941661db9ca18c18ea7b546b5656fc961`.
 
 Paths in the last two entries are relative to `.github/probes/iroh-paths/`.
 These values were read as data, without executing project or downloaded code.
+The first source-prerequisite run 41054455509 exposed Windows newline translation
+in the shared packet-identity writer. Its corrected, explicitly LF-writing recipe
+has SHA256 `55ec2863c031fde609e2258b8c0e9d095288462a1bd52a47f28ff35aa81c335e`;
+the original baseline hash above remains historical provenance. Exact reversal is
+still required; unrelated CRLF conversion is not normalized away by verification.
 Prepared product path packages retain their versions; their exact transformed
 source and feature/edge receipts must also be recorded by the new fixture. Do not
 substitute the older independently resolved probe graph for the product graph.

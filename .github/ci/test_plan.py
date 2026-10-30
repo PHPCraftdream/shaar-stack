@@ -47,9 +47,12 @@ class PolicyTests(unittest.TestCase):
                 self.assertFalse(result["selection"]["full"])
 
     def test_carrier_frame_sources_select_only_their_owned_proof(self):
-        for name in ("probe.rs", "instrument.py", "graph.py", "run.py", "checks.py"):
-            with self.subTest(name=name):
-                result = POLICY.select([".github/probes/iroh-paths/carrier/" + name])
+        paths = [".github/probes/iroh-paths/carrier/" + name
+                 for name in ("probe.rs", "instrument.py", "graph.py", "run.py", "checks.py")]
+        paths.append(".github/probes/iroh-paths/gate/bridge/support/packet_identity.py")
+        for path in paths:
+            with self.subTest(path=path):
+                result = POLICY.select([path])
                 self.assertEqual([key for key in POLICY.DOMAINS if result["selection"][key]], ["carrier_frames"])
                 self.assertEqual(result["suites"], ["carrier_frames"])
                 self.assertFalse(result["targets"])

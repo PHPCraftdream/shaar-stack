@@ -1,5 +1,6 @@
 """CI-only source/graph contracts; these checks are not real-carrier frame evidence."""
 
+import ast
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -113,6 +114,29 @@ class FrameContracts(unittest.TestCase):
             source.write_text("exact anchor\nexact anchor\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 instrument.edit(root, "sample.rs", "exact anchor", "fixture anchor", [])
+
+    def test_shared_ciphertext_writer_keeps_lf_and_exact_reversal_on_every_host(self):
+        target = REPO / "target"
+        target.mkdir(exist_ok=True)
+        helper = REPO / instrument.PACKET_HELPER
+        tree = ast.parse(helper.read_bytes())
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "apply")
+        constants = {node.targets[0].id: ast.literal_eval(node.value) for node in function.body
+                     if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                     and node.targets[0].id in {"call", "before"}}
+        with tempfile.TemporaryDirectory(prefix="frame-lf-contract-", dir=target) as temporary:
+            root = Path(temporary)
+            (root / "src/connection").mkdir(parents=True)
+            (root / "Cargo.toml").write_bytes(b'[package]\nname = "noq-proto"\nversion = "1.3.0"\n')
+            files = {"src/connection/packet_builder.rs": constants["call"],
+                     "src/connection/qlog.rs": constants["before"]}
+            for name, anchor in files.items():
+                (root / name).write_bytes(("prefix\n" + anchor + "\nsuffix\n").encode())
+            receipt = instrument.packet_identity(REPO, root)
+            self.assertEqual({record["path"] for record in receipt["files"]}, set(files))
+            self.assertTrue(all(record["reverse_verified"] for record in receipt["files"]))
+            for name in files:
+                self.assertNotIn(b"\r\n", (root / name).read_bytes())
 
     def test_fixture_destination_cannot_escape_repository_target(self):
         with self.assertRaises(ValueError):
