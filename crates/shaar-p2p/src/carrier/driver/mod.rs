@@ -53,6 +53,8 @@ mod boundary;
 mod events;
 #[path = "runtime/infrastructure.rs"]
 mod infrastructure;
+#[path = "runtime/protocols/mod.rs"]
+mod protocols;
 #[path = "runtime/setup.rs"]
 mod setup;
 
@@ -63,6 +65,7 @@ mod setup;
 enum BehaviourEvent {
     Relays(libp2p::relay::client::Event),
     Packets(rpc::Event<Datagram, ()>),
+    Protocols(protocols::Event),
     Dial(DialOpts),
 }
 
@@ -84,11 +87,18 @@ impl From<rpc::Event<Datagram, ()>> for BehaviourEvent {
     }
 }
 
+impl From<protocols::Event> for BehaviourEvent {
+    fn from(event: protocols::Event) -> Self {
+        Self::Protocols(event)
+    }
+}
+
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "BehaviourEvent")]
 struct Behaviour {
     admission: Admission,
     relays: libp2p::relay::client::Behaviour,
+    protocols: protocols::Behaviour,
     packets: rpc::Behaviour<DatagramCodec>,
 }
 

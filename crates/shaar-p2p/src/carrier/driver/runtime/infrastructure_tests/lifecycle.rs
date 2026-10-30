@@ -24,6 +24,7 @@ async fn carrier_infrastructure_network_rootless_dependency_dial_uses_staged_nat
                 permit,
                 deadline,
                 phase: Phase::Pending,
+                protocols: 0,
             },
         );
         source
