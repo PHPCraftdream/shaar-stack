@@ -46,6 +46,17 @@ class PolicyTests(unittest.TestCase):
                 self.assertFalse(any(result["selection"][key] for key in POLICY.DOMAINS))
                 self.assertFalse(result["selection"]["full"])
 
+    def test_carrier_frame_sources_select_only_their_owned_proof(self):
+        for name in ("probe.rs", "instrument.py", "graph.py", "run.py", "checks.py"):
+            with self.subTest(name=name):
+                result = POLICY.select([".github/probes/iroh-paths/carrier/" + name])
+                self.assertEqual([key for key in POLICY.DOMAINS if result["selection"][key]], ["carrier_frames"])
+                self.assertEqual(result["suites"], ["carrier_frames"])
+                self.assertFalse(result["targets"])
+                self.assertTrue(result["selection"]["prepare"])
+                self.assertFalse(result["selection"]["full"])
+                self.assertFalse(result["selection"]["product"])
+
     def test_dependency_proofs_only_follow_changed_dependency_owner(self):
         cases = {".github/scripts/p2p/discovery/resolver/prepare.py": "resolver",
                  ".github/scripts/p2p/discovery/kad/kad.py": "kad",

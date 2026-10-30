@@ -2,7 +2,7 @@
 
 import re
 
-DOMAINS = ("dns", "discovery", "carrier", "relay", "resolver", "kad", "backend", "sdk", "apps", "license")
+DOMAINS = ("dns", "discovery", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license")
 PACKAGES = {
     "shaar-p2p": ("lib", "shaar_p2p"), "shaar": ("lib", "shaar"),
     "shaar-platform": ("lib", "shaar_platform"), "shaar-ygg": ("lib", "shaar_ygg"),
@@ -71,6 +71,7 @@ RULES = (
     ("crates/shaar/src/network/forwarding/", ("sdk-forwarding",)),
 )
 PROOFS = (
+    (".github/probes/iroh-paths/carrier/", "carrier_frames"),
     (".github/scripts/p2p/carrier-wire-proof/", "carrier"),
     (".github/scripts/p2p/relay/", "relay"),
     (".github/scripts/p2p/discovery/resolver/", "resolver"),
