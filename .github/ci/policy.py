@@ -72,6 +72,7 @@ RULES = (
 )
 PROOFS = (
     (".github/probes/iroh-paths/carrier/", "carrier_frames"),
+    (".github/probes/iroh-paths/gate/bridge/support/packet_identity.py", "carrier_frames"),
     (".github/scripts/p2p/carrier-wire-proof/", "carrier"),
     (".github/scripts/p2p/relay/", "relay"),
     (".github/scripts/p2p/discovery/resolver/", "resolver"),

@@ -7,7 +7,7 @@ from pathlib import Path
 import tomllib
 
 PACKET_HELPER = ".github/probes/iroh-paths/gate/bridge/support/packet_identity.py"
-PACKET_HELPER_SHA = "c4e299523dd1b5c118855952992cce9ac9f65d7a018f9b9cfd42bce14d92d50a"
+PACKET_HELPER_SHA = "55ec2863c031fde609e2258b8c0e9d095288462a1bd52a47f28ff35aa81c335e"
 ORACLE = ".github/probes/iroh-paths/gate/bridge/support/wire_oracle.rs"
 ORACLE_SHA = "40a3945e9e6cd3ec4a45cab61fe167f7f9be27292b602acf11c1f651f1abe080"
 
