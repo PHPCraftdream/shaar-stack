@@ -11,17 +11,20 @@ The existing running DNS repair campaign is not cancelled by this change.
 ## Selection
 
 A stdlib-only planner selects the union of domains affected by changed paths.
-Pushes compare the event's `before` and `after` commits; pull requests compare the
-merge base of the event's base and head with that head. Both sides of renames are
-included. Deletions are classified by their old paths. A newly created feature
-branch uses its merge base with the integration `develop`. CI fetches that ref
-from the fixed project upstream into `refs/remotes/ci-upstream/develop`, so a fork
-without its own `develop` does not force a broad campaign. A local `origin/develop`
-is the secondary option; when neither comparison can be established the planner
-falls back conservatively. Missing history, unknown paths
+Integration pushes to `develop` compare the event's `before` and `after` commits.
+Every feature-branch revision compares its integration merge base with its head;
+pull requests compare the merge base of the event's base and head with that head.
+This cumulative feature range preserves unverified obligations after failed or
+cancelled runs: a runner fix or documentation follow-up cannot erase the original
+feature's required suites. Both sides of renames are included; deletions use their
+old paths. CI fetches integration `develop` on every feature push from the fixed
+project upstream into `refs/remotes/ci-upstream/develop`, so a fork without its own
+`develop` does not force a broad campaign. A local `origin/develop` is the secondary
+option; when neither comparison can be established the planner falls back
+conservatively. Missing history, unknown paths
 and shared build/CI configuration select a broad targeted campaign, never an empty
 success and never an automatic full run.
-Documentation-only changes run policy and structural checks without building Rust.
+Documentation-only cumulative diffs run policy and structural checks without building Rust.
 No untrusted path or event value becomes shell source or a Cargo argument.
 
 Domains and required dependent coverage:
@@ -84,9 +87,11 @@ not substitutes for selecting the correct tests.
 ## Operator commands
 
 Normal feature pushes and upstream integration pushes select their domains
-without a manual dispatch. Documentation-only pushes still run planner policy
-regressions and structural checks on both operating systems, but skip Rust
-installation, source preparation, lint and product/proof execution.
+without a manual dispatch. Branches whose cumulative diff is documentation-only
+still run planner policy regressions and structural checks on both operating
+systems, but skip Rust installation, source preparation, lint and product/proof
+execution. A documentation follow-up on an unmerged code feature retains that
+feature's suites; successful checks are not cached or inferred from earlier runs.
 
 For an explicit targeted comparison, replace `feature-branch` and `BASE_SHA`
 with the published candidate branch and the full comparison commit SHA:
