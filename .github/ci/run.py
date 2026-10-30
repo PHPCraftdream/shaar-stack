@@ -34,12 +34,13 @@ def safe_text(path):
 
 def capture(arguments, log, *, stderr=None):
     # The workflow timeout owns the Cargo process tree; do not kill only its parent.
+    environment = dict(os.environ, CARGO_TARGET_DIR=str(ROOT / "target"))
     with log.open("wb") as output:
         if stderr:
             with stderr.open("wb") as errors:
-                status = subprocess.run(arguments, cwd=ROOT, stdout=output, stderr=errors, check=False).returncode
+                status = subprocess.run(arguments, cwd=ROOT, env=environment, stdout=output, stderr=errors, check=False).returncode
         else:
-            status = subprocess.run(arguments, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT, check=False).returncode
+            status = subprocess.run(arguments, cwd=ROOT, env=environment, stdout=output, stderr=subprocess.STDOUT, check=False).returncode
     text = safe_text(log)
     if stderr:
         print(safe_text(stderr), end="")
@@ -154,22 +155,47 @@ def tests(targets):
 
 
 def self_test():
-    directory = ROOT / "target/ci-selected/self-test"
-    directory.mkdir(parents=True, exist_ok=True)
-    source = directory / "fixture.rs"
+    global ROOT
+    original = ROOT
+    directory = original / "target/ci-selected/self-test"
+    fixture = directory / "workspace"
+    source = fixture / "crates/shaar-p2p/src/lib.rs"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    (fixture / "Cargo.toml").write_text('[workspace]\nresolver = "3"\nmembers = ["crates/shaar-p2p"]\n', encoding="utf-8")
+    (source.parents[1] / "Cargo.toml").write_text(
+        '[package]\nname = "shaar-p2p"\nversion = "0.0.0"\nedition = "2024"\nlicense = "MIT OR Apache-2.0"\n', encoding="utf-8")
     source.write_text('''#![forbid(unsafe_code)]
-#[test] fn chosen_alpha() {}
-#[test] fn chosen_beta() {}
-#[test] fn unselected_failure() { panic!("UNSELECTED_CASE_RAN"); }
-#[test] #[ignore] fn ignored_failure() { panic!("IGNORED_CASE_RAN"); }
+pub mod carrier {
+    pub mod driver {
+        pub mod protocols {
+            #[cfg(test)]
+            mod tests {
+                #[test]
+                fn chosen_alpha() {}
+                #[test]
+                fn chosen_beta() {}
+                #[test]
+                #[ignore]
+                fn ignored_failure() { panic!("IGNORED_CASE_RAN"); }
+            }
+        }
+    }
+}
+#[test]
+fn unselected_failure() { panic!("UNSELECTED_CASE_RAN"); }
 ''', encoding="utf-8")
-    binary = directory / ("fixture.exe" if os.name == "nt" else "fixture")
-    _, status = capture(["rustc", "--edition", "2024", "--test", str(source), "-o", str(binary)], directory / "compile.log")
-    if status:
-        raise ValueError("runner self-test compilation failed")
-    output, status = capture([str(binary), "--exact", "--color", "never", "chosen_alpha", "chosen_beta"], directory / "run.log")
-    VERIFY.verify({"self-test": "chosen_alpha: test\nchosen_beta: test\n"},
-                  {"self-test": (output, status)}, "")
+    try:
+        ROOT = fixture
+        _, status = capture(["cargo", "generate-lockfile", "--offline"], directory / "lock.log")
+        if status:
+            raise ValueError("stdlib-only runner fixture lock failed")
+        tests([POLICY.target("shaar-p2p", ("carrier::driver::protocols::",))])
+        receipt = json.loads((fixture / "target/ci-selected/receipt.json").read_text(encoding="utf-8"))
+        expected = ["carrier::driver::protocols::tests::chosen_alpha", "carrier::driver::protocols::tests::chosen_beta"]
+        if receipt[0]["executed"] != expected or receipt[0]["ignored_not_executed"] != ["carrier::driver::protocols::tests::ignored_failure"]:
+            raise ValueError("runner fixture selected or executed the wrong cases")
+    finally:
+        ROOT = original
 
 
 def main():

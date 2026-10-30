@@ -57,6 +57,16 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RUN.validate([valid, valid])
 
+    def test_identity_scanner_failure_redacts_artifact_before_reporting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "run.log"
+            log.write_text("unsafe fixture output", encoding="utf-8")
+            with patch.object(RUN.SCANNER, "read_bounded", return_value=b"unsafe fixture output"), \
+                 patch.object(RUN.SCANNER, "scan_bytes", return_value=True):
+                with self.assertRaisesRegex(ValueError, "unsafe log redacted"):
+                    RUN.safe_text(log)
+            self.assertNotIn("unsafe fixture output", log.read_text(encoding="utf-8"))
+
     def test_build_artifact_is_from_exact_selected_target_and_workspace(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
