@@ -89,6 +89,22 @@ jobs:
         if: fromJSON(needs.plan.outputs.selection).prepare
         with:
           selection: ${{ needs.plan.outputs.selection }}
+      - name: Verify real-carrier observer source contracts
+        if: fromJSON(needs.plan.outputs.selection).carrier_frames
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I -m unittest discover -s .github/probes/iroh-paths/carrier -p checks.py
+          python -I .github/probes/iroh-paths/carrier/run.py
+      - name: Preserve carrier observer source receipts
+        if: always() && fromJSON(needs.plan.outputs.selection).carrier_frames
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: carrier-frame-source-${{ matrix.os }}
+          path: |
+            target/carrier-frame-source-*/receipt.json
+            target/carrier-frame-source-*/workspace/target/ci-selected/*
+          if-no-files-found: warn
       - name: Verify relay operation units, wire cases and isolated counterfactuals
         if: fromJSON(needs.plan.outputs.selection).relay
         shell: bash
