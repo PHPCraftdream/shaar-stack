@@ -14,7 +14,7 @@ on:
         options: [targeted, full]
         default: targeted
       base:
-        description: Comparison base SHA for a manual targeted campaign (empty selects all domains)
+        description: Optional manual comparison SHA (empty uses the normal branch comparison)
         type: string
         default: ''
       p08_graph:
@@ -35,6 +35,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       selection: ${{ steps.plan.outputs.selection }}
+      targets: ${{ steps.plan.outputs.targets }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -44,11 +45,11 @@ jobs:
         with:
           python-version: '3.11'
       - name: Fetch upstream comparison base for feature revisions
-        if: github.event_name == 'push' && github.ref != 'refs/heads/develop'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref != 'refs/heads/develop'
         shell: bash
         run: |
           if ! git fetch --no-tags https://github.com/PHPCraftdream/shaar-stack.git refs/heads/develop:refs/remotes/ci-upstream/develop; then
-            printf 'Upstream comparison unavailable; planner will use local history or conservative selection\n'
+            printf 'Upstream comparison unavailable; targeted selection requires a usable local base\n'
           fi
       - run: python -I -m unittest discover -s .github/ci
       - id: plan
@@ -69,9 +70,7 @@ jobs:
     timeout-minutes: 90
     env:
       RUSTUP_TOOLCHAIN: "1.99.1"
-      CI_P2P: ${{ fromJSON(needs.plan.outputs.selection).p2p }}
-      CI_SDK: ${{ fromJSON(needs.plan.outputs.selection).sdk }}
-      CI_APPS: ${{ fromJSON(needs.plan.outputs.selection).apps }}
+      CI_TARGETS: ${{ needs.plan.outputs.targets }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -81,8 +80,11 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install Rust 1.99.1
-        if: fromJSON(needs.plan.outputs.selection).prepare
+        if: fromJSON(needs.plan.outputs.selection).prepare || fromJSON(needs.plan.outputs.selection).ci_policy
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+      - name: Verify selected-test runner with real libtest filters
+        if: fromJSON(needs.plan.outputs.selection).ci_policy
+        run: python -I .github/ci/run.py self-test
       - uses: ./.github/actions/prepare-sources
         if: fromJSON(needs.plan.outputs.selection).prepare
         with:
@@ -469,17 +471,24 @@ jobs:
           if ! python -I -X utf8 .github/scripts/scan_identity_output.py "$log"; then exit 1; fi
           cat "$log"
           exit "$status"
-      - name: Targeted product package tests
-        if: fromJSON(needs.plan.outputs.selection).rust && !fromJSON(needs.plan.outputs.selection).full
+      - name: Targeted project test cases
+        if: fromJSON(needs.plan.outputs.selection).product && !fromJSON(needs.plan.outputs.selection).full
         shell: bash
         run: bash .github/ci/product.sh test
+      - name: Preserve selected-test inventories and execution receipts
+        if: always() && (fromJSON(needs.plan.outputs.selection).product || fromJSON(needs.plan.outputs.selection).ci_policy)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: selected-tests-${{ matrix.os }}
+          path: target/ci-selected/
+          if-no-files-found: error
       # SEC-KEY-02: explicit run of the ignored sudo probe. Fail-closed: the
       # step passes only if the standard non-quiet harness prints the exact
       # success line for the fully qualified test name, so a run selecting
       # zero tests, or missing sudo/setup, can never false-pass.
       - name: SEC-KEY-02 unprivileged reader probe (Ubuntu only)
         shell: bash
-        if: matrix.os == 'ubuntu-latest' && (fromJSON(needs.plan.outputs.selection).sdk || fromJSON(needs.plan.outputs.selection).apps)
+        if: matrix.os == 'ubuntu-latest' && fromJSON(needs.plan.outputs.selection).identity_probe
         env:
           TEST_NAME: identity::store::tests::unprivileged_reader::identity_unprivileged_uid_cannot_read_seed_file
         run: |
@@ -495,12 +504,14 @@ jobs:
           if [[ "$status" -ne 0 ]]; then exit "$status"; fi
           grep -Fx "test $TEST_NAME ... ok" "$log"
       - name: Record toolchain versions
+        if: fromJSON(needs.plan.outputs.selection).prepare || fromJSON(needs.plan.outputs.selection).ci_policy
         run: |
           rustc --version --verbose
           cargo --version
       - name: Structural limits
         run: python -I -X utf8 .github/scripts/check_structure.py
       - name: Structural guard tests
+        if: fromJSON(needs.plan.outputs.selection).ci_policy
         run: python -I -X utf8 -m unittest discover -s .github/scripts/tests
       - name: Verify high-PTO shutdown negative control after production proofs
         if: fromJSON(needs.plan.outputs.selection).backend

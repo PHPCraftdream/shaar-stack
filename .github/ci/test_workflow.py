@@ -1,4 +1,4 @@
-"""Check routing invariants in our fixed workflow layout, not general YAML parsing."""
+"""Workflow routing contracts for the repository's fixed layout, not a generic YAML parser."""
 
 from pathlib import Path
 import re
@@ -15,7 +15,7 @@ def named_steps(text):
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_expensive_proof_groups_have_explicit_owning_domains(self):
+    def test_proof_groups_keep_explicit_owner_gates(self):
         steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))
         expected = {
             "Verify relay operation units, wire cases and isolated counterfactuals": "relay",
@@ -25,62 +25,64 @@ class WorkflowTests(unittest.TestCase):
             "Verify resolver locking with product identities and host feature unions": "resolver",
             "Verify no-cache contracts with the unchanged product feature union": "resolver",
             "Verify owned DNS foundation and its single product graph edge": "dns",
-            "Verify private DNS wire input envelopes": "dns",
-            "Verify strict discovery address scope and complete grammar": "discovery",
-            "Verify owned destination role ledger boundaries": "discovery",
-            "Verify guarded DNS transport root pinning": "discovery",
-            "Verify carrier role-integration wiring": "discovery",
             "Verify Kademlia internal retention with the unchanged archive lock": "kad",
-            "Verify DNS expansion with the unchanged archive lock": "dns",
-            "Verify ingress ownership and budget boundaries": "backend",
             "Verify Noq fatal driver exit and cancellation": "backend",
-            "Verify identical driver fixture with product dependency identities": "backend",
-            "Verify native path retention against the reviewed protocol archive lock": "backend",
             "Verify high-PTO shutdown negative control after production proofs": "backend",
-            "Verify actor abort joins native resource destruction": "sdk",
             "cargo test": "full",
         }
-        for name, domain in expected.items():
+        for name, owner in expected.items():
             with self.subTest(step=name):
-                self.assertTrue(steps[name].startswith("\n        if: fromJSON(needs.plan.outputs.selection)." + domain + "\n"))
+                self.assertTrue(steps[name].startswith("\n        if: fromJSON(needs.plan.outputs.selection)." + owner + "\n"))
 
-    def test_full_campaign_and_windows_repeats_are_not_automatic(self):
+    def test_full_and_targeted_paths_do_not_both_execute(self):
         steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))
+        self.assertIn("cargo test --workspace --locked", steps["cargo test"])
+        targeted = steps["Targeted project test cases"]
+        self.assertIn("selection).product && !fromJSON(needs.plan.outputs.selection).full", targeted)
+        self.assertIn("bash .github/ci/product.sh test", targeted)
         for name in ("Diagnose native-after-signaling path lifecycle (Windows only)",
                      "Diagnose unreachable native lifecycle under SDK parallelism (Windows only)"):
-            self.assertIn("matrix.os == 'windows-latest' && fromJSON(needs.plan.outputs.selection).full", steps[name])
-        self.assertIn("cargo test --workspace --locked", steps["cargo test"])
-        targeted = steps["Targeted product package tests"]
-        self.assertIn("!fromJSON(needs.plan.outputs.selection).full", targeted)
-        self.assertIn("bash .github/ci/product.sh test", targeted)
-        self.assertIn("bash .github/ci/product.sh lint", steps["cargo clippy"])
+            self.assertIn("selection).full", steps[name])
 
-    def test_product_graph_prerequisites_do_not_depend_on_resolver_tests(self):
-        prep = (ROOT / ".github/actions/prepare-sources/action.yml").read_text(encoding="utf-8")
-        self.assertIn('> target/resolver-locking-baseline.json', prep)
-        for domain in ("resolver", "kad", "dns"):
-            self.assertIn("if ${{ fromJSON(inputs.selection)." + domain + " }}; then", prep)
-        for dependency in ("backend/prepare.py", "p2p/prepare.py", "discovery/dns/prepare.py",
-                           '"$script/prepare.py"', "discovery/kad/kad.py prepare"):
-            self.assertIn(dependency, prep)
-
-    def test_upstream_base_is_fetched_for_every_feature_revision(self):
-        steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))
-        fetch = steps["Fetch upstream comparison base for feature revisions"]
-        self.assertTrue(fetch.startswith("\n        if: github.event_name == 'push' && github.ref != 'refs/heads/develop'\n"))
+    def test_feature_and_manual_comparisons_fetch_integration_base(self):
+        fetch = named_steps(WORKFLOW.read_text(encoding="utf-8"))["Fetch upstream comparison base for feature revisions"]
+        self.assertIn("github.event_name == 'workflow_dispatch'", fetch)
+        self.assertIn("github.ref != 'refs/heads/develop'", fetch)
         self.assertIn("refs/heads/develop:refs/remotes/ci-upstream/develop", fetch)
+        self.assertNotIn("github.event.before", fetch)
 
-    def test_workflow_always_runs_selection_and_structural_policy(self):
+    def test_ci_control_tests_are_separate_from_product_dependency_proofs(self):
         text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("    needs: plan\n", text)
-        self.assertIn("fetch-depth: 0", text)
-        self.assertIn("python -I .github/ci/plan.py", text)
-        self.assertIn("python -I -m unittest discover -s .github/ci", text)
         steps = named_steps(text)
-        for name in ("Structural limits", "Structural guard tests"):
-            self.assertNotIn("        if:", steps[name])
+        self.assertIn("if: fromJSON(needs.plan.outputs.selection).ci_policy", steps["Verify selected-test runner with real libtest filters"])
+        self.assertIn("run.py self-test", steps["Verify selected-test runner with real libtest filters"])
+        self.assertIn("if: fromJSON(needs.plan.outputs.selection).ci_policy", steps["Structural guard tests"])
+        self.assertNotIn("        if:", steps["Structural limits"])
+        self.assertIn("CI_TARGETS: ${{ needs.plan.outputs.targets }}", text)
         self.assertNotIn("continue-on-error:", text)
-        self.assertIn("ci-plan.json", text)
+        self.assertIn("target/ci-selected/", text)
+
+    def test_preparation_does_not_unconditionally_run_dependency_tests(self):
+        text = (ROOT / ".github/actions/prepare-sources/action.yml").read_text(encoding="utf-8")
+        for owner, command in (("relay", "python -I .github/scripts/p2p/checks.py"),
+                               ("dns", "python -I .github/scripts/p2p/discovery/dns/checks.py"),
+                               ("resolver", 'rustfmt --edition 2021'),
+                               ("kad", "python -I .github/scripts/p2p/discovery/kad/kad_checks.py")):
+            start = "if ${{ fromJSON(inputs.selection)." + owner + " }}; then"
+            self.assertIn(start + "\n          " + command, text)
+        self.assertIn("> target/resolver-locking-baseline.json", text)
+        self.assertIn("graph.py verify", text)
+
+    def test_instructions_document_both_full_triggers_and_normal_actions(self):
+        instructions = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("[ci:full]", instructions)
+        self.assertIn("CURRENT candidate commit", instructions)
+        self.assertIn("scope: full", instructions)
+        self.assertIn("scope: targeted", instructions)
+        self.assertIn("ancestor commits do not trigger", instructions)
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", text)
+        self.assertIn("options: [targeted, full]", text)
 
 
 if __name__ == "__main__":

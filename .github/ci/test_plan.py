@@ -1,4 +1,4 @@
-"""CI policy regressions; run only in GitHub CI."""
+"""CI-only regressions for fine-grained ownership, Git comparison and full triggers."""
 
 import importlib.util
 import os
@@ -15,182 +15,159 @@ POLICY = PLAN.POLICY
 
 
 class PolicyTests(unittest.TestCase):
-    def test_dns_fixture_does_not_run_unrelated_dependency_campaigns(self):
-        result = POLICY.select(["crates/shaar-p2p/src/dns/tests/support.rs"])["selection"]
-        self.assertTrue(all(result[k] for k in ("dns", "discovery", "carrier", "p2p", "rust", "prepare")))
-        self.assertFalse(any(result[k] for k in ("relay", "resolver", "kad", "backend", "sdk", "apps", "full")))
+    def test_protocol_feature_selects_own_cases_and_small_wiring_contracts_only(self):
+        paths = ["crates/shaar-p2p/src/carrier/driver/runtime/protocols/guard.rs",
+                 "crates/shaar-p2p/src/carrier/driver/mod.rs",
+                 "crates/shaar-p2p/src/carrier/driver/runtime/events.rs",
+                 "crates/shaar-p2p/src/carrier/driver/runtime/infrastructure_tests/identification.rs"]
+        result = POLICY.select(paths)
+        self.assertEqual(result["suites"], ["carrier-core", "protocols"])
+        self.assertEqual(len(result["targets"]), 1)
+        self.assertEqual(result["targets"][0]["package"], "shaar-p2p")
+        self.assertIn("carrier::driver::protocols::", result["targets"][0]["filters"])
+        self.assertIn("infrastructure::tests::identification::", result["targets"][0]["filters"])
+        self.assertNotIn("", result["targets"][0]["filters"])
+        self.assertFalse(any(result["selection"][key] for key in POLICY.DOMAINS))
+        self.assertTrue(result["selection"]["product"])
+        self.assertFalse(result["selection"]["full"])
 
-    def test_product_dns_and_discovery_include_consumers(self):
-        for path in ("crates/shaar-p2p/src/dns/mod.rs", "crates/shaar-p2p/src/discovery/roles/mod.rs"):
-            with self.subTest(path=path):
-                result = POLICY.select([path])["selection"]
-                self.assertTrue(all(result[k] for k in ("p2p", "sdk", "apps", "carrier", "discovery")))
-
-    def test_docs_only_has_no_rust_build(self):
-        result = POLICY.select(["docs/plans/new.md", "crates/shaar/src/network/README.md"])["selection"]
-        self.assertFalse(any(result.values()))
-
-    def test_unions_are_order_independent(self):
-        paths = ["crates/shaar-p2p/src/dns/tests/support.rs", ".github/scripts/backend/policy.py"]
-        forward = POLICY.select(paths)["selection"]
-        self.assertEqual(forward, POLICY.select(list(reversed(paths)))["selection"])
-        self.assertTrue(all(forward[k] for k in ("dns", "backend", "sdk", "apps")))
-
-    def test_unknown_shared_empty_and_missing_base_are_broad_not_full(self):
-        for paths, fallback in ((["Cargo.lock"], None), ([".github/ci/plan.py"], None),
-                                (["new-component/code.rs"], None), ([], None),
-                                (["docs/new.md"], "missing base")):
-            with self.subTest(paths=paths, fallback=fallback):
-                result = POLICY.select(paths, fallback=fallback)["selection"]
-                self.assertTrue(all(result[k] for k in POLICY.DOMAINS))
-                self.assertFalse(result["full"])
-
-    def test_dependency_policies_keep_their_own_controls(self):
+    def test_dependency_proofs_only_follow_changed_dependency_owner(self):
         cases = {".github/scripts/p2p/discovery/resolver/prepare.py": "resolver",
                  ".github/scripts/p2p/discovery/kad/kad.py": "kad",
                  ".github/scripts/p2p/relay/fixtures/wire/run.py": "relay",
                  ".github/scripts/tests/noq_driver/prepare.py": "backend"}
-        for path, domain in cases.items():
-            result = POLICY.select([path])["selection"]
-            self.assertTrue(result[domain])
-            self.assertTrue(result["sdk"])
+        for path, owner in cases.items():
+            with self.subTest(path=path):
+                result = POLICY.select([path])
+                self.assertEqual([k for k in POLICY.DOMAINS if result["selection"][k]], [owner])
+                self.assertFalse(result["targets"])
+                self.assertTrue(result["selection"]["prepare"])
 
-    def test_license_only_prepares_graph_without_product_tests(self):
-        result = POLICY.select([".github/actions/dependency-license/action.yml"])["selection"]
-        self.assertTrue(result["license"])
-        self.assertTrue(result["prepare"])
-        self.assertFalse(result["rust"])
+    def test_docs_and_ci_policy_do_not_compile_rust(self):
+        for paths in (["docs/plans/new.md", "CLAUDE.md"], [".github/ci/policy.py"]):
+            result = POLICY.select(paths)
+            self.assertFalse(result["selection"]["prepare"])
+            self.assertFalse(result["selection"]["rust"])
+        self.assertTrue(POLICY.select([".github/ci/policy.py"])["selection"]["ci_policy"])
 
-    def test_full_is_explicit_dispatch_only(self):
-        with patch.object(PLAN, "changes", return_value=(["docs/new.md"], "a" * 40, "b" * 40)):
-            for name in ("push", "pull_request", "workflow_dispatch"):
-                result = PLAN.plan(name, {"inputs": {"scope": "full"}}, "b" * 40)
-                self.assertEqual(result["selection"]["full"], name == "workflow_dispatch")
-                if name == "workflow_dispatch":
-                    self.assertTrue(all(result["selection"].values()))
+    def test_unknown_paths_empty_comparison_and_shared_lock_fail_not_expand(self):
+        for paths in ([], ["new-component/code.rs"], ["Cargo.lock"],
+                      ["crates/shaar-p2p/src/new-unknown/module.rs"]):
+            with self.subTest(paths=paths):
+                with self.assertRaises(ValueError):
+                    POLICY.select(paths)
 
-    def test_bad_scope_fails_and_unavailable_history_is_conservative(self):
-        with self.assertRaises(ValueError):
-            PLAN.plan("workflow_dispatch", {"inputs": {"scope": "typo"}}, "a" * 40)
-        with patch.object(PLAN, "changes", side_effect=ValueError("missing")):
-            result = PLAN.plan("push", {"before": "0" * 40}, "a" * 40)
-        self.assertTrue(result["fallback"])
-        self.assertTrue(all(result["selection"][k] for k in POLICY.DOMAINS))
-        self.assertFalse(result["selection"]["full"])
+    def test_unions_are_order_independent_and_targets_deduplicate(self):
+        paths = ["crates/shaar-p2p/src/discovery/roles/mod.rs",
+                 "crates/shaar-p2p/src/discovery/roles/infrastructure/tests/contacts.rs"]
+        result = POLICY.select(paths)
+        self.assertEqual(result, POLICY.select(list(reversed(paths))))
+        self.assertEqual(len(result["targets"]), 1)
+        self.assertEqual(result["targets"][0]["filters"],
+                         ["discovery::roles::", "discovery::roles::infrastructure::tests::contacts::"])
+
+    def test_full_is_all_explicit_proofs_without_targeted_double_execution(self):
+        result = POLICY.select([], full=True)
+        self.assertTrue(all(result["selection"][key] for key in POLICY.DOMAINS))
+        self.assertTrue(result["selection"]["full"])
+        self.assertFalse(result["targets"])
+        self.assertEqual(result["suites"], ["full"])
 
     def test_commit_values_cannot_be_git_options_or_shell(self):
         for value in ("--help", "$(command)", "a" * 39, "0" * 40, None):
             with self.assertRaises(ValueError):
                 PLAN.commit(value)
 
+    def test_marker_is_an_exact_separate_line(self):
+        self.assertTrue(PLAN.FULL_MARKER.search("subject\n\n[ci:full]\n"))
+        self.assertTrue(PLAN.FULL_MARKER.search("subject\r\n[ci:full]\r\n"))
+        for message in ("subject [ci:full]", "> [ci:full]", " [ci:full]", "[ci:full ]", "[ci:FULL]"):
+            self.assertFalse(PLAN.FULL_MARKER.search(message))
 
-class GitComparisonTests(unittest.TestCase):
+
+class GitTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.old = Path.cwd()
         os.chdir(self.directory.name)
         self.addCleanup(self.directory.cleanup)
         self.addCleanup(os.chdir, self.old)
-        self.run_git("init", "-q")
-        self.run_git("config", "user.name", "CI fixture")
-        self.run_git("config", "user.email", "ci@example.invalid")
+        self.git("init", "-q")
+        self.git("config", "user.name", "CI fixture")
+        self.git("config", "user.email", "ci@example.invalid")
 
-    def run_git(self, *args):
+    def git(self, *args):
         return subprocess.check_output(["git", *args], stderr=subprocess.STDOUT).decode().strip()
 
-    def commit_file(self, name, text):
+    def commit_file(self, name, text, message="fixture"):
         path = Path(name)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-        self.run_git("add", "--all")
-        self.run_git("commit", "-qm", "fixture")
-        return self.run_git("rev-parse", "HEAD")
+        self.git("add", "--all")
+        self.git("commit", "-qm", message)
+        return self.git("rev-parse", "HEAD")
 
-    def test_push_rename_includes_both_paths_and_deleted_files(self):
+    def event(self, base, head, ref="refs/heads/develop"):
+        return {"before": base, "after": head, "ref": ref}
+
+    def test_rename_and_deletion_include_both_sides(self):
         base = self.commit_file("old.rs", "one")
         Path("old.rs").rename("new.rs")
-        end = self.commit_file("docs/new.md", "two")
-        event = {"before": base, "after": end, "ref": "refs/heads/develop"}
-        paths, actual_base, actual_end = PLAN.changes("push", event, end)
+        head = self.commit_file("docs/new.md", "two")
+        paths, actual, _ = PLAN.changes("push", self.event(base, head), head)
         self.assertEqual(set(paths), {"old.rs", "new.rs", "docs/new.md"})
-        self.assertEqual((actual_base, actual_end), (base, end))
+        self.assertEqual(actual, base)
 
-    def test_pr_uses_merge_base_not_base_branch_changes(self):
-        initial = self.commit_file("common.rs", "one")
-        self.run_git("checkout", "-qb", "feature")
-        head = self.commit_file("feature.rs", "two")
-        self.run_git("checkout", "-qb", "base", initial)
-        base = self.commit_file("unrelated.rs", "three")
-        event = {"pull_request": {"base": {"sha": base}, "head": {"sha": head}}}
-        paths, actual_base, actual_head = PLAN.changes("pull_request", event, base)
-        self.assertEqual(paths, ["feature.rs"])
-        self.assertEqual((actual_base, actual_head), (initial, head))
-
-    def test_new_feature_branch_uses_develop_merge_base_when_available(self):
+    def test_feature_repair_preserves_original_own_test_selectors(self):
         base = self.commit_file("common.rs", "one")
-        self.run_git("update-ref", "refs/remotes/origin/develop", base)
-        head = self.commit_file("crates/shaar-p2p/src/dns/tests/support.rs", "two")
-        event = {"before": "0" * 40, "after": head, "ref": "refs/heads/feature"}
-        paths, actual_base, _ = PLAN.changes("push", event, head)
-        self.assertEqual(paths, ["crates/shaar-p2p/src/dns/tests/support.rs"])
-        self.assertEqual(actual_base, base)
-        self.assertFalse(PLAN.plan("push", event, head)["selection"]["backend"])
-
-    def test_fork_prefers_upstream_base_without_requiring_local_develop(self):
-        older = self.commit_file("common.rs", "one")
-        base = self.commit_file(".github/scripts/backend/policy.py", "two")
-        self.run_git("update-ref", "refs/remotes/ci-upstream/develop", base)
-        head = self.commit_file("crates/shaar-p2p/src/dns/tests/support.rs", "three")
-        event = {"before": "0" * 40, "after": head, "ref": "refs/heads/feature"}
-        for stale_origin in (False, True):
-            if stale_origin:
-                self.run_git("update-ref", "refs/remotes/origin/develop", older)
-            result = PLAN.plan("push", event, head)
-            self.assertIsNone(result["fallback"])
-            self.assertEqual(result["base"], base)
-            self.assertTrue(result["selection"]["dns"])
-            self.assertFalse(result["selection"]["backend"])
-
-    def test_feature_repair_keeps_original_unverified_domains(self):
-        base = self.commit_file("common.rs", "one")
-        self.run_git("update-ref", "refs/remotes/ci-upstream/develop", base)
+        self.git("update-ref", "refs/remotes/ci-upstream/develop", base)
         failed = self.commit_file("crates/shaar/src/network/mod.rs", "two")
-        head = self.commit_file(".github/scripts/p2p/carrier-wire-proof/checks.py", "three")
-        event = {"before": failed, "after": head, "ref": "refs/heads/feature"}
-        result = PLAN.plan("push", event, head)
+        head = self.commit_file("crates/shaar-p2p/src/carrier/driver/runtime/protocols/guard.rs", "three")
+        result = PLAN.plan("push", self.event(failed, head, "refs/heads/feature"), head)
         self.assertEqual(result["base"], base)
-        self.assertTrue(all(result["selection"][key] for key in ("sdk", "apps", "carrier")))
+        self.assertEqual({t["package"] for t in result["targets"]}, {"shaar", "shaar-p2p"})
         self.assertFalse(result["selection"]["backend"])
 
-    def test_docs_followup_does_not_erase_feature_test_obligations(self):
-        base = self.commit_file("common.rs", "one")
-        self.run_git("update-ref", "refs/remotes/ci-upstream/develop", base)
-        feature = self.commit_file("crates/shaar-p2p/src/dns/tests/support.rs", "two")
-        head = self.commit_file("docs/new.md", "three")
-        event = {"before": feature, "after": head, "ref": "refs/heads/feature"}
-        result = PLAN.plan("push", event, head)
-        self.assertEqual(result["base"], base)
-        self.assertTrue(result["selection"]["dns"])
-        self.assertTrue(result["selection"]["rust"])
-        self.assertFalse(result["selection"]["backend"])
+    def test_missing_history_is_not_a_full_trigger(self):
+        head = self.commit_file("docs/new.md", "one")
+        with self.assertRaisesRegex(ValueError, "no automatic full fallback"):
+            PLAN.plan("push", self.event("0" * 40, head), head)
 
-    def test_develop_push_compares_previous_integration_not_entire_branch(self):
-        initial = self.commit_file("common.rs", "one")
-        self.run_git("update-ref", "refs/remotes/ci-upstream/develop", initial)
-        base = self.commit_file("crates/shaar/src/network/mod.rs", "two")
-        head = self.commit_file("docs/new.md", "three")
-        event = {"before": base, "after": head, "ref": "refs/heads/develop"}
-        result = PLAN.plan("push", event, head)
-        self.assertEqual(result["base"], base)
+    def test_current_commit_marker_triggers_full_even_without_a_base(self):
+        head = self.commit_file("unknown.rs", "one", "sprint acceptance\n\n[ci:full]")
+        result = PLAN.plan("push", self.event("0" * 40, head), head)
+        self.assertEqual(result["trigger"], "commit-marker")
+        self.assertTrue(result["selection"]["full"])
+
+    def test_old_commit_marker_is_not_inherited(self):
+        base = self.commit_file("docs/old.md", "one", "old sprint\n\n[ci:full]")
+        head = self.commit_file("docs/new.md", "two")
+        result = PLAN.plan("push", self.event(base, head), head)
+        self.assertEqual(result["scope"], "targeted")
         self.assertFalse(result["selection"]["rust"])
 
-    def test_new_branch_and_missing_history_do_not_false_pass_docs(self):
-        head = self.commit_file("docs/new.md", "one")
-        for base in ("0" * 40, "a" * 40):
-            result = PLAN.plan("push", {"before": base, "after": head}, head)
-            self.assertTrue(result["fallback"])
-            self.assertTrue(result["selection"]["rust"])
-            self.assertFalse(result["selection"]["full"])
+    def test_pr_reads_real_head_message_not_checkout_merge_message(self):
+        initial = self.commit_file("common.rs", "one")
+        self.git("checkout", "-qb", "feature")
+        head = self.commit_file("docs/new.md", "two")
+        self.git("checkout", "-qb", "base", initial)
+        base = self.commit_file("other.rs", "three", "merge text\n\n[ci:full]")
+        event = {"pull_request": {"base": {"sha": base}, "head": {"sha": head}}}
+        result = PLAN.plan("pull_request", event, base)
+        self.assertFalse(result["selection"]["full"])
+        self.assertEqual(result["head"], head)
+        self.assertEqual(result["base"], initial)
+
+    def test_actions_manual_full_and_targeted_are_available(self):
+        self.commit_file("docs/old.md", "one")
+        head = self.commit_file("docs/new.md", "two")
+        targeted = PLAN.plan("workflow_dispatch", {"inputs": {"scope": "targeted"}}, head, "refs/heads/develop")
+        self.assertFalse(targeted["selection"]["rust"])
+        full = PLAN.plan("workflow_dispatch", {"inputs": {"scope": "full"}}, head)
+        self.assertEqual(full["trigger"], "manual-full")
+        self.assertTrue(full["selection"]["full"])
+        with self.assertRaises(ValueError):
+            PLAN.plan("workflow_dispatch", {"inputs": {"scope": "typo"}}, head)
 
 
 if __name__ == "__main__":
