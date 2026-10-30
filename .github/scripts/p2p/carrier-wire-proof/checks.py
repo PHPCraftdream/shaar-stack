@@ -23,6 +23,7 @@ def load(name):
 
 graph = load("graph")
 instrument = load("instrument")
+runner = load("run")
 
 
 def metadata(root):
@@ -61,6 +62,66 @@ class FixtureContracts(unittest.TestCase):
         with patch.object(instrument, "verified", return_value=self.original):
             record = instrument.instrument(self.root / "prepared", destination, variant)
         return destination, record
+
+    def compile_inventory(self, names):
+        directory = Path(tempfile.mkdtemp(prefix="inventory-", dir=self.root))
+        workspace, relay = directory / "workspace", directory / "relay"
+        unit_source = workspace / "crates/shaar-p2p/src/lib.rs"
+        for source in (unit_source, relay / "src/lib.rs"):
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"fixture source\n")
+        executable = directory / "compiled/unit-tests"
+
+        def command(arguments, *args, **kwargs):
+            if arguments[0] != "cargo":
+                self.assertEqual(arguments[0], str(executable))
+                return "".join(name + ": test\n" for name in names)
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture executable witness")
+            artifacts = [
+                {"reason": "compiler-artifact", "target": {"src_path": str(relay / "src/lib.rs")},
+                 "fresh": False, "package_id": "fixture-relay"},
+                {"reason": "compiler-artifact", "target": {"src_path": str(unit_source)},
+                 "fresh": False, "package_id": "fixture-unit", "executable": str(executable)},
+            ]
+            return "\n".join(json.dumps(item) for item in artifacts)
+
+        with patch.object(runner, "command", side_effect=command):
+            return runner.compile_fixture(workspace, directory, relay, graph)
+
+    def test_compiled_inventory_accepts_growing_and_shrinking_source_suites(self):
+        fixtures = ["carrier_protocol_fixture::" + case["name"] for case in runner.CASES.values()]
+        for size in (2, 19, 1):
+            names = fixtures + [f"roles::destination_roles_case_{index}" for index in range(size)]
+            _, selected, witness = self.compile_inventory(names)
+            self.assertEqual(witness["unit_inventory"], names)
+            self.assertEqual(set(selected), set(runner.CASES))
+            runner.verify_inventories({variant: witness for variant in runner.VARIANTS})
+
+    def test_inventory_equality_rejects_added_missing_or_replaced_counterfactual_tests(self):
+        baseline = ["roles::destination_roles_one", "guard::destination_guard_two"]
+        for changed in (baseline[:-1], baseline + ["new::case"], [baseline[0], "guard::other"]):
+            results = {variant: {"unit_inventory": baseline} for variant in runner.VARIANTS}
+            results["counterfactual"] = {"unit_inventory": changed}
+            with self.assertRaisesRegex(ValueError, "changed the executable test inventory"):
+                runner.verify_inventories(results)
+
+    def test_inventory_requires_all_variants_and_nonempty_unique_well_formed_listings(self):
+        with self.assertRaisesRegex(ValueError, "missing Carrier proof variant"):
+            runner.verify_inventories({"baseline": {"unit_inventory": ["case"]}})
+        with self.assertRaisesRegex(ValueError, "empty Carrier executable"):
+            runner.verify_inventories({variant: {"unit_inventory": []} for variant in runner.VARIANTS})
+        for listing in ("", "case: test\ncase: test\n", "case: benchmark\n", "malformed text\n"):
+            with self.assertRaises(ValueError):
+                runner.unit_inventory(listing)
+
+    def test_compiled_inventory_keeps_exact_fixture_controls(self):
+        fixtures = ["carrier_protocol_fixture::" + case["name"] for case in runner.CASES.values()]
+        with self.assertRaisesRegex(ValueError, "included exactly once"):
+            self.compile_inventory(fixtures[:-1])
+        duplicated = "other::" + fixtures[0]
+        with self.assertRaisesRegex(ValueError, "included exactly once"):
+            self.compile_inventory(fixtures + [duplicated])
 
     def test_exact_anchor_is_required(self):
         for text in ("absent", "anchor anchor"):
