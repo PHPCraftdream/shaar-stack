@@ -198,6 +198,16 @@ fn unselected_failure() { panic!("UNSELECTED_CASE_RAN"); }
         ROOT = original
 
 
+def lint(targets):
+    directory = ROOT / "target/ci-selected"
+    directory.mkdir(parents=True, exist_ok=True)
+    for index, spec in enumerate(targets):
+        arguments = ["cargo", "clippy", "--locked", "-p", spec["package"], *cargo_target(spec), "--", "-D", "warnings"]
+        _, status = capture(arguments, directory / f"{index}.lint.log")
+        if status:
+            raise ValueError("selected target lint failed: " + str(status))
+
+
 def main():
     mode = sys.argv[1]
     if mode == "self-test":
@@ -206,9 +216,7 @@ def main():
     targets = json.loads(os.environ["CI_TARGETS"])
     validate(targets)
     if mode == "lint":
-        for spec in targets:
-            arguments = ["cargo", "clippy", "--locked", "-p", spec["package"], *cargo_target(spec)]
-            subprocess.run([*arguments, "--", "-D", "warnings"], cwd=ROOT, check=True)
+        lint(targets)
     elif mode == "test":
         tests(targets)
     else:
