@@ -64,6 +64,12 @@ class WorkflowTests(unittest.TestCase):
                            '"$script/prepare.py"', "discovery/kad/kad.py prepare"):
             self.assertIn(dependency, prep)
 
+    def test_upstream_base_is_fetched_for_every_feature_revision(self):
+        steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))
+        fetch = steps["Fetch upstream comparison base for feature revisions"]
+        self.assertTrue(fetch.startswith("\n        if: github.event_name == 'push' && github.ref != 'refs/heads/develop'\n"))
+        self.assertIn("refs/heads/develop:refs/remotes/ci-upstream/develop", fetch)
+
     def test_workflow_always_runs_selection_and_structural_policy(self):
         text = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("    needs: plan\n", text)

@@ -36,7 +36,7 @@ def changes(event_name, event, head):
         end = commit(event["after"])
         if end != head:
             raise ValueError("push head differs from checkout identity")
-        if event["before"] == "0" * 40 and event.get("ref") != "refs/heads/develop":
+        if event.get("ref") != "refs/heads/develop":
             try:
                 reference = commit(git("rev-parse", "--verify", "refs/remotes/ci-upstream/develop^{commit}").decode("ascii").strip())
             except subprocess.CalledProcessError:

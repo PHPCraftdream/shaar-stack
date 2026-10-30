@@ -110,7 +110,8 @@ class GitComparisonTests(unittest.TestCase):
         base = self.commit_file("old.rs", "one")
         Path("old.rs").rename("new.rs")
         end = self.commit_file("docs/new.md", "two")
-        paths, actual_base, actual_end = PLAN.changes("push", {"before": base, "after": end}, end)
+        event = {"before": base, "after": end, "ref": "refs/heads/develop"}
+        paths, actual_base, actual_end = PLAN.changes("push", event, end)
         self.assertEqual(set(paths), {"old.rs", "new.rs", "docs/new.md"})
         self.assertEqual((actual_base, actual_end), (base, end))
 
@@ -149,6 +150,39 @@ class GitComparisonTests(unittest.TestCase):
             self.assertEqual(result["base"], base)
             self.assertTrue(result["selection"]["dns"])
             self.assertFalse(result["selection"]["backend"])
+
+    def test_feature_repair_keeps_original_unverified_domains(self):
+        base = self.commit_file("common.rs", "one")
+        self.run_git("update-ref", "refs/remotes/ci-upstream/develop", base)
+        failed = self.commit_file("crates/shaar/src/network/mod.rs", "two")
+        head = self.commit_file(".github/scripts/p2p/carrier-wire-proof/checks.py", "three")
+        event = {"before": failed, "after": head, "ref": "refs/heads/feature"}
+        result = PLAN.plan("push", event, head)
+        self.assertEqual(result["base"], base)
+        self.assertTrue(all(result["selection"][key] for key in ("sdk", "apps", "carrier")))
+        self.assertFalse(result["selection"]["backend"])
+
+    def test_docs_followup_does_not_erase_feature_test_obligations(self):
+        base = self.commit_file("common.rs", "one")
+        self.run_git("update-ref", "refs/remotes/ci-upstream/develop", base)
+        feature = self.commit_file("crates/shaar-p2p/src/dns/tests/support.rs", "two")
+        head = self.commit_file("docs/new.md", "three")
+        event = {"before": feature, "after": head, "ref": "refs/heads/feature"}
+        result = PLAN.plan("push", event, head)
+        self.assertEqual(result["base"], base)
+        self.assertTrue(result["selection"]["dns"])
+        self.assertTrue(result["selection"]["rust"])
+        self.assertFalse(result["selection"]["backend"])
+
+    def test_develop_push_compares_previous_integration_not_entire_branch(self):
+        initial = self.commit_file("common.rs", "one")
+        self.run_git("update-ref", "refs/remotes/ci-upstream/develop", initial)
+        base = self.commit_file("crates/shaar/src/network/mod.rs", "two")
+        head = self.commit_file("docs/new.md", "three")
+        event = {"before": base, "after": head, "ref": "refs/heads/develop"}
+        result = PLAN.plan("push", event, head)
+        self.assertEqual(result["base"], base)
+        self.assertFalse(result["selection"]["rust"])
 
     def test_new_branch_and_missing_history_do_not_false_pass_docs(self):
         head = self.commit_file("docs/new.md", "one")
