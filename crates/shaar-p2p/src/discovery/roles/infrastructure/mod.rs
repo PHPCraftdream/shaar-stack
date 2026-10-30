@@ -5,6 +5,10 @@ use std::net::SocketAddr;
 
 use super::{AttemptKey, Owner, State};
 
+mod referrals;
+pub(crate) use referrals::Epoch;
+pub(super) use referrals::{Admission, Hint};
+
 /// Counted permit whose only effect is its exact row's count and Drop.
 pub(crate) struct Permit {
     view: super::View,

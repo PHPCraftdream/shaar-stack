@@ -5,6 +5,9 @@ use libp2p::{
 use crate::{CONTROL_PROTOCOL, discovery::roles::View};
 
 mod guard;
+mod owner;
+
+pub(super) use owner::{Control, Operation};
 
 pub(super) const DHT: u8 = 1;
 pub(super) const HOP: u8 = 2;
@@ -42,14 +45,16 @@ pub(super) struct Inner {
 }
 
 pub(super) fn new(peer: PeerId, public: PublicKey, view: Option<View>) -> Behaviour {
-    let inner = view.as_ref().map(|_| {
+    let inner = view.as_ref().map(|view| {
         let mut config = kad::Config::new(StreamProtocol::new(DHT_PROTOCOL));
         config.set_kbucket_inserts(kad::BucketInserts::Manual);
         config.set_periodic_bootstrap_interval(None);
         config.set_automatic_bootstrap_throttle(None);
         config.set_caching(kad::Caching::Disabled);
-        // No query authority is installed until the owner binds its epoch and sources.
-        config.set_query_referral_filter(|_, _, _, _| false);
+        let referrals = view.clone();
+        config.set_query_referral_filter(move |query, source, peer, addresses| {
+            referrals.admit_query_referral(query, source, peer, addresses)
+        });
         let mut kad = kad::Behaviour::with_config(peer, kad::store::MemoryStore::new(peer), config);
         kad.set_mode(Some(kad::Mode::Client));
         let identify = identify::Behaviour::new(
@@ -91,12 +96,23 @@ pub(super) fn update_seed(
     }
 }
 
-pub(super) fn reject_unowned_query(behaviour: &mut Behaviour, event: kad::Event) {
-    if let kad::Event::OutboundQueryProgressed { id, .. } = event
-        && let Some(inner) = behaviour.as_mut()
+pub(super) fn start_query(behaviour: &mut Behaviour, target: PeerId) -> Option<kad::QueryId> {
+    behaviour
+        .as_mut()
+        .map(|inner| inner.kad.get_closest_peers(target))
+}
+
+pub(super) fn finish_query(behaviour: &mut Behaviour, id: kad::QueryId) {
+    if let Some(inner) = behaviour.as_mut()
         && let Some(mut query) = inner.kad.query_mut(&id)
     {
         query.finish();
+    }
+}
+
+pub(super) fn reject_unowned_query(behaviour: &mut Behaviour, event: kad::Event) {
+    if let kad::Event::OutboundQueryProgressed { id, .. } = event {
+        finish_query(behaviour, id);
     }
 }
 

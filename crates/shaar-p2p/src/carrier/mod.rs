@@ -34,6 +34,19 @@ pub struct Received {
     pub packet: Datagram,
 }
 
+/// A HOP claim observed on an authenticated control, not a reservation or APP authority.
+/// The carrier owns the control; retaining this value does not keep its socket alive.
+#[derive(Debug)]
+pub struct DiscoveredRelay {
+    key: crate::discovery::roles::AttemptKey,
+}
+
+impl DiscoveredRelay {
+    pub fn peer_id(&self) -> PeerId {
+        self.key.peer
+    }
+}
+
 /// Submission capability only; retaining it does not retain the carrier's sockets.
 #[derive(Clone)]
 pub struct CarrierHandle {
@@ -49,6 +62,7 @@ type Reply<T> = oneshot::Sender<io::Result<T>>;
 // At most 32 queued inline packets; boxing would add a needless per-packet allocation.
 #[allow(clippy::large_enum_variant)]
 enum Command {
+    Discover(Reply<Vec<DiscoveredRelay>>),
     Connect(PeerId, SocketAddr, Reply<ConnectionId>),
     Send(PeerId, Datagram, Reply<()>),
     SendOn(Link, Datagram, Reply<()>),
@@ -59,6 +73,15 @@ enum Command {
 }
 
 impl CarrierHandle {
+    /// Runs one bounded discovery operation using only constructor-validated seeds.
+    /// Claims remain tied to current controls and do not reserve a relay or permit APP traffic.
+    /// cancel-safe: NO — the owner retires admitted work after observing waiter cancellation.
+    pub async fn discover_relays(&self) -> io::Result<Vec<DiscoveredRelay>> {
+        let (reply, result) = oneshot::channel();
+        self.submit(Command::Discover(reply))?;
+        result.await.map_err(|_| closed())?
+    }
+
     pub fn peer_id(&self) -> PeerId {
         self.peer
     }

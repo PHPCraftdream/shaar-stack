@@ -1,6 +1,9 @@
 use super::*;
 use libp2p::{identify, kad};
 
+#[path = "discovery.rs"]
+mod discovery;
+
 #[derive(Debug)]
 struct MetadataEvent(Option<identify::Event>);
 

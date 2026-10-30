@@ -67,6 +67,10 @@ impl Admission {
         self.owner.as_ref().map(roles::Owner::view)
     }
 
+    pub(super) fn discovery_owner(&mut self) -> Option<&mut roles::Owner> {
+        self.owner.as_mut()
+    }
+
     pub(super) fn admit_identity(&mut self, peer: PeerId, role: roles::Role) -> io::Result<()> {
         if let Some(owner) = &mut self.owner {
             owner.admit_identity(peer, role)

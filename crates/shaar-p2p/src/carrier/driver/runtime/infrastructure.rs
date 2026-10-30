@@ -15,6 +15,8 @@ struct Entry {
     deadline: Instant,
     phase: Phase,
     protocols: u8,
+    identified: bool,
+    epoch: Option<roles::DiscoveryEpoch>,
 }
 
 #[derive(Default)]
@@ -62,6 +64,134 @@ impl State {
 }
 
 impl Core {
+    pub(super) fn infrastructure_empty(&self) -> bool {
+        self.infrastructure.entries.is_empty()
+    }
+
+    pub(super) fn discovery_owned_controls(
+        &self,
+        epoch: roles::DiscoveryEpoch,
+    ) -> [Option<protocols::Control>; roles::INFRASTRUCTURE_CONNECTIONS] {
+        let view = self.swarm.behaviour().inner.admission.roles_view();
+        let mut entries = self
+            .infrastructure
+            .entries
+            .values()
+            .filter(|entry| entry.epoch == Some(epoch));
+        std::array::from_fn(|_| {
+            entries.next().map(|entry| protocols::Control {
+                key: entry.key,
+                live: entry.phase == Phase::Live
+                    && view
+                        .as_ref()
+                        .is_some_and(|view| view.infrastructure_live(entry.key).is_some()),
+                pending: entry.phase == Phase::Pending,
+                identified: entry.identified,
+                protocols: entry.protocols,
+            })
+        })
+    }
+
+    pub(super) fn discovery_matching_control(
+        &self,
+        epoch: roles::DiscoveryEpoch,
+        peer: PeerId,
+        connection: ConnectionId,
+    ) -> Option<protocols::Control> {
+        self.discovery_owned_controls(epoch)
+            .into_iter()
+            .flatten()
+            .find(|control| control.key.peer == peer && control.key.connection == connection)
+    }
+
+    pub(super) fn discovery_fixture(&mut self, key: AttemptKey, root: &libp2p::Multiaddr) {
+        #[cfg(test)]
+        if let Some((_, endpoint)) = self
+            .discovery_witnesses
+            .iter()
+            .flatten()
+            .find(|(peer, _)| *peer == key.peer)
+        {
+            self.swarm
+                .behaviour_mut()
+                .inner
+                .admission
+                .allow_infrastructure_fixture(key, root, *endpoint)
+                .unwrap();
+        }
+        #[cfg(not(test))]
+        let _ = (key, root);
+    }
+
+    pub(super) fn stage_discovery_dial(
+        &mut self,
+        options: &DialOpts,
+        root: &libp2p::Multiaddr,
+        epoch: roles::DiscoveryEpoch,
+        deadline: Instant,
+    ) -> io::Result<AttemptKey> {
+        let peer = options
+            .get_peer_id()
+            .ok_or_else(|| io::Error::other("discovery dial has no expected peer"))?;
+        if self.infrastructure.entries.len() >= roles::INFRASTRUCTURE_CONNECTIONS
+            || self
+                .infrastructure
+                .entries
+                .values()
+                .any(|entry| entry.key.peer == peer)
+            || self.pending.values().any(|entry| entry.peer == peer)
+        {
+            return Err(capacity());
+        }
+        let view = self
+            .swarm
+            .behaviour()
+            .inner
+            .admission
+            .roles_view()
+            .ok_or_else(|| io::Error::other("discovery authority unavailable"))?;
+        if !view.discovery_epoch_active(epoch, Instant::now()) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "discovery epoch retired",
+            ));
+        }
+        let supplied = options.get_addresses();
+        if supplied.len() > 1 || supplied.iter().any(|address| address != root) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "discovery dial root mismatch",
+            ));
+        }
+        let admission = &mut self.swarm.behaviour_mut().inner.admission;
+        let newly_admitted = view.role(peer).is_none();
+        admission.admit_identity(peer, roles::Role::Infrastructure)?;
+        let (key, permit) =
+            match admission.stage_infrastructure(peer, root, options.connection_id(), deadline) {
+                Ok(staged) => staged,
+                Err(error) => {
+                    if newly_admitted && let Some(owner) = admission.discovery_owner() {
+                        let _ = owner.forget_identity(peer);
+                    }
+                    return Err(admission_error(error));
+                }
+            };
+        self.infrastructure.entries.insert(
+            key.connection,
+            Entry {
+                key,
+                permit,
+                deadline,
+                phase: Phase::Pending,
+                protocols: 0,
+                identified: false,
+                epoch: Some(epoch),
+            },
+        );
+        self.discovery_fixture(key, root);
+        Ok(key)
+    }
+
     pub(super) fn record_infrastructure_protocols(
         &mut self,
         peer: PeerId,
@@ -74,6 +204,7 @@ impl Core {
         }
         let view = self.swarm.behaviour().inner.admission.roles_view()?;
         view.infrastructure_live(entry.key)?;
+        entry.identified = true;
         let capabilities = advertised.map(protocols::capabilities).unwrap_or(0);
         if entry.protocols == capabilities {
             return None;
@@ -153,6 +284,8 @@ impl Core {
                     deadline,
                     phase: Phase::Pending,
                     protocols: 0,
+                    identified: false,
+                    epoch: None,
                 },
             );
             Some(key)
@@ -193,6 +326,7 @@ impl Core {
     }
 
     pub(super) fn close_infrastructure(&mut self, key: AttemptKey, now: Instant) {
+        self.discovery_lost_control(key);
         let Some(entry) = self
             .infrastructure
             .entries
@@ -247,6 +381,7 @@ impl Core {
 
     fn finish_infrastructure(&mut self, connection: ConnectionId) {
         if let Some(entry) = self.infrastructure.entries.remove(&connection) {
+            self.discovery_lost_control(entry.key);
             let admission = &mut self.swarm.behaviour_mut().inner.admission;
             admission.terminal(entry.key, None);
             admission.terminal_infrastructure(entry.key);
@@ -257,6 +392,11 @@ impl Core {
                 0,
             );
             drop(entry.permit);
+            if entry.epoch.is_some()
+                && let Some(owner) = self.swarm.behaviour_mut().inner.admission.discovery_owner()
+            {
+                let _ = owner.forget_identity(entry.key.peer);
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-//! Constructor-owned infrastructure reservations; no bootstrap or discovery commands yet.
+//! Constructor-validated seeds and resolver inputs for explicitly requested discovery.
 
 use std::{io, net::SocketAddr};
 
@@ -94,6 +94,10 @@ impl DiscoveryConfig {
         self.seeds.iter().map(|(peer, _)| *peer)
     }
 
+    pub(crate) fn seed_descriptors(&self) -> impl Iterator<Item = &(PeerId, Multiaddr)> {
+        self.seeds.iter()
+    }
+
     fn is_seed(&self, peer: &PeerId) -> bool {
         self.seeds.iter().any(|(seed, _)| seed == peer)
     }
@@ -113,6 +117,10 @@ impl State {
 
     pub(crate) fn is_seed(&self, peer: &PeerId) -> bool {
         self.config.is_seed(peer)
+    }
+
+    pub(crate) fn seed_at(&self, index: usize) -> Option<(PeerId, Multiaddr)> {
+        self.config.seeds.get(index).cloned()
     }
 
     pub(crate) fn seed_address(&self, peer: PeerId) -> Option<&Multiaddr> {

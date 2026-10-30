@@ -15,8 +15,9 @@ use libp2p::{
 use tokio::sync::{mpsc, watch};
 
 use super::{
-    CarrierHandle, Command, Link, PEER_LIMIT, PENDING_LIMIT, QUEUE_LIMIT, RELAY_LIMIT,
-    REQUEST_LIMIT, Received, Reply, admission::Admission, capacity, multiaddr, socket_address,
+    CarrierHandle, Command, DiscoveredRelay, Link, PEER_LIMIT, PENDING_LIMIT, QUEUE_LIMIT,
+    RELAY_LIMIT, REQUEST_LIMIT, Received, Reply, admission::Admission, capacity, multiaddr,
+    socket_address,
 };
 use crate::discovery::roles::AttemptKey;
 #[cfg(test)]
@@ -111,6 +112,9 @@ pub struct Carrier {
 struct Core {
     // Declared first so the authority closes before Swarm and executor teardown.
     discovery: Option<discovery::State>,
+    discovery_operation: Option<protocols::Operation>,
+    #[cfg(test)]
+    discovery_witnesses: [Option<(PeerId, SocketAddr)>; 4],
     swarm: Swarm<boundary::Boundary<Behaviour>>,
     infrastructure: infrastructure::State,
     commands: mpsc::Receiver<Command>,
@@ -175,6 +179,7 @@ mod roles_tests;
 impl Drop for Core {
     fn drop(&mut self) {
         self.commands.close();
+        self.retire_discovery_on_drop();
         // Cancel and drop every live relay operation owner outside all guards;
         // the Swarm field below drops the last capability clones.
         self.relay.gate.revoke_all();
@@ -233,6 +238,7 @@ impl Core {
     ) -> io::Result<()> {
         tokio::pin!(stop);
         loop {
+            self.discovery_tick(tokio::time::Instant::now());
             self.infrastructure_tick(tokio::time::Instant::now())?;
             self.relay_tick(tokio::time::Instant::now())?;
             // All ledgers have fixed limits; no separately allocated timer queue.
@@ -249,6 +255,7 @@ impl Core {
                 .chain(self.relay.next_deadline())
                 .chain(self.relay.gate.next_deadline())
                 .chain(self.infrastructure.next_deadline())
+                .chain(self.discovery_deadline())
                 .min();
             let closing_deadline = async {
                 match deadline {
@@ -262,6 +269,12 @@ impl Core {
                     self.expire(now)?;
                     self.relay_tick(now)?;
                 },
+                _ = async {
+                    match &mut self.discovery_operation {
+                        Some(operation) => operation.waiter_closed().await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {},
                 _ = &mut stop => return Ok(()),
                 _ = self.incoming.closed() => return Ok(()),
                 command = self.commands.recv() => match command {
@@ -475,6 +488,7 @@ impl Core {
                     let _ = reply.send(Ok(()));
                 }
             }
+            Command::Discover(reply) => self.start_discovery(reply),
             Command::Reserve(relay, reply) => self.reserve_relay(relay, reply),
             Command::ReleaseRelay(peer, reply) => self.release_relay(peer, reply),
             Command::ConnectVia(peer, relay, reply) => self.connect_via(peer, relay, reply),

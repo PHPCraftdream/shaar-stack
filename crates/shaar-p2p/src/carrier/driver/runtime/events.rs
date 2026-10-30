@@ -129,7 +129,7 @@ impl Core {
             SwarmEvent::Behaviour(BehaviourEvent::Dial(options)) => {
                 // Swarm reports synchronous rejection to every child via DialFailure.
                 // Preserve the original connection ID, condition and address selection.
-                let _ = self.swarm.dial(options);
+                self.discovery_dependency_dial(options);
             }
             _ => {} // Other notifications add no carrier state.
         }
@@ -138,10 +138,7 @@ impl Core {
 
     fn discovery_protocol_event(&mut self, event: protocols::Event) {
         match event {
-            protocols::Event::Kad(event) => protocols::reject_unowned_query(
-                &mut self.swarm.behaviour_mut().inner.protocols,
-                event,
-            ),
+            protocols::Event::Kad(event) => self.discovery_query_event(event),
             protocols::Event::Identify(libp2p::identify::Event::Received {
                 connection_id,
                 peer_id,
@@ -168,19 +165,26 @@ impl Core {
         connection: ConnectionId,
         advertised: Option<&[StreamProtocol]>,
     ) {
-        let Some(capabilities) = self.record_infrastructure_protocols(peer, connection, advertised)
-        else {
-            return;
-        };
-        let address = self
-            .discovery
-            .as_ref()
-            .and_then(|state| state.seed_address(peer));
-        protocols::update_seed(
-            &mut self.swarm.behaviour_mut().inner.protocols,
-            peer,
-            address,
-            capabilities,
-        );
+        let changed = self.record_infrastructure_protocols(peer, connection, advertised);
+        if let Some(capabilities) = changed {
+            if capabilities & protocols::DHT == 0 {
+                self.discovery_identified_control(peer, connection);
+            }
+            let address = self
+                .discovery
+                .as_ref()
+                .and_then(|state| state.seed_address(peer));
+            protocols::update_seed(
+                &mut self.swarm.behaviour_mut().inner.protocols,
+                peer,
+                address,
+                capabilities,
+            );
+            if capabilities & protocols::DHT != 0 {
+                self.discovery_identified_control(peer, connection);
+            }
+        } else {
+            self.discovery_identified_control(peer, connection);
+        }
     }
 }
