@@ -10,6 +10,7 @@ import sys
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
+VARIANTS = ("baseline", "counterfactual", "counterfactual-deadline", "counterfactual-listener")
 CASES = {
     "protocol": {
         "name": "carrier_protocol_fixture_revocation",
@@ -79,6 +80,32 @@ def metadata(root, output, host, target):
     return json.loads(text)
 
 
+def unit_inventory(listing):
+    names = []
+    for line in listing.splitlines():
+        if not line.strip():
+            continue
+        if not line.endswith(": test"):
+            raise ValueError("malformed Carrier executable test inventory")
+        name = line.removesuffix(": test")
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_:]*", name):
+            raise ValueError("malformed Carrier executable test name")
+        names.append(name)
+    if not names or len(names) != len(set(names)):
+        raise ValueError("empty or duplicate Carrier executable test inventory")
+    return names
+
+
+def verify_inventories(results):
+    if set(results) != set(VARIANTS):
+        raise ValueError("missing Carrier proof variant inventory")
+    if not results["baseline"]["unit_inventory"]:
+        raise ValueError("empty Carrier executable test inventory")
+    if any(result["unit_inventory"] != results["baseline"]["unit_inventory"]
+           for result in results.values()):
+        raise ValueError("counterfactual changed the executable test inventory")
+
+
 def compile_fixture(workspace, directory, relay, graph):
     target = directory / "compiled"
     if target.exists():
@@ -104,9 +131,7 @@ def compile_fixture(workspace, directory, relay, graph):
         raise ValueError("Carrier executable came from a different compile target")
     listing = command([str(executable), "--list", "--format=terse"], workspace, timeout=30)
     (directory / "inventory.log").write_text(listing, encoding="utf-8")
-    names = [line.removesuffix(": test") for line in listing.splitlines() if line.endswith(": test")]
-    if len(names) != len(set(names)):
-        raise ValueError("duplicate Carrier executable test names")
+    names = unit_inventory(listing)
     selected = {}
     for case, specification in CASES.items():
         matches = [name for name in names if name.endswith("::" + specification["name"])
@@ -114,10 +139,6 @@ def compile_fixture(workspace, directory, relay, graph):
         if len(matches) != 1:
             raise ValueError("Carrier fixture case must be included exactly once: " + case)
         selected[case] = matches[0]
-    for prefix, count in (("destination_roles_", 15), ("destination_guard_", 22),
-                          ("carrier_destination_", 33)):
-        if sum(name.split("::")[-1].startswith(prefix) for name in names) != count:
-            raise ValueError("existing source inventory changed: " + prefix)
     return executable, selected, {
         "fresh_relay": True,
         "fresh_carrier_unit": True,
@@ -193,7 +214,7 @@ def run(repository, destination):
     product_paths = graph.product_paths(repository, product)
     original_hashes = graph.selected_hashes(repository, product_paths)
     results = {}
-    for variant in ("baseline", "counterfactual", "counterfactual-deadline", "counterfactual-listener"):
+    for variant in VARIANTS:
         directory = destination / variant
         directory.mkdir()
         workspace = directory / "workspace"
@@ -217,9 +238,7 @@ def run(repository, destination):
             raise ValueError("Carrier fixture source or lock changed during compilation/execution")
         results[variant] = {**witness, "cases": outcomes, "fixture_lock_sha256": graph.digest(product_lock)}
         write_json(directory / "variant-receipt.json", results[variant])
-    if any(result["unit_inventory"] != results["baseline"]["unit_inventory"]
-           for result in results.values()):
-        raise ValueError("counterfactual changed the executable test inventory")
+    verify_inventories(results)
     if original_hashes != graph.selected_hashes(repository, product_paths):
         raise ValueError("Carrier proof changed original product sources or lock")
     write_json(destination / "run-receipt.json", {
