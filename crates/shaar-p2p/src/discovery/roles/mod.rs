@@ -111,6 +111,8 @@ struct State {
     closed: bool,
     serial: u64,
     identities: HashMap<PeerId, Identity>,
+    // Lifetime charges survive identity retirement without retaining dial authority.
+    contacts: [Option<PeerId>; INFRASTRUCTURE],
     attempts: HashMap<ConnectionId, Attempt>,
     pub(super) inbound: [Option<incoming::Row>; PENDING],
     pub(super) inbound_count: usize,
@@ -275,6 +277,7 @@ impl Owner {
             )
             .map_err(|_| full())?;
         let mut identities = HashMap::with_capacity(IDENTITIES);
+        let mut contacts = [None; INFRASTRUCTURE];
         for &peer in applications {
             identities.insert(
                 peer,
@@ -284,7 +287,10 @@ impl Owner {
                 },
             );
         }
-        for &peer in seeds {
+        for (index, &peer) in seeds.iter().enumerate() {
+            if !contacts.contains(&Some(peer)) {
+                contacts[index] = Some(peer);
+            }
             identities.insert(
                 peer,
                 Identity {
@@ -300,6 +306,7 @@ impl Owner {
                     closed: false,
                     serial: 0,
                     identities,
+                    contacts,
                     attempts: HashMap::with_capacity(PENDING),
                     inbound: std::array::from_fn(|_| None),
                     inbound_count: 0,
@@ -350,6 +357,14 @@ impl Owner {
         };
         if count >= limit || state.identities.len() >= IDENTITIES {
             return Err(full());
+        }
+        if role == Role::Infrastructure && !state.contacts.contains(&Some(peer)) {
+            let slot = state
+                .contacts
+                .iter_mut()
+                .find(|slot| slot.is_none())
+                .ok_or_else(full)?;
+            *slot = Some(peer);
         }
         state.identities.insert(
             peer,
