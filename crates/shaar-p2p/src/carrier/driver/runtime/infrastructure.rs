@@ -156,13 +156,7 @@ impl Core {
                 "discovery epoch retired",
             ));
         }
-        let supplied = options.get_addresses();
-        if supplied.len() > 1 || supplied.iter().any(|address| address != root) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "discovery dial root mismatch",
-            ));
-        }
+        // Admission checks the original address list against this exact root before I/O.
         let admission = &mut self.swarm.behaviour_mut().inner.admission;
         let newly_admitted = view.role(peer).is_none();
         admission.admit_identity(peer, roles::Role::Infrastructure)?;

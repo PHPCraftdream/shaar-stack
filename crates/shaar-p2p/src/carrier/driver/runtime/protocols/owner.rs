@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::discovery::roles::{DiscoveryEpoch, Role};
-use libp2p::{Multiaddr, kad};
+use libp2p::kad;
 use tokio::time::Instant;
 
 pub(in super::super) struct Operation {
@@ -367,6 +367,13 @@ impl Core {
         let Some(operation) = &self.discovery_operation else {
             return;
         };
+        if Instant::now() >= operation.deadline {
+            self.stop_discovery(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "discovery deadline",
+            ));
+            return;
+        }
         if operation.delivered {
             return;
         }
@@ -427,6 +434,10 @@ impl Core {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "owner_tests.rs"]
+mod tests;
 
 fn oneshot_closed(reply: &Reply<Vec<DiscoveredRelay>>) -> bool {
     reply.is_closed()
