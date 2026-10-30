@@ -14,6 +14,7 @@ struct Entry {
     permit: InfrastructurePermit,
     deadline: Instant,
     phase: Phase,
+    protocols: u8,
 }
 
 #[derive(Default)]
@@ -61,6 +62,26 @@ impl State {
 }
 
 impl Core {
+    pub(super) fn record_infrastructure_protocols(
+        &mut self,
+        peer: PeerId,
+        connection: ConnectionId,
+        advertised: Option<&[StreamProtocol]>,
+    ) -> Option<u8> {
+        let entry = self.infrastructure.entries.get_mut(&connection)?;
+        if entry.key.peer != peer || entry.phase != Phase::Live {
+            return None;
+        }
+        let view = self.swarm.behaviour().inner.admission.roles_view()?;
+        view.infrastructure_live(entry.key)?;
+        let capabilities = advertised.map(protocols::capabilities).unwrap_or(0);
+        if entry.protocols == capabilities {
+            return None;
+        }
+        entry.protocols = capabilities;
+        Some(capabilities)
+    }
+
     /// Shared explicit native path; public commands perform APP authorization before calling.
     pub(super) fn prepare_native(
         &mut self,
@@ -131,6 +152,7 @@ impl Core {
                     permit,
                     deadline,
                     phase: Phase::Pending,
+                    protocols: 0,
                 },
             );
             Some(key)
@@ -183,11 +205,18 @@ impl Core {
             entry.phase = Phase::Closing;
             entry.deadline = now + DEADLINE;
         }
+        entry.protocols = 0;
         self.swarm
             .behaviour_mut()
             .inner
             .admission
             .withdraw_infrastructure(key);
+        protocols::update_seed(
+            &mut self.swarm.behaviour_mut().inner.protocols,
+            key.peer,
+            None,
+            0,
+        );
         // Pending dials stop at their revoked guard; established connections close by ID.
         let _ = self.swarm.close_connection(key.connection);
     }
@@ -221,6 +250,12 @@ impl Core {
             let admission = &mut self.swarm.behaviour_mut().inner.admission;
             admission.terminal(entry.key, None);
             admission.terminal_infrastructure(entry.key);
+            protocols::update_seed(
+                &mut self.swarm.behaviour_mut().inner.protocols,
+                entry.key.peer,
+                None,
+                0,
+            );
             drop(entry.permit);
         }
     }

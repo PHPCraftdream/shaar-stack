@@ -123,6 +123,9 @@ impl Core {
             }
             SwarmEvent::Behaviour(BehaviourEvent::Relays(event)) => self.relay_event(event),
             SwarmEvent::Behaviour(BehaviourEvent::Packets(event)) => self.packet(event),
+            SwarmEvent::Behaviour(BehaviourEvent::Protocols(event)) => {
+                self.discovery_protocol_event(event)
+            }
             SwarmEvent::Behaviour(BehaviourEvent::Dial(options)) => {
                 // Swarm reports synchronous rejection to every child via DialFailure.
                 // Preserve the original connection ID, condition and address selection.
@@ -131,5 +134,53 @@ impl Core {
             _ => {} // Other notifications add no carrier state.
         }
         Ok(())
+    }
+
+    fn discovery_protocol_event(&mut self, event: protocols::Event) {
+        match event {
+            protocols::Event::Kad(event) => protocols::reject_unowned_query(
+                &mut self.swarm.behaviour_mut().inner.protocols,
+                event,
+            ),
+            protocols::Event::Identify(libp2p::identify::Event::Received {
+                connection_id,
+                peer_id,
+                info,
+            }) => {
+                let advertised =
+                    (info.public_key.to_peer_id() == peer_id).then_some(info.protocols.as_slice());
+                self.discovery_identified(peer_id, connection_id, advertised);
+            }
+            protocols::Event::Identify(libp2p::identify::Event::Error {
+                connection_id,
+                peer_id,
+                ..
+            }) => {
+                self.discovery_identified(peer_id, connection_id, None);
+            }
+            _ => {}
+        }
+    }
+
+    fn discovery_identified(
+        &mut self,
+        peer: PeerId,
+        connection: ConnectionId,
+        advertised: Option<&[StreamProtocol]>,
+    ) {
+        let Some(capabilities) = self.record_infrastructure_protocols(peer, connection, advertised)
+        else {
+            return;
+        };
+        let address = self
+            .discovery
+            .as_ref()
+            .and_then(|state| state.seed_address(peer));
+        protocols::update_seed(
+            &mut self.swarm.behaviour_mut().inner.protocols,
+            peer,
+            address,
+            capabilities,
+        );
     }
 }

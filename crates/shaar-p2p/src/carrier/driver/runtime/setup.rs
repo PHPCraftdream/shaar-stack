@@ -108,9 +108,11 @@ impl Carrier {
         };
         let relay_roles = admission.roles_view();
         let (transport, relays) = relay::transport(transport, &key, factory, relay_roles)?;
+        let protocols = protocols::new(peer, key.public(), admission.roles_view());
         let behaviour = Behaviour {
             admission,
             relays,
+            protocols,
             packets: rpc::Behaviour::with_codec(
                 DatagramCodec,
                 [(
