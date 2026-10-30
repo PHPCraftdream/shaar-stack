@@ -9,8 +9,11 @@ use crate::{
     network::{Allowlist, Endpoint, Limits, NetworkError, Session},
 };
 
-use super::{check_peers, owner::Owned, peer_id};
+use super::{DiscoveredRelay, DiscoveryConfig, check_peers, owner::Owned, peer_id};
 
+#[cfg(test)]
+#[path = "discovery_tests.rs"]
+mod discovery_tests;
 #[cfg(test)]
 #[path = "owned_tests.rs"]
 mod tests;
@@ -40,10 +43,36 @@ impl SignaledEndpoint {
         peers: &[PublicKey],
         limits: Limits,
     ) -> Result<Self, NetworkError> {
+        Self::bind_configured(identity, native, signaling, peers, limits, None).await
+    }
+
+    /// Starts the same joined owner with validated discovery inputs; bootstrap remains explicit.
+    /// Does not load OS configuration or grant infrastructure peers APP authority.
+    /// cancel-safe: NO — cancelled startup aborts owners but cannot join their destruction.
+    pub async fn bind_with_discovery(
+        identity: &Identity,
+        native: SocketAddr,
+        signaling: SocketAddr,
+        peers: &[PublicKey],
+        limits: Limits,
+        discovery: DiscoveryConfig,
+    ) -> Result<Self, NetworkError> {
+        Self::bind_configured(identity, native, signaling, peers, limits, Some(discovery)).await
+    }
+
+    /// cancel-safe: NO — cancelled startup drops owners; only close proves joined destruction.
+    async fn bind_configured(
+        identity: &Identity,
+        native: SocketAddr,
+        signaling: SocketAddr,
+        peers: &[PublicKey],
+        limits: Limits,
+        discovery: Option<DiscoveryConfig>,
+    ) -> Result<Self, NetworkError> {
         Endpoint::validate_bind(native)?;
         check_peers(peers)?;
         let allowlist = Allowlist::new(peers)?;
-        let owner = Owned::start(identity, signaling, peers)?;
+        let owner = Owned::start(identity, signaling, peers, discovery)?;
         let signaling_address = match owner.ready().await {
             Ok(address) => address,
             Err(error) => {
@@ -71,6 +100,29 @@ impl SignaledEndpoint {
             signaling: owner,
             signaling_address,
         })
+    }
+
+    /// Explicit bounded discovery; returned claims are not reservations or APP authority.
+    /// cancel-safe: NO — the carrier reconciles admitted work after observing cancellation.
+    pub async fn discover_relays(&self) -> Result<Vec<DiscoveredRelay>, NetworkError> {
+        self.signaling
+            .handle
+            .discover_relays()
+            .await
+            .map_err(NetworkError::SignalingOperation)
+    }
+
+    /// Consumes a candidate; the carrier revalidates its exact current control before reservation.
+    /// cancel-safe: NO — admitted reservation work remains owned until cancellation cleanup.
+    pub async fn reserve_discovered_relay(
+        &self,
+        candidate: DiscoveredRelay,
+    ) -> Result<RelayLease, NetworkError> {
+        self.signaling
+            .handle
+            .reserve_discovered_relay(candidate)
+            .await
+            .map_err(NetworkError::SignalingOperation)
     }
 
     pub fn id(&self) -> PublicKey {

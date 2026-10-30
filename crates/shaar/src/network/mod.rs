@@ -13,7 +13,10 @@ pub use admission::{Allowlist, Endpoint, Limits};
 pub use error::NetworkError;
 pub use forwarding::{ForwardError, ForwardStats, ServeReport};
 pub use session::Session;
-pub use signaling::{SignaledEndpoint, bind_signaling};
+pub use signaling::{
+    DiscoveredRelay, DiscoveryConfig, SignaledEndpoint, bind_signaling,
+    bind_signaling_with_discovery,
+};
 
 /// Exact protocol identifier; no compatibility with historical draft protocols.
 pub const ALPN: &[u8] = b"shaar/tcp/1";

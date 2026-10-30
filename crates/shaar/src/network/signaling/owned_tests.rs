@@ -213,7 +213,7 @@ async fn actual_custom_source_must_match_final_tls_key_even_when_both_keys_are_a
             )
             .await
             .unwrap();
-            let owner = Owned::start(&a, loopback(), &[public(&b)]).unwrap();
+            let owner = Owned::start(&a, loopback(), &[public(&b)], None).unwrap();
             owner.ready().await.unwrap();
             let remote = peer_id(&public(&b)).unwrap();
             owner
