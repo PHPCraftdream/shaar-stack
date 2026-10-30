@@ -172,6 +172,6 @@ async fn configured_owner_close_joins_discovery_with_waiter_and_factory_retained
         assert!(handle.local_addr().await.is_err());
         drop(TcpListener::bind(signaling).await.unwrap());
         drop(UdpSocket::bind(dns_client).await.unwrap());
-        drop((retained, handle));
+        drop(retained);
     }).await.unwrap();
 }
