@@ -70,6 +70,7 @@ async fn carrier_discovery_waiter_cancellation_wakes_owner_and_closes_live_contr
         let (reply, result) = oneshot::channel();
         source.core.command(Command::Discover(reply));
         let deadline = source.core.discovery_deadline().unwrap();
+        let mut remote_established = false;
         let connection = loop {
             tokio::select! {
                 event = source.core.swarm.select_next_some() => {
@@ -80,10 +81,23 @@ async fn carrier_discovery_waiter_cancellation_wakes_owner_and_closes_live_contr
                     source.core.event(event).unwrap();
                     if let Some(connection) = established { break connection; }
                 },
-                _ = seed.swarm.select_next_some() => {},
+                event = seed.swarm.select_next_some() => {
+                    remote_established |= matches!(event, SwarmEvent::ConnectionEstablished { .. });
+                },
                 _ = tokio::time::sleep_until(deadline) => panic!("seed connection deadline"),
             }
         };
+        // The close oracle requires the remote Swarm to have published its live connection.
+        while !remote_established {
+            tokio::select! {
+                event = seed.swarm.select_next_some() => {
+                    remote_established = matches!(event, SwarmEvent::ConnectionEstablished { .. });
+                },
+                _ = tokio::time::sleep_until(deadline) => panic!("remote seed connection deadline"),
+            }
+        }
+        let key = source.core.infrastructure.entries.get(&connection).unwrap().key;
+        let view = source.core.swarm.behaviour().inner.admission.roles_view().unwrap();
         drop(result);
         {
             let driving = source.core.drive(&mut source.executor, std::future::pending());
@@ -94,7 +108,7 @@ async fn carrier_discovery_waiter_cancellation_wakes_owner_and_closes_live_contr
                     event = seed.swarm.select_next_some() => {
                         if matches!(event, SwarmEvent::ConnectionClosed { .. }) { break; }
                     },
-                    _ = tokio::time::sleep_until(deadline) => panic!("waiter cancellation did not wake owner"),
+                    _ = tokio::time::sleep_until(deadline) => panic!("waiter cancellation close boundary: live_authority={:?}", view.infrastructure_live(key)),
                 }
             }
         }
