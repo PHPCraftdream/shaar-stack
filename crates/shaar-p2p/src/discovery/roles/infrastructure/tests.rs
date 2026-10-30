@@ -419,4 +419,6 @@ fn infrastructure_role_rejects_application_but_allows_new_identity_admission() {
 }
 
 #[cfg(test)]
+mod contacts;
+#[cfg(test)]
 mod matrix;
