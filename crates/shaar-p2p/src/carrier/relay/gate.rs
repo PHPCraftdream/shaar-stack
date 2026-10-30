@@ -63,8 +63,35 @@ enum RecordState {
     Retired,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Authority {
+    Explicit,
+    Discovery(roles::AttemptKey),
+}
+
+impl Authority {
+    fn permits(self, view: &roles::View, peer: PeerId, endpoint: SocketAddr) -> bool {
+        match self {
+            Self::Explicit => view.role(peer) == Some(Role::ExplicitRelay(endpoint)),
+            Self::Discovery(key) => {
+                key.peer == peer
+                    && view.role(peer) == Some(Role::Infrastructure)
+                    && view.infrastructure_live(key) == Some(endpoint)
+            }
+        }
+    }
+
+    fn accepts_control(self, control: Option<ConnectionId>) -> bool {
+        match self {
+            Self::Explicit => true,
+            Self::Discovery(key) => control.is_none_or(|control| control == key.connection),
+        }
+    }
+}
+
 struct Record {
     endpoint: SocketAddr,
+    authority: Authority,
     deadline: Instant,
     // First authenticated control connection wins; later checks require equality.
     control: Option<ConnectionId>,
@@ -196,19 +223,29 @@ impl Gate {
         };
         let view = { lock(&self.core.roles).clone() };
         let Some(view) = view else { return false };
-        if view.role(relay) != Some(Role::ExplicitRelay(socket))
-            || destination.is_some_and(|app| view.role(app) != Some(Role::Application))
-        {
+        if destination.is_some_and(|app| view.role(app) != Some(Role::Application)) {
             return false;
         }
         let now = Instant::now();
-        lock(&self.core.records).iter().any(|(key, record)| {
-            key.0 == relay
-                && slot.is_none_or(|slot| key.1 == slot && record.destination == destination)
-                && record.endpoint == socket
-                && !record.retired()
-                && record.deadline > now
-        })
+        let authorities = {
+            let records = lock(&self.core.records);
+            let mut matching = records
+                .iter()
+                .filter(|(key, record)| {
+                    key.0 == relay
+                        && slot
+                            .is_none_or(|slot| key.1 == slot && record.destination == destination)
+                        && record.endpoint == socket
+                        && !record.retired()
+                        && record.deadline > now
+                })
+                .map(|(_, record)| record.authority);
+            std::array::from_fn::<_, RECORDS, _>(|_| matching.next())
+        };
+        authorities
+            .into_iter()
+            .flatten()
+            .any(|authority| authority.permits(&view, relay, socket))
     }
 
     /// Final publication veto for a specific issued/established connect row.
@@ -223,16 +260,16 @@ impl Gate {
                     && record.control.is_some()
                     && (matches!(record.state, RecordState::Established)
                         || (matches!(record.state, RecordState::Issued) && record.deadline > now)))
-                    .then_some(record.endpoint)
+                    .then_some((record.endpoint, record.authority))
             })
         };
-        let Some(endpoint) = permitted else {
+        let Some((endpoint, authority)) = permitted else {
             return false;
         };
         let view = lock(&self.core.roles).clone();
         view.is_some_and(|view| {
             view.role(destination) == Some(Role::Application)
-                && view.role(ticket.relay) == Some(Role::ExplicitRelay(endpoint))
+                && authority.permits(&view, ticket.relay, endpoint)
         })
     }
 
@@ -253,15 +290,15 @@ impl Gate {
     fn stage(
         &self,
         peer: PeerId,
-        slot: Slot,
         generation: u64,
         endpoint: SocketAddr,
         deadline: Instant,
-        destination: Option<PeerId>,
+        kind: OperationKind,
+        authority: Authority,
     ) -> io::Result<()> {
-        let kind = match (slot, destination) {
-            (Slot::Reserve, None) => OperationKind::Reserve,
-            (Slot::Connect, Some(destination)) => OperationKind::Connect { destination },
+        let (slot, destination) = match kind {
+            OperationKind::Reserve => (Slot::Reserve, None),
+            OperationKind::Connect { destination } => (Slot::Connect, Some(destination)),
             _ => return Err(denied()),
         };
         let descriptor = OperationDescriptor::new(
@@ -316,6 +353,7 @@ impl Gate {
                 (peer, slot, generation),
                 Record {
                     endpoint,
+                    authority,
                     deadline,
                     control: None,
                     destination,
@@ -342,7 +380,38 @@ impl Gate {
         deadline: Instant,
     ) -> io::Result<u64> {
         let generation = self.next()?;
-        self.stage(peer, Slot::Reserve, generation, endpoint, deadline, None)?;
+        self.stage(
+            peer,
+            generation,
+            endpoint,
+            deadline,
+            OperationKind::Reserve,
+            Authority::Explicit,
+        )?;
+        Ok(generation)
+    }
+
+    /// The Core validates the current HOP claim before transferring its exact control.
+    pub(crate) fn stage_discovered_reserve(
+        &self,
+        key: roles::AttemptKey,
+        endpoint: SocketAddr,
+        deadline: Instant,
+    ) -> io::Result<u64> {
+        let authority = Authority::Discovery(key);
+        let view = lock(&self.core.roles).clone().ok_or_else(denied)?;
+        if !authority.permits(&view, key.peer, endpoint) || deadline <= Instant::now() {
+            return Err(denied());
+        }
+        let generation = self.next()?;
+        self.stage(
+            key.peer,
+            generation,
+            endpoint,
+            deadline,
+            OperationKind::Reserve,
+            authority,
+        )?;
         Ok(generation)
     }
 
@@ -353,14 +422,31 @@ impl Gate {
         destination: PeerId,
         deadline: Instant,
     ) -> io::Result<Ticket> {
+        let inherited = {
+            let records = lock(&self.core.records);
+            records.iter().find_map(|(key, record)| {
+                (key.0 == relay
+                    && key.1 == Slot::Reserve
+                    && record.endpoint == endpoint
+                    && matches!(record.state, RecordState::Issued)
+                    && record.deadline > Instant::now()
+                    && record.control.is_some()
+                    && matches!(record.authority, Authority::Discovery(_)))
+                .then_some((record.authority, record.deadline))
+            })
+        };
+        let (authority, deadline) = inherited
+            .map_or((Authority::Explicit, deadline), |(authority, expiry)| {
+                (authority, deadline.min(expiry))
+            });
         let generation = self.next()?;
         self.stage(
             relay,
-            Slot::Connect,
             generation,
             endpoint,
             deadline,
-            Some(destination),
+            OperationKind::Connect { destination },
+            authority,
         )?;
         Ok(Ticket { relay, generation })
     }
@@ -373,13 +459,26 @@ impl Gate {
         generation: u64,
         control: ConnectionId,
     ) -> bool {
-        lock(&self.core.records)
-            .get(&(peer, Slot::Reserve, generation))
-            .is_some_and(|record| {
-                matches!(record.state, RecordState::Issued)
-                    && record.deadline > Instant::now()
-                    && record.control == Some(control)
-            })
+        let permitted = {
+            let records = lock(&self.core.records);
+            records
+                .get(&(peer, Slot::Reserve, generation))
+                .and_then(|record| {
+                    (matches!(record.state, RecordState::Issued)
+                        && record.deadline > Instant::now()
+                        && record.control == Some(control)
+                        && record.authority.accepts_control(Some(control)))
+                    .then_some((record.endpoint, record.authority))
+                })
+        };
+        match permitted {
+            Some((_, Authority::Explicit)) => true,
+            Some((endpoint, authority)) => {
+                let view = lock(&self.core.roles).clone();
+                view.is_some_and(|view| authority.permits(&view, peer, endpoint))
+            }
+            None => false,
+        }
     }
 
     /// A reservation acceptance renews the exact staged Reserve generation so
@@ -395,6 +494,7 @@ impl Gate {
         let mut records = lock(&self.core.records);
         if let Some(record) = records.get_mut(&(peer, Slot::Reserve, generation))
             && !record.retired()
+            && record.authority.accepts_control(Some(control))
         {
             record.deadline = deadline;
             if record.control.is_none() {

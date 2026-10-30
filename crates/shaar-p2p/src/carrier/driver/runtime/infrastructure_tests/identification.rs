@@ -3,6 +3,8 @@ use libp2p::{identify, kad};
 
 #[path = "discovery.rs"]
 mod discovery;
+#[path = "handoff.rs"]
+mod handoff;
 
 #[derive(Debug)]
 struct MetadataEvent(Option<identify::Event>);
@@ -44,6 +46,11 @@ struct MetadataServer {
 impl MetadataServer {
     /// cancel-safe: NO — dropping startup aborts owned work without joining it.
     async fn new() -> Self {
+        Self::configured(false).await
+    }
+
+    /// cancel-safe: NO — startup owns native work that must join on shutdown.
+    async fn configured(accept_reservations: bool) -> Self {
         let key = Keypair::generate_ed25519();
         let public = key.public();
         let peer = public.to_peer_id();
@@ -63,8 +70,8 @@ impl MetadataServer {
             relay: libp2p::relay::Behaviour::new(
                 peer,
                 libp2p::relay::Config {
-                    max_reservations: 0,
-                    max_reservations_per_peer: 0,
+                    max_reservations: if accept_reservations { 2 } else { 0 },
+                    max_reservations_per_peer: if accept_reservations { 1 } else { 0 },
                     max_circuits: 0,
                     max_circuits_per_peer: 0,
                     ..libp2p::relay::Config::default()

@@ -31,6 +31,21 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(result["selection"]["product"])
         self.assertFalse(result["selection"]["full"])
 
+    def test_relay_gate_includes_provenance_and_handoff_contracts_without_broad_proofs(self):
+        for suffix in ("gate.rs", "gate_factory.rs", "gate_test_support.rs"):
+            with self.subTest(suffix=suffix):
+                result = POLICY.select(["crates/shaar-p2p/src/carrier/relay/" + suffix])
+                self.assertEqual(result["suites"], ["carrier-relay", "relay-gate"])
+                self.assertEqual(len(result["targets"]), 1)
+                target = result["targets"][0]
+                self.assertEqual(target["package"], "shaar-p2p")
+                self.assertIn("carrier::driver::roles_gate_tests::", target["filters"])
+                self.assertIn("carrier::driver::roles_tests::", target["filters"])
+                self.assertIn("infrastructure::tests::identification::handoff::", target["filters"])
+                self.assertNotIn("", target["filters"])
+                self.assertFalse(any(result["selection"][key] for key in POLICY.DOMAINS))
+                self.assertFalse(result["selection"]["full"])
+
     def test_dependency_proofs_only_follow_changed_dependency_owner(self):
         cases = {".github/scripts/p2p/discovery/resolver/prepare.py": "resolver",
                  ".github/scripts/p2p/discovery/kad/kad.py": "kad",
