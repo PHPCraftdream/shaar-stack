@@ -43,8 +43,8 @@ def capture(arguments, log, *, stderr=None):
             status = subprocess.run(arguments, cwd=ROOT, env=environment, stdout=output, stderr=subprocess.STDOUT, check=False).returncode
     text = safe_text(log)
     if stderr:
-        print(safe_text(stderr), end="")
-    print(text, end="")
+        print(safe_text(stderr), end="", flush=True)
+    print(text, end="", flush=True)
     return text, status
 
 
@@ -144,6 +144,12 @@ def tests(targets):
         for batch_index, batch in enumerate(batches(cases)):
             output, status = capture(arguments + ["--", "--exact", "--color", "never", *batch],
                                      directory / f"{index}-run-{batch_index}.log")
+            if status:
+                receipt.append({**spec, "status": "failed", "exit_code": status,
+                                "selected_cases": cases, "verified_passed": executed,
+                                "unverified_batch": batch, "ignored_not_executed": skipped})
+                (directory / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+                raise ValueError("selected test cases failed; Cargo exit code: " + str(status))
             expected = "".join(name + ": test\n" for name in batch)
             VERIFY.verify({"selected": expected}, {"selected": (VERIFY.cargo_execution(output), status)}, "")
             executed.extend(batch)
