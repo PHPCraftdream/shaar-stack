@@ -13,7 +13,9 @@ const HOP_PROTOCOL: &str = "/libp2p/circuit/relay/0.2.0/hop";
 
 pub(super) type Behaviour = guard::Guard<Inner>;
 
+// The enclosing Carrier event already reserves its larger inline packet payload.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub(super) enum Event {
     Kad(kad::Event),
     Identify(identify::Event),

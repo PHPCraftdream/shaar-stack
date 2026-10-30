@@ -13,6 +13,18 @@ SPEC.loader.exec_module(RUN)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_failed_lint_retains_an_artifact_without_running_test_cases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def failed(arguments, log):
+                self.assertEqual(arguments[:2], ["cargo", "clippy"])
+                log.write_text("selected lint failure\n", encoding="utf-8")
+                return "selected lint failure\n", 1
+            with patch.object(RUN, "ROOT", root), patch.object(RUN, "capture", side_effect=failed):
+                with self.assertRaisesRegex(ValueError, "lint failed: 1"):
+                    RUN.lint([RUN.POLICY.target("shaar-p2p")])
+            self.assertEqual((root / "target/ci-selected/0.lint.log").read_text(), "selected lint failure\n")
+
     def test_overlapping_filters_execute_each_selected_case_once(self):
         listing = "roles::a: test\nroles::b: test\nother::c: test\nroles::ignored: test\n"
         selected, ignored = RUN.selected_cases(listing, "roles::ignored: test\n", ["roles::", "roles::a"])
