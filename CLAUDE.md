@@ -137,6 +137,27 @@ written in English. The directory `docs/checkpoints/` may remain in Russian.
 - Do not commit, push, or run subagents without an explicit user request.
 - Comments in code are concise and written in English.
 
+## CI selection and sprint acceptance
+
+- Ordinary push and pull-request CI selects owned test cases automatically from
+  the diff. Feature branches use their cumulative integration-base diff so a
+  repair push cannot erase unfinished test obligations.
+- Map a changed module to its own tests and only necessary small wiring contracts.
+  Do not expand every P2P change into all SDK, dependency fixtures or workspace
+  tests. Keep the impact map in `.github/ci/policy.py` current for new components.
+- A full run is allowed only by an explicit trigger: a standalone line
+  `[ci:full]` in the CURRENT candidate commit message, or
+  **Actions → CI → Run workflow → scope: full**. Use it for end-of-sprint acceptance.
+  Inline examples, file content and markers in ancestor commits do not trigger it.
+- **Actions → CI → Run workflow → scope: targeted** remains available for normal
+  manual runs. A current commit's explicit full marker still requests full scope.
+- Unknown source ownership, unavailable comparisons and zero runnable selected
+  cases fail clearly; they never silently fall back to a full run or empty green.
+- Inspect the selection and execution receipts. A targeted pass is not full-sprint
+  acceptance; later code changes invalidate a previous full run's tested SHA.
+- These triggers do not authorize gated public-network, NAT, Yggdrasil, TUN/root or
+  release workflows. Existing permission gates remain in force.
+
 ## Consequence for the architectural draft
 
 `docs/architecture/keypipe.md` is an architectural draft. Its Go shim for
