@@ -120,7 +120,12 @@ impl State {
     }
 
     pub(crate) fn seed_at(&self, index: usize) -> Option<(PeerId, Multiaddr)> {
-        self.config.seeds.get(index).cloned()
+        let (peer, address) = self.config.seeds.get(index)?;
+        address
+            .clone()
+            .with_p2p(*peer)
+            .ok()
+            .map(|address| (*peer, address))
     }
 
     pub(crate) fn seed_address(&self, peer: PeerId) -> Option<&Multiaddr> {
