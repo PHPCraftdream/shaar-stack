@@ -80,6 +80,7 @@ impl MetadataServer {
             .unwrap();
         let address = loop {
             if let SwarmEvent::NewListenAddr { address, .. } = swarm.select_next_some().await {
+                swarm.add_external_address(address.clone());
                 break socket_address(&address).unwrap();
             }
         };

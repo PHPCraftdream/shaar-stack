@@ -25,6 +25,21 @@ class RunnerTests(unittest.TestCase):
                     RUN.lint([RUN.POLICY.target("shaar-p2p")])
             self.assertEqual((root / "target/ci-selected/0.lint.log").read_text(), "selected lint failure\n")
 
+    def test_failed_cases_preserve_cargo_status_without_parsing_failure_prose(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outputs = [("build", 0), ("chosen: test\n", 0), ("", 0), ("failure prose", 101)]
+            with patch.object(RUN, "ROOT", root), \
+                 patch.object(RUN, "capture", side_effect=outputs), \
+                 patch.object(RUN, "executable", return_value=root / "target/binary"), \
+                 patch.object(RUN.VERIFY, "cargo_execution", side_effect=AssertionError("failed output parsed")):
+                with self.assertRaisesRegex(ValueError, "Cargo exit code: 101"):
+                    RUN.tests([RUN.POLICY.target("shaar-p2p")])
+            receipt = json.loads((root / "target/ci-selected/receipt.json").read_text())
+            self.assertEqual(receipt[0]["exit_code"], 101)
+            self.assertEqual(receipt[0]["unverified_batch"], ["chosen"])
+            self.assertEqual(receipt[0]["verified_passed"], [])
+
     def test_overlapping_filters_execute_each_selected_case_once(self):
         listing = "roles::a: test\nroles::b: test\nother::c: test\nroles::ignored: test\n"
         selected, ignored = RUN.selected_cases(listing, "roles::ignored: test\n", ["roles::", "roles::a"])
