@@ -264,7 +264,9 @@ async fn scenario() -> VerificationInput {
     assert!(
         matches!(al.route, Route::Relayed { relay: Some(peer), generation } if peer == relay.address.peer_id() && generation != 0)
     );
-    assert!(matches!(bl.route, Route::Relayed { relay: None, generation } if generation != 0));
+    assert!(
+        matches!(bl.route, Route::Relayed { relay: Some(peer), generation } if peer == relay.address.peer_id() && generation != 0)
+    );
     let scopes = [
         capture::Scope::observed(ap, al, &aa).unwrap(),
         capture::Scope::observed(bp, bl, &ba).unwrap(),
