@@ -191,9 +191,15 @@ fn trace(directory: &Path, prefix: &str) -> PathBuf {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn carrier_frames_actual_relay_bootstrap_and_payload_policy() {
-    let input = tokio::time::timeout(Duration::from_secs(25), scenario())
+    let phase = std::cell::Cell::new("scenario startup");
+    let input = tokio::time::timeout(Duration::from_secs(25), scenario(&phase))
         .await
-        .expect("real-carrier frame phase deadline");
+        .unwrap_or_else(|error| {
+            panic!(
+                "real-carrier frame phase deadline: {error}; phase={}",
+                phase.get()
+            )
+        });
     verify(input).await;
 }
 
@@ -206,7 +212,7 @@ struct VerificationInput {
 }
 
 /// cancel-safe: NO — timeout fails the case; joined cleanup is required on successful completion.
-async fn scenario() -> VerificationInput {
+async fn scenario(phase: &std::cell::Cell<&'static str>) -> VerificationInput {
     let allowed = match std::env::var("SHAAR_CARRIER_FRAME_POLICY")
         .unwrap()
         .as_str()
@@ -220,7 +226,9 @@ async fn scenario() -> VerificationInput {
     let bi = Identity::generate();
     let ap = peer_id(&public(&ai)).unwrap();
     let bp = peer_id(&public(&bi)).unwrap();
+    phase.set("start relay fixture");
     let relay = relay_fixture::RelayFixture::start().await;
+    phase.set("bind endpoint A");
     let a = SignaledEndpoint::bind_with_discovery(
         &ai,
         loopback(),
@@ -231,6 +239,7 @@ async fn scenario() -> VerificationInput {
     )
     .await
     .unwrap();
+    phase.set("bind endpoint B");
     let b = SignaledEndpoint::bind_with_discovery(
         &bi,
         loopback(),
@@ -243,8 +252,10 @@ async fn scenario() -> VerificationInput {
     .unwrap();
     let native = [a.local_addr(), b.local_addr()];
     let signaling = [a.signaling_addr(), b.signaling_addr()];
+    phase.set("reserve relay");
     let lease = b.reserve_relay(relay.address).await.unwrap();
     assert_eq!(lease.relay(), relay.address);
+    phase.set("connect via relay and wait link");
     let connection = a
         .signaling
         .handle
@@ -281,6 +292,7 @@ async fn scenario() -> VerificationInput {
             .await
             .unwrap()
     };
+    phase.set("connect and accept carrier");
     let (outgoing, incoming) = tokio::join!(
         a.endpoint.carrier_frame_raw().connect(
             EndpointAddr::from_parts(b.id(), [TransportAddr::Custom(aa.clone())]),
@@ -292,24 +304,48 @@ async fn scenario() -> VerificationInput {
     assert_eq!(outgoing.remote_id(), b.id());
     assert_eq!(incoming.remote_id(), a.id());
     let original = [outgoing.stable_id(), incoming.stable_id()];
+    phase.set("open streams and send payloads");
     let (mut sa, ra) = outgoing.open_bi().await.unwrap();
     let (mut sb, rb) = incoming.open_bi().await.unwrap();
     sa.write_all(b"frameapp").await.unwrap();
     sb.write_all(b"frameapp").await.unwrap();
     sa.finish().unwrap();
     sb.finish().unwrap();
-    outgoing.send_datagram(b"frameapp".to_vec().into()).unwrap();
-    incoming.send_datagram(b"frameapp".to_vec().into()).unwrap();
     if allowed {
-        for receiver in [&outgoing, &incoming] {
+        // Complete both reliable deliveries before exercising DATAGRAMs.
+        for (index, receiver) in [&outgoing, &incoming].into_iter().enumerate() {
+            phase.set(if index == 0 {
+                "allow-all accept A"
+            } else {
+                "allow-all accept B"
+            });
             let (_send, mut receive) = receiver.accept_bi().await.unwrap();
+            phase.set(if index == 0 {
+                "allow-all read STREAM A"
+            } else {
+                "allow-all read STREAM B"
+            });
             assert_eq!(receive.read_to_end(8).await.unwrap(), b"frameapp");
+        }
+        phase.set("allow-all send bounded DATAGRAMs");
+        outgoing.send_datagram(b"frameapp".to_vec().into()).unwrap();
+        incoming.send_datagram(b"frameapp".to_vec().into()).unwrap();
+        for (index, receiver) in [&outgoing, &incoming].into_iter().enumerate() {
+            phase.set(if index == 0 {
+                "allow-all read DATAGRAM A"
+            } else {
+                "allow-all read DATAGRAM B"
+            });
             assert_eq!(
                 receiver.read_datagram().await.unwrap(),
                 b"frameapp".as_slice()
             );
         }
     } else {
+        // Keep strict mode adversarial: queue STREAM+FIN and DATAGRAM work
+        // together, then verify policy exclusion and ongoing control traffic.
+        outgoing.send_datagram(b"frameapp".to_vec().into()).unwrap();
+        incoming.send_datagram(b"frameapp".to_vec().into()).unwrap();
         let before = [
             capture::count(scopes[0]).unwrap(),
             capture::count(scopes[1]).unwrap(),
@@ -332,14 +368,18 @@ async fn scenario() -> VerificationInput {
     drop((sa, sb, ra, rb));
     let retained = [a.signaling.factory.clone(), b.signaling.factory.clone()];
     let retained_addresses = [aa.clone(), ba.clone()];
+    phase.set("joined endpoint close");
     let (closed_a, closed_b) = tokio::join!(a.close(), b.close());
     closed_a.unwrap();
     closed_b.unwrap();
+    phase.set("relay close");
     relay.close().await;
     let transcript = capture::finish().unwrap();
+    phase.set("native UDP rebind");
     for address in native {
         drop(UdpSocket::bind(address).await.unwrap());
     }
+    phase.set("signaling TCP rebind");
     for address in signaling {
         drop(TcpListener::bind(address).await.unwrap());
     }
