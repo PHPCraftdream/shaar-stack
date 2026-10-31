@@ -430,8 +430,14 @@ async fn two_authenticated_owners_promote_bounded_concurrent_bursts_both_directi
                 .map(|packet| bh.send(pa, Datagram::new(packet.as_bytes()).unwrap())),
         );
         let (results_a, results_b) = tokio::join!(sends_a, sends_b);
-        assert!(results_a.into_iter().all(|result| result.is_ok()));
-        assert!(results_b.into_iter().all(|result| result.is_ok()));
+        for (side, results) in [("A->B", &results_a), ("B->A", &results_b)] {
+            for (index, result) in results.iter().enumerate() {
+                assert!(
+                    result.is_ok(),
+                    "{side} send at index {index} failed: {result:?}; A->B={results_a:?}; B->A={results_b:?}"
+                );
+            }
+        }
 
         let mut received_a = Vec::with_capacity(BURST);
         let mut received_b = Vec::with_capacity(BURST);
