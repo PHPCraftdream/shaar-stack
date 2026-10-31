@@ -10,7 +10,7 @@ PACKAGES = {
 }
 SUITES = {
     "protocols": ("shaar-p2p", ("carrier::driver::protocols::", "infrastructure::tests::identification::")),
-    "carrier-core": ("shaar-p2p", ("carrier::driver::tests::", "carrier::driver::boundary::tests::", "carrier::driver::events::request_owner::tests::")),
+    "carrier-core": ("shaar-p2p", ("carrier::driver::tests::", "carrier::driver::fault_tests::", "carrier::driver::boundary::tests::", "carrier::driver::events::request_owner::tests::")),
     "infrastructure": ("shaar-p2p", ("carrier::driver::infrastructure::tests::",)),
     "carrier-admission": ("shaar-p2p", ("carrier_destination_",)),
     "roles": ("shaar-p2p", ("discovery::roles::",)),

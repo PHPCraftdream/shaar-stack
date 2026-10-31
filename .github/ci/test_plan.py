@@ -38,6 +38,26 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(result["selection"]["product"])
         self.assertFalse(result["selection"]["full"])
 
+    def test_fault_test_source_and_driver_wiring_select_fault_cases(self):
+        selector = "carrier::driver::fault_tests::"
+        fault_source = POLICY.select(["crates/shaar-p2p/src/carrier/fault_tests.rs"])
+        self.assertEqual(fault_source["suites"], ["carrier-core"])
+        self.assertIn(selector, fault_source["targets"][0]["filters"])
+        self.assertFalse(fault_source["selection"]["full"])
+
+        driver_wiring = POLICY.select(["crates/shaar-p2p/src/carrier/driver/mod.rs"])
+        self.assertEqual(driver_wiring["suites"], ["carrier-core"])
+        self.assertIn(selector, driver_wiring["targets"][0]["filters"])
+        self.assertFalse(driver_wiring["selection"]["full"])
+
+        cumulative_repair = POLICY.select([
+            "crates/shaar-p2p/src/carrier/fault_tests.rs",
+            "crates/shaar-p2p/src/carrier/driver/mod.rs",
+        ])
+        self.assertIn(selector, cumulative_repair["targets"][0]["filters"])
+        self.assertFalse(any(cumulative_repair["selection"][key] for key in POLICY.DOMAINS))
+        self.assertFalse(cumulative_repair["selection"]["full"])
+
     def test_relay_gate_includes_provenance_and_handoff_contracts_without_broad_proofs(self):
         for suffix in ("gate.rs", "gate_factory.rs", "gate_test_support.rs"):
             with self.subTest(suffix=suffix):
@@ -158,10 +178,13 @@ class GitTests(unittest.TestCase):
         base = self.commit_file("common.rs", "one")
         self.git("update-ref", "refs/remotes/ci-upstream/develop", base)
         failed = self.commit_file("crates/shaar/src/network/mod.rs", "two")
+        failed = self.commit_file("crates/shaar-p2p/src/carrier/fault_tests.rs", "fault obligation", "fault tests")
         head = self.commit_file("crates/shaar-p2p/src/carrier/driver/runtime/protocols/guard.rs", "three")
         result = PLAN.plan("push", self.event(failed, head, "refs/heads/feature"), head)
         self.assertEqual(result["base"], base)
         self.assertEqual({t["package"] for t in result["targets"]}, {"shaar", "shaar-p2p"})
+        p2p_target = next(t for t in result["targets"] if t["package"] == "shaar-p2p")
+        self.assertIn("carrier::driver::fault_tests::", p2p_target["filters"])
         self.assertFalse(result["selection"]["backend"])
 
     def test_missing_history_is_not_a_full_trigger(self):
