@@ -11,6 +11,31 @@ import tomllib
 ROOTS = {"shaar", "shaar-p2p", "iroh", "noq", "noq-proto", "libp2p", "libp2p-relay", "tokio"}
 PATCHED = {"iroh", "noq", "noq-proto"}
 PROBE_LOCK_SHA = "122e16a01b4b2d76a4ace23b2a25caba8856b2996fe901b1300e4c686a706b16"
+OBSERVATION_ROOTS = {
+    ("n0-qlog", "0.2.0", "registry+https://github.com/rust-lang/crates.io-index"),
+    ("serde_json", "1.0.154", "registry+https://github.com/rust-lang/crates.io-index"),
+}
+
+
+def reviewed_observation_closure(reviewed_text):
+    _, reviewed = lock_blocks(reviewed_text)
+    selected = set()
+
+    def include(key):
+        if key in selected:
+            return
+        package = reviewed[key][0]
+        if key[2] != "registry+https://github.com/rust-lang/crates.io-index":
+            raise ValueError("observation root or dependency is not crates.io-sourced")
+        selected.add(key)
+        for dependency in package.get("dependencies", []):
+            include(resolve(dependency, reviewed))
+
+    for root in OBSERVATION_ROOTS:
+        if root not in reviewed:
+            raise ValueError("reviewed observation root identity missing")
+        include(root)
+    return selected
 
 
 def shared(repo):
@@ -79,8 +104,8 @@ def derive_lock(product_text, reviewed_text):
         if key in selected:
             return key
         package, block = reviewed[key]
-        if not key[2] or not key[2].startswith("registry+"):
-            raise ValueError("observation graph cannot add an unreviewed path identity")
+        if key[2] != "registry+https://github.com/rust-lang/crates.io-index":
+            raise ValueError("observation graph cannot add a non-crates.io identity")
         selected[key] = (package, block)
         edges[key] = set()
         for dependency in package.get("dependencies", []):
@@ -110,10 +135,16 @@ def derive_lock(product_text, reviewed_text):
             raise ValueError("ambiguous path dependency identity")
         return key[0] + " " + key[1] + " (" + key[2] + ")"
 
-    output = prefix
+    expected_additions = reviewed_observation_closure(reviewed_text) - set(product)
+    if set(selected) - set(product) != expected_additions:
+        raise ValueError("derived observation identities differ from reviewed root closure")
+    # Normalize only the disposable derived output. Source lock bytes remain untouched.
+    newline = "\r\n" if "\r\n" in product_text else "\n"
+    output = prefix.replace("\r\n", "\n").replace("\n", newline)
     pattern = re.compile(r"\ndependencies = \[\n.*?\n\]", re.S)
     for key in sorted(selected, key=lambda key: (key[0], key[1], key[2] or "")):
         package, block = selected[key]
+        block = block.replace("\r\n", "\n")
         dependencies = sorted(reference(dependency) for dependency in edges[key])
         replacement = "\ndependencies = [\n" + "".join(" " + json.dumps(item) + ",\n" for item in dependencies) + "]"
         if "dependencies" in package:
@@ -122,7 +153,7 @@ def derive_lock(product_text, reviewed_text):
             block = pattern.sub(lambda _: replacement, block, count=1)
         elif dependencies:
             block = block.rstrip() + replacement + "\n\n"
-        output += "[[package]]" + block
+        output += "[[package]]" + block.replace("\n", newline)
     parsed = tomllib.loads(output)
     actual = {identity(package): package for package in parsed["package"]}
     if set(actual) != set(selected):
@@ -130,8 +161,24 @@ def derive_lock(product_text, reviewed_text):
     for key in product:
         if actual[key].get("checksum") != product[key][0].get("checksum"):
             raise ValueError("fixture changed an existing product checksum")
-    return output, {"added_registry_identities": [list(key) for key in sorted(set(selected) - set(product))],
+    return output, {"declared_observation_roots": [list(key) for key in sorted(OBSERVATION_ROOTS)],
+                    "added_registry_identities": [list(key) for key in sorted(set(selected) - set(product))],
                     "existing_versions_and_checksums_preserved": True}
+
+
+def validate_derived_lock(product_text, reviewed_text, candidate_text):
+    expected, _ = derive_lock(product_text, reviewed_text)
+    _, expected_packages = lock_blocks(expected)
+    _, candidate_packages = lock_blocks(candidate_text)
+    if set(candidate_packages) != set(expected_packages):
+        raise ValueError("candidate lock identities differ from trusted derived lock")
+    for key, (package, _) in expected_packages.items():
+        candidate = candidate_packages[key][0]
+        if any(candidate.get(field) != package.get(field) for field in ("name", "version", "source", "checksum")):
+            raise ValueError("candidate lock package identity or checksum differs from trusted derived lock")
+        if {resolve(dep, candidate_packages) for dep in candidate.get("dependencies", [])} != {
+                resolve(dep, expected_packages) for dep in package.get("dependencies", [])}:
+            raise ValueError("candidate lock dependencies differ from trusted derived lock")
 
 
 def copy_product(repo, product, destination):
@@ -166,6 +213,7 @@ def observation_reference(repo, root):
     manifest.write_bytes(transformed.encode())
     derived, receipt = derive_lock(lock.decode(), reviewed.decode())
     (root / "Cargo.lock").write_bytes(derived.encode())
+    validate_derived_lock(lock.decode(), reviewed.decode(), (root / "Cargo.lock").read_bytes().decode())
     return {**receipt, "product_lock_sha256": helper.digest(lock), "fixture_lock_sha256": helper.digest(derived.encode()),
             "manifest_before": helper.digest(original), "manifest_after": helper.digest(transformed.encode()),
             "declared_delta": "iroh/qlog and reviewed serde_json test parser only"}
@@ -199,12 +247,11 @@ def closure(data):
 def verify_reference(repo, product, reference):
     original = {identity(package): package for package in product["packages"]}
     observed = {identity(package): package for package in reference["packages"]}
-    reviewed = tomllib.loads((repo / ".github/probes/iroh-paths/Cargo.lock").read_text(encoding="utf-8"))
-    allowed = {identity(package) for package in reviewed["package"]}
+    allowed = reviewed_observation_closure((repo / ".github/probes/iroh-paths/Cargo.lock").read_text(encoding="utf-8"))
     if not set(original) <= set(observed):
         raise ValueError("observation reference removed or replaced a product identity")
-    if not set(observed) - set(original) <= allowed:
-        raise ValueError("observation reference added a package absent from reviewed lock")
+    if set(observed) - set(original) != allowed - set(original):
+        raise ValueError("observation reference additions differ from reviewed root closure")
     before, after = closure(product), closure(reference)
     for key, (features, edges) in before.items():
         new_features, new_edges = after[key]

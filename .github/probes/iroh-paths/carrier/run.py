@@ -41,11 +41,6 @@ def wire():
             record = {"variant": name, "status": "preparing", "product": copied}
             records.append(record)
             record["observation_delta"] = graph.observation_reference(REPO, root)
-            if {tuple(item) for item in record["observation_delta"]["added_registry_identities"]} != {
-                ("n0-qlog", "0.2.0", "registry+https://github.com/rust-lang/crates.io-index"),
-                ("serde_json", "1.0.154", "registry+https://github.com/rust-lang/crates.io-index"),
-            }:
-                raise ValueError("observation reference identity delta changed")
             reference = graph.metadata(root)
             record["reference_graph"] = graph.verify_reference(REPO, product, reference)
             lock = (root / "Cargo.lock").read_bytes()

@@ -29,9 +29,11 @@ oracle.
 
 `instrument.py` copies the reviewed oracle and injects fixture-only endpoint
 accessors into disposable product sources. The qlog observation graph is derived
-from the prepared product lock and must add exactly n0-qlog 0.2.0 and serde_json
-1.0.154; existing product identities, features, checksums and non-dev edges
-remain checked. Product manifests, locks and sources are not edited.
+from the prepared product lock and hash-pinned reviewed probe lock. It declares
+exactly the n0-qlog 0.2.0 and serde_json 1.0.154 roots, then independently derives
+their full transitive registry closure, minus identities already in the product
+lock; the fixture must add exactly that difference. Existing product identities, features,
+checksums and non-dev edges remain checked. Product manifests, locks and sources are not edited.
 
 `run.py --wire` creates separate strict and allow-all product copies, records
 source-edit reversibility, packet helper/oracle hashes, graph validation,

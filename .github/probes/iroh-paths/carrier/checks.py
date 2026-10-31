@@ -20,7 +20,7 @@ def load(name):
 
 graph = load("graph")
 instrument = load("instrument")
-REGISTRY = "registry+https://example.invalid/reviewed-index"
+REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
 
 
 def entry(name, version, dependencies=(), checksum=None):
@@ -45,8 +45,14 @@ def locks():
         entry("noq", "1.3.0", ("noq-proto",), "c" * 64),
         entry("noq-proto", "1.3.0", ("core", "n0-qlog"), "d" * 64),
         entry("core", "1.0.0", checksum="a" * 64),
-        entry("n0-qlog", "0.2.0", ("serde_json",), "e" * 64),
+        entry("n0-qlog", "0.2.0", ("serde_json", "serde_with"), "e" * 64),
         entry("serde_json", "1.0.154", ("core",), "f" * 64),
+        entry("serde_with", "3.24.0", ("darling",), "1" * 64),
+        entry("darling", "0.24.1", ("darling_core", "darling_macro"), "2" * 64),
+        entry("darling_core", "0.24.1", ("ident_case", "strsim"), "3" * 64),
+        entry("darling_macro", "0.24.1", ("darling_core",), "4" * 64),
+        entry("ident_case", "1.0.1", checksum="5" * 64),
+        entry("strsim", "0.11.1", checksum="6" * 64),
     ])
     return product, reviewed
 
@@ -63,12 +69,62 @@ class FrameContracts(unittest.TestCase):
             original = {graph.resolve(name, before) for name in package.get("dependencies", [])}
             current = {graph.resolve(name, after) for name in after[key][0].get("dependencies", [])}
             self.assertTrue(original <= current)
-        self.assertEqual({key[0] for key in set(after) - set(before)}, {"n0-qlog", "serde_json"})
+        self.assertEqual({tuple(key) for key in receipt["declared_observation_roots"]}, graph.OBSERVATION_ROOTS)
+        self.assertEqual({key[0] for key in set(after) - set(before)},
+                         {"n0-qlog", "serde_json", "serde_with", "darling", "darling_core", "darling_macro", "ident_case", "strsim"})
         for name in graph.PATCHED:
             selected = [key for key in after if key[0] == name]
             self.assertEqual(selected, [(name, "1.3.0", None)])
         self.assertTrue(receipt["existing_versions_and_checksums_preserved"])
         self.assertEqual(tomllib.loads(derived)["version"], 4)
+
+    def test_lock_derivation_normalizes_lf_and_crlf_inputs_without_changing_lock_semantics(self):
+        product, reviewed = locks()
+        outputs = []
+        inputs = (("\n", "\n"), ("\r\n", "\r\n"), ("\r\n", "\n"), ("\n", "\r\n"))
+        for product_newline, reviewed_newline in inputs:
+            derived, _ = graph.derive_lock(product.replace("\n", product_newline), reviewed.replace("\n", reviewed_newline))
+            parsed = tomllib.loads(derived)
+            outputs.append({(item["name"], item["version"], item.get("source")): item for item in parsed["package"]})
+        self.assertTrue(all(output == outputs[0] for output in outputs[1:]))
+        _, source_packages = graph.lock_blocks(product)
+        derived_packages = {key: (package, "") for key, package in outputs[0].items()}
+        for key, (package, _) in source_packages.items():
+            original_edges = {graph.resolve(dep, source_packages) for dep in package.get("dependencies", [])}
+            derived_edges = {graph.resolve(dep, derived_packages) for dep in outputs[0][key].get("dependencies", [])}
+            self.assertTrue(original_edges <= derived_edges)
+            self.assertEqual(package.get("checksum"), outputs[0][key].get("checksum"))
+
+    def test_lock_derivation_rejects_unreviewed_closure_and_root_version_or_checksum_drift(self):
+        product, reviewed = locks()
+        derived, receipt = graph.derive_lock(product, reviewed)
+        self.assertEqual({key[0] for key in {tuple(item) for item in receipt["added_registry_identities"]}},
+                         {"n0-qlog", "serde_json", "serde_with", "darling", "darling_core", "darling_macro", "ident_case", "strsim"})
+        mutated_candidates = (
+            derived.replace('checksum = "' + "1" * 64 + '"', 'checksum = "' + "8" * 64 + '"'),
+            derived.replace('version = "3.24.0"', 'version = "3.24.1"'),
+            derived.replace('checksum = "' + "2" * 64 + '"', 'checksum = "' + "8" * 64 + '"'),
+            derived.replace('checksum = "' + "e" * 64 + '"', 'checksum = "' + "8" * 64 + '"'),
+            derived + entry("unrelated", "1.0.0", checksum="7" * 64),
+        )
+        for mutated in mutated_candidates:
+            with self.assertRaises(ValueError):
+                graph.validate_derived_lock(product, reviewed, mutated)
+        reviewed_blocks = reviewed.split("[[package]]")
+        for index, block in enumerate(reviewed_blocks):
+            if 'name = "iroh"' in block and 'version = "1.3.0"' in block:
+                reviewed_blocks[index] = block.replace('"n0-qlog",', '"n0-qlog",\n "unrelated",', 1)
+                break
+        self.assertTrue(any('"unrelated"' in block for block in reviewed_blocks))
+        extended_reviewed = "[[package]]".join(reviewed_blocks) + entry("unrelated", "1.0.0", checksum="7" * 64)
+        with self.assertRaisesRegex(ValueError, "reviewed root closure"):
+            graph.derive_lock(product, extended_reviewed)
+        for changed in (
+            reviewed.replace('name = "n0-qlog"\nversion = "0.2.0"', 'name = "n0-qlog"\nversion = "0.2.1"'),
+            reviewed.replace('name = "n0-qlog"\nversion = "0.2.0"\nsource = "' + REGISTRY + '"', 'name = "n0-qlog"\nversion = "0.2.0"\nsource = "registry+https://example.invalid/index"'),
+        ):
+            with self.assertRaises(ValueError):
+                graph.derive_lock(product, changed)
 
     def test_lock_derivation_rejects_disagreeing_registry_checksum(self):
         product, reviewed = locks()
