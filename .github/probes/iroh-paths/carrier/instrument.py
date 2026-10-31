@@ -140,7 +140,7 @@ def observer(repo, root):
          "        let packet_hex = crate::carrier_frame_probe::packet_hex(&frame.packet);\n        let result = handle.send_on(frame.link, frame.packet).await;\n        crate::carrier_frame_probe::send_result(handle.peer_id(), &frame.link, packet_hex.as_deref(), &result);", records)
     rejects = (
         (guards[0], "                if !handle.is_current(&received) { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"stale\", &received); continue; }"),
-        (guards[1], "                let Ok(source) = source else { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"no-source\", &received); continue; }"),
+        (guards[1], "                let Ok(source) = source else { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"no-source\", &received); continue; };"),
         (guards[2], "                if !shared.matches(&source, link) { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"route-mismatch\", &received); continue; }"),
     )
     for before, after in rejects:

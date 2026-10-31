@@ -217,7 +217,7 @@ class FrameContracts(unittest.TestCase):
             self.assertEqual(source.count("handle.send_on(frame.link, frame.packet).await"), 1)
             self.assertIn("packet_hex(&frame.packet)", source)
             self.assertIn("receive_rejected(handle.peer_id(), \"stale\", &received)", source)
-            self.assertIn("receive_rejected(handle.peer_id(), \"no-source\", &received)", source)
+            self.assertIn("let Ok(source) = source else { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"no-source\", &received); continue; };", source)
             self.assertIn("receive_rejected(handle.peer_id(), \"route-mismatch\", &received)", source)
             self.assertIn("received(handle.peer_id(), &received, &source)", source)
             self.assertLess(source.index("is_current"), source.index("receive_rejected(handle.peer_id(), \"stale\""))
