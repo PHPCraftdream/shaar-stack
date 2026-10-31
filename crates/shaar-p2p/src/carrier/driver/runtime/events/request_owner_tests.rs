@@ -51,7 +51,7 @@ async fn changed_route_generation_is_stale_and_remove_role_is_connection_scoped(
             .admit(pending(old, tx, now + Duration::from_secs(5)))
             .is_ok()
     );
-    owner.retain_links(&[changed_route]);
+    assert!(promote(&mut owner, &[changed_route], now).is_none());
     assert_eq!(
         rx.await.unwrap().unwrap_err().kind(),
         io::ErrorKind::NotConnected
@@ -143,10 +143,19 @@ async fn charges_queue_and_submission_until_terminal_and_enforces_exact_connecti
         waiters.push(rx);
     }
     assert_eq!(owner.len(), REQUEST_LIMIT);
-    assert!(
-        owner
-            .admit(pending(link, oneshot::channel().0, now))
-            .is_err()
+    let (overflow_tx, mut overflow_rx) = oneshot::channel();
+    let overflow_reply = owner.admit(pending(link, overflow_tx, now));
+    let Err(Some(overflow_reply)) = overflow_reply else {
+        panic!("full owner must return the overflow reply");
+    };
+    let _ = overflow_reply.send(Err(io::Error::new(
+        io::ErrorKind::WouldBlock,
+        "carrier admission limit reached",
+    )));
+    assert_eq!(owner.len(), REQUEST_LIMIT);
+    assert_eq!(
+        overflow_rx.try_recv().unwrap().unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
     );
     let admitted = promote(&mut owner, &[link], now).unwrap();
     let mut rpc = rpc::Behaviour::with_codec(
@@ -369,10 +378,19 @@ async fn concurrent_submissions_keep_peer_scoped_and_total_capacity_bounded() {
         );
     }
     assert_eq!(owner.len(), REQUEST_LIMIT);
-    let (overflow, overflow_rx) = oneshot::channel();
-    assert!(owner.admit(pending(peers[1], overflow, now)).is_err());
-    drop(overflow_rx);
+    let (overflow, mut overflow_rx) = oneshot::channel();
+    let Err(Some(overflow)) = owner.admit(pending(peers[1], overflow, now)) else {
+        panic!("full owner must return the overflow reply");
+    };
+    let _ = overflow.send(Err(io::Error::new(
+        io::ErrorKind::WouldBlock,
+        "carrier admission limit reached",
+    )));
     assert_eq!(owner.len(), REQUEST_LIMIT);
+    assert_eq!(
+        overflow_rx.try_recv().unwrap().unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
     owner.finish(&first_id, Err(io::Error::other("terminal")));
     owner.finish(&second_id, Err(io::Error::other("terminal")));
     assert_eq!(owner.len(), REQUEST_LIMIT - 2);
@@ -447,7 +465,7 @@ async fn terminal_failure_promotes_next_and_stale_or_withdrawn_work_is_replied()
         connection: ConnectionId::new_unchecked(31),
         ..link
     };
-    owner.retain_links(&[successor]);
+    assert!(promote(&mut owner, &[successor], now).is_none());
     assert_eq!(
         stale_rx.await.unwrap().unwrap_err().kind(),
         io::ErrorKind::NotConnected

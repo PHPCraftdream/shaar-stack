@@ -354,10 +354,8 @@ impl Core {
             deadline: tokio::time::Instant::now() + DEADLINE,
             reply: Some(reply),
         };
-        if let Err(request) = self.requests.admit(request) {
-            if let Some(reply) = request.reply {
-                let _ = reply.send(Err(capacity()));
-            }
+        if let Err(Some(reply)) = self.requests.admit(request) {
+            let _ = reply.send(Err(capacity()));
         }
         self.promote_requests(tokio::time::Instant::now());
     }

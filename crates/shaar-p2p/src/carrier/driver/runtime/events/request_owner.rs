@@ -19,8 +19,14 @@ pub(in crate::carrier::driver) struct Pending {
 #[derive(Default)]
 pub(in crate::carrier::driver) struct Owner {
     queued: VecDeque<Pending>,
-    submitted:
-        HashMap<OutboundRequestId, (PeerId, ConnectionId, Instant, Option<super::Reply<()>>)>,
+    submitted: HashMap<OutboundRequestId, Submitted>,
+}
+
+struct Submitted {
+    peer: PeerId,
+    _connection: ConnectionId,
+    deadline: Instant,
+    reply: Option<super::Reply<()>>,
 }
 
 impl Owner {
@@ -28,14 +34,17 @@ impl Owner {
         self.queued.len() + self.submitted.len()
     }
 
+    #[cfg(test)]
     pub(in crate::carrier::driver) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    #[cfg(test)]
     pub(in crate::carrier::driver) fn queued_len(&self) -> usize {
         self.queued.len()
     }
 
+    #[cfg(test)]
     pub(in crate::carrier::driver) fn submitted_len(&self) -> usize {
         self.submitted.len()
     }
@@ -43,16 +52,19 @@ impl Owner {
     pub(in crate::carrier::driver) fn next_deadline(&self) -> impl Iterator<Item = Instant> + '_ {
         self.submitted
             .values()
-            .filter_map(|(_, _, deadline, reply)| reply.as_ref().map(|_| *deadline))
+            .filter_map(|request| request.reply.as_ref().map(|_| request.deadline))
     }
 
     pub(in crate::carrier::driver) fn queued(&self) -> impl Iterator<Item = &Pending> {
         self.queued.iter()
     }
 
-    pub(in crate::carrier::driver) fn admit(&mut self, pending: Pending) -> Result<(), Pending> {
+    pub(in crate::carrier::driver) fn admit(
+        &mut self,
+        pending: Pending,
+    ) -> Result<(), Option<super::Reply<()>>> {
         if self.len() >= REQUEST_LIMIT {
-            Err(pending)
+            Err(pending.reply)
         } else {
             self.queued.push_back(pending);
             Ok(())
@@ -92,21 +104,6 @@ impl Owner {
     pub(in crate::carrier::driver) fn purge_stale(&mut self, now: Instant) {
         self.expire_queued(now);
         self.cancel_queued();
-    }
-
-    pub(in crate::carrier::driver) fn retain_links(&mut self, links: &[Link]) {
-        self.queued.retain_mut(|request| {
-            if links.contains(&request.expected) {
-                true
-            } else {
-                reply_error(
-                    request.reply.take(),
-                    io::ErrorKind::NotConnected,
-                    "carrier peer not connected",
-                );
-                false
-            }
-        });
     }
 
     pub(in crate::carrier::driver) fn remove_role(
@@ -166,7 +163,7 @@ impl Owner {
             if self
                 .submitted
                 .values()
-                .any(|(peer, _, _, _)| *peer == request.peer)
+                .any(|submitted| submitted.peer == request.peer)
             {
                 index += 1;
                 continue;
@@ -184,8 +181,15 @@ impl Owner {
         deadline: Instant,
         reply: Option<super::Reply<()>>,
     ) {
-        self.submitted
-            .insert(id, (peer, connection, deadline, reply));
+        self.submitted.insert(
+            id,
+            Submitted {
+                peer,
+                _connection: connection,
+                deadline,
+                reply,
+            },
+        );
     }
 
     pub(in crate::carrier::driver) fn finish(
@@ -194,8 +198,8 @@ impl Owner {
         result: io::Result<()>,
     ) -> bool {
         match self.submitted.remove(id) {
-            Some((_, _, _, reply)) => {
-                if let Some(reply) = reply {
+            Some(submitted) => {
+                if let Some(reply) = submitted.reply {
                     let _ = reply.send(result);
                 }
                 true
@@ -206,11 +210,11 @@ impl Owner {
 
     pub(in crate::carrier::driver) fn retain_submitted(&mut self, now: Instant) -> Vec<PeerId> {
         let mut expired = Vec::new();
-        for (peer, _, deadline, reply) in self.submitted.values_mut() {
-            if *deadline <= now && reply.is_some() {
-                expired.push(*peer);
+        for submitted in self.submitted.values_mut() {
+            if submitted.deadline <= now && submitted.reply.is_some() {
+                expired.push(submitted.peer);
                 reply_error(
-                    reply.take(),
+                    submitted.reply.take(),
                     io::ErrorKind::TimedOut,
                     "carrier request deadline",
                 );
@@ -240,8 +244,8 @@ impl Owner {
 
     pub(in crate::carrier::driver) fn shutdown(&mut self) {
         self.queued.clear();
-        for (_, _, _, reply) in self.submitted.values_mut() {
-            reply.take();
+        for submitted in self.submitted.values_mut() {
+            submitted.reply.take();
         }
     }
 }
