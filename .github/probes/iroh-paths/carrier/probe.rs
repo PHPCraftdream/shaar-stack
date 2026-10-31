@@ -1,7 +1,13 @@
 #![forbid(unsafe_code)]
 //! Disposable-fixture capture after authenticated carrier and current mapping validation.
 
-use std::{fmt, io, sync::Mutex};
+use std::{
+    fmt, io,
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use iroh_base::CustomAddr;
 use libp2p::{PeerId, swarm::ConnectionId};
@@ -11,6 +17,54 @@ use crate::{Link, MAX_DATAGRAM, Received, Route};
 
 const SCOPES: usize = 4;
 const PER_SIDE: usize = 256;
+const DIAGNOSTIC_TICKETS: usize = 2 * PER_SIDE;
+
+struct DiagnosticBudget {
+    used: AtomicUsize,
+    overflow_reported: AtomicUsize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DiagnosticTicket {
+    admitted: bool,
+    report_overflow: bool,
+}
+
+impl DiagnosticBudget {
+    const fn new() -> Self {
+        Self {
+            used: AtomicUsize::new(0),
+            overflow_reported: AtomicUsize::new(0),
+        }
+    }
+
+    fn ticket(&self) -> DiagnosticTicket {
+        match self
+            .used
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+                (used < DIAGNOSTIC_TICKETS).then_some(used + 1)
+            }) {
+            Ok(_) => DiagnosticTicket {
+                admitted: true,
+                report_overflow: false,
+            },
+            Err(_) => DiagnosticTicket {
+                admitted: false,
+                report_overflow: self.overflow_reported.swap(1, Ordering::Relaxed) == 0,
+            },
+        }
+    }
+}
+
+static DIAGNOSTIC_BUDGET: DiagnosticBudget = DiagnosticBudget::new();
+
+fn diagnostic_ticket() -> bool {
+    let ticket = DIAGNOSTIC_BUDGET.ticket();
+    if ticket.report_overflow {
+        eprintln!("CARRIER_FRAME_DIAGNOSTIC_OVERFLOW limit={DIAGNOSTIC_TICKETS}");
+    }
+    ticket.admitted
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Scope {
@@ -262,8 +316,43 @@ impl Capture {
     }
 }
 
+pub fn receive_rejected(local: PeerId, reason: &'static str, packet: &Received) {
+    if !diagnostic_ticket() {
+        return;
+    }
+    eprintln!(
+        "CARRIER_FRAME_RECEIVE_REJECT local={local} peer={} connection={:?} route={:?} reason={reason} len={} packet_hex={}",
+        packet.peer,
+        packet.connection,
+        packet.route,
+        packet.packet.as_bytes().len(),
+        encode_hex(&packet.packet),
+    );
+}
+
 static CAPTURE: Mutex<Option<Capture>> = Mutex::new(None);
 static CHANGED: Notify = Notify::const_new();
+
+fn encode_hex(packet: &crate::Datagram) -> String {
+    use std::fmt::Write as _;
+    let mut hex = String::with_capacity(packet.as_bytes().len().saturating_mul(2));
+    for byte in packet.as_bytes() {
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    hex
+}
+
+pub fn packet_hex(packet: &crate::Datagram) -> Option<String> {
+    diagnostic_ticket().then(|| encode_hex(packet))
+}
+
+pub fn send_result(local: PeerId, link: &Link, packet_hex: Option<&str>, result: &io::Result<()>) {
+    if let Some(packet_hex) = packet_hex {
+        eprintln!(
+            "CARRIER_FRAME_SEND_RESULT local={local} link={link:?} packet_hex={packet_hex} result={result:?}"
+        );
+    }
+}
 
 pub fn arm(pair: [Scope; 2]) -> io::Result<()> {
     let capture = Capture::new(pair)?;
@@ -393,6 +482,49 @@ mod tests {
             route: link.route,
             packet: Datagram::new(b"ciphertext fixture").unwrap(),
         }
+    }
+
+    #[test]
+    fn diagnostic_budget_admits_exact_limit_then_reports_overflow_once() {
+        let budget = DiagnosticBudget::new();
+        for _ in 0..512 {
+            assert_eq!(
+                budget.ticket(),
+                DiagnosticTicket {
+                    admitted: true,
+                    report_overflow: false
+                }
+            );
+        }
+        assert_eq!(
+            budget.ticket(),
+            DiagnosticTicket {
+                admitted: false,
+                report_overflow: true
+            }
+        );
+        for _ in 0..3 {
+            assert_eq!(
+                budget.ticket(),
+                DiagnosticTicket {
+                    admitted: false,
+                    report_overflow: false
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostic_encoding_is_lowercase_full_hex_and_accepts_max_datagram() {
+        let bytes = [0x00, 0x0a, 0xab, 0xff];
+        let packet = Datagram::new(&bytes).unwrap();
+        assert_eq!(encode_hex(&packet), "000aabff");
+
+        let max_bytes = vec![0x00; MAX_DATAGRAM];
+        let max_packet = Datagram::new(&max_bytes).unwrap();
+        let encoded = encode_hex(&max_packet);
+        assert_eq!(encoded.len(), MAX_DATAGRAM * 2);
+        assert!(encoded.bytes().all(|byte| byte == b'0'));
     }
 
     #[test]

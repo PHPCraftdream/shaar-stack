@@ -128,11 +128,23 @@ def observer(repo, root):
     records.append({"path": root_lib, "before": digest(original), "after": digest(original + extra.encode()),
                     "reverse_verified": (original + extra.encode())[:-len(extra.encode())] == original})
     receive = "                permit.send(Inbound { received, source });"
-    driver = (root / "crates/shaar-p2p/src/bridge/driver.rs").read_text(encoding="utf-8")
-    guards = ("if !handle.is_current(&received) { continue; }",
-              "if !shared.matches(&source, link) { continue; }", receive)
+    driver_path = root / "crates/shaar-p2p/src/bridge/driver.rs"
+    driver = driver_path.read_text(encoding="utf-8")
+    guards = ("                if !handle.is_current(&received) { continue; }",
+              "                let Ok(source) = source else { continue; };",
+              "                if !shared.matches(&source, link) { continue; }", receive)
     if any(driver.count(guard) != 1 for guard in guards) or [driver.index(guard) for guard in guards] != sorted(driver.index(guard) for guard in guards):
         raise ValueError("authenticated/current carrier receive boundary changed")
+    send = "        let _ = handle.send_on(frame.link, frame.packet).await;"
+    edit(root, "crates/shaar-p2p/src/bridge/driver.rs", send,
+         "        let packet_hex = crate::carrier_frame_probe::packet_hex(&frame.packet);\n        let result = handle.send_on(frame.link, frame.packet).await;\n        crate::carrier_frame_probe::send_result(handle.peer_id(), &frame.link, packet_hex.as_deref(), &result);", records)
+    rejects = (
+        (guards[0], "                if !handle.is_current(&received) { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"stale\", &received); continue; }"),
+        (guards[1], "                let Ok(source) = source else { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"no-source\", &received); continue; }"),
+        (guards[2], "                if !shared.matches(&source, link) { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"route-mismatch\", &received); continue; }"),
+    )
+    for before, after in rejects:
+        edit(root, "crates/shaar-p2p/src/bridge/driver.rs", before, after, records)
     edit(root, "crates/shaar-p2p/src/bridge/driver.rs", receive,
          "                crate::carrier_frame_probe::received(handle.peer_id(), &received, &source);\n" + receive,
          records)

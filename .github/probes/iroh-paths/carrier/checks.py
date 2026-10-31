@@ -194,6 +194,35 @@ class FrameContracts(unittest.TestCase):
             for name in files:
                 self.assertNotIn(b"\r\n", (root / name).read_bytes())
 
+    def test_send_and_receive_diagnostics_remain_fixture_only_and_preserve_guards(self):
+        (REPO / "target").mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="carrier-observer-", dir=REPO / "target") as temporary:
+            root = Path(temporary)
+            driver_path = root / "crates/shaar-p2p/src/bridge/driver.rs"
+            driver_path.parent.mkdir(parents=True)
+            driver_path.write_text(
+                "        let _ = handle.send_on(frame.link, frame.packet).await;\n"
+                "                if !handle.is_current(&received) { continue; }\n"
+                "                let Ok(source) = source else { continue; };\n"
+                "                if !shared.matches(&source, link) { continue; }\n"
+                "                permit.send(Inbound { received, source });\n",
+                encoding="utf-8")
+            library = root / "crates/shaar-p2p/src/lib.rs"
+            library.parent.mkdir(parents=True, exist_ok=True)
+            library.write_text("#![forbid(unsafe_code)]\n", encoding="utf-8")
+            receipt = instrument.observer(REPO, root)
+            source = driver_path.read_text(encoding="utf-8")
+            self.assertEqual(len(receipt["files"]), 6)
+            self.assertTrue(all(item["reverse_verified"] for item in receipt["files"]))
+            self.assertEqual(source.count("handle.send_on(frame.link, frame.packet).await"), 1)
+            self.assertIn("packet_hex(&frame.packet)", source)
+            self.assertIn("receive_rejected(handle.peer_id(), \"stale\", &received)", source)
+            self.assertIn("receive_rejected(handle.peer_id(), \"no-source\", &received)", source)
+            self.assertIn("receive_rejected(handle.peer_id(), \"route-mismatch\", &received)", source)
+            self.assertIn("received(handle.peer_id(), &received, &source)", source)
+            self.assertLess(source.index("is_current"), source.index("receive_rejected(handle.peer_id(), \"stale\""))
+            self.assertLess(source.index("route-mismatch"), source.index("permit.send(Inbound"))
+
     def test_fixture_destination_cannot_escape_repository_target(self):
         with self.assertRaises(ValueError):
             instrument.owned(REPO / "crates", REPO)
