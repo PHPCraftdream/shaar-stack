@@ -22,7 +22,8 @@ third-party integration was denied by the tool; source review is not CI proof.
 ## 1. Goal and scope of the first version
 
 A single repository `shaar-stack`, a Cargo workspace with an SDK, a Server, a Client,
-and two transport adapters. The device is identified by an Ed25519 key.
+and two transport adapters, one of which (P07/Yggdrasil) is deferred beyond the first
+version. The device is identified by an Ed25519 key.
 The Client provides a local TCP port; the Server connects the stream to a specified
 internal TCP service after checking the client key against an allowlist.
 
@@ -31,17 +32,20 @@ port; a disallowed client causes no connections to the target. The connection
 is established without TUN, root, route configuration, or router port forwarding.
 n0 infrastructure is not used, neither explicitly nor via defaults.
 
-The primary path is direct QUIC. Yggdrasil provides negotiation and fallback.
-The libp2p relay is intended exclusively for negotiation, not for application
-data. The Mainline DHT publishes and resolves signed address records.
-Server and Client startup configs use the ktav 0.8.* format.
+The first-version scope decision, dated 2026-10-31, is direct QUIC, native Mainline
+discovery, and strict libp2p signaling only. The entire P07/Yggdrasil path, including
+its negotiation and standby payload fallback, is deferred beyond the first version;
+this is a scope decision, not an acceptance blocker. The relay is exclusively for
+negotiation, never application data. Mainline publishes and resolves signed records.
+Server and Client startup configs use ktav 0.8.*.
 
 Not included: UDP forwarding, multiple published services on the server, a GUI,
-a single CLI replacing separate Server and Client, an in-house Yggdrasil
-protocol implementation (a reviewed external Rust core is required), DHT
-record encryption, system packages, and automated release
-publication. New modes, parameters, and dependencies are added only when necessary
-for agreed acceptance criteria.
+a single CLI replacing separate Server and Client, all P07/Yggdrasil implementation
+and acceptance in this version (deferred; future obligations remain below), DHT record
+encryption, system packages, and automated release publication. New modes, parameters,
+and dependencies are added only when necessary for agreed acceptance criteria.
+An in-house Yggdrasil protocol implementation is not permitted; future P07 requires
+a reviewed external Rust core.
 
 ## 2. Normative rules and source materials
 
@@ -88,35 +92,35 @@ Before creating the workspace, move the original draft into `docs/architecture/`
 and fix the references. If one more root file is needed, reconsider the layout
 first without breaking the limit. Nested directories are checked too.
 
-Dependencies: the Server and Client use `shaar`; the SDK wires in the
-`shaar-ygg` and `shaar-p2p` adapters. The adapters do not depend on the SDK, the Server,
-or the Client, so no cycle forms. External iroh types are localized in the SDK's
-networking layer; the public SDK surface must not needlessly cement unstable
-upstream APIs. The small `shaar-platform` leaf supplies atomic Windows
-private-file creation; the SDK uses it only on Windows. Its isolated native
-FFI keeps the SDK's forbid policy intact. No generic shared crate is added.
+Dependencies: Server and Client use `shaar`; the SDK wires in the `shaar-p2p`
+adapter. P07's `shaar-ygg` SDK wiring is deferred. The adapters do not depend on
+the SDK, Server, or Client, so no cycle forms. External iroh types are localized in
+the SDK networking layer; the public SDK surface must not needlessly cement unstable
+upstream APIs. The small `shaar-platform` leaf supplies atomic Windows private-file
+creation; the SDK uses it only on Windows. Its isolated native FFI keeps the SDK's
+forbid policy intact. No generic shared crate is added.
 
 ## 4. Decisions to be proven before main implementation
 
 ### 4.1. Compatibility and contracts
 
-Choose compatible versions of iroh, libp2p, and ktav 0.8.*
-from sources and documentation, not from the draft's pseudocode. The Yggdrasil
-core is pinned: native Rust crate `yggdrasil` 0.3.1 (Revertron/Yggdrasil-ng,
-commit c9a54f1587bb133a06072596484c972a336db0d2, MPL-2.0). The initial
-choice of dependencies is not a permission to upgrade versions later.
-Pin the Rust toolchain/MSRV required by these versions.
+Choose compatible versions of iroh, libp2p, and ktav 0.8.* from sources and
+documentation, not from the draft's pseudocode. The native Rust Yggdrasil core is
+pinned for deferred future research: native Rust crate `yggdrasil` 0.3.1
+(Revertron/Yggdrasil-ng), commit c9a54f1587bb133a06072596484c972a336db0d2,
+MPL-2.0. The initial choice of dependencies is not permission to upgrade versions
+later. Pin the Rust toolchain/MSRV required by these versions.
 
 Verify the availability of custom transports, NAT traversal, path observation,
 publishing custom addresses, discovery configuration, and fully disabling n0.
 For ktav, verify the exact library name, syntax, the supported format branch,
 parser behavior, and diagnostics. Do not invent config syntax.
 
-Determine the target OSes of the first version from the native Rust Yggdrasil
-core's platform support and the Rust linker, confirmed by our CI. Windows is a
-mandatory verification environment; Linux is for server
-deployment. If the external stack does not support one of them, escalate the specific
-blocker to the user rather than silently dropping the OS.
+Determine the first-version target OSes from the native direct/signaling stack and
+Rust linker, confirmed by our CI. Windows is a mandatory verification environment;
+Linux is for server deployment. If the applicable first-version stack does not
+support either OS, escalate the specific blocker rather than silently dropping it.
+Yggdrasil platform support is deferred and is not a first-version dependency.
 
 ### 4.2. Blocking iroh experiment
 
@@ -141,16 +145,16 @@ Silently replacing signaling-only with carrying user traffic is not allowed.
 
 ### 4.3. Remaining mandatory checks
 
-- Ed25519 seed, iroh public key, Yggdrasil address, and libp2p PeerId:
-  fixed conversion vectors; the PeerId is not equal to the raw key bytes.
-- The Yggdrasil core really carries datagrams by public key without TUN:
-  verify actual asynchronous `read_from`/`write_to` exchange by 32-byte key
-  (`Addr` = peer key; the 1-byte session type is stripped/prepended by the core,
-  so the payload maximum is `buf.len() − 1`), MTU boundaries (`mtu()` = inner − 1,
-  capped at 65535), cancellation and `close()` semantics (no leaked tasks), and
-  actual interoperability with the deployed Yggdrasil network — the upstream
-  README's interoperability claim with yggdrasil-go v0.5.x is an upstream claim,
-  not our proof.
+- Ed25519 seed, iroh public key, and libp2p PeerId: fixed conversion vectors;
+  the PeerId is not equal to the raw key bytes. Yggdrasil address conversion
+  remains a deferred P07 obligation.
+- **Deferred P07 check (outside the first version):** verify that the Yggdrasil
+  core carries datagrams by public key without TUN: actual asynchronous
+  `read_from`/`write_to` exchange by 32-byte key (`Addr` = peer key; the 1-byte
+  session type is stripped/prepended by the core, so payload maximum is
+  `buf.len() − 1`), MTU boundaries (`mtu()` = inner − 1, capped at 65535),
+  cancellation and `close()` semantics (no leaked tasks), and interoperability
+  with the deployed Yggdrasil network. Upstream README claims are not our proof.
 - Public Amino relays really permit reservation and the needed protocol;
   advertising a relay protocol by itself does not guarantee a free slot.
 - Real relay limitations and opening streams on limited connections are verified.
@@ -250,7 +254,9 @@ readiness. P07's external permission/lifecycle gate remains unchanged.
 
 ### P07. Implement the Yggdrasil transport as an isolated adapter over the native Rust core
 
-Dependencies: P03, P04, P06.
+Dependencies: P03, P04, P06. This future P07 adapter and its acceptance are
+deferred beyond the first version; retain the pinned native source, adapter
+research, lifecycle/ownership gates, and no-TUN/no-root/no-routes constraints below.
 
 Select and verify a native Rust core before implementing `shaar-ygg`.
 Yggdrasil-ng (`yggdrasil` 0.3.1, source revision
@@ -285,6 +291,8 @@ failure handling, a cache of available peers. Do not treat the infrastructure as
 unlimited. Bounded framing of QUIC datagrams over the stream with length checks,
 backpressure, re-opening on demand, and bounded retry/backoff.
 
+First-version libp2p is strict signaling only; it carries no application data.
+
 Acceptance: deterministic checks against an owned test relay cover
 limits, reservation expiry, partial read/write, malformed frames, and reconnect.
 A separate smoke scenario checks the public infrastructure, but its transient
@@ -292,35 +300,42 @@ failure is not masked as a defect of the deterministic test.
 
 ### P09. Implement Mainline discovery and address records
 
-Dependencies: P06 and the D1 direct application milestone for native address records.
-Custom-address integration additionally requires its corresponding P07/P08 adapter;
-it must not block native signed-address discovery.
+Dependencies: P06 and D1 for native address records. Custom-address integration
+requires its corresponding accepted adapters; any P07-dependent address remains
+deferred and must not block native signed-address discovery.
 
-Publication and refresh of signed records, address resolution,
-serialization of custom addresses, the record budget, and the IP publication policy.
-The Yggdrasil path is computed from the key and is available independently of the DHT.
+Publish and refresh signed records, resolve addresses, serialize applicable addresses,
+and enforce the record budget and IP publication policy. The key-derived Yggdrasil
+path remains a deferred P07 obligation, not a first-version path.
 Acceptance: round-trip of addresses and signatures, the size limit, stale records,
 a wrong key, absence of the DHT, and the mode without publishing the home IP are verified.
 Do not promise anonymity: the IP may be visible to other layers and to communication peers.
 
-### P10. Implement path selection and recovery
+### P10. Implement first-version path selection and recovery
 
-Dependencies: P06, P07, P08, P09.
+Dependencies: applicable P06/P08 and native P09; not P07. P10 owns recovery
+#215. P07's signal-versus-standby behavior and recovery acceptance remain deferred.
 
-Data priority: direct QUIC, then Yggdrasil only in `standby`.
-In `signal`, alternative paths carry negotiation only.
-libp2p carries no application data in any mode.
-Path observation, keepalive, channel reactivation, and bounded retries
-are implemented on mechanisms confirmed by P03.
+First-version data uses direct QUIC; libp2p carries negotiation only, never
+application data. This specifies scope, not runtime acceptance, and adds no mode.
+The future P07 architecture retains direct QUIC priority, Yggdrasil negotiation
+in `signal`, and Yggdrasil payload fallback in `standby`. Existing config and
+standby limitations remain unchanged: this plan does not enable unsupported
+standby behavior or change schemas/defaults.
+Path observation, keepalive, channel reactivation, and bounded retries are
+implemented on mechanisms confirmed by P03.
 
-Acceptance: a matrix of the two modes, path availability, network changes, and re-punching
-confirms the prohibitions, the absence of cyclic switching,
-and the absence of unbounded state growth.
+Acceptance: first-version direct-path availability, network changes, and re-punching
+confirm applicable prohibitions, no cyclic switching, and no unbounded state growth.
+The deferred future matrix covers both `signal` and `standby`, path availability,
+network changes, and re-punching; it must also confirm no cyclic switching and no
+unbounded state growth, but is not a first-version acceptance criterion.
 
 ### P11. Implement the Server
 
-Dependencies: P05 and P06 for the D1 direct-only runtime; P10 only for the later
-multi-path integration. D1 implementation and executable acceptance run first.
+Dependencies: P05 and P06 for the D1 direct-only first-version runtime; P10 only
+for applicable native path recovery. D1 implementation and executable acceptance
+run first.
 
 Config, allowlist, a fixed target, stream servicing, and a clean stop.
 For the first version the target is restricted to loopback; do not add opening other
@@ -331,8 +346,9 @@ a slow client, limit exhaustion, and shutdown are covered by tests.
 
 ### P12. Implement the Client
 
-Dependencies: P05 and P06 for the D1 direct-only runtime; P10 only for the later
-multi-path integration. D1 implementation and executable acceptance run first.
+Dependencies: P05 and P06 for the D1 direct-only first-version runtime; P10 only
+for applicable native path recovery. D1 implementation and executable acceptance
+run first.
 
 Config, a local loopback listener, verification of the server key, connection
 reuse, and creating a new connection after one closes. Connection-establishment
@@ -345,14 +361,16 @@ cancellation, recovery for new streams, and shutdown are covered by tests.
 
 Dependencies: P11, P12.
 
-A deterministic matrix: direct IPv4/IPv6, various NATs, blocked UDP,
-DHT unavailable, relay unavailable/exhausted, Yggdrasil unavailable, network change,
-process restarts, both fallback modes. Also test LAN and the absence of n0.
+A deterministic first-version matrix: direct IPv4/IPv6, various NATs, blocked UDP,
+DHT unavailable, relay unavailable/exhausted, network change and process restarts.
+Also test LAN and absence of n0. Exclude deferred Yggdrasil and both fallback modes
+from #218; retain the future P07 two-mode matrix separately.
 The testbed controls network conditions and does not depend on luck in the public network.
 
-Acceptance: a report with the result of each applicable scenario, evidence
-of the data route and of denial to an unauthorized key. A skipped item does not
-count as passed. A failing test or flake is investigated and fixed in the same pass.
+Acceptance: a report records every applicable first-version scenario, the data route,
+and denial to unauthorized keys. Deferred Yggdrasil scenarios are not first-version
+acceptance. A skipped applicable item does not count as passed. Investigate and fix
+failures or flakes in the same pass.
 Real home/mobile network/café scenarios are run separately with user permission
 and device access, without unconfirmed NAT claims.
 
@@ -388,7 +406,9 @@ Dependencies: P14, P15.
 Cross-check the first-version goal, the development rules, and the verification matrix.
 Check dependencies, licenses, secrets in artifacts, and build reproducibility
 on the pinned stack. Record CI results and open risks.
-Acceptance: all mandatory scenarios are confirmed; no blocking questions remain.
+Acceptance: all mandatory first-version scenarios are confirmed; no blocking questions
+remain. Yggdrasil implementation, interoperability and fallback acceptance are
+explicitly excluded. First-version green must not be called Yggdrasil acceptance.
 Publishing crates, a GitHub release, a version change, commit, and push — only
 on a separate explicit user request.
 
@@ -398,14 +418,47 @@ on a separate explicit user request.
 
 P03's strict payload gate, controlled NAT recovery and production dependency delivery,
 and P06's authenticated native forwarding are accepted; they are not current research
-blockers. Server and Client executables are still scaffolds. P08 has accepted Carrier,
-role-guard and owned-relay foundations at `740964d` (Linux/Windows CI `40447870611`),
-but discovery, candidate handoff and consolidated signaling-only acceptance remain
-unfinished. Infrastructure-control foundations and validated direct endpoint inputs
-have since been integrated. The combined direct application snapshot `259a7a0`
-passed full Linux/Windows CI `40659189547`, but remains outside `develop` and has
-not passed real-process D1 acceptance. A feature branch or a passing component
-suite is not delivered application acceptance.
+blockers. P08 has accepted Carrier, role-guard and owned-relay foundations at `740964d`
+(Linux/Windows CI `40447870611`), but discovery, candidate handoff and consolidated
+signaling-only acceptance remain unfinished. Direct-only Server and Client sources
+were merged into `develop` at `63e2f90`; this does not complete D1 acceptance.
+
+As of 2026-10-29, candidate `89a8881` passed full CI `40773760958` and focused CI
+`40773843667` attempt 2 on Linux and Windows. The focused lane exercised real processes,
+exact forwarding, successive streams, client half-close, empty-allowlist and wrong-pin
+rejection, and child/worker cleanup regressions. Candidate `ebd8040` passed full CI
+`40783014028` and focused CI `40783155770` on both platforms; it adds eight concurrently
+held target streams and exact forwarding after forced Client termination and restart.
+This forced Client restart is not graceful shutdown, Server restart or survival of
+existing streams. Candidate `e13088d`, delivered to remote `develop`, passed full CI
+`40788893903` and focused CI `40789008760` on both platforms; it adds startup validation,
+busy-listener and unavailable-target recovery scenarios. The target recovery fixture
+releases and rebinds a port, so that interval remains a race.
+
+Candidate `ef0ae60` passed full CI `40796922678` and focused CI `40797022573` on both
+platforms and is integrated locally. Its process test sends SIGINT on Unix or targeted
+Ctrl-Break on Windows after the target observes an active stream, then checks successful
+Server exit, target closure and UDP rebind. This does not independently prove a joined
+production worker or exercise Windows Ctrl-C.
+
+Combined candidate `341e14b` was delivered to remote `develop` after full CI
+`40807624299`, focused CI `40807774299`, and post-integration CI `40813234362` passed
+on Linux and Windows. The focused
+logs show graceful Server restart, Client shutdown during an observed native UDP dial,
+and joined shutdown of an accepted production Server worker. The UDP packet is not
+decoded; it is not a signaling-only frame oracle. Windows Ctrl-C itself was not tested:
+the process test uses targeted Ctrl-Break. The target recovery port race remains, and
+these results alone do not establish all D1 acceptance criteria.
+
+Candidate `3b3976d` additionally passed full feature CI `40855394533` on Linux and
+Windows and was delivered to upstream `develop`. Both logs show
+`ready_session_waits_for_server_worker_capacity ... ok`. It feeds two already
+authenticated SDK sessions to the same Server loop through a private session source:
+the second ready session is not consumed while the first worker holds capacity,
+then forwards exact target bytes after release. This proves the Server loop's
+admission boundary, not receipt or queuing of a second transport Initial. SDK tests
+separately cover 16-stream capacity and copy-loop backpressure. No new public SDK
+API or dependency was added; Windows Ctrl-C and the target port race limits remain.
 
 The next usable milestone is **D1: direct-only Server and Client**. Its prerequisites
 are accepted P04/P05/P06, not completion of P07/P08/P09/P10. This is an incremental
@@ -445,16 +498,23 @@ capabilities or proof frameworks.
 ### 6.2. Remaining stages
 
 Delivery path: accepted P04/P05/P06 → D1 Server/Client → D1 process acceptance and
-minimal usage documentation. Mainline discovery follows the explicit-address baseline;
-its native signed-address subset needs P06 and D1, not working Yggdrasil or Amino.
-Custom-address serialization and multi-path integration remain dependent on the
-corresponding accepted adapters. P07/P08 and P10 then extend the working applications;
-full P13/P14/P15/P16 acceptance still requires all applicable first-version scenarios.
+minimal usage documentation → consolidation/review → native Mainline task #212.
+Task #212 technically depends only on accepted P06/D1, not P07/P08/#203/#204.
+Later custom-address task #213 requires its corresponding adapters. P10 depends on
+applicable P06/P08/native P09, not P07, and owns #215 recovery. P13 owns #218's
+first-version matrix; deferred P07 two-mode Yggdrasil obligations remain separate.
+The [P08 frame-acceptance plan](p08-carrier-frame-acceptance.md) defines the finite
+#203 bootstrap; only public smoke #204 is scheduled for P13 under its separate
+authorization gate. Mainline needs P06 and D1, not P07 or Amino. P07 remains future
+native-adapter research with pinned source and lifecycle gates. Full P13/P14/P15/P16
+acceptance still requires all applicable first-version scenarios for native QUIC,
+Mainline and strict libp2p signaling, excluding deferred P07.
 
-Strict signaling-only is unchanged: libp2p never becomes an APP Backup path. Yggdrasil
-fallback policy is not widened. Process-isolated Rust Yggdrasil is only a possible
-alternative to investigate after its separate external gate; no child executable,
-IPC API, privilege-free operation or lifecycle guarantee is assumed accepted.
+Strict signaling-only remains invariant: libp2p never becomes an APP Backup path.
+Yggdrasil is deferred beyond the first version. Its native Rust adapter remains
+future research, subject to the pinned source and separate external lifecycle/ownership
+gate; no child executable, IPC API, privilege-free operation or lifecycle guarantee
+is assumed accepted.
 
 ### 6.3. GitHub CI feedback and evidence
 
@@ -480,17 +540,15 @@ are met. External blockers are explicit; no unconfirmed assumption is promoted t
 ### 6.4. Bounded delivery commitment after the second process review
 
 The immediate outcome is runnable direct-only Server and Client in `develop`, not
-additional feature branches or another general research phase. Work proceeds in
-this order:
+additional feature branches or another general research phase. This is the first-
+version foundation; Yggdrasil remains deferred. Work proceeds in this order:
 
-1. **Review and integrate the existing D1 implementation.** Reconcile the combined
-   snapshot with current `develop`, including project license metadata, both direct
-   dependency edges and the exact DNS graph baseline. Review concrete defects and
-   known limitations; fix product correctness/security blockers and observed CI
-   failures. Run the full Linux/Windows checks for the exact integration candidate.
-   Integrate it as an explicitly limited direct-only implementation once those
-   checks pass. Do not require completion of P08 or every proposed test-infrastructure
-   enhancement before making the implementation available in `develop`.
+1. **Deliver the existing D1 implementation.** The direct-only Server and Client
+   sources, project license metadata, both direct dependency edges and DNS graph
+   baseline have been integrated into `develop`. The full Linux/Windows CI for
+   `89a8881` passed; this is source delivery, not completed process acceptance.
+   Continue to fix observed CI failures and concrete product correctness or security
+   blockers without making P08 a prerequisite for the direct slice.
 2. **Complete the finite D1 process acceptance in section 6.1.** Exercise real
    binaries, provisioned keys/configs, authorized exact-byte forwarding, denied and
    wrong-key attempts with zero target connections, concurrent streams, half-close,
@@ -505,10 +563,12 @@ this order:
    one implementation rather than creating successive integration branches. Review
    an eventual `develop` to `main` integration after the integrated checks and D1
    acceptance; no blanket merge, release or publication is implied.
-4. **Resume extensions only after D1 acceptance.** Native Mainline may follow D1;
-   P08 discovery and other transport extensions remain held until then. A local
-   ThinkPad demonstration requires separate permission under the existing local
-   execution rule; it is not an implicit new prerequisite or authorization.
+4. **Deliver first-version networking extensions.** After D1 acceptance and
+   consolidation/review, complete native Mainline #212, applicable strict libp2p
+   signaling, P10 direct-path recovery (#215), then the P13 first-version fault
+   matrix (#218). P07/Yggdrasil implementation, interoperability, and fallback
+   acceptance remain deferred beyond this version. A local demonstration requires
+   separate permission; this is not implicit authorization.
 
 Keep the already requested license work bounded: finish and validate the current
 license gate, report actual policy findings, and retain the distinction between

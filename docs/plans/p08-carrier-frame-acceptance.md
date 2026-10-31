@@ -4,6 +4,38 @@ Status: scoped acceptance plan, not execution evidence. Tasks 201–204 implemen
 this remaining part of task 63. Public infrastructure, Yggdrasil, host routes,
 TUN/root operations and a full-workspace campaign are not authorized by this plan.
 
+Task #202 is complete as **source contracts only** at `ff7c5997b56b40423571abb04c5e88eca6a710c5`:
+feature CI `41056322410` and post-integration CI `41057285706` passed on Linux and
+Windows. The companion bridge run `41057285755` is not that CI. The eight Python
+contracts and four Rust observer cases per OS establish source/graph and observer
+contracts only; the actual wire proof has never been compiled or executed. Preserve
+that distinction: the bootstrap defined below is a proposed, unaccepted #203 slice.
+
+## #203 finite bootstrap boundary
+
+#203 is limited to a finite Linux/Windows bootstrap proof over an actually owned
+Rust relay, TCP/Noise/Yamux carrier, and the actual Iroh/Noq bridge. Reuse the
+accepted P03 oracle; do not create a general proof framework. It includes strict
+and fixture-only allow-all payload policy, complete finalized-ciphertext/decoded-
+frame correlation, authenticated peer/ConnectionId/route generation/custom
+instance+epoch binding, bounded capture, explicit positive bidi STREAM **and FIN**
+and DATAGRAM sensitivity, immutable product identities with only documented
+fixture observation deltas, oracle negatives, joined cleanup, and socket rebind
+while snapshots/capabilities remain retained. Details and fail-closed conditions
+are below.
+
+Native path gain/physical loss, automatic re-punch and carrier disconnect/reconnect
+acceptance are deferred to P10 task #215; the integrated fault matrix is P13 task
+#218. These defer acceptance, not the signaling-only invariant or its obligations:
+retain the original Noq peer/connection and distinguish successor carrier
+generations, rejecting stale-scope observations and keeping carrier payload
+forbidden throughout.
+Task #204 remains separately permission-gated and unexecuted. Its P13 schedule is
+not authorization: no cron, goal, task completion or local-fixture result authorizes
+execution. Before execution, obtain fresh human approval of the exact targets and
+time/traffic/socket limits. No automatic run is authorized. A green bootstrap is not
+full P08, public-readiness, NAT-readiness, or full-sprint acceptance.
+
 ## Accepted implementation and the remaining gap
 
 | Component | Accepted revision | Evidence and boundary |
@@ -113,32 +145,35 @@ substitute the older independently resolved probe graph for the product graph.
 
 ## Required cases and acceptance conditions
 
-### Strict policy
+### Finite bootstrap (task #203)
 
 Use a real owned Rust relay, TCP/Noise/Yamux carrier and the actual Iroh/Noq bridge
 on Linux and Windows. Establish authenticated custom control, queue bounded
-STREAM/FIN and DATAGRAM work once in each direction, and require continuing
-control traffic. Every received carrier byte must match finalized decoded packet
-metadata, with zero carrier STREAM/DATAGRAM frames. Require complete correlation;
+bidirectional STREAM/FIN and DATAGRAM work once in each direction, and require
+continuing control traffic. Every received carrier byte must match finalized decoded
+packet metadata, with zero carrier STREAM/DATAGRAM frames. Require complete correlation;
 unobserved payload, duplicate/prefix-ambiguous identity, missing trace, trailing
 bytes, unknown scope and truncation all fail closed.
 
 ### Positive sensitivity
 
 With the same carrier, peer/control/generation checks and capture path, a separate
-fixture-only allow-all payload callback must produce observed STREAM and DATAGRAM
-frames and exact application bytes on the actual carrier in both directions.
-Handshake/setup/capture failures cannot satisfy this calibration. Do not weaken
-role, admission, lease, framing or native resource policies to make it pass.
+fixture-only allow-all payload callback must produce observed bidirectional STREAM
+and explicit FIN, plus DATAGRAM frames and exact application bytes on the actual
+carrier in both directions. Handshake/setup/capture failures cannot satisfy this
+calibration. Do not weaken role, admission, lease, framing or native resource policies
+to make it pass.
 
-### Path and control lifetime
+### Deferred recovery acceptance (P10 #215; P13 #218)
 
-Use only owned portable UDP observation/forwarding to exercise native path gain
-and physical loss, then carrier disconnect/reconnect. Prove the claimed original
-Noq connection/peer scope, distinguish successor carrier generations and reject
-old-scope observations. Observe native payload positively where native is admitted;
-zero carrier payload must hold throughout. Existing controlled-NAT evidence remains
-separate; this work does not claim arbitrary NAT or authorize a new NAT campaign.
+This is outside #203. Use only owned portable UDP observation/forwarding for
+native path gain and physical loss, automatic re-punch and carrier
+disconnect/reconnect; do not alter host networking. Preserve the original Noq
+connection/peer scope, distinguish successor carrier generations and reject
+stale-scope observations. Observe native payload positively when native is
+admitted, while zero carrier payload holds throughout. Existing controlled-NAT
+evidence remains separate: this does not claim arbitrary NAT or authorize a new
+NAT campaign. P13 #218 integrates these obligations into the broader fault matrix.
 
 ### Oracle controls and cleanup
 
@@ -156,13 +191,19 @@ silently become full scope. Full remains a current standalone `[ci:full]` line o
 manual Actions `scope: full`, and is not requested here. No local compilation or
 tests: only standalone formatting, syntax and own isolated data readers locally.
 
+#202 is complete as source contracts only; #203 remains open until the exact
+finite bootstrap candidate passes Linux/Windows CI and its integration receipts
+are reviewed. Bootstrap completion is not full P08, public-infrastructure,
+NAT-readiness or full-sprint acceptance.
+
 After the exact candidate passes both OSes, inspect inventories, expected events,
 negative/sensitivity preconditions, source/graph receipts and cleanup evidence.
 Fetch collaborators before exact-SHA integration, watch post-integration CI and
 remove the clean integrated worktree. Update the acceptance record with real run
-IDs, hashes, limits and exclusions. Tasks 202/203 remain open until this happens.
+IDs, hashes, limits and exclusions.
 
-Task 204 is separately permission-blocked public Amino/relay smoke. No cron, goal,
-task completion or local-fixture result authorizes that operation. Do not close
-full P08 acceptance or claim public-infrastructure readiness while that gate is
-unmet. Yggdrasil and release permissions remain separate as well.
+Task #204 remains separately permission-gated and unexecuted. Its P13 schedule is
+not authorization: no cron, goal, task completion or local-fixture result authorizes
+execution. Before execution, obtain fresh human approval of the exact targets and
+time/traffic/socket limits. No automatic run is authorized. Yggdrasil and release
+permissions remain separate as well.
