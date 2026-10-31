@@ -366,16 +366,21 @@ impl Core {
     }
 
     pub(super) fn close_infrastructure(&mut self, key: AttemptKey, now: Instant) {
+        if !self
+            .infrastructure
+            .entries
+            .get(&key.connection)
+            .is_some_and(|entry| entry.key == key)
+        {
+            return;
+        }
         self.relay_control_closed(key.peer, key.connection);
         self.discovery_lost_control(key);
-        let Some(entry) = self
+        let entry = self
             .infrastructure
             .entries
             .get_mut(&key.connection)
-            .filter(|entry| entry.key == key)
-        else {
-            return;
-        };
+            .expect("validated infrastructure entry");
         if entry.phase != Phase::Closing {
             entry.phase = Phase::Closing;
             entry.deadline = now + DEADLINE;
@@ -394,6 +399,8 @@ impl Core {
         );
         // Pending dials stop at their revoked guard; established connections close by ID.
         let _ = self.swarm.close_connection(key.connection);
+        self.withdraw_request_role(key.peer, key.connection);
+        self.close_connection_requests(key.peer, key.connection);
     }
 
     pub(super) fn infrastructure_tick(&mut self, now: Instant) -> io::Result<()> {

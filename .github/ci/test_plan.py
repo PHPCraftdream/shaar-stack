@@ -18,7 +18,7 @@ class PolicyTests(unittest.TestCase):
     def test_protocol_feature_selects_own_cases_and_small_wiring_contracts_only(self):
         paths = ["crates/shaar-p2p/src/carrier/driver/runtime/protocols/guard.rs",
                  "crates/shaar-p2p/src/carrier/driver/mod.rs",
-                 "crates/shaar-p2p/src/carrier/driver/runtime/events.rs",
+                 "crates/shaar-p2p/src/carrier/driver/runtime/events/mod.rs",
                  "crates/shaar-p2p/src/carrier/driver/runtime/infrastructure_tests/identification.rs"]
         result = POLICY.select(paths)
         self.assertEqual(result["suites"], ["carrier-core", "protocols"])
@@ -26,6 +26,13 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(result["targets"][0]["package"], "shaar-p2p")
         self.assertIn("carrier::driver::protocols::", result["targets"][0]["filters"])
         self.assertIn("infrastructure::tests::identification::", result["targets"][0]["filters"])
+        self.assertIn("carrier::driver::events::request_owner::tests::", result["targets"][0]["filters"])
+        core = POLICY.select(["crates/shaar-p2p/src/carrier/driver/runtime/events/request_owner.rs"])
+        self.assertEqual(core["suites"], ["carrier-core"])
+        self.assertIn("carrier::driver::events::request_owner::tests::", core["targets"][0]["filters"])
+        test_source = POLICY.select(["crates/shaar-p2p/src/carrier/driver/runtime/events/request_owner_tests.rs"])
+        self.assertEqual(test_source["suites"], ["carrier-core"])
+        self.assertIn("carrier::driver::events::request_owner::tests::", test_source["targets"][0]["filters"])
         self.assertNotIn("", result["targets"][0]["filters"])
         self.assertFalse(any(result["selection"][key] for key in POLICY.DOMAINS))
         self.assertTrue(result["selection"]["product"])

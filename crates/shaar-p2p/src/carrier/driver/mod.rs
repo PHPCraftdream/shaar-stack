@@ -50,7 +50,7 @@ pub use relay::{RelayAddr, RelayLease, Route};
 
 #[path = "runtime/boundary.rs"]
 mod boundary;
-#[path = "runtime/events.rs"]
+#[path = "runtime/events/mod.rs"]
 mod events;
 #[path = "runtime/infrastructure.rs"]
 mod infrastructure;
@@ -58,7 +58,7 @@ mod infrastructure;
 mod protocols;
 #[path = "runtime/setup.rs"]
 mod setup;
-
+use events::request_owner;
 // Preserve the derived behaviour's bounded inline packet storage; boxing would
 // allocate for every signaling packet. The dial handoff adds no larger payload.
 #[derive(Debug)]
@@ -124,7 +124,7 @@ struct Core {
     pending: HashMap<ConnectionId, Pending>,
     native_listener: ListenerId,
     relay: relay::State,
-    requests: HashMap<rpc::OutboundRequestId, Request>,
+    requests: request_owner::Owner,
     closing: HashMap<PeerId, Closing>,
 }
 
@@ -135,12 +135,6 @@ struct Pending {
     attempt: Option<AttemptKey>,
     // Gate ticket for relay dials: authenticated control-bound operations.
     operation: Option<relay::gate::Ticket>,
-}
-
-struct Request {
-    peer: PeerId,
-    deadline: tokio::time::Instant,
-    reply: Option<Reply<()>>,
 }
 
 struct Closing {
@@ -183,6 +177,7 @@ impl Drop for Core {
         // Cancel and drop every live relay operation owner outside all guards;
         // the Swarm field below drops the last capability clones.
         self.relay.gate.revoke_all();
+        self.requests.shutdown();
         self.withdraw_all_infrastructure();
         self.swarm.behaviour_mut().inner.admission.close_authority();
         if let Some(discovery) = &self.discovery {
@@ -246,12 +241,8 @@ impl Core {
                 .closing
                 .values()
                 .map(|closing| closing.deadline)
-                .chain(
-                    self.requests
-                        .values()
-                        .filter(|request| request.reply.is_some())
-                        .map(|request| request.deadline),
-                )
+                .chain(self.requests.queued().map(|request| request.deadline))
+                .chain(self.requests.next_deadline())
                 .chain(self.relay.next_deadline())
                 .chain(self.relay.gate.next_deadline())
                 .chain(self.infrastructure.next_deadline())
@@ -267,6 +258,7 @@ impl Core {
                 _ = closing_deadline => {
                     let now = tokio::time::Instant::now();
                     self.expire(now)?;
+                    self.request_owner_tick();
                     self.relay_tick(now)?;
                 },
                 _ = async {
@@ -294,34 +286,18 @@ impl Core {
                 "carrier disconnect deadline",
             ));
         }
-        let mut changed = false;
-        for request in self.requests.values() {
-            if request.deadline <= now
-                && request.reply.is_some()
-                && let std::collections::hash_map::Entry::Vacant(entry) =
-                    self.closing.entry(request.peer)
-            {
-                let _ = self.swarm.disconnect_peer_id(request.peer);
+        let expired = self.requests.retain_submitted(now);
+        self.requests.expire_queued(now);
+        self.requests.cancel_queued();
+        for peer in expired {
+            if let std::collections::hash_map::Entry::Vacant(entry) = self.closing.entry(peer) {
+                let _ = self.swarm.disconnect_peer_id(peer);
                 entry.insert(Closing {
                     deadline: now + DEADLINE,
                     reply: None,
                 });
-                changed = true;
+                self.publish_links();
             }
-        }
-        if changed {
-            self.publish_links();
-        }
-        for request in self.requests.values_mut() {
-            if request.deadline <= now
-                && let Some(reply) = request.reply.take()
-            {
-                let _ = reply.send(Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "carrier request deadline",
-                )));
-            }
-            // Keep the ID charged until the dependency emits its terminal event.
         }
         Ok(())
     }
@@ -336,38 +312,126 @@ impl Core {
         if reply.is_closed() {
             return;
         }
+        let now = tokio::time::Instant::now();
+        self.requests.purge_stale(now);
+        let link = self
+            .swarm
+            .behaviour()
+            .inner
+            .admission
+            .connection(&peer)
+            .and_then(|connection| {
+                self.relay
+                    .routes
+                    .get(&connection)
+                    .copied()
+                    .map(|route| Link {
+                        peer,
+                        connection,
+                        route,
+                    })
+            });
         if self.requests.len() >= REQUEST_LIMIT {
             let _ = reply.send(Err(capacity()));
-        } else if !self.allows_application(&peer)
+            return;
+        }
+        if expected.is_some_and(|expected| Some(expected) != link)
+            || !self.allows_application(&peer)
             || self.closing.contains_key(&peer)
             || !self.swarm.behaviour().inner.packets.is_connected(&peer)
-            || expected.is_some_and(|link| {
-                self.swarm.behaviour().inner.admission.connection(&peer) != Some(link.connection)
-                    || self.relay.routes.get(&link.connection) != Some(&link.route)
-            })
+            || link.is_none()
         {
             let _ = reply.send(Err(io::Error::new(
                 io::ErrorKind::NotConnected,
                 "carrier peer not connected",
             )));
-        } else {
-            // The sole owner validates the exact link before allocating a request ID.
-            // With one admitted connection per peer, request-response pins NotifyHandler to that ID.
+            return;
+        }
+        let request = request_owner::Pending {
+            peer,
+            expected: link.expect("validated connected link"),
+            packet,
+            deadline: tokio::time::Instant::now() + DEADLINE,
+            reply: Some(reply),
+        };
+        if let Err(request) = self.requests.admit(request) {
+            if let Some(reply) = request.reply {
+                let _ = reply.send(Err(capacity()));
+            }
+        }
+        self.promote_requests(tokio::time::Instant::now());
+    }
+
+    fn promote_requests(&mut self, now: tokio::time::Instant) {
+        loop {
+            let request = {
+                let Core {
+                    requests,
+                    swarm,
+                    closing,
+                    relay,
+                    discovery,
+                    ..
+                } = &mut *self;
+                requests.take_next_eligible(now, |request| {
+                    let peer = request.peer;
+                    let allowed = swarm.behaviour().inner.admission.allows(&peer)
+                        && !discovery.as_ref().is_some_and(|state| state.is_seed(&peer));
+                    if !allowed || closing.contains_key(&peer) {
+                        return false;
+                    }
+                    let Some(connection) = swarm.behaviour().inner.admission.connection(&peer)
+                    else {
+                        return false;
+                    };
+                    connection == request.expected.connection
+                        && relay.routes.get(&connection).copied() == Some(request.expected.route)
+                })
+            };
+            let Some(request) = request else {
+                break;
+            };
+            let request_owner::Pending {
+                peer,
+                expected,
+                packet,
+                deadline,
+                reply,
+            } = request;
+            if !self.allows_application(&peer)
+                || self.closing.contains_key(&peer)
+                || self.current_link(peer) != Some(expected)
+                || !self.swarm.behaviour().inner.packets.is_connected(&peer)
+            {
+                if let Some(reply) = reply {
+                    let _ = reply.send(Err(io::Error::new(
+                        io::ErrorKind::NotConnected,
+                        "carrier peer not connected",
+                    )));
+                }
+                continue;
+            }
             let id = self
                 .swarm
                 .behaviour_mut()
                 .inner
                 .packets
                 .send_request(&peer, packet);
-            self.requests.insert(
-                id,
-                Request {
-                    peer,
-                    deadline: tokio::time::Instant::now() + DEADLINE,
-                    reply: Some(reply),
-                },
-            );
+            self.requests
+                .submitted(id, peer, expected.connection, deadline, reply);
         }
+    }
+
+    fn current_link(&self, peer: PeerId) -> Option<Link> {
+        let connection = self.swarm.behaviour().inner.admission.connection(&peer)?;
+        if self.closing.contains_key(&peer) || !self.allows_application(&peer) {
+            return None;
+        }
+        Some(Link {
+            peer,
+            connection,
+            route: *self.relay.routes.get(&connection)?,
+        })
     }
 
     /// Pins the exact selected root and stages the registry attempt for an explicit dial.
@@ -484,6 +548,7 @@ impl Core {
                         },
                     );
                     self.publish_links();
+                    self.request_owner_tick();
                 } else {
                     let _ = reply.send(Ok(()));
                 }
@@ -496,6 +561,21 @@ impl Core {
             Command::ReleaseRelay(peer, reply) => self.release_relay(peer, reply),
             Command::ConnectVia(peer, relay, reply) => self.connect_via(peer, relay, reply),
         }
+    }
+
+    fn request_owner_tick(&mut self) {
+        let now = tokio::time::Instant::now();
+        self.promote_requests(now);
+    }
+
+    pub(super) fn withdraw_request_role(&mut self, peer: PeerId, connection: ConnectionId) {
+        self.requests.remove_role(peer, connection);
+        self.request_owner_tick();
+    }
+
+    pub(super) fn close_connection_requests(&mut self, peer: PeerId, connection: ConnectionId) {
+        self.requests.close_connection(peer, connection);
+        self.request_owner_tick();
     }
 
     fn packet(&mut self, event: rpc::Event<Datagram, ()>) {
@@ -541,22 +621,13 @@ impl Core {
                 message: rpc::Message::Response { request_id, .. },
                 ..
             } => {
-                if let Some(Request {
-                    reply: Some(reply), ..
-                }) = self.requests.remove(&request_id)
-                {
-                    let _ = reply.send(Ok(()));
-                }
+                self.requests.finish(&request_id, Ok(()));
             }
             rpc::Event::OutboundFailure {
                 request_id, error, ..
             } => {
-                if let Some(Request {
-                    reply: Some(reply), ..
-                }) = self.requests.remove(&request_id)
-                {
-                    let _ = reply.send(Err(io::Error::other(error)));
-                }
+                self.requests
+                    .finish(&request_id, Err(io::Error::other(error)));
             }
             rpc::Event::InboundFailure { .. } | rpc::Event::ResponseSent { .. } => {}
         }

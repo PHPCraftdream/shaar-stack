@@ -10,7 +10,7 @@ PACKAGES = {
 }
 SUITES = {
     "protocols": ("shaar-p2p", ("carrier::driver::protocols::", "infrastructure::tests::identification::")),
-    "carrier-core": ("shaar-p2p", ("carrier::driver::tests::", "carrier::driver::boundary::tests::")),
+    "carrier-core": ("shaar-p2p", ("carrier::driver::tests::", "carrier::driver::boundary::tests::", "carrier::driver::events::request_owner::tests::")),
     "infrastructure": ("shaar-p2p", ("carrier::driver::infrastructure::tests::",)),
     "carrier-admission": ("shaar-p2p", ("carrier_destination_",)),
     "roles": ("shaar-p2p", ("discovery::roles::",)),
@@ -46,6 +46,9 @@ RULES = (
     ("crates/shaar-p2p/src/carrier/driver/runtime/infrastructure", ("infrastructure",)),
     ("crates/shaar-p2p/src/carrier/driver/runtime/boundary", ("carrier-core",)),
     ("crates/shaar-p2p/src/carrier/driver/runtime/events.rs", ("carrier-core",)),
+    ("crates/shaar-p2p/src/carrier/driver/runtime/events/mod.rs", ("carrier-core",)),
+    ("crates/shaar-p2p/src/carrier/driver/runtime/events/request_owner.rs", ("carrier-core",)),
+    ("crates/shaar-p2p/src/carrier/driver/runtime/events/request_owner_tests.rs", ("carrier-core",)),
     ("crates/shaar-p2p/src/carrier/driver/runtime/setup.rs", ("carrier-core",)),
     ("crates/shaar-p2p/src/carrier/driver/mod.rs", ("carrier-core",)),
     ("crates/shaar-p2p/src/carrier/driver/admission_tests/", ("carrier-admission",)),

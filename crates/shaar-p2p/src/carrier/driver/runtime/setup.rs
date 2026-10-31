@@ -175,7 +175,7 @@ impl Carrier {
             native_listener,
             relay,
             pending: HashMap::with_capacity(PENDING_LIMIT),
-            requests: HashMap::with_capacity(REQUEST_LIMIT),
+            requests: super::events::request_owner::Owner::default(),
             closing: HashMap::with_capacity(super::PEER_LIMIT + super::RELAY_LIMIT),
         };
         core.native_listener = core

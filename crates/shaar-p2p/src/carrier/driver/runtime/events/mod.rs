@@ -1,4 +1,6 @@
 use super::*;
+#[path = "request_owner.rs"]
+pub(in crate::carrier::driver) mod request_owner;
 
 impl Core {
     pub(super) fn event(&mut self, event: SwarmEvent<BehaviourEvent>) -> io::Result<()> {
@@ -111,6 +113,7 @@ impl Core {
                 ..
             } => {
                 self.relay_control_closed(peer_id, connection_id);
+                self.close_connection_requests(peer_id, connection_id);
                 self.publish_links();
                 if num_established == 0
                     && let Some(Closing {
@@ -133,6 +136,7 @@ impl Core {
             }
             _ => {} // Other notifications add no carrier state.
         }
+        self.request_owner_tick();
         Ok(())
     }
 
