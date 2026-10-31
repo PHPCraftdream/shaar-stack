@@ -410,7 +410,33 @@ async fn two_authenticated_owners_promote_bounded_concurrent_bursts_both_directi
         }));
         let a_addr = ah.local_addr().await.unwrap();
         let b_addr = bh.local_addr().await.unwrap();
-        ah.connect(pb, b_addr).await.unwrap();
+        let connection_a = ah.connect(pb, b_addr).await.unwrap();
+        let mut links_a = ah.links();
+        let mut links_b = bh.links();
+        for (links, peer, connection) in [
+            (&mut links_a, pb, Some(connection_a)),
+            (&mut links_b, pa, None),
+        ] {
+            loop {
+                let link = {
+                    let snapshot = links.borrow_and_update();
+                    if let Some(link) = snapshot.iter().find(|link| link.peer == peer) {
+                        assert_eq!(snapshot.len(), 1);
+                        Some(*link)
+                    } else {
+                        None
+                    }
+                };
+                if let Some(link) = link {
+                    assert_eq!(link.route, Route::Direct);
+                    if let Some(connection) = connection {
+                        assert_eq!(link.connection, connection);
+                    }
+                    break;
+                }
+                links.changed().await.expect("carrier link watch closed");
+            }
+        }
 
         const BURST: usize = 8;
         let outbound_a = (0..BURST)
