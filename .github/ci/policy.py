@@ -135,6 +135,11 @@ def select(paths, *, full=False):
         elif path in {"LICENSE-MIT", "LICENSE-APACHE"}:
             flags["license"] = True
             owned = ["license"]
+        elif path == "Cargo.toml":
+            for package in PACKAGES:
+                add(target(package))
+            flags["license"] = True
+            owned = ["workspace-manifest"]
         elif path == "Cargo.lock" and manifest_packages:
             flags["license"] = True
             for package in sorted(manifest_packages):

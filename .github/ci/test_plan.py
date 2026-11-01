@@ -50,6 +50,16 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "matched no runnable cases"):
             RUNNER.selected_cases("network::unrelated: test\n", "", [selector])
 
+    def test_workspace_manifest_has_explicit_package_ownership_without_full_campaign(self):
+        result = POLICY.select(["Cargo.toml"])
+        self.assertEqual(result["targets"], sorted(
+            (POLICY.target(package) for package in POLICY.PACKAGES),
+            key=lambda target: (target["package"], target["kind"], target["name"])))
+        self.assertEqual(result["suites"], ["workspace-manifest"])
+        self.assertTrue(result["selection"]["license"])
+        self.assertFalse(result["selection"]["full"])
+        self.assertFalse(result["selection"]["backend"])
+
     def test_native_discovery_wiring_and_manifest_lock_contracts_are_wide(self):
         module = POLICY.select(["crates/shaar/src/lib.rs", "crates/shaar/src/native_discovery/mod.rs"])
         self.assertEqual(module["targets"], [POLICY.target("shaar", ("", "native_discovery::"))])
