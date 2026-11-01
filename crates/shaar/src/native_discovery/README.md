@@ -5,6 +5,10 @@
 
 This private SDK implementation verifies pkarr signed packets for the caller-supplied exact `EndpointId`, strictly validates a bounded native DNS/TXT profile, and transfers verified observations into the bounded in-memory `PolicyOwner`. It does not implement publication, DHT networking, dialing, actor ownership, cancellation, refresh, shutdown, or consumer integration; no P09/runtime-readiness claim is made.
 
+## Pending actor boundary
+
+The private address validator, signed decoder, and policy owner remain compiled in production but are not yet connected to the P09 actor. Production-only, item-scoped `dead_code` expectations mark the current pending boundary; `cfg(test)` profiles retain normal dead-code diagnostics. Keep expectations on diagnosed items only so newly unused items remain visible. Remove an item's expectation when actor wiring makes it live; do not treat these expectations as P09 integration or runtime-readiness evidence.
+
 ## Upstream APIs and strict profile
 
 Pinned source receipts: simple-dns 0.12.0 archive SHA-256 `2b6f884fa9a8d48101774bfbd3aeb81e968dd22cffd19a372da69f183db22c1a`, matching root path-patched lock identity; upstream declares MIT and the prepared tree retains its original `LICENSE` (not relicensed). iroh-dns 1.3.0 archive SHA-256 `80276761b56e904e26ea71d0863beef0bb8d5ab6b639cbd1338e4b615209e3a1`.

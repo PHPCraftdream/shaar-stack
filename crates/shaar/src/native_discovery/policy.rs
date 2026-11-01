@@ -2,26 +2,74 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
-use super::codec::DecodedRecord;
+use super::codec::{DecodedRecord, PolicyRecordParts};
 use iroh_base::EndpointId;
 use std::{collections::BTreeMap, net::SocketAddr};
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_KEYS: usize = 64;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_RECORD_BYTES: usize = 1104;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_BATCH_RECORDS: usize = 32;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_BATCH_BYTES: usize = 1104 * 32;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_ADDRESSES: usize = 4;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_METADATA_ENTRIES: usize = 1;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_USER_DATA_BYTES: usize = 245;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_AGE_US: i64 = 300_000_000;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_FUTURE_US: i64 = 30_000_000;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_CACHE_US: u64 = 30_000_000;
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ClockSample {
     pub(super) wall_us: i64,
     pub(super) monotonic_us: u64,
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RecordObservation {
     pub(super) sequence: i64,
@@ -51,8 +99,14 @@ impl RecordObservation {
 }
 impl From<DecodedRecord> for RecordObservation {
     fn from(record: DecodedRecord) -> Self {
-        let (key, sequence, signed_at_us, signed_bytes, addresses, metadata) =
-            record.into_policy_parts();
+        let PolicyRecordParts {
+            key,
+            signed_sequence: sequence,
+            signed_at_us,
+            signed_bytes,
+            canonical_addresses: addresses,
+            metadata,
+        } = record.into_policy_parts();
         Self {
             sequence,
             signed_at_us,
@@ -63,12 +117,20 @@ impl From<DecodedRecord> for RecordObservation {
         }
     }
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum QuerySource {
     Network,
     CacheOnly,
     LocalActivePut,
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Clone, Debug)]
 pub(super) struct CompletedQuery {
     source: QuerySource,
@@ -76,6 +138,10 @@ pub(super) struct CompletedQuery {
     records: Vec<RecordObservation>,
 }
 impl CompletedQuery {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn new(
         source: QuerySource,
         completed_at: ClockSample,
@@ -88,6 +154,10 @@ impl CompletedQuery {
         }
     }
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RecordError {
     Unauthorized,
@@ -104,6 +174,10 @@ pub(super) enum RecordError {
     InvalidObservation,
     BatchTooLarge,
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Clone, Debug)]
 struct PeerState {
     winner: Option<RecordObservation>,
@@ -111,6 +185,10 @@ struct PeerState {
     cache_deadline: Option<u64>,
 }
 impl PeerState {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     fn new() -> Self {
         Self {
             winner: None,
@@ -119,6 +197,10 @@ impl PeerState {
         }
     }
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Debug)]
 pub(super) struct PolicyOwner {
     peers: BTreeMap<EndpointId, PeerState>,
@@ -126,6 +208,10 @@ pub(super) struct PolicyOwner {
     clock_fault: bool,
 }
 impl PolicyOwner {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn new() -> Self {
         Self {
             peers: BTreeMap::new(),
@@ -133,6 +219,10 @@ impl PolicyOwner {
             clock_fault: false,
         }
     }
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn admit_expected_key(&mut self, key: EndpointId) -> Result<(), RecordError> {
         if self.clock_fault {
             return Err(RecordError::ClockFault);
@@ -146,6 +236,10 @@ impl PolicyOwner {
         self.peers.insert(key, PeerState::new());
         Ok(())
     }
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn complete_query(
         &mut self,
         key: EndpointId,
@@ -272,6 +366,10 @@ impl PolicyOwner {
         peer.cache_deadline = Some(deadline);
         Ok(())
     }
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn lookup_cache(
         &mut self,
         key: EndpointId,
@@ -290,6 +388,10 @@ impl PolicyOwner {
         check_freshness(now.wall_us, winner.signed_at_us)?;
         Ok(())
     }
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn query_required(
         &mut self,
         key: EndpointId,
@@ -311,6 +413,10 @@ impl PolicyOwner {
         }
         Ok(check_freshness(now.wall_us, winner.signed_at_us).is_err())
     }
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn addresses(
         &mut self,
         key: EndpointId,
@@ -326,6 +432,10 @@ impl PolicyOwner {
             .ok_or(RecordError::CacheMiss)?
             .addresses)
     }
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn metadata(
         &mut self,
         key: EndpointId,
@@ -341,18 +451,23 @@ impl PolicyOwner {
             .ok_or(RecordError::CacheMiss)?
             .metadata)
     }
+    #[cfg(test)]
     pub(super) fn cache_deadline(&self, key: EndpointId) -> Option<u64> {
         self.peers.get(&key)?.cache_deadline
     }
+    #[cfg(test)]
     pub(super) fn signed_timestamp(&self, key: EndpointId) -> Option<i64> {
         Some(self.peers.get(&key)?.winner.as_ref()?.signed_at_us)
     }
+    #[cfg(test)]
     pub(super) fn winner_sequence(&self, key: EndpointId) -> Option<i64> {
         Some(self.peers.get(&key)?.winner.as_ref()?.sequence)
     }
+    #[cfg(test)]
     pub(super) fn winner_bytes(&self, key: EndpointId) -> Option<&[u8]> {
         Some(&self.peers.get(&key)?.winner.as_ref()?.signed_bytes)
     }
+    #[cfg(test)]
     pub(super) fn has_conflict(&self, key: EndpointId, sequence: i64) -> bool {
         self.peers.get(&key).is_some_and(|peer| {
             peer.conflict
@@ -362,14 +477,20 @@ impl PolicyOwner {
                     .is_some_and(|winner| winner.sequence == sequence)
         })
     }
+    #[cfg(test)]
     pub(super) fn authorized_peer_count(&self) -> usize {
         self.peers.len()
     }
+    #[cfg(test)]
     pub(super) fn expire_cache(&mut self, key: EndpointId) {
         if let Some(peer) = self.peers.get_mut(&key) {
             peer.cache_deadline = None;
         }
     }
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn observe_clock(&mut self, now: ClockSample) -> Result<(), RecordError> {
         if self.clock_fault {
             return Err(RecordError::ClockFault);
@@ -387,6 +508,10 @@ impl PolicyOwner {
         Ok(())
     }
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 pub(super) fn check_freshness(now_wall_us: i64, signed_at_us: i64) -> Result<u64, RecordError> {
     if signed_at_us < 0 {
         return Err(RecordError::TooOld);
@@ -402,9 +527,17 @@ pub(super) fn check_freshness(now_wall_us: i64, signed_at_us: i64) -> Result<u64
     }
     Ok(MAX_AGE_US.saturating_sub(delta.max(0)) as u64)
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 pub(super) fn sequence_from_unsigned(value: u64) -> Result<i64, RecordError> {
     i64::try_from(value).map_err(|_| RecordError::InvalidSequence)
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 pub(super) fn sequence_from_signed(value: i64) -> Result<i64, RecordError> {
     if value < 0 {
         Err(RecordError::InvalidSequence)

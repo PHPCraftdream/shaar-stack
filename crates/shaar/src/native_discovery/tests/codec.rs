@@ -25,13 +25,13 @@ fn strict_profile_helper_rejects_untrusted_dns_encodings_without_claiming_signat
     let key = id(PUB1);
     let valid = signed(vec![ip("127.0.0.1:9000".parse().expect("socket literal"))]);
     let dns = &valid[104..];
-    let (raw, canonical, metadata) = parse_dns_profile(dns, key).expect("valid profile");
+    let profile = parse_dns_profile(dns, key).expect("valid profile");
     assert_eq!(
-        raw,
+        profile.raw_addresses,
         ["127.0.0.1:9000".parse::<SocketAddr>().expect("socket")]
     );
-    assert_eq!(canonical, raw);
-    assert!(metadata.is_empty());
+    assert_eq!(profile.canonical_addresses, profile.raw_addresses);
+    assert!(profile.metadata.is_empty());
     assert!(parse_dns_profile(&dns[..dns.len() - 1], key).is_err());
     let mut trailing = dns.to_vec();
     trailing.push(0);
@@ -104,10 +104,9 @@ fn strict_profile_helper_rejects_untrusted_dns_encodings_without_claiming_signat
     let fragment_dns = fragment_packet
         .build_bytes_vec_compressed()
         .expect("serialize fragmented TXT");
-    let (fragment_raw, _, _) =
-        parse_dns_profile(&fragment_dns, key).expect("fragment concatenates");
+    let fragment_profile = parse_dns_profile(&fragment_dns, key).expect("fragment concatenates");
     assert_eq!(
-        fragment_raw,
+        fragment_profile.raw_addresses,
         ["127.0.0.1:9000".parse::<SocketAddr>().expect("socket")]
     );
 
@@ -137,9 +136,9 @@ fn strict_profile_helper_rejects_untrusted_dns_encodings_without_claiming_signat
     let equals_dns = equals_packet
         .build_bytes_vec_compressed()
         .expect("TXT packet");
-    let (_, _, metadata) = parse_dns_profile(&equals_dns, key).expect("concatenated TXT");
+    let profile = parse_dns_profile(&equals_dns, key).expect("concatenated TXT");
     assert_eq!(
-        metadata,
+        profile.metadata,
         [("user-data".to_owned(), "opaque=tail".to_owned())]
     );
 
@@ -158,9 +157,9 @@ fn strict_profile_helper_rejects_untrusted_dns_encodings_without_claiming_signat
         simple_dns::rdata::RData::TXT(utf8_fragments),
     ));
     let utf8_dns = utf8_packet.build_bytes_vec_compressed().expect("UTF-8 TXT");
-    let (_, _, utf8_metadata) = parse_dns_profile(&utf8_dns, key).expect("validate after concat");
+    let profile = parse_dns_profile(&utf8_dns, key).expect("validate after concat");
     assert_eq!(
-        utf8_metadata,
+        profile.metadata,
         [("user-data".to_owned(), "split=é".to_owned())]
     );
 

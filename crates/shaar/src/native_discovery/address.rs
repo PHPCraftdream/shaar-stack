@@ -5,8 +5,16 @@
 use iroh_base::TransportAddr;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV6};
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_ADDRESSES: usize = 4;
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SnapshotError {
     TooManyAddresses,
@@ -15,10 +23,18 @@ pub(super) enum SnapshotError {
     Oversize,
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 pub(super) fn validate_snapshot(addrs: &[TransportAddr]) -> Result<Vec<SocketAddr>, SnapshotError> {
     validate_transport_addresses(addrs)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 pub(super) fn validate_transport_addresses(
     addrs: &[TransportAddr],
 ) -> Result<Vec<SocketAddr>, SnapshotError> {
@@ -36,10 +52,18 @@ pub(super) fn validate_transport_addresses(
     validate_addresses(&sockets)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 pub(super) fn validate_addresses(addrs: &[SocketAddr]) -> Result<Vec<SocketAddr>, SnapshotError> {
     validate_addresses_with_snapshot(addrs).map(|(_, canonical)| canonical)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 pub(super) fn validate_addresses_with_snapshot(
     addrs: &[SocketAddr],
 ) -> Result<(Vec<SocketAddr>, Vec<SocketAddr>), SnapshotError> {
@@ -60,6 +84,10 @@ pub(super) fn validate_addresses_with_snapshot(
     Ok((raw, canonical))
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 fn check_raw_count(count: usize) -> Result<(), SnapshotError> {
     if count > MAX_ADDRESSES {
         Err(SnapshotError::TooManyAddresses)
@@ -67,6 +95,10 @@ fn check_raw_count(count: usize) -> Result<(), SnapshotError> {
         Ok(())
     }
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 fn valid_native(address: SocketAddr) -> bool {
     let ip = address.ip().to_canonical();
     address.port() != 0
@@ -78,6 +110,10 @@ fn valid_native(address: SocketAddr) -> bool {
             IpAddr::V6(v6) => v6.octets()[..6] != [0xfd, 0x15, 0x07, 0x0a, 0x51, 0x0b],
         }
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 fn portable_v6(address: SocketAddr) -> bool {
     match address {
         SocketAddr::V4(_) => true,
@@ -86,10 +122,18 @@ fn portable_v6(address: SocketAddr) -> bool {
         }
     }
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 fn is_v6_link_local(ip: &std::net::Ipv6Addr) -> bool {
     let octets = ip.octets();
     octets[0] == 0xfe && octets[1] & 0xc0 == 0x80
 }
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 fn canonical_socket(address: SocketAddr) -> SocketAddr {
     match address {
         SocketAddr::V6(v6) => match v6.ip().to_ipv4_mapped() {

@@ -8,10 +8,26 @@ use iroh_dns::pkarr::SignedPacket;
 use simple_dns::{CLASS, OPCODE, Packet, PacketFlag, RCODE, header_buffer, rdata::RData};
 use std::net::SocketAddr;
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const SIGNED_HEADER_BYTES: usize = 104;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_DNS_BYTES: usize = 1000;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 const MAX_TXT_RECORDS: usize = 32;
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct DecodedRecord {
     pub(super) key: EndpointId,
@@ -23,25 +39,26 @@ pub(super) struct DecodedRecord {
     metadata: Vec<(String, String)>,
 }
 impl DecodedRecord {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
     pub(super) fn addresses(&self) -> &[SocketAddr] {
         &self.canonical_addresses
     }
+    #[cfg(test)]
     pub(super) fn raw_addresses(&self) -> &[SocketAddr] {
         &self.raw_addresses
     }
+    #[cfg(test)]
     pub(super) fn metadata(&self) -> &[(String, String)] {
         &self.metadata
     }
-    pub(super) fn into_policy_parts(
-        self,
-    ) -> (
-        EndpointId,
-        i64,
-        i64,
-        Vec<u8>,
-        Vec<SocketAddr>,
-        Vec<(String, String)>,
-    ) {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
+    pub(super) fn into_policy_parts(self) -> PolicyRecordParts {
         let DecodedRecord {
             key,
             signed_sequence,
@@ -51,17 +68,46 @@ impl DecodedRecord {
             metadata,
             ..
         } = self;
-        (
+        PolicyRecordParts {
             key,
             signed_sequence,
             signed_at_us,
             signed_bytes,
             canonical_addresses,
             metadata,
-        )
+        }
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
+#[derive(Debug)]
+pub(super) struct DnsProfile {
+    pub(super) raw_addresses: Vec<SocketAddr>,
+    pub(super) canonical_addresses: Vec<SocketAddr>,
+    pub(super) metadata: Vec<(String, String)>,
+}
+
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
+#[derive(Debug)]
+pub(super) struct PolicyRecordParts {
+    pub(super) key: EndpointId,
+    pub(super) signed_sequence: i64,
+    pub(super) signed_at_us: i64,
+    pub(super) signed_bytes: Vec<u8>,
+    pub(super) canonical_addresses: Vec<SocketAddr>,
+    pub(super) metadata: Vec<(String, String)>,
+}
+
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DecodeError {
     InvalidPacket,
@@ -83,6 +129,10 @@ impl From<SnapshotError> for DecodeError {
 }
 
 /// Verify the upstream signed envelope, then enforce this leaf's strict DNS/TXT profile.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 pub(super) fn decode_record(
     bytes: &[u8],
     expected: EndpointId,
@@ -123,28 +173,33 @@ pub(super) fn decode_record(
         return Err(DecodeError::InvalidSequence);
     }
 
-    let (raw_addresses, canonical_addresses, metadata) = parse_dns_profile(dns, key)?;
+    let profile = parse_dns_profile(dns, key)?;
     Ok(DecodedRecord {
         key,
         signed_sequence: timestamp,
         signed_at_us: timestamp,
         signed_bytes: bytes.to_vec(),
-        raw_addresses,
-        canonical_addresses,
-        metadata,
+        raw_addresses: profile.raw_addresses,
+        canonical_addresses: profile.canonical_addresses,
+        metadata: profile.metadata,
     })
 }
 
 /// Parse a message with the dependency's strict parser, which rejects trailing bytes.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
 fn parse_complete_dns(dns: &[u8]) -> Result<Packet<'_>, DecodeError> {
     Packet::parse_exact(dns).map_err(|_| DecodeError::InvalidPacket)
 }
 
 /// Parse and validate DNS profile bytes; this helper does not authenticate signatures.
-pub(super) fn parse_dns_profile(
-    dns: &[u8],
-    key: EndpointId,
-) -> Result<(Vec<SocketAddr>, Vec<SocketAddr>, Vec<(String, String)>), DecodeError> {
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
+pub(super) fn parse_dns_profile(dns: &[u8], key: EndpointId) -> Result<DnsProfile, DecodeError> {
     if dns.len() > MAX_DNS_BYTES || dns.len() < 12 || dns[..2] != [0, 0] || dns[2..4] != [0x80, 0] {
         return Err(DecodeError::InvalidPacket);
     }
@@ -226,5 +281,9 @@ pub(super) fn parse_dns_profile(
     }
     let (raw_addresses, canonical_addresses) =
         validate_addresses_with_snapshot(&addresses).map_err(DecodeError::from)?;
-    Ok((raw_addresses, canonical_addresses, metadata))
+    Ok(DnsProfile {
+        raw_addresses,
+        canonical_addresses,
+        metadata,
+    })
 }
