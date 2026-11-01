@@ -13,7 +13,7 @@ import sys
 import tempfile
 
 sys.dont_write_bytecode = True
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 import prepare
 

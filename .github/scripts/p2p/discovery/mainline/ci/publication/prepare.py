@@ -23,7 +23,7 @@ def sha(data: bytes) -> str:
 
 
 def recipe() -> dict[str, str]:
-    names = ("prepare.py", "runner.py", "test_source.py", "graph.py", "ci.py", "tests/publication_tests.rs")
+    names = ("prepare.py", "runner.py", "test_source.py", "graph.py", "execution/ci.py", "execution/verify.sh", "tests/publication_tests.rs")
     return {name: sha((HERE / name).read_bytes()) for name in names}
 
 

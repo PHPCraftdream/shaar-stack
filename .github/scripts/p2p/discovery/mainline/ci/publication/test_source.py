@@ -14,7 +14,7 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import ci as fixture_ci
+from execution import ci as fixture_ci
 import graph
 import prepare
 import runner
@@ -169,7 +169,7 @@ class RecipeIntegrity(unittest.TestCase):
 
     def test_recipe_binds_owned_sources_and_policy(self):
         receipt = prepare.recipe()
-        expected = {"prepare.py", "runner.py", "test_source.py", "graph.py", "ci.py", "tests/publication_tests.rs"}
+        expected = {"prepare.py", "runner.py", "test_source.py", "graph.py", "execution/ci.py", "execution/verify.sh", "tests/publication_tests.rs"}
         self.assertEqual(set(receipt), expected)
         for name, value in receipt.items():
             self.assertEqual(value, hashlib.sha256((prepare.HERE / name).read_bytes()).hexdigest())

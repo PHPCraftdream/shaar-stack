@@ -39,9 +39,12 @@ class WorkflowTests(unittest.TestCase):
     def test_publication_has_own_runner_archives_and_always_evidence(self):
         steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))
         runner = steps["Verify supplied timestamp encoder against archive graph"]
-        self.assertIn("python -I .github/scripts/p2p/discovery/mainline/ci/publication/ci.py", runner)
-        self.assertIn("https://static.crates.io/crates/iroh-dns/iroh-dns-1.3.0.crate", runner)
-        self.assertIn("https://static.crates.io/crates/simple-dns/simple-dns-0.12.0.crate", runner)
+        script = ".github/scripts/p2p/discovery/mainline/ci/publication/execution/verify.sh"
+        self.assertIn("bash " + script, runner)
+        execution = (ROOT / script).read_text(encoding="utf-8")
+        self.assertIn("python -I .github/scripts/p2p/discovery/mainline/ci/publication/execution/ci.py", execution)
+        self.assertIn("https://static.crates.io/crates/iroh-dns/iroh-dns-1.3.0.crate", execution)
+        self.assertIn("https://static.crates.io/crates/simple-dns/simple-dns-0.12.0.crate", execution)
         self.assertNotIn("cargo test --workspace", runner)
         evidence = steps["Preserve supplied timestamp encoder evidence"]
         self.assertIn("always() && fromJSON(needs.plan.outputs.selection).publication", evidence)
