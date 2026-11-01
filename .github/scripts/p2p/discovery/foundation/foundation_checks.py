@@ -64,7 +64,7 @@ class FoundationGraphChecks(unittest.TestCase):
             foundation.compare(before, after)
 
     def test_exact_product_lock_reverses_only_one_edge(self):
-        repository = Path(__file__).resolve().parents[4]
+        repository = Path(__file__).resolve().parents[5]
         current = (repository / "Cargo.lock").read_bytes().replace(b"\r\n", b"\n")
         original = foundation.original_lock(current)
         self.assertEqual(foundation.original_lock(current.replace(b"\n", b"\r\n")), original)

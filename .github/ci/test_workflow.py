@@ -28,11 +28,31 @@ class WorkflowTests(unittest.TestCase):
             "Verify Kademlia internal retention with the unchanged archive lock": "kad",
             "Verify Noq fatal driver exit and cancellation": "backend",
             "Verify high-PTO shutdown negative control after production proofs": "backend",
+            "Verify mainline lifecycle archive against planned revision": "mainline",
             "cargo test": "full",
         }
         for name, owner in expected.items():
             with self.subTest(step=name):
                 self.assertTrue(steps[name].startswith("\n        if: fromJSON(needs.plan.outputs.selection)." + owner + "\n"))
+
+    def test_mainline_archive_gate_and_prepare_sources_routing(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        steps = named_steps(text)
+        mainline = steps["Verify mainline lifecycle archive against planned revision"]
+        self.assertIn("python -I -m unittest discover -s .github/scripts/p2p/discovery/mainline/ci -p 'test_*.py'", mainline)
+        self.assertIn('"CI_PLAN_JSON"', mainline)
+        self.assertIn('p["head"]', mainline)
+        self.assertIn('p["base"]', mainline)
+        self.assertIn('p["scope"]', mainline)
+        self.assertIn("https://static.crates.io/crates/n0-mainline/n0-mainline-0.7.0.crate", mainline)
+        self.assertIn("--plan-json \"$CI_PLAN_JSON\"", mainline)
+        evidence = steps["Preserve mainline lifecycle evidence"]
+        self.assertIn("always() && fromJSON(needs.plan.outputs.selection).mainline", evidence)
+        self.assertIn("if-no-files-found: error", evidence)
+        prepare = next(step for step in text.split("      - ") if "./.github/actions/prepare-sources" in step)
+        for owner in ("product", "dns", "discovery", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license"):
+            self.assertIn("fromJSON(needs.plan.outputs.selection)." + owner, prepare)
+        self.assertNotIn("selection).mainline", prepare)
 
     def test_full_and_targeted_paths_do_not_both_execute(self):
         steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))

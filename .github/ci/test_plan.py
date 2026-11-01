@@ -189,6 +189,19 @@ class PolicyTests(unittest.TestCase):
                 self.assertFalse(result["selection"]["full"])
                 self.assertFalse(result["selection"]["product"])
 
+    def test_mainline_proofs_select_only_their_owned_domain(self):
+        result = POLICY.select([".github/scripts/p2p/discovery/mainline/checks.py"])
+        self.assertEqual([key for key in POLICY.DOMAINS if result["selection"][key]], ["mainline"])
+        self.assertTrue(result["selection"]["prepare"])
+        self.assertFalse(result["selection"]["rust"])
+        self.assertFalse(result["selection"]["product"])
+        self.assertEqual(result["targets"], [])
+        self.assertEqual(result["suites"], ["mainline"])
+        for other in ("dns", "relay", "sdk"):
+            self.assertFalse(result["selection"][other])
+        with self.assertRaisesRegex(ValueError, "No test impact rule"):
+            POLICY.select([".github/scripts/unowned-mainline.py"])
+
     def test_dependency_proofs_only_follow_changed_dependency_owner(self):
         cases = {".github/scripts/p2p/discovery/resolver/prepare.py": "resolver",
                  ".github/scripts/p2p/discovery/kad/kad.py": "kad",
@@ -317,6 +330,19 @@ class GitTests(unittest.TestCase):
         self.assertTrue(result["selection"]["license"])
         self.assertTrue(result["selection"]["ci_policy"])
         self.assertFalse(result["selection"]["full"])
+
+    def test_mainline_obligation_survives_policy_only_repair_push(self):
+        base = self.commit_file("common.rs", "one")
+        self.git("update-ref", "refs/remotes/ci-upstream/develop", base)
+        failed = self.commit_file(".github/scripts/p2p/discovery/mainline/owner.rs", "mainline obligation")
+        head = self.commit_file(".github/ci/policy.py", "policy repair")
+        result = PLAN.plan("push", self.event(failed, head, "refs/heads/feature"), head)
+        self.assertEqual(result["base"], base)
+        self.assertTrue(result["selection"]["mainline"])
+        self.assertEqual(result["targets"], [])
+        self.assertFalse(result["selection"]["full"])
+        self.assertIn(".github/scripts/p2p/discovery/mainline/owner.rs",
+                      [reason["path"] for reason in result["reasons"]])
 
     def test_missing_history_is_not_a_full_trigger(self):
         head = self.commit_file("docs/new.md", "one")
