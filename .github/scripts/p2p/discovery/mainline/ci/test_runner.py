@@ -29,12 +29,14 @@ class SelectionTests(unittest.TestCase):
         selected, ignored = RUNNER.select_cases(
             listing("owned::tests::run", "actor::owned_tests::run",
                     "common::messages::signed_peer_length_tests::run",
+                    "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run",
                     "owned::tests::skipped", "dht::tests::upstream"),
             listing("owned::tests::skipped"), VERIFY,
         )
         self.assertEqual(selected, [
             "owned::tests::run", "actor::owned_tests::run",
             "common::messages::signed_peer_length_tests::run",
+            "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run",
         ])
         self.assertEqual(ignored, ["owned::tests::skipped"])
 
@@ -52,7 +54,8 @@ class SelectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RUNNER.select_cases(
                 listing("owned::tests::run", "actor::owned_tests::run",
-                        "common::messages::signed_peer_length_tests::run"),
+                        "common::messages::signed_peer_length_tests::run",
+                        "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run"),
                 listing("owned::tests::absent"), VERIFY,
             )
 
@@ -61,14 +64,16 @@ class SelectionTests(unittest.TestCase):
             RUNNER.select_cases(
                 listing("owned::tests::run", "owned::tests::run",
                         "actor::owned_tests::run",
-                        "common::messages::signed_peer_length_tests::run"), "", VERIFY
+                        "common::messages::signed_peer_length_tests::run",
+                        "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run"), "", VERIFY
             )
 
     def test_rejects_prefix_with_only_ignored_cases(self):
         with self.assertRaises(ValueError):
             RUNNER.select_cases(
                 listing("owned::tests::skipped", "actor::owned_tests::run",
-                        "common::messages::signed_peer_length_tests::run"),
+                        "common::messages::signed_peer_length_tests::run",
+                        "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run"),
                 listing("owned::tests::skipped"), VERIFY,
             )
 

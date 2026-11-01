@@ -26,6 +26,10 @@ MAX_TOTAL = 32 * 1024 * 1024
 HERE = Path(__file__).resolve().parent
 TESTS = HERE / "tests"
 SOURCE = "src/common/messages.rs"
+INGRESS_TESTS = "src/common/messages/ingress_tests.rs"
+SOCKET_INGRESS_TESTS = "src/actor/socket/ingress_tests.rs"
+INGRESS_TEST_MODULE = '\n\n#[cfg(test)]\n#[path = "messages/ingress_tests.rs"]\nmod ingress_tests;\n'
+SOCKET_INGRESS_TEST_MODULE = '\n\n#[cfg(test)]\n#[path = "socket/ingress_tests.rs"]\nmod ingress_tests;\n'
 OLD_GUARD = "    if !bytes.len().is_multiple_of(104) {\n        return Err(DecodeMessageError::InvalidSignedPeersEncodingLength);\n    }"
 NEW_GUARD = "    if bytes.len() != 104 {\n        return Err(DecodeMessageError::InvalidSignedPeersEncodingLength);\n    }"
 TEST_MODULE = '\n\n#[cfg(test)]\n#[path = "messages/signed_peer_length_tests.rs"]\nmod signed_peer_length_tests;\n'
@@ -46,9 +50,10 @@ def hashes(files: dict[str, bytes]) -> dict[str, str]:
 
 def load_edits(filename: str) -> dict[str, list[tuple[str, str]]]:
     path = (HERE / filename).resolve()
-    if path.parent != HERE or path.name != filename:
+    if (filename not in ("numeric.py", "lifetime.py", "ci/ingress.py")
+            or path != HERE / filename or not path.is_relative_to(HERE)):
         raise ValueError("invalid fixed edit-module path")
-    name = "_mainline_" + filename.removesuffix(".py")
+    name = "_mainline_" + filename.removesuffix(".py").replace("/", "_")
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ValueError(f"cannot load fixed edit module {filename}")
@@ -62,7 +67,7 @@ def load_edits(filename: str) -> dict[str, list[tuple[str, str]]]:
 
 def edit_map() -> dict[str, list[tuple[str, str]]]:
     merged: dict[str, list[tuple[str, str]]] = {}
-    for module in ("numeric.py", "lifetime.py"):
+    for module in ("numeric.py", "lifetime.py", "ci/ingress.py"):
         for path, pairs in load_edits(module).items():
             merged.setdefault(path, []).extend(pairs)
     return merged
@@ -70,7 +75,9 @@ def edit_map() -> dict[str, list[tuple[str, str]]]:
 
 def recipe() -> dict[str, str]:
     names = ("prepare.py", "tests/regressions.rs", "numeric.py", "lifetime.py",
-             "owner.rs", "tests/lifecycle_tests.rs", "tests/actor_tests.rs")
+             "owner.rs", "tests/lifecycle_tests.rs", "tests/actor_tests.rs",
+             "ci/ingress.py", "ci/bencode/prepare.py", "ci/bencode/edits.py",
+             "tests/ingress_tests.rs", "tests/udp_ingress_tests.rs")
     return {name: digest((HERE / name).read_bytes()) for name in names}
 
 
@@ -169,16 +176,29 @@ def reverse(files: dict[str, bytes], edits: dict[str, list[tuple[str, str]]]) ->
         OWNER: (HERE / "owner.rs").read_bytes() + OWNER_SUFFIX.encode("utf-8"),
         LIFECYCLE: (TESTS / "lifecycle_tests.rs").read_bytes(),
         ACTOR_TESTS: (TESTS / "actor_tests.rs").read_bytes(),
+        INGRESS_TESTS: (TESTS / "ingress_tests.rs").read_bytes(),
+        SOCKET_INGRESS_TESTS: (TESTS / "udp_ingress_tests.rs").read_bytes(),
     }
     for path, expected in expected_generated.items():
         if restored.get(path) != expected:
             raise ValueError(f"generated source content mismatch: {path}")
     for path in expected_generated:
         del restored[path]
-    owner = restored.get("src/lib.rs")
-    if owner is None:
-        raise ValueError("prepared lib.rs missing")
-    # The owner module declaration and signed-peer additions are restored by exact edits below.
+    data = restored.get(SOURCE)
+    if data is None:
+        raise ValueError("signed-peer source missing")
+    text = data.decode("utf-8")
+    if text.count(INGRESS_TEST_MODULE) != 1:
+        raise ValueError("prepared ingress module shape mismatch")
+    text = text.replace(INGRESS_TEST_MODULE, "", 1)
+    restored[SOURCE] = text.encode("utf-8")
+    data = restored.get("src/actor/socket.rs")
+    if data is None:
+        raise ValueError("prepared socket source missing")
+    text = data.decode("utf-8")
+    if text.count(SOCKET_INGRESS_TEST_MODULE) != 1:
+        raise ValueError("prepared socket ingress module shape mismatch")
+    restored["src/actor/socket.rs"] = text.replace(SOCKET_INGRESS_TEST_MODULE, "", 1).encode("utf-8")
     for path, pairs in reversed(list(edits.items())):
         data = restored.get(path)
         if data is None:
@@ -206,19 +226,25 @@ def transform(files: dict[str, bytes]) -> dict[str, bytes]:
     if OLD_GUARD not in files[SOURCE].decode("utf-8"):
         raise ValueError("signed-peer unique upstream guard anchor mismatch")
     edits = edit_map()
-    if set(edits) & {OWNER, LIFECYCLE, ACTOR_TESTS}:
+    if set(edits) & {OWNER, LIFECYCLE, ACTOR_TESTS, INGRESS_TESTS, SOCKET_INGRESS_TESTS}:
         raise ValueError("generated source collides with upstream edits")
     changed = apply_edits(files, edits)
+    socket_text = changed["src/actor/socket.rs"].decode("utf-8")
+    if SOCKET_INGRESS_TEST_MODULE in socket_text:
+        raise ValueError("socket ingress module already exists")
+    changed["src/actor/socket.rs"] = (socket_text + SOCKET_INGRESS_TEST_MODULE).encode("utf-8")
     text = changed[SOURCE].decode("utf-8")
-    if text.count(OLD_GUARD) != 1 or NEW_GUARD in text or TEST_MODULE in text:
+    if text.count(OLD_GUARD) != 1 or NEW_GUARD in text or TEST_MODULE in text or INGRESS_TEST_MODULE in text:
         raise ValueError("signed-peer unique upstream guard anchor mismatch")
     text = text.replace(OLD_GUARD, NEW_GUARD, 1)
-    changed[SOURCE] = (text + TEST_MODULE).encode("utf-8")
+    changed[SOURCE] = (text + TEST_MODULE + INGRESS_TEST_MODULE).encode("utf-8")
     generated = {
         GENERATED: (TESTS / "regressions.rs").read_bytes(),
         OWNER: (HERE / "owner.rs").read_bytes() + OWNER_SUFFIX.encode("utf-8"),
         LIFECYCLE: (TESTS / "lifecycle_tests.rs").read_bytes(),
         ACTOR_TESTS: (TESTS / "actor_tests.rs").read_bytes(),
+        INGRESS_TESTS: (TESTS / "ingress_tests.rs").read_bytes(),
+        SOCKET_INGRESS_TESTS: (TESTS / "udp_ingress_tests.rs").read_bytes(),
     }
     original_names = {name.casefold() for name in files}
     generated_names = [name.casefold() for name in generated]

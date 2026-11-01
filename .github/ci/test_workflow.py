@@ -62,6 +62,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('p["scope"]', mainline)
         self.assertIn("https://static.crates.io/crates/n0-mainline/n0-mainline-0.7.0.crate", mainline)
         self.assertIn("--plan-json \"$CI_PLAN_JSON\"", mainline)
+        self.assertIn("https://static.crates.io/crates/serde_bencode/serde_bencode-0.2.4.crate", mainline)
+        self.assertIn("--bencode-archive target/mainline-archive/serde_bencode-0.2.4.crate", mainline)
         evidence = steps["Preserve mainline lifecycle evidence"]
         self.assertIn("always() && fromJSON(needs.plan.outputs.selection).mainline", evidence)
         self.assertIn("if-no-files-found: error", evidence)

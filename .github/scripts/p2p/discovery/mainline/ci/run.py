@@ -22,7 +22,7 @@ HERE = Path(__file__).resolve().parent
 MAINLINE = HERE.parent
 ROOT = MAINLINE.parents[4]
 VERIFY_PATH = ROOT / ".github/scripts/p2p/discovery/owned_dns/verify.py"
-PREFIXES = ("owned::tests::", "actor::owned_tests::", "common::messages::signed_peer_length_tests::")
+PREFIXES = ("owned::tests::", "actor::owned_tests::", "common::messages::signed_peer_length_tests::", "common::messages::ingress_tests::", "actor::socket::ingress_tests::")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
@@ -101,6 +101,7 @@ def batches(names: list[str], limit: int = 12000):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", required=True, type=Path)
+    parser.add_argument("--bencode-archive", required=True, type=Path)
     parser.add_argument("--destination", required=True, type=Path)
     plans = parser.add_mutually_exclusive_group(required=True)
     plans.add_argument("--plan", type=Path)
@@ -114,8 +115,17 @@ def main() -> int:
     source = None
     lock = None
     before_lock = None
-    checks_receipt = receipt_dir / "integrity" / "receipt.json"
+    original_lock = None
+    overlay_lock_hash = None
+    overlay_lock = None
+    overlay_verified = False
+    graph = None
+    bencode_prepare = None
+    bencode_root = None
+    bencode_integrity = receipt_dir / "bencode-integrity" / "receipt.json"
+    bencode_integrity_data = None
     integrity_data = None
+    checks_receipt = receipt_dir / "integrity" / "receipt.json"
 
     def command(label, argv, cwd, env=None, structured=False):
         out = evidence / (label + ".stdout.log")
@@ -186,6 +196,29 @@ def main() -> int:
                 or integrity_data.get("archive_sha256") != receipt["archive_sha256"]
                 or integrity_data.get("recipe_sha256") != recipe_sha256):
             raise ValueError("archive integrity checks receipt validation failed")
+        bencode_archive = args.bencode_archive.resolve(strict=True)
+        receipt["bencode_archive_sha256"] = digest(bencode_archive)
+        bencode_checks = MAINLINE / "ci" / "bencode" / "checks.py"
+        _, bencode_status = command("bencode-integrity", [sys.executable, "-I", str(bencode_checks), "--archive", str(bencode_archive),
+                                      "--destination", str(receipt_dir / "bencode-integrity")], MAINLINE)
+        if bencode_integrity.is_file() and not bencode_integrity.is_symlink():
+            bencode_integrity_data = json.loads(bencode_integrity.read_text(encoding="utf-8"))
+        if bencode_status or not isinstance(bencode_integrity_data, dict):
+            raise ValueError("serde_bencode archive integrity checks failed")
+        bencode_spec = importlib.util.spec_from_file_location("mainline_bencode_prepare", MAINLINE / "ci" / "bencode" / "prepare.py")
+        if bencode_spec is None or bencode_spec.loader is None:
+            raise ValueError("fixed serde_bencode preparation recipe unavailable")
+        bencode_prepare = importlib.util.module_from_spec(bencode_spec)
+        bencode_spec.loader.exec_module(bencode_prepare)
+        recipe_hash = hashlib.sha256(json.dumps(bencode_prepare.recipe(), sort_keys=True).encode("utf-8")).hexdigest()
+        receipt["bencode_integrity_validation"] = bool(
+            bencode_integrity_data.get("status") == "passed" and bencode_integrity_data.get("selected")
+            and bencode_integrity_data.get("selected") == bencode_integrity_data.get("executed")
+            and bencode_integrity_data.get("ignored") == []
+            and bencode_integrity_data.get("archive_sha256") == receipt["bencode_archive_sha256"]
+            and bencode_integrity_data.get("recipe_sha256") == recipe_hash)
+        if not receipt["bencode_integrity_validation"]:
+            raise ValueError("serde_bencode integrity receipt validation failed")
         fixture_parent = Path(tempfile.mkdtemp(prefix="shaar-mainline-", dir=os.environ["RUNNER_TEMP"])).resolve()
         if fixture_parent.is_relative_to(ROOT):
             raise ValueError("isolated fixture source directory is inside checkout")
@@ -193,16 +226,62 @@ def main() -> int:
         source = prepare.prepare(archive, prepared_root)
         provenance = prepared_root / "provenance.json"
         prepare.verify(source, archive)
+        bencode_root = bencode_prepare.prepare(bencode_archive, fixture_parent / "bencode")
+        bencode_prepare.verify(bencode_root, bencode_archive)
+        bencode_provenance = bencode_root.parent / "provenance.json"
+        (evidence / "bencode-provenance.json").write_bytes(bencode_provenance.read_bytes())
         (evidence / "provenance.json").write_bytes(provenance.read_bytes())
+        bencode_recipe_files = {name: digest(MAINLINE / "ci" / "bencode" / name) for name in
+                                ("prepare.py", "edits.py", "checks.py", "graph.py", "test_graph.py")}
+        receipt["bencode_audit_recipe_files"] = {
+            name: digest(MAINLINE / "ci" / "bencode" / name)
+            for name in ("prepare.py", "edits.py", "checks.py", "graph.py", "test_graph.py")
+        }
         receipt.update(source=str(source), isolated_source_root=str(fixture_parent), outside_product_workspace=True,
                        provenance_sha256=digest(provenance), recipe_files=prepare.recipe(),
-                       source_sha256=digest(source / "src/lib.rs"))
+                       source_sha256=digest(source / "src/lib.rs"),
+                       bencode_recipe_files=bencode_recipe_files,
+                       bencode_provenance_sha256=digest(bencode_provenance))
         lock = source / "Cargo.lock"
         if not lock.is_file() or lock.is_symlink():
             raise ValueError("upstream archive is missing its required Cargo.lock")
         before_lock = digest(lock)
         (evidence / "Cargo.lock").write_bytes(lock.read_bytes())
         receipt["lock_sha256_before"] = before_lock
+        graph_spec = importlib.util.spec_from_file_location("mainline_bencode_graph", MAINLINE / "ci" / "bencode" / "graph.py")
+        if graph_spec is None or graph_spec.loader is None:
+            raise ValueError("fixed bencode graph auditor unavailable")
+        graph = importlib.util.module_from_spec(graph_spec)
+        graph_spec.loader.exec_module(graph)
+        original_lock = lock.read_bytes()
+        patch_config = '--config=patch.crates-io.serde_bencode.path=' + json.dumps(str(bencode_root))
+        metadata_text, status = command("metadata-original", ["cargo", "metadata", "--locked", "--format-version", "1",
+            "--manifest-path", str(source / "Cargo.toml")], source, structured=True)
+        if status:
+            raise ValueError("baseline Cargo metadata failed: " + str(status))
+        metadata_before = json.loads(metadata_text)
+        receipt["baseline_metadata_sha256"] = hashlib.sha256(metadata_text.encode("utf-8")).hexdigest()
+        if digest(lock) != before_lock:
+            raise ValueError("baseline Cargo metadata changed the archived lockfile")
+        overlay_lock = graph.make_lock_overlay(original_lock)
+        graph.validate_lock(original_lock, overlay_lock)
+        lock.write_bytes(overlay_lock)
+        overlay_lock_hash = digest(lock)
+        evidence.joinpath("Cargo.lock.overlay").write_bytes(overlay_lock)
+        receipt.update(archived_lock_sha256=before_lock, overlay_lock_sha256=overlay_lock_hash)
+        metadata_args = ["cargo", patch_config, "metadata", "--locked", "--format-version", "1", "--manifest-path", str(source / "Cargo.toml")]
+        metadata_text, status = command("metadata-overlay", metadata_args, source, structured=True)
+        if status:
+            raise ValueError("overlay Cargo metadata failed: " + str(status))
+        metadata_after = json.loads(metadata_text)
+        audit = graph.validate_metadata(metadata_before, metadata_after, source, bencode_root)
+        receipt["graph_validation"] = audit
+        evidence.joinpath("metadata-baseline.json").write_text(json.dumps(metadata_before, indent=2) + "\n", encoding="utf-8")
+        evidence.joinpath("metadata-overlay.json").write_text(json.dumps(metadata_after, indent=2) + "\n", encoding="utf-8")
+        _, graph_test_status = command("bencode-graph-tests", [sys.executable, "-I", "-m", "unittest", "discover", "-s",
+            str(MAINLINE / "ci" / "bencode"), "-p", "test_*.py"], MAINLINE)
+        if graph_test_status:
+            raise ValueError("bencode graph unit tests failed")
 
         toolchain = {}
         for label, argv in (("cargo-version", ["cargo", "--version"]), ("rustc-version", ["rustc", "--version", "--verbose"])):
@@ -211,11 +290,7 @@ def main() -> int:
             if status:
                 raise ValueError(label + " failed")
         receipt["toolchain"] = toolchain
-        metadata_text, status = command("metadata", ["cargo", "metadata", "--locked", "--format-version", "1",
-            "--manifest-path", str(source / "Cargo.toml")], source, structured=True)
-        if status:
-            raise ValueError("Cargo metadata failed: " + str(status))
-        metadata = json.loads(metadata_text)
+        metadata = metadata_after
         root_manifest = str((source / "Cargo.toml").resolve())
         root_packages = [p for p in metadata.get("packages", []) if p.get("name") == "n0-mainline" and p.get("version") == "0.7.0"
                          and isinstance(p.get("manifest_path"), str) and str(Path(p["manifest_path"]).resolve()) == root_manifest]
@@ -230,11 +305,11 @@ def main() -> int:
 
         target = receipt_dir / "build"
         env = dict(os.environ, CARGO_TARGET_DIR=str(target))
-        normal_build = ["cargo", "build", "--locked", "--manifest-path", str(source / "Cargo.toml"), "--lib", "--message-format=json"]
+        normal_build = ["cargo", patch_config, "build", "--locked", "--manifest-path", str(source / "Cargo.toml"), "--lib", "--message-format=json"]
         _, status = command("normal-build", normal_build, source, env, structured=True)
         if status:
             raise ValueError("isolated normal library build failed: " + str(status))
-        cargo = ["cargo", "test", "--locked", "--manifest-path", str(source / "Cargo.toml"), "--lib", "--no-run", "--message-format=json"]
+        cargo = ["cargo", patch_config, "test", "--locked", "--manifest-path", str(source / "Cargo.toml"), "--lib", "--no-run", "--message-format=json"]
         build_text, status = command("build", cargo, source, env, structured=True)
         if status:
             raise ValueError("isolated library test compilation failed: " + str(status))
@@ -278,22 +353,67 @@ def main() -> int:
             receipt["executed"].extend(verified)
         if not selected or Counter(receipt["executed"]) != Counter(selected):
             raise ValueError("selected and executed fixture inventories do not match required receipt")
-        if digest(lock) != before_lock:
-            raise ValueError("Cargo.lock changed during isolated build")
+        if digest(lock) != overlay_lock_hash:
+            raise ValueError("Cargo.lock overlay changed during isolated build")
+        receipt["lock_unchanged_during_commands"] = True
+        graph.validate_lock(original_lock, lock.read_bytes())
+        overlay_verified = True
+        receipt["overlay_lock_validation"] = True
+        receipt["lock_unchanged_during_commands"] = True
+        bencode_prepare.verify(bencode_root, bencode_archive)
+        receipt["overlay_lock_sha256_final"] = digest(lock)
+        receipt.update(lock_sha256_after=receipt["overlay_lock_sha256_final"])
+        lock.write_bytes(original_lock)
+        receipt["lock_sha256_after"] = digest(lock)
+        receipt["lock_unchanged"] = receipt["lock_sha256_after"] == before_lock
         prepare.verify(source, archive)
-        receipt.update(lock_sha256_after=digest(lock), status="passed")
+        receipt["source_and_bencode_verified_final"] = True
+        receipt["status"] = "passed"
         return 0
     except Exception as error:
         receipt["error"] = str(error)
         print("Mainline isolated fixture failed: " + str(error), file=sys.stderr)
         return 1
     finally:
-        if lock is not None and lock.is_file():
+        if lock is not None and lock.is_file() and overlay_lock is not None:
+            current_hash = digest(lock)
+            if overlay_verified and current_hash == before_lock:
+                receipt["lock_unchanged_during_commands"] = True
+                receipt["overlay_lock_validation"] = True
+            else:
+                receipt["overlay_lock_sha256_final"] = current_hash
+                receipt["lock_unchanged_during_commands"] = current_hash == overlay_lock_hash
+                try:
+                    receipt["overlay_lock_validation"] = bool(
+                        graph is not None and original_lock is not None
+                        and graph.validate_lock(original_lock, lock.read_bytes()))
+                except Exception as error:
+                    receipt["overlay_lock_validation"] = False
+                    receipt["overlay_lock_validation_error"] = str(error)
+                if current_hash != overlay_lock_hash:
+                    receipt["status"] = "failed"
+                    receipt["error"] = receipt.get("error", "Cargo.lock overlay changed during execution")
+            lock.write_bytes(original_lock)
             receipt["lock_sha256_after"] = digest(lock)
-            receipt["lock_unchanged"] = before_lock == receipt["lock_sha256_after"] if before_lock else False
-        integrity = receipt_dir / "integrity"
-        if checks_receipt.is_file() and not checks_receipt.is_symlink():
-            (evidence / "checks-receipt.json").write_bytes(checks_receipt.read_bytes())
+            receipt["lock_unchanged"] = receipt["lock_sha256_after"] == before_lock
+            if not receipt.get("overlay_lock_validation") or not receipt.get("lock_unchanged_during_commands"):
+                receipt["status"] = "failed"
+        if bencode_integrity.is_file() and not bencode_integrity.is_symlink():
+            evidence.mkdir(parents=True, exist_ok=True)
+            (evidence / "bencode-integrity-receipt.json").write_bytes(bencode_integrity.read_bytes())
+        if bencode_integrity_data is not None:
+            receipt["bencode_integrity_receipt_sha256"] = digest(bencode_integrity) if bencode_integrity.is_file() else None
+        if source is not None and bencode_root is not None and bencode_prepare is not None and receipt.get("status") != "passed":
+            try:
+                prepare.verify(source, archive)
+                bencode_prepare.verify(bencode_root, bencode_archive)
+                receipt["source_and_bencode_verified_final"] = True
+            except Exception as error:
+                receipt["source_and_bencode_verified_final"] = False
+                receipt["final_verification_error"] = str(error)
+        if source is not None:
+            if checks_receipt.is_file() and not checks_receipt.is_symlink():
+                (evidence / "checks-receipt.json").write_bytes(checks_receipt.read_bytes())
         if integrity_data is not None:
             receipt["integrity_validation"] = bool(
                 integrity_data.get("status") == "passed" and integrity_data.get("selected")

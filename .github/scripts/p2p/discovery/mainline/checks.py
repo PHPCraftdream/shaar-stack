@@ -67,6 +67,23 @@ def run(archive: Path, destination: Path, receipt: dict | None = None) -> tuple[
         path = root / prepare.GENERATED
         path.write_bytes(path.read_bytes() + b"\n")
 
+    def altered_ingress_generated(root, receipt):
+        path = root / prepare.INGRESS_TESTS
+        path.write_bytes(path.read_bytes() + b"\n")
+
+    def altered_socket_generated(root, receipt):
+        path = root / prepare.SOCKET_INGRESS_TESTS
+        path.write_bytes(path.read_bytes() + b"\n")
+
+    def altered_ingress_source(root, receipt):
+        path = root / "src/common/messages.rs"
+        path.write_bytes(path.read_bytes() + b"\n")
+
+    def ingress_recipe_drift(root, receipt):
+        data = json.loads(receipt.read_text(encoding="utf-8"))
+        data["recipe_files"]["ci/ingress.py"] = "0" * 64
+        receipt.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
     def coordinated_manifest_mutation(root, receipt):
         manifest = root / "Cargo.toml"
         manifest.write_bytes(manifest.read_bytes() + b"\n# coordinated mutation\n")
@@ -104,6 +121,10 @@ def run(archive: Path, destination: Path, receipt: dict | None = None) -> tuple[
         "receipt-only": lambda: rejected("receipt-only", receipt_only),
         "recipe-drift": lambda: rejected("recipe-drift", recipe_drift),
         "altered-generated": lambda: rejected("altered-generated", altered_generated),
+        "altered-ingress-generated": lambda: rejected("altered-ingress-generated", altered_ingress_generated),
+        "altered-socket-generated": lambda: rejected("altered-socket-generated", altered_socket_generated),
+        "altered-ingress-source": lambda: rejected("altered-ingress-source", altered_ingress_source),
+        "ingress-recipe-drift": lambda: rejected("ingress-recipe-drift", ingress_recipe_drift),
         "coordinated-manifest-mutation": lambda: rejected("coordinated-manifest-mutation", coordinated_manifest_mutation),
         "wrong-archive": wrong_archive,
         "missing-unique-anchor": missing_unique_anchor,
