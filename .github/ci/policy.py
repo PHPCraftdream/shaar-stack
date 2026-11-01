@@ -136,7 +136,9 @@ def select(paths, *, full=False):
             flags["license"] = True
             owned = ["license"]
         elif path == "Cargo.toml":
-            for package in PACKAGES:
+            # Only these libraries consume the patched sources; shaar-ygg has no tests and
+            # shaar-platform is OS-gated, so a package-wide selector would match no runnable case.
+            for package in ("shaar", "shaar-p2p"):
                 add(target(package))
             flags["license"] = True
             owned = ["workspace-manifest"]

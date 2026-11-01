@@ -88,6 +88,17 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No test impact rule"):
             POLICY.select(["Cargo.lock"])
 
+    def test_workspace_manifest_selects_only_patch_consumers_with_runnable_cases(self):
+        result = POLICY.select(["Cargo.toml"])
+        self.assertEqual(result["targets"], [POLICY.target("shaar"), POLICY.target("shaar-p2p")])
+        self.assertEqual(result["suites"], ["workspace-manifest"])
+        self.assertTrue(result["selection"]["license"])
+        self.assertFalse(result["selection"]["full"])
+        RUNNER.validate(result["targets"])
+        # A package-wide selector over a binary without runnable cases is a hard error.
+        with self.assertRaisesRegex(ValueError, "matched no runnable cases"):
+            RUNNER.selected_cases("", "", [""])
+
     def test_native_discovery_cumulative_repair_keeps_each_case_obligation(self):
         paths = ["crates/shaar/src/native_discovery/tests/address.rs",
                  "crates/shaar/src/native_discovery/tests/codec.rs"]
