@@ -29,6 +29,11 @@ class PolicyTests(unittest.TestCase):
                 self.assertFalse(result["selection"]["full"])
                 self.assertFalse(any(result["selection"][key] for key in POLICY.DOMAINS))
 
+        for filename in ("prepare.py", "checks.py", "graph_checks.py"):
+            result = POLICY.select([".github/scripts/p2p/discovery/simple_dns/" + filename])
+            self.assertEqual(result["targets"], [POLICY.target("shaar", (selector,))])
+            self.assertFalse(result["selection"]["full"])
+
         source = POLICY.select(["crates/shaar/src/native_discovery/record.rs"])
         source_target = source["targets"]
         RUNNER.validate(source_target)

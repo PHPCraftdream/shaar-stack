@@ -68,6 +68,7 @@ RULES = (
     ("crates/shaar-p2p/src/discovery/", ("discovery-config",)),
     ("crates/shaar-p2p/src/dns/transport", ("destination-guard",)),
     ("crates/shaar-p2p/src/dns/", ("owned-dns",)),
+    (".github/scripts/p2p/discovery/simple_dns/", ("native-discovery",)),
     ("crates/shaar/src/native_discovery/", ("native-discovery",)),
     ("crates/shaar/src/identity/", ("sdk-identity",)),
     ("crates/shaar/src/config/", ("sdk-config",)),
