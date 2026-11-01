@@ -53,7 +53,7 @@ class PolicyTests(unittest.TestCase):
     def test_workspace_manifest_has_explicit_package_ownership_without_full_campaign(self):
         result = POLICY.select(["Cargo.toml"])
         self.assertEqual(result["targets"], sorted(
-            (POLICY.target(package) for package in POLICY.PACKAGES),
+            (POLICY.target(package) for package in ("shaar", "shaar-p2p")),
             key=lambda target: (target["package"], target["kind"], target["name"])))
         self.assertEqual(result["suites"], ["workspace-manifest"])
         self.assertTrue(result["selection"]["license"])
