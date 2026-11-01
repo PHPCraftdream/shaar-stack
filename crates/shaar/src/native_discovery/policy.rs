@@ -243,14 +243,22 @@ impl PolicyOwner {
     pub(super) fn complete_query(
         &mut self,
         key: EndpointId,
-        mut query: CompletedQuery,
+        query: CompletedQuery,
     ) -> Result<(), RecordError> {
+        self.complete_query_result(key, query).map(|_| ())
+    }
+    fn complete_query_result(
+        &mut self,
+        key: EndpointId,
+        mut query: CompletedQuery,
+    ) -> Result<Option<&[SocketAddr]>, RecordError> {
         self.observe_clock(query.completed_at)?;
         if !self.peers.contains_key(&key) {
             return Err(RecordError::Unauthorized);
         }
         if query.source != QuerySource::Network {
-            return self.lookup_cache(key, query.completed_at);
+            self.lookup_cache(key, query.completed_at)?;
+            return Ok(None);
         }
         if query.records.is_empty() {
             return Err(RecordError::CacheMiss);
@@ -364,7 +372,20 @@ impl PolicyOwner {
             peer.conflict = false;
         }
         peer.cache_deadline = Some(deadline);
-        Ok(())
+        let winner = peer.winner.as_ref().ok_or(RecordError::CacheMiss)?;
+        Ok(Some(&winner.addresses))
+    }
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "P09 actor boundary is not wired yet")
+    )]
+    pub(super) fn complete_query_addresses(
+        &mut self,
+        key: EndpointId,
+        query: CompletedQuery,
+    ) -> Result<&[SocketAddr], RecordError> {
+        self.complete_query_result(key, query)?
+            .ok_or(RecordError::CacheExpired)
     }
     #[cfg_attr(
         not(test),
