@@ -155,10 +155,15 @@ fn actual_message_decoder_accepts_bounded_get_peers_nested_values() {
 
 #[test]
 fn actual_message_decoder_accepts_error_response_tuple_lists_at_depth_two() {
-    // d1:eli201e4:errore1:t2:aa1:y1:ee
-    let wire = b"d1:eli201e4:errore1:t2:aa1:y1:ee";
+    let wire = b"d1:eli201e5:errore1:t2:aa1:y1:ee";
+    super::internal::DHTMessage::from_bytes(wire).expect("upstream accepts the error tuple");
     let parsed = Message::from_bytes(wire).expect("valid error response");
     assert_eq!(parsed.transaction_id, u16::from_be_bytes(*b"aa") as u32);
+    assert!(
+        matches!(parsed.message_type, crate::common::MessageType::Error(ref error)
+        if error.code == 201 && error.description == "error")
+    );
+    assert!(Message::from_bytes(b"d1:eli201e4:errore1:t2:aa1:y1:ee").is_err());
 }
 
 #[test]
