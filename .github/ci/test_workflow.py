@@ -29,11 +29,24 @@ class WorkflowTests(unittest.TestCase):
             "Verify Noq fatal driver exit and cancellation": "backend",
             "Verify high-PTO shutdown negative control after production proofs": "backend",
             "Verify mainline lifecycle archive against planned revision": "mainline",
+            "Verify supplied timestamp encoder against archive graph": "publication",
             "cargo test": "full",
         }
         for name, owner in expected.items():
             with self.subTest(step=name):
                 self.assertTrue(steps[name].startswith("\n        if: fromJSON(needs.plan.outputs.selection)." + owner + "\n"))
+
+    def test_publication_has_own_runner_archives_and_always_evidence(self):
+        steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))
+        runner = steps["Verify supplied timestamp encoder against archive graph"]
+        self.assertIn("python -I .github/scripts/p2p/discovery/mainline/ci/publication/ci.py", runner)
+        self.assertIn("https://static.crates.io/crates/iroh-dns/iroh-dns-1.3.0.crate", runner)
+        self.assertIn("https://static.crates.io/crates/simple-dns/simple-dns-0.12.0.crate", runner)
+        self.assertNotIn("cargo test --workspace", runner)
+        evidence = steps["Preserve supplied timestamp encoder evidence"]
+        self.assertIn("always() && fromJSON(needs.plan.outputs.selection).publication", evidence)
+        self.assertIn("if-no-files-found: error", evidence)
+        self.assertIn("target/publication-evidence/", evidence)
 
     def test_mainline_archive_gate_and_prepare_sources_routing(self):
         text = WORKFLOW.read_text(encoding="utf-8")

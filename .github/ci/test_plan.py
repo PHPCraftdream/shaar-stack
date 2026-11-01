@@ -19,6 +19,21 @@ POLICY = PLAN.POLICY
 
 
 class PolicyTests(unittest.TestCase):
+    def test_publication_fixture_has_narrow_independent_ownership(self):
+        prefix = ".github/scripts/p2p/discovery/mainline/ci/publication/"
+        for name in ("prepare.py", "ci.py", "runner.py", "graph.py", "test_source.py", "tests/publication_tests.rs"):
+            result = POLICY.select([prefix + name])
+            self.assertTrue(result["selection"]["publication"])
+            self.assertFalse(result["selection"]["mainline"])
+            self.assertFalse(result["selection"]["product"])
+            self.assertFalse(result["selection"]["full"])
+            self.assertEqual(result["targets"], [])
+        mixed = POLICY.select([prefix + "runner.py", ".github/scripts/p2p/discovery/mainline/prepare.py"])
+        self.assertTrue(mixed["selection"]["publication"])
+        self.assertTrue(mixed["selection"]["mainline"])
+        full = POLICY.select([], full=True)
+        self.assertTrue(full["selection"]["publication"])
+
     def test_native_discovery_sources_select_only_owned_module_cases(self):
         selector = "native_discovery::"
         for filename in ("address.rs", "codec.rs", "state.rs", "ordering_clock.rs", "unowned.rs"):

@@ -2,7 +2,7 @@
 
 import re
 
-DOMAINS = ("dns", "discovery", "mainline", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license")
+DOMAINS = ("dns", "discovery", "mainline", "publication", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license")
 PACKAGES = {
     "shaar-p2p": ("lib", "shaar_p2p"), "shaar": ("lib", "shaar"),
     "shaar-platform": ("lib", "shaar_platform"), "shaar-ygg": ("lib", "shaar_ygg"),
@@ -81,6 +81,7 @@ PROOFS = (
     (".github/probes/iroh-paths/gate/bridge/support/packet_identity.py", "carrier_frames"),
     (".github/scripts/p2p/carrier-wire-proof/", "carrier"),
     (".github/scripts/p2p/relay/", "relay"),
+    (".github/scripts/p2p/discovery/mainline/ci/publication/", "publication"),
     (".github/scripts/p2p/discovery/mainline/", "mainline"),
     (".github/scripts/p2p/discovery/resolver/", "resolver"),
     (".github/scripts/p2p/discovery/kad/", "kad"),
