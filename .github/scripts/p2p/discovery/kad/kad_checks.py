@@ -133,11 +133,11 @@ class PreparationChecks(unittest.TestCase):
 
 class IdentityChecks(unittest.TestCase):
     def setUp(self):
-        self.roots = [Path("relay"), Path("swarm"), Path("kad"), Path("dns"), Path("resolver")]
+        self.roots = [Path("relay"), Path("swarm"), Path("kad"), Path("dns"), Path("resolver"), REPOSITORY / "target/p2p/simple-dns/simple-dns-0.12.0"]
         self.old = {"package": [{"name": "unrelated", "version": "1", "source": "registry", "checksum": "keep"}]}
         self.new = copy.deepcopy(self.old)
         self.metadata = {"packages": [], "resolve": {"nodes": []}}
-        paths = dict(zip(("libp2p-relay", "libp2p-swarm", "libp2p-kad", "libp2p-dns", "hickory-resolver"), self.roots))
+        paths = dict(zip(("libp2p-relay", "libp2p-swarm", "libp2p-kad", "libp2p-dns", "hickory-resolver", "simple-dns"), self.roots))
         for name, version in graph.FAMILY.items():
             source = None if name in paths else "registry"
             self.new["package"].append({"name": name, "version": version, "source": source})
@@ -147,10 +147,16 @@ class IdentityChecks(unittest.TestCase):
             self.metadata["resolve"]["nodes"].append({"id": identity})
         self.old["package"].append({"name": "libp2p-kad", "version": kad.VERSION,
                                     "source": "registry+https://github.com/rust-lang/crates.io-index", "checksum": kad.DIGEST})
+        self.old["package"].append({"name": "simple-dns", "version": "0.12.0",
+                                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                                    "checksum": "2b6f884fa9a8d48101774bfbd3aeb81e968dd22cffd19a372da69f183db22c1a"})
+        self.new["package"] = [package for package in self.new["package"] if package["name"] != "simple-dns"]
+        self.new["package"].append({"name": "simple-dns", "version": "0.12.0", "source": None})
 
     def test_only_exact_reviewed_registry_identity_can_be_replaced(self):
         result = graph.validate(self.old, self.new, self.metadata, *self.roots)
         self.assertTrue(result["reviewed_kad_identity_replacement"])
+        self.assertTrue(result["reviewed_simple_dns_identity_replacement"])
         self.assertEqual(result["retained_package_identities"], 1)
         for field in ("version", "source", "checksum"):
             changed = copy.deepcopy(self.old)

@@ -151,6 +151,8 @@ class IdentityChecks(unittest.TestCase):
         names = ("libp2p-relay", "libp2p-swarm", "libp2p-kad", "libp2p-dns", "hickory-resolver")
         self.roots = [Path(name) for name in ("relay", "swarm", "kad", "dns", "resolver")]
         paths = dict(zip(names, self.roots))
+        self.simple_dns = REPOSITORY / "target/p2p/simple-dns/simple-dns-0.12.0"
+        paths["simple-dns"] = self.simple_dns
         self.old = {"package": [{"name": "unrelated", "version": "1", "source": "registry", "checksum": "keep", "dependencies": ["kept"]}]}
         self.new = copy.deepcopy(self.old)
         self.metadata = {"packages": [], "resolve": {"nodes": []}}
@@ -165,13 +167,13 @@ class IdentityChecks(unittest.TestCase):
                                     "source": "registry+https://github.com/rust-lang/crates.io-index", "checksum": resolver.DIGEST})
 
     def test_only_exact_resolver_registry_identity_is_replaced(self):
-        result = graph.validate(self.old, self.new, self.metadata, *self.roots)
+        result = graph.validate(self.old, self.new, self.metadata, *self.roots, self.simple_dns)
         self.assertTrue(result["reviewed_resolver_identity_replacement"])
         for field in ("version", "source", "checksum"):
             changed = copy.deepcopy(self.old)
             changed["package"][1][field] = "unreviewed"
             with self.assertRaisesRegex(ValueError, "existing package identity"):
-                graph.validate(changed, self.new, self.metadata, *self.roots)
+                graph.validate(changed, self.new, self.metadata, *self.roots, self.simple_dns)
 
     def test_stock_duplicate_wrong_path_and_changed_edges_are_rejected(self):
         for duplicate in (False, True):
@@ -182,7 +184,7 @@ class IdentityChecks(unittest.TestCase):
             else:
                 changed["package"] = [p if p["name"] != "hickory-resolver" else stock for p in changed["package"]]
             with self.assertRaisesRegex(ValueError, "reviewed path identity"):
-                graph.validate(self.old, changed, self.metadata, *self.roots)
+                graph.validate(self.old, changed, self.metadata, *self.roots, self.simple_dns)
         metadata = copy.deepcopy(self.metadata)
         next(p for p in metadata["packages"] if p["name"] == "hickory-resolver")["manifest_path"] = "other/Cargo.toml"
         with self.assertRaisesRegex(ValueError, "prepared source: hickory-resolver"):
@@ -190,7 +192,7 @@ class IdentityChecks(unittest.TestCase):
         changed = copy.deepcopy(self.new)
         changed["package"][0]["dependencies"] = ["changed"]
         with self.assertRaisesRegex(ValueError, "dependency edge"):
-            graph.validate(self.old, changed, self.metadata, *self.roots)
+            graph.validate(self.old, changed, self.metadata, *self.roots, self.simple_dns)
 
 
 class ProductChecks(unittest.TestCase):

@@ -8,6 +8,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+RUN_SPEC = importlib.util.spec_from_file_location("ci_runner", Path(__file__).with_name("run.py"))
+RUNNER = importlib.util.module_from_spec(RUN_SPEC)
+RUN_SPEC.loader.exec_module(RUNNER)
+
 SPEC = importlib.util.spec_from_file_location("ci_plan", Path(__file__).with_name("plan.py"))
 PLAN = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PLAN)
@@ -15,6 +19,78 @@ POLICY = PLAN.POLICY
 
 
 class PolicyTests(unittest.TestCase):
+    def test_native_discovery_sources_select_only_owned_module_cases(self):
+        selector = "native_discovery::"
+        for filename in ("address.rs", "codec.rs", "state.rs", "ordering_clock.rs", "unowned.rs"):
+            with self.subTest(filename=filename):
+                result = POLICY.select(["crates/shaar/src/native_discovery/tests/" + filename])
+                self.assertEqual(result["targets"], [POLICY.target("shaar", (selector,))])
+                self.assertEqual(result["suites"], ["native-discovery"])
+                self.assertFalse(result["selection"]["full"])
+                self.assertFalse(any(result["selection"][key] for key in POLICY.DOMAINS))
+
+        source = POLICY.select(["crates/shaar/src/native_discovery/record.rs"])
+        source_target = source["targets"]
+        RUNNER.validate(source_target)
+        self.assertEqual(source_target, [POLICY.target("shaar", (selector,))])
+
+        listing = ("native_discovery::tests::address::valid: test\n"
+                   "native_discovery::tests::codec::roundtrip: test\n"
+                   "native_discovery::tests::address::ignored: test\n"
+                   "network::unrelated: test\n")
+        ignored = "native_discovery::tests::address::ignored: test\n"
+        selected, skipped = RUNNER.selected_cases(listing, ignored, [selector])
+        self.assertEqual(selected, ["native_discovery::tests::address::valid", "native_discovery::tests::codec::roundtrip"])
+        self.assertEqual(skipped, ["native_discovery::tests::address::ignored"])
+        with self.assertRaisesRegex(ValueError, "matched no runnable cases"):
+            RUNNER.selected_cases("network::unrelated: test\n", "", [selector])
+
+    def test_native_discovery_wiring_and_manifest_lock_contracts_are_wide(self):
+        module = POLICY.select(["crates/shaar/src/lib.rs", "crates/shaar/src/native_discovery/mod.rs"])
+        self.assertEqual(module["targets"], [POLICY.target("shaar", ("", "native_discovery::"))])
+        self.assertEqual(module["suites"], ["native-discovery", "package:shaar"])
+        self.assertFalse(module["selection"]["full"])
+
+        manifest = POLICY.select(["crates/shaar/Cargo.toml"])
+        self.assertEqual(manifest["targets"], [POLICY.target("shaar")])
+        self.assertTrue(manifest["selection"]["license"])
+        self.assertEqual(POLICY.select(["crates/shaar-p2p/Cargo.toml", "Cargo.lock"])["targets"],
+                         [POLICY.target("shaar-p2p")])
+        for paths, expected_license, mixed in (
+            (["crates/shaar/src/native_discovery/README.md", "crates/shaar/src/lib.rs"], False, False),
+            (["crates/shaar/src/native_discovery/README.md", "crates/shaar/Cargo.toml"], True, False),
+            (["crates/shaar/src/native_discovery/README.md", "crates/shaar/Cargo.toml", "Cargo.lock"], True, False),
+            (["crates/shaar/src/native_discovery/record.rs", "crates/shaar/src/lib.rs"], False, True),
+            (["crates/shaar/src/native_discovery/record.rs", "crates/shaar/Cargo.toml"], True, True),
+            (["crates/shaar/src/native_discovery/record.rs", "crates/shaar/Cargo.toml", "Cargo.lock"], True, True),
+        ):
+            with self.subTest(paths=paths):
+                result = POLICY.select(paths)
+                expected = ["", "native_discovery::"] if mixed else [""]
+                self.assertEqual(result["targets"], [POLICY.target("shaar", expected)])
+                self.assertEqual(result["selection"]["license"], expected_license)
+                self.assertFalse(result["selection"]["full"])
+        with self.assertRaisesRegex(ValueError, "No test impact rule"):
+            POLICY.select(["Cargo.lock"])
+
+    def test_native_discovery_cumulative_repair_keeps_each_case_obligation(self):
+        paths = ["crates/shaar/src/native_discovery/tests/address.rs",
+                 "crates/shaar/src/native_discovery/tests/codec.rs"]
+        result = POLICY.select(paths)
+        self.assertEqual(result["targets"], [POLICY.target("shaar", ("native_discovery::",))])
+        self.assertEqual(result["suites"], ["native-discovery"])
+        self.assertEqual(result, POLICY.select(list(reversed(paths))))
+
+    def test_unrelated_shaar_shared_wiring_keeps_package_default(self):
+        for path in ("crates/shaar/src/lib.rs", "crates/shaar/Cargo.toml"):
+            with self.subTest(path=path):
+                result = POLICY.select([path])
+                self.assertEqual(result["targets"], [POLICY.target("shaar")])
+                self.assertEqual(result["suites"], ["package:shaar"])
+                self.assertFalse(result["selection"]["full"])
+                expected_domains = ["license"] if path.endswith("Cargo.toml") else []
+                self.assertEqual([key for key in POLICY.DOMAINS if result["selection"][key]], expected_domains)
+
     def test_protocol_feature_selects_own_cases_and_small_wiring_contracts_only(self):
         paths = ["crates/shaar-p2p/src/carrier/driver/runtime/protocols/guard.rs",
                  "crates/shaar-p2p/src/carrier/driver/mod.rs",
@@ -186,6 +262,35 @@ class GitTests(unittest.TestCase):
         p2p_target = next(t for t in result["targets"] if t["package"] == "shaar-p2p")
         self.assertIn("carrier::driver::fault_tests::", p2p_target["filters"])
         self.assertFalse(result["selection"]["backend"])
+
+    def test_native_discovery_obligation_survives_policy_only_repair_push(self):
+        base = self.commit_file("common.rs", "one")
+        self.git("update-ref", "refs/remotes/ci-upstream/develop", base)
+        failed = self.commit_file("crates/shaar/src/native_discovery/tests/address.rs", "native test")
+        head = self.commit_file(".github/ci/policy.py", "policy repair")
+        result = PLAN.plan("push", self.event(failed, head, "refs/heads/feature"), head)
+        self.assertEqual(result["base"], base)
+        self.assertEqual({(target["package"], tuple(target["filters"])) for target in result["targets"]},
+                         {("shaar", ("native_discovery::",))})
+        self.assertTrue(result["selection"]["ci_policy"])
+        self.assertFalse(any(result["selection"][key] for key in POLICY.DOMAINS))
+        self.assertFalse(result["selection"]["full"])
+
+    def test_native_discovery_shared_obligation_survives_policy_only_repair_push(self):
+        base = self.commit_file("common.rs", "one")
+        self.git("update-ref", "refs/remotes/ci-upstream/develop", base)
+        failed = self.commit_file("crates/shaar/src/native_discovery/tests/address.rs", "native test")
+        failed = self.commit_file("crates/shaar/src/lib.rs", "shared wiring")
+        failed = self.commit_file("crates/shaar/Cargo.toml", "manifest")
+        failed = self.commit_file("Cargo.lock", "lock")
+        head = self.commit_file(".github/ci/policy.py", "policy repair")
+        result = PLAN.plan("push", self.event(failed, head, "refs/heads/feature"), head)
+        self.assertEqual(result["base"], base)
+        shaar = next(target for target in result["targets"] if target["package"] == "shaar")
+        self.assertEqual(shaar["filters"], ["", "native_discovery::"])
+        self.assertTrue(result["selection"]["license"])
+        self.assertTrue(result["selection"]["ci_policy"])
+        self.assertFalse(result["selection"]["full"])
 
     def test_missing_history_is_not_a_full_trigger(self):
         head = self.commit_file("docs/new.md", "one")

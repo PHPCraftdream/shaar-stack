@@ -3951,6 +3951,7 @@ dependencies = [
  "futures",
  "iroh",
  "iroh-base",
+ "iroh-dns",
  "ktav",
  "libp2p",
  "libp2p-identity",
@@ -3960,6 +3961,7 @@ dependencies = [
  "shaar-p2p",
  "shaar-platform",
  "shaar-ygg",
+ "simple-dns",
  "tokio",
  "tokio-util",
  "tracing",
@@ -4068,8 +4070,6 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 [[package]]
 name = "simple-dns"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b6f884fa9a8d48101774bfbd3aeb81e968dd22cffd19a372da69f183db22c1a"
 dependencies = [
  "bitflags",
 ]

@@ -14,6 +14,7 @@ FAMILY = {
     "libp2p-swarm": "0.48.0",
     "libp2p-relay": "0.22.0",
     "libp2p-request-response": "0.30.0",
+    "simple-dns": "0.12.0",
 }
 DEPENDENCIES = '''[dependencies]
 libp2p = { version = "=0.57.1", default-features = false, features = ["ed25519", "tokio", "tcp", "dns", "noise", "yamux", "kad", "identify", "relay", "request-response", "macros"] }
@@ -34,13 +35,18 @@ def replace(text, old, new):
     return text.replace(old, new)
 
 
-def create(repository, destination, relay_source, swarm_source, kad_source, dns_source, resolver_source):
+def create(repository, destination, relay_source, swarm_source, kad_source, dns_source, resolver_source, simple_dns_source=None):
     repository = repository.resolve()
     relay_source = relay_source.resolve()
     swarm_source = swarm_source.resolve()
     kad_source = kad_source.resolve()
     dns_source = dns_source.resolve()
     resolver_source = resolver_source.resolve()
+    simple_dns_source = (simple_dns_source or repository / "target/p2p/simple-dns/simple-dns-0.12.0").resolve()
+    if not (simple_dns_source / "Cargo.toml").is_file():
+        raise ValueError("reviewed simple-dns source is missing")
+    from discovery.simple_dns import prepare as simple_dns_prepare
+    simple_dns_prepare.verify(simple_dns_source)
     if not (resolver_source / "Cargo.toml").is_file():
         raise ValueError("reviewed resolver source is missing")
     if not (dns_source / "Cargo.toml").is_file():
@@ -60,9 +66,9 @@ def create(repository, destination, relay_source, swarm_source, kad_source, dns_
             raise ValueError("production backend must be prepared before candidate resolution")
         manifest = replace(manifest, f'path = "{relative}"', f"path = {json.dumps(actual.as_posix())}")
     root_patches = tomllib.loads(manifest)["patch"]["crates-io"]
-    for name, path in (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source), ("libp2p-kad", kad_source), ("libp2p-dns", dns_source), ("hickory-resolver", resolver_source)):
-        if name in root_patches:
-            previous = root_patches[name]["path"]
+    for name, path in (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source), ("libp2p-kad", kad_source), ("libp2p-dns", dns_source), ("hickory-resolver", resolver_source), ("simple-dns", simple_dns_source)):
+        previous = root_patches.get(name, {}).get("path")
+        if previous:
             manifest = replace(manifest, f'path = "{previous}"', f"path = {json.dumps(path.as_posix())}")
         else:
             addition = f"{name} = {{ path = {json.dumps(path.as_posix())} }}"
@@ -74,8 +80,8 @@ def create(repository, destination, relay_source, swarm_source, kad_source, dns_
         candidate = replace(original, "[dependencies]", DEPENDENCIES.rstrip())
     else:
         for name, version in FAMILY.items():
-            if name in ("libp2p-kad", "libp2p-dns", "hickory-resolver"):
-                continue  # Discovery transports/protocols are enabled transitively by libp2p.
+            if name in ("libp2p-kad", "libp2p-dns", "hickory-resolver", "simple-dns"):
+                continue
             dependency = dependencies.get(name)
             declared = dependency.get("version") if isinstance(dependency, dict) else dependency
             if declared != "=" + version:
@@ -94,13 +100,19 @@ def identities(lock):
     return {(p["name"], p["version"], p.get("source"), p.get("checksum")) for p in lock["package"]}
 
 
-def validate(old, new, metadata, relay_source, swarm_source, kad_source, dns_source, resolver_source):
+def validate(old, new, metadata, relay_source, swarm_source, kad_source, dns_source, resolver_source, simple_dns_source=None):
     previous = identities(old)
     current = identities(new)
+    if simple_dns_source is None:
+        simple_dns_source = Path(__file__).resolve().parents[3] / "target/p2p/simple-dns/simple-dns-0.12.0"
+    simple_dns_source = Path(simple_dns_source).resolve()
     registry_kad = ("libp2p-kad", "0.49.0", "registry+https://github.com/rust-lang/crates.io-index",
                     "973caa45045e53f3cf1cf3d596888b82602b30640fd75485836c81aa66e7c38a")
     prepared_kad = ("libp2p-kad", "0.49.0", None, None)
     replaced = registry_kad in previous and registry_kad not in current and prepared_kad in current
+    registry_simple_dns = ("simple-dns", "0.12.0", "registry+https://github.com/rust-lang/crates.io-index", "2b6f884fa9a8d48101774bfbd3aeb81e968dd22cffd19a372da69f183db22c1a")
+    prepared_simple_dns = ("simple-dns", "0.12.0", None, None)
+    simple_dns_replaced = registry_simple_dns in previous and registry_simple_dns not in current and prepared_simple_dns in current
     retained = previous - {registry_kad} if replaced else previous
     registry_dns = ("libp2p-dns", "0.45.0", "registry+https://github.com/rust-lang/crates.io-index",
                     "18694695e98ff9ce26ee245fdede7cd0b4186cb793b25da3258d9c053400a291")
@@ -114,6 +126,8 @@ def validate(old, new, metadata, relay_source, swarm_source, kad_source, dns_sou
     resolver_replaced = registry_resolver in previous and registry_resolver not in current and prepared_resolver in current
     if resolver_replaced:
         retained -= {registry_resolver}
+    if simple_dns_replaced:
+        retained -= {registry_simple_dns}
     if not retained.issubset(current):
         missing = sorted((name, version) for name, version, _, _ in retained - current)
         raise ValueError(f"candidate removed or changed an existing package identity: {missing}")
@@ -126,6 +140,10 @@ def validate(old, new, metadata, relay_source, swarm_source, kad_source, dns_sou
     resolver_lock = [p for p in new["package"] if p["name"] == "hickory-resolver"]
     if len(resolver_lock) != 1 or resolver_lock[0].get("source") is not None or resolver_lock[0].get("checksum") is not None:
         raise ValueError("candidate resolver lock must use the reviewed path identity")
+    simple_dns_lock = [p for p in new["package"] if p["name"] == "simple-dns"]
+    if (len(simple_dns_lock) != 1 or simple_dns_lock[0].get("version") != "0.12.0"
+            or simple_dns_lock[0].get("source") is not None or simple_dns_lock[0].get("checksum") is not None):
+        raise ValueError("candidate simple-dns lock must use the reviewed path identity")
     # An identity substitution must not silently change an existing package's edges.
     by_identity = {}
     for package in new["package"]:
@@ -151,22 +169,33 @@ def validate(old, new, metadata, relay_source, swarm_source, kad_source, dns_sou
         package = next(p for p in packages if p["name"] == name)
         if package["source"] is not None or Path(package["manifest_path"]).resolve() != (root / "Cargo.toml").resolve():
             raise ValueError(f"candidate did not resolve the prepared source: {name}")
+    simple_dns_packages = [p for p in packages if p["name"] == "simple-dns"]
+    if len(simple_dns_packages) != 1:
+        raise ValueError("candidate dependency family differs from reviewed source APIs")
+    simple_dns_package = simple_dns_packages[0]
+    if (simple_dns_package["version"] != "0.12.0" or simple_dns_package["id"] not in resolved
+            or simple_dns_package["source"] is not None):
+        raise ValueError("candidate did not resolve the prepared source: simple-dns")
+    if Path(simple_dns_package["manifest_path"]).resolve() != (simple_dns_source / "Cargo.toml").resolve():
+        raise ValueError("candidate did not resolve the prepared source: simple-dns")
+    from discovery.simple_dns import prepare as simple_dns_prepare
+    simple_dns_prepare.verify(simple_dns_source)
     added = sorted((name, version, source or "path", checksum or "") for name, version, source, checksum in current - previous)
-    return {"reviewed_resolver_identity_replacement": resolver_replaced, "reviewed_dns_identity_replacement": dns_replaced, "reviewed_kad_identity_replacement": replaced, "retained_package_identities": len(retained), "added_package_identities": added, "family": FAMILY}
+    return {"reviewed_resolver_identity_replacement": resolver_replaced, "reviewed_dns_identity_replacement": dns_replaced, "reviewed_kad_identity_replacement": replaced, "reviewed_simple_dns_identity_replacement": simple_dns_replaced, "retained_package_identities": len(retained), "added_package_identities": added, "family": FAMILY}
 
 
-def verify(workspace, metadata_path, relay_source, swarm_source, kad_source, dns_source, resolver_source, baseline=None, receipt_path=None):
+def verify(workspace, metadata_path, relay_source, swarm_source, kad_source, dns_source, resolver_source, baseline=None, receipt_path=None, simple_dns_source=None):
     old_bytes = (baseline or workspace / "baseline.lock").read_bytes()
     new_bytes = (workspace / "Cargo.lock").read_bytes()
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    receipt = validate(tomllib.loads(old_bytes.decode()), tomllib.loads(new_bytes.decode()), metadata, relay_source, swarm_source, kad_source, dns_source, resolver_source)
+    receipt = validate(tomllib.loads(old_bytes.decode()), tomllib.loads(new_bytes.decode()), metadata, relay_source, swarm_source, kad_source, dns_source, resolver_source, simple_dns_source)
     receipt["baseline_lock_sha256"] = hashlib.sha256(old_bytes).hexdigest()
     receipt["candidate_lock_sha256"] = hashlib.sha256(new_bytes).hexdigest()
     (receipt_path or workspace / "graph-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"retained": receipt["retained_package_identities"], "added": len(receipt["added_package_identities"])}))
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="mode", required=True)
     prepare = sub.add_parser("create")
@@ -184,10 +213,16 @@ def main():
     prepare.add_argument("--dns-source", type=Path, required=True)
     check.add_argument("--dns-source", type=Path, required=True)
     prepare.add_argument("--resolver-source", type=Path, required=True)
+    prepare.add_argument("--simple-dns-source", type=Path)
     check.add_argument("--resolver-source", type=Path, required=True)
+    check.add_argument("--simple-dns-source", type=Path)
     check.add_argument("--baseline", type=Path)
     check.add_argument("--receipt", type=Path)
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
     import sys
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -198,9 +233,9 @@ def main():
     from discovery.resolver import prepare as resolver
     resolver.verify(args.resolver_source.resolve())
     if args.mode == "create":
-        create(args.repository, args.destination, args.relay_source, args.swarm_source, args.kad_source, args.dns_source, args.resolver_source)
+        create(args.repository, args.destination, args.relay_source, args.swarm_source, args.kad_source, args.dns_source, args.resolver_source, args.simple_dns_source)
     else:
-        verify(args.workspace, args.metadata, args.relay_source, args.swarm_source, args.kad_source, args.dns_source, args.resolver_source, args.baseline, args.receipt)
+        verify(args.workspace, args.metadata, args.relay_source, args.swarm_source, args.kad_source, args.dns_source, args.resolver_source, args.baseline, args.receipt, args.simple_dns_source)
 
 
 if __name__ == "__main__":

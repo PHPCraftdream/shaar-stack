@@ -22,11 +22,12 @@ class GraphChecks(unittest.TestCase):
         self.kad = Path(self.temporary.name) / "kad"
         self.dns = Path(self.temporary.name) / "dns"
         self.resolver = Path(self.temporary.name) / "resolver"
+        self.simple_dns = Path(__file__).resolve().parents[3] / "target/p2p/simple-dns/simple-dns-0.12.0"
         self.old = {"package": [{"name": "bytes", "version": "1.12.1", "source": "registry", "checksum": "old"}]}
         self.new = copy.deepcopy(self.old)
         self.metadata = {"packages": [], "resolve": {"nodes": []}}
         for name, version in graph.FAMILY.items():
-            root = {"libp2p-relay": self.relay, "libp2p-swarm": self.swarm, "libp2p-kad": self.kad, "libp2p-dns": self.dns, "hickory-resolver": self.resolver}.get(name)
+            root = {"libp2p-relay": self.relay, "libp2p-swarm": self.swarm, "libp2p-kad": self.kad, "libp2p-dns": self.dns, "hickory-resolver": self.resolver, "simple-dns": self.simple_dns}.get(name)
             local = root is not None
             source = None if local else "registry"
             identity = f"{name}@{version}"
@@ -35,27 +36,42 @@ class GraphChecks(unittest.TestCase):
                                                "manifest_path": str(root / "Cargo.toml") if local else "registry"})
             self.metadata["resolve"]["nodes"].append({"id": identity})
 
-    def test_complete_resolved_family_preserves_existing_identity(self):
-        receipt = graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
+        simple_dns = next(package for package in self.new["package"] if package["name"] == "simple-dns")
+        simple_dns["dependencies"] = ["kept-edge"]
+        self.old["package"].append({"name": "simple-dns", "version": "0.12.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "checksum": "2b6f884fa9a8d48101774bfbd3aeb81e968dd22cffd19a372da69f183db22c1a", "dependencies": ["kept-edge"]})
+
+    def test_simple_dns_registry_identity_replacement_preserves_edges(self):
+        receipt = graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
+        self.assertTrue(receipt["reviewed_simple_dns_identity_replacement"])
         self.assertEqual(receipt["retained_package_identities"], 1)
-        self.assertEqual(len(receipt["added_package_identities"]), 7)
+        self.assertEqual(len(receipt["added_package_identities"]), 8)
+        changed = copy.deepcopy(self.new)
+        changed["package"][-1]["dependencies"] = ["different-edge"]
+        with self.assertRaisesRegex(ValueError, "dependency edge"):
+            graph.validate(self.old, changed, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
+
+    def test_complete_resolved_family_preserves_existing_identity(self):
+        receipt = graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
+        self.assertEqual(receipt["retained_package_identities"], 1)
+        self.assertEqual(len(receipt["added_package_identities"]), 8)
+        self.assertTrue(receipt["reviewed_simple_dns_identity_replacement"])
 
     def test_no_deps_or_empty_resolve_is_rejected(self):
         for resolve in [None, {"nodes": []}]:
             self.metadata["resolve"] = resolve
             with self.assertRaisesRegex(ValueError, "full resolved metadata"):
-                graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
+                graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
 
     def test_existing_identity_removal_or_mutation_is_rejected(self):
         for field in ["name", "version", "source", "checksum"]:
             changed = copy.deepcopy(self.new)
             changed["package"][0][field] = "changed"
             with self.assertRaisesRegex(ValueError, "existing package identity"):
-                graph.validate(self.old, changed, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
+                graph.validate(self.old, changed, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
         changed = copy.deepcopy(self.new)
         changed["package"].pop(0)
         with self.assertRaisesRegex(ValueError, "existing package identity"):
-            graph.validate(self.old, changed, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
+            graph.validate(self.old, changed, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
 
     def test_wrong_unresolved_or_duplicate_family_is_rejected(self):
         for mode in ["version", "unresolved", "duplicate"]:
@@ -67,21 +83,21 @@ class GraphChecks(unittest.TestCase):
             else:
                 metadata["packages"].append(copy.deepcopy(metadata["packages"][0]))
             with self.assertRaisesRegex(ValueError, "reviewed source APIs"):
-                graph.validate(self.old, self.new, metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
+                graph.validate(self.old, self.new, metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
 
     def test_candidate_lock_family_must_match_metadata(self):
         self.new["package"][1]["version"] = "0.0.0"
         with self.assertRaisesRegex(ValueError, "candidate lock family"):
-            graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
+            graph.validate(self.old, self.new, self.metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
 
     def test_stock_or_wrong_path_prepared_sources_are_rejected(self):
-        for name, root in (("libp2p-relay", self.relay), ("libp2p-swarm", self.swarm), ("libp2p-kad", self.kad), ("libp2p-dns", self.dns), ("hickory-resolver", self.resolver)):
+        for name, root in (("libp2p-relay", self.relay), ("libp2p-swarm", self.swarm), ("libp2p-kad", self.kad), ("libp2p-dns", self.dns), ("hickory-resolver", self.resolver), ("simple-dns", self.simple_dns)):
             for field, value in (("source", "registry"), ("manifest_path", str(root.parent / "other/Cargo.toml"))):
                 metadata = copy.deepcopy(self.metadata)
                 package = next(p for p in metadata["packages"] if p["name"] == name)
                 package[field] = value
                 with self.assertRaisesRegex(ValueError, f"prepared source: {name}"):
-                    graph.validate(self.old, self.new, metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver)
+                    graph.validate(self.old, self.new, metadata, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
 
     def test_source_anchor_drift_is_rejected(self):
         for replace in [graph.replace, prepare.replace]:
@@ -106,6 +122,7 @@ class GraphChecks(unittest.TestCase):
             root += 'libp2p-kad = { path = "target/p2p/kad/libp2p-kad-0.49.0" }\n'
             root += 'libp2p-relay = { path = "target/p2p/relay/libp2p-relay-0.22.0" }\n'
             root += 'libp2p-swarm = { path = "target/p2p/swarm/libp2p-swarm-0.48.0" }\n'
+            root += 'simple-dns = { path = "target/p2p/simple-dns/simple-dns-0.12.0" }\n'
         (repository / "Cargo.toml").write_text(root, encoding="utf-8")
         (repository / "Cargo.lock").write_text("version = 4\n", encoding="utf-8")
         dependencies = graph.DEPENDENCIES if adopted else "[dependencies]\n"
@@ -128,7 +145,7 @@ version = "=0.4.79"\n''', encoding="utf-8")
             repository = self.repository_fixture(adopted)
             original = (repository / "Cargo.toml").read_bytes()
             destination = repository / "candidate"
-            graph.create(repository, destination, self.relay, self.swarm, self.kad, self.dns, self.resolver)
+            graph.create(repository, destination, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
             import tomllib
             staged = tomllib.loads((destination / "Cargo.toml").read_text())
             self.assertEqual(staged["patch"]["crates-io"]["libp2p-relay"]["path"], self.relay.resolve().as_posix())
@@ -136,6 +153,7 @@ version = "=0.4.79"\n''', encoding="utf-8")
             self.assertEqual(staged["patch"]["crates-io"]["libp2p-kad"]["path"], self.kad.resolve().as_posix())
             self.assertEqual(staged["patch"]["crates-io"]["libp2p-dns"]["path"], self.dns.resolve().as_posix())
             self.assertEqual(staged["patch"]["crates-io"]["hickory-resolver"]["path"], self.resolver.resolve().as_posix())
+            self.assertEqual(staged["patch"]["crates-io"]["simple-dns"]["path"], self.simple_dns.resolve().as_posix())
             self.assertEqual((repository / "Cargo.toml").read_bytes(), original)
             self.assertEqual((destination / "baseline.lock").read_bytes(), (repository / "Cargo.lock").read_bytes())
 
@@ -145,7 +163,7 @@ version = "=0.4.79"\n''', encoding="utf-8")
         manifest.write_text(manifest.read_text().replace("=0.57.1", "=0.57.0"), encoding="utf-8")
         destination = repository / "candidate"
         with self.assertRaisesRegex(ValueError, "product dependency family"):
-            graph.create(repository, destination, self.relay, self.swarm, self.kad, self.dns, self.resolver)
+            graph.create(repository, destination, self.relay, self.swarm, self.kad, self.dns, self.resolver, self.simple_dns)
         self.assertFalse(destination.exists())
 
     def test_prepared_lease_and_monotonic_expiry_provenance_are_exact(self):

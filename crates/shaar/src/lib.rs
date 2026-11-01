@@ -3,4 +3,5 @@
 
 pub mod config;
 pub mod identity;
+mod native_discovery;
 pub mod network;
