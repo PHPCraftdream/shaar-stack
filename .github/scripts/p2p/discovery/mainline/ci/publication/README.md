@@ -18,3 +18,5 @@ The parent-supplied archive-baseline graph resolves iroh-base 1.2.0, tokio 1.53.
 Parent-provided evidence identifies archive SHA-256 `80276761b56e904e26ea71d0863beef0bb8d5ab6b639cbd1338e4b615209e3a1` and archive lock SHA-256 `e81d22b26b9e4ab1d68412b948b0e6447e594cf300ee064737796348b807204f`; not independently checked here. The exact n0-error 1.0.1 and macro source was unavailable, so macro-generated `EncodingError` structural match shapes remain unverified. Existing `SignedPacket::from_bytes` verification does not evidence strict rejection of trailing bytes; timestamp-only evidence makes no such verifier claim. Roundtrip verification is not an independent known-answer vector. `Timestamp::now` overflow remains out of scope.
 
 No Python, Cargo, tests, formatting, metadata, or network commands were executed.
+
+The exact registry archive declares `MIT OR Apache-2.0` in its manifest but does not include `LICENSE-MIT` or `LICENSE-APACHE`. The fixture preserves all original members and checks that declaration; it neither fabricates license texts nor establishes release/notices clearance. That remains a separate release gate.

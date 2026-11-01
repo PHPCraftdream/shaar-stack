@@ -104,8 +104,6 @@ def validate(files: dict[str, bytes]) -> None:
     if (package.get("name"), package.get("version"), package.get("license")) != (
             "iroh-dns", "1.3.0", "MIT OR Apache-2.0"):
         raise ValueError("unexpected upstream package identity/license")
-    if not files.get("LICENSE-MIT") or not files.get("LICENSE-APACHE"):
-        raise ValueError("upstream license files missing")
 
 
 def edits() -> dict[str, list[tuple[str, str]]]:

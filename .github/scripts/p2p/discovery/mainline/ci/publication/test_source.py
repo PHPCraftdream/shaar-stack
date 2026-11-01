@@ -9,16 +9,34 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import ci as fixture_ci
 import graph
 import prepare
 import runner
 
 
 class RecipeIntegrity(unittest.TestCase):
+    def test_ci_staging_failure_preserves_failed_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = root / "exported-evidence"
+            arguments = ["ci.py", "--archive", str(root / "unread.crate"),
+                         "--simple-dns-archive", str(root / "simple.crate"),
+                         "--evidence", str(evidence)]
+            with (
+                patch.object(sys, "argv", arguments),
+                patch.dict(os.environ, {"RUNNER_TEMP": str(root)}),
+                patch.object(prepare, "archive_files", side_effect=ValueError("archive failure probe")),
+            ):
+                self.assertEqual(fixture_ci.main(), 1)
+            receipt = json.loads((evidence / "receipt.json").read_text())
+            self.assertEqual(receipt, {"status": "failed", "error": "archive failure probe"})
+
     def test_runner_path_resolution_and_output_path_guard(self):
         repo = runner.repository_root()
         self.assertTrue((repo / "CLAUDE.md").is_file())
@@ -105,6 +123,15 @@ class RecipeIntegrity(unittest.TestCase):
             self.fail("IROH_DNS_ARCHIVE must name the pinned archive")
         archive = Path(archive_value)
         original = prepare.archive_files(archive)
+        prepare.validate(original)
+        self.assertNotIn("LICENSE-MIT", original)
+        self.assertNotIn("LICENSE-APACHE", original)
+        invalid_license = dict(original)
+        invalid_license["Cargo.toml"] = original["Cargo.toml"].replace(
+            b'license = "MIT OR Apache-2.0"', b'license = "unverified"', 1)
+        self.assertNotEqual(invalid_license["Cargo.toml"], original["Cargo.toml"])
+        with self.assertRaises(ValueError):
+            prepare.validate(invalid_license)
         changed = prepare.transform(original)
         prepare.reverse(original, changed)
         receipt = {"archive_sha256": prepare.ARCHIVE_SHA256, "recipe": prepare.recipe(),

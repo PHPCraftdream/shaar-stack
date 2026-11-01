@@ -29,35 +29,40 @@ def main() -> int:
         raise ValueError("CI evidence destination must be new")
     # Keep compiled dependency sources out of the product workspace.
     root = Path(tempfile.mkdtemp(prefix="shaar-publication-", dir=os.environ["RUNNER_TEMP"]))
-    original = root / "original"
-    original.mkdir()
-    files = prepare.archive_files(args.archive.resolve())
-    prepare.validate(files)
-    for name, data in files.items():
-        path = original.joinpath(*PurePosixPath(name).parts)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-    plan = root / "ci-plan.json"
-    plan.write_text(json.dumps(json.loads(os.environ["CI_PLAN_JSON"]), sort_keys=True), encoding="utf-8")
     receipt = root / "evidence" / "receipt.json"
+    plan = root / "ci-plan.json"
+    receipt.parent.mkdir()
     try:
-        return subprocess.run([
+        original = root / "original"
+        original.mkdir()
+        files = prepare.archive_files(args.archive.resolve())
+        prepare.validate(files)
+        for name, data in files.items():
+            path = original.joinpath(*PurePosixPath(name).parts)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        plan.write_text(json.dumps(json.loads(os.environ["CI_PLAN_JSON"]), sort_keys=True), encoding="utf-8")
+        result = subprocess.run([
             sys.executable, "-I", str(HERE / "runner.py"),
             "--archive", str(args.archive.resolve()), "--source", str(original),
             "--original-lock", str(original / "Cargo.lock"),
             "--simple-dns-archive", str(args.simple_dns_archive.resolve()),
             "--destination", str(root / "prepared"), "--evidence", str(receipt),
             "--plan", str(plan),
-        ], check=False).returncode
+        ], check=False)
+        if not receipt.is_file():
+            raise ValueError("runner produced no receipt")
+        return result.returncode
+    except Exception as error:
+        if not receipt.exists():
+            receipt.write_text(json.dumps({"status": "failed", "error": str(error)}), encoding="utf-8")
+        print(str(error), file=sys.stderr)
+        return 1
     finally:
-        if receipt.parent.exists():
-            shutil.copytree(receipt.parent, evidence,
-                            ignore=shutil.ignore_patterns("cargo-target", "simple-dns-prepared"))
-        else:
-            evidence.mkdir(parents=True)
-            (evidence / "failure.json").write_text(
-                json.dumps({"status": "failed", "error": "runner produced no evidence"}), encoding="utf-8")
-        shutil.copy2(plan, evidence / "ci-plan.json")
+        shutil.copytree(receipt.parent, evidence,
+                        ignore=shutil.ignore_patterns("cargo-target", "simple-dns-prepared"))
+        if plan.is_file():
+            shutil.copy2(plan, evidence / "ci-plan.json")
 
 
 if __name__ == "__main__":
