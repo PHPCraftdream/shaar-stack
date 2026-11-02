@@ -229,7 +229,7 @@ async fn partial_put_deadline_expires_only_put_rpc_and_preserves_unrelated_get()
         .expect("receive actual PUT response");
     actor.process_message(response, from);
     actor.owned_note_response(tid);
-    assert_eq!(
+    assert!(matches!(
         actor
             .core
             .put_queries
@@ -237,7 +237,7 @@ async fn partial_put_deadline_expires_only_put_rpc_and_preserves_unrelated_get()
             .expect("partial PUT remains")
             .check(&actor.socket),
         Ok(false)
-    );
+    ));
 
     actor.expire_owned_operations_at(deadline);
     assert!(matches!(
@@ -504,7 +504,7 @@ async fn retained_put_get_recreation_keeps_operation_round_budget() {
         vec![9].into_boxed_slice(),
     );
     let mut put =
-        PutQuery::new_owned(request, None, operation, budget).expect("actual retained PUT");
+        PutQuery::new_owned(request.clone(), None, operation, budget).expect("actual retained PUT");
     put.start(&mut actor.socket, &[node])
         .expect("start retained PUT");
     *actor
@@ -513,7 +513,7 @@ async fn retained_put_get_recreation_keeps_operation_round_budget() {
         .get_mut(&put_target)
         .expect("pending PUT slot") = put;
     actor
-        .owned_get_until(get_request.clone(), None, deadline)
+        .owned_get_until(GetRequestSpecific::from(&request), None, deadline)
         .expect("live GET coalesces");
     assert_eq!(actor.socket.operation_rpc_len(operation), 2);
     actor.socket.flush_owned().await;
@@ -533,7 +533,7 @@ async fn retained_put_get_recreation_keeps_operation_round_budget() {
 
     for round in 1..=3 {
         actor
-            .owned_get_until(get_request.clone(), None, deadline)
+            .owned_get_until(GetRequestSpecific::from(&request), None, deadline)
             .expect("live GET coalesces without consuming another round");
         assert_eq!(actor.socket.operation_rpc_len(operation), 2);
         actor.socket.flush_owned().await;
@@ -581,7 +581,7 @@ async fn retained_put_get_recreation_keeps_operation_round_budget() {
         assert_eq!(actor.socket.owned_deadline(operation), Some(deadline));
         if round < 3 {
             actor
-                .owned_get_until(get_request.clone(), None, deadline)
+                .owned_get_until(GetRequestSpecific::from(&request), None, deadline)
                 .expect("recreate GET on retained PUT operation");
             assert_eq!(
                 actor.owned_resources.as_ref().unwrap().operations[&put_target],

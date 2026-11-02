@@ -59,10 +59,7 @@ async fn check_shared_get_provenance(get_reply: bool) {
         read_only: false,
     };
     put_peer
-        .send_to(
-            &reply.to_bytes().expect("encode PUT response"),
-            put_source.into(),
-        )
+        .send_to(&reply.to_bytes().expect("encode PUT response"), put_source)
         .await
         .expect("send PUT success");
     let (decoded, from) = receive_response(&mut actor).await;
@@ -99,7 +96,7 @@ async fn check_shared_get_provenance(get_reply: bool) {
         bootstrap
             .send_to(
                 &reply.to_bytes().expect("encode GET response"),
-                actor.socket.local_addr().into(),
+                actor.socket.local_addr(),
             )
             .await
             .expect("send GET response");

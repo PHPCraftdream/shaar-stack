@@ -147,7 +147,10 @@ async fn actual_owned_put_retries_three_submitted_attempts_then_stops() {
             crate::common::Message::from_bytes(&buffer[..length]).expect("decode PUT attempt");
         assert_eq!(
             source,
-            SocketAddrV4::new(Ipv4Addr::LOCALHOST, actor.socket.local_addr().port())
+            std::net::SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::LOCALHOST,
+                actor.socket.local_addr().port()
+            ))
         );
         assert!(matches!(
             message.message_type,

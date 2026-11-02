@@ -59,7 +59,7 @@ async fn response_then_last_waiter_cancellation_releases_operation_receipt() {
     bootstrap
         .send_to(
             &reply.to_bytes().expect("encode response"),
-            actor.socket.local_addr().into(),
+            actor.socket.local_addr(),
         )
         .await
         .expect("send bootstrap response");
@@ -205,12 +205,9 @@ async fn actual_actor_retains_completed_result_leases_until_last_clone_drops() {
         )),
         read_only: false,
     };
-    peer.send_to(
-        &reply.to_bytes().expect("encode actual response"),
-        source.into(),
-    )
-    .await
-    .expect("send actual response");
+    peer.send_to(&reply.to_bytes().expect("encode actual response"), source)
+        .await
+        .expect("send actual response");
     let (decoded, from) = receive_response(&mut actor).await;
     actor.process_message(decoded, from);
     actor.owned_note_response(request.transaction_id);

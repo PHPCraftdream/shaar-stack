@@ -48,7 +48,7 @@ async fn owned_put_timeout_releases_receipt_and_preserves_success_or_error_seman
         first_peer
             .send_to(
                 &response.to_bytes().expect("encode GET response"),
-                get_source.into(),
+                get_source,
             )
             .await
             .expect("send GET response");
@@ -89,7 +89,7 @@ async fn owned_put_timeout_releases_receipt_and_preserves_success_or_error_seman
         first_peer
             .send_to(
                 &response.to_bytes().expect("encode first PUT response"),
-                first_source.into(),
+                first_source,
             )
             .await
             .expect("send first PUT response");

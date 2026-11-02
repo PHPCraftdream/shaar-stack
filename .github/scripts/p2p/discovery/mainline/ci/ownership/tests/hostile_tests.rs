@@ -132,7 +132,7 @@ async fn socket_validated_hostile_referrals_hit_actual_candidate_limit() {
     };
     peer.send_to(
         &response.to_bytes().expect("encode real KRPC response"),
-        source.into(),
+        source,
     )
     .await
     .expect("send referrals from queried peer");
@@ -193,7 +193,7 @@ async fn real_socket_rejects_wrong_source_and_receipt_uses_the_accepted_operatio
     .expect("encode KRPC response");
 
     spoof
-        .send_to(&reply, destination.into())
+        .send_to(&reply, destination)
         .await
         .expect("send wrong-source reply");
     assert!(
@@ -208,7 +208,7 @@ async fn real_socket_rejects_wrong_source_and_receipt_uses_the_accepted_operatio
     );
     assert_eq!(actor.socket.owned_response_operation(), None);
 
-    peer.send_to(&reply, destination.into())
+    peer.send_to(&reply, destination)
         .await
         .expect("reply from registered source");
     let (decoded, from) = receive_response(&mut actor).await;
@@ -261,7 +261,7 @@ async fn terminal_owned_put_response_releases_receipt(success: bool) {
     };
     peer.send_to(
         &response.to_bytes().expect("encode actual GET response"),
-        source.into(),
+        source,
     )
     .await
     .expect("send GET response");
@@ -303,7 +303,7 @@ async fn terminal_owned_put_response_releases_receipt(success: bool) {
     };
     peer.send_to(
         &response.to_bytes().expect("encode accepted PUT response"),
-        put_source.into(),
+        put_source,
     )
     .await
     .expect("send PUT success");
@@ -380,12 +380,9 @@ async fn newer_owned_mutable_put_replaces_old_receipt_without_disturbing_other_o
         )),
         read_only: false,
     };
-    peer.send_to(
-        &response.to_bytes().expect("encode GET response"),
-        source.into(),
-    )
-    .await
-    .expect("send GET response");
+    peer.send_to(&response.to_bytes().expect("encode GET response"), source)
+        .await
+        .expect("send GET response");
     let (decoded, from) = receive_response(&mut actor).await;
     actor.process_message(decoded, from);
     actor.owned_note_response(get_request.transaction_id);
@@ -404,7 +401,7 @@ async fn newer_owned_mutable_put_replaces_old_receipt_without_disturbing_other_o
     };
     peer.send_to(
         &reply.to_bytes().expect("encode accepted PUT response"),
-        put_source.into(),
+        put_source,
     )
     .await
     .expect("send accepted PUT response");

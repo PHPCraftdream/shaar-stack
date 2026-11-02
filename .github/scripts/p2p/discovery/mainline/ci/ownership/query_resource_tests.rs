@@ -507,7 +507,10 @@ async fn eight_real_queries_share_visited_budget_across_bounded_rpc_batches() {
                 let tid = message.transaction_id;
                 assert_eq!(
                     source,
-                    SocketAddrV4::new(Ipv4Addr::LOCALHOST, socket.local_addr().port())
+                    std::net::SocketAddr::V4(SocketAddrV4::new(
+                        Ipv4Addr::LOCALHOST,
+                        socket.local_addr().port()
+                    ))
                 );
                 assert!(
                     socket.accept_owned_response(tid, destination),
