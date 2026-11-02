@@ -324,7 +324,7 @@ async fn actual_udp_wrong_source_cannot_complete_transaction() {
     socket.flush_owned().await;
 
     let mut bytes = [0; 2048];
-    let (length, _) = peer.recv_from(&mut bytes).unwrap();
+    let (length, local) = peer.recv_from(&mut bytes).unwrap();
     let request = Message::from_bytes(&bytes[..length]).unwrap();
     assert_eq!(request.transaction_id, tid);
     let reply = Message {
@@ -340,7 +340,6 @@ async fn actual_udp_wrong_source_cannot_complete_transaction() {
     .to_bytes()
     .unwrap();
 
-    let local = socket.local_addr();
     wrong_peer.send_to(&reply, local).unwrap();
     assert!(socket.recv_from().await.is_none());
     assert!(socket.owned_inflight(tid));

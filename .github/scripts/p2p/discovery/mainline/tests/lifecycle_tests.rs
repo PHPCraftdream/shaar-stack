@@ -129,7 +129,7 @@ fn actor_run_keeps_stop_priority_outside_unbiased_work_select() {
     assert!(normalized.contains(
         "tokio::select! { biased; _ = wait_stop(&mut stop) => break, keep_running = async {"
     ));
-    assert!(normalized.contains("keep_running = async { tokio::select! { msg = receiver.recv()"));
+    assert!(normalized.contains("keep_running = async { tokio::select! {"));
     let work_start = normalized
         .find("keep_running = async {")
         .expect("work future");
@@ -140,6 +140,7 @@ fn actor_run_keeps_stop_priority_outside_unbiased_work_select() {
     let work = &normalized[work_start..work_end];
     assert_eq!(work.matches("tokio::select!").count(), 1);
     assert!(!work.contains("biased;"));
+    assert!(work.contains("msg = receiver.recv()"));
     assert!(work.contains("packet = actor.socket.recv_from()"));
     assert!(work.contains("_ = maintenance.tick()"));
     assert!(normalized.contains("None => { // All senders dropped, shutdown. debug!(\"dht::Dht's actor task was shutdown after Drop.\"); return false; }"));
