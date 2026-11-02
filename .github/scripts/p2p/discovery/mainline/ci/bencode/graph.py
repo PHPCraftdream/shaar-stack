@@ -109,7 +109,7 @@ def _node_signature(metadata, mapping):
 
 
 def validate_mainline_test_features(original_manifest, prepared_manifest):
-    """Allow only Tokio test-util in the prepared manifest's dev dependency."""
+    """Allow only Tokio dev test-util and the explicit owned API test target."""
     original = _parsed(original_manifest)
     prepared = _parsed(prepared_manifest)
     original_tokio = original.get("dependencies", {}).get("tokio", {})
@@ -121,9 +121,13 @@ def validate_mainline_test_features(original_manifest, prepared_manifest):
         raise ValueError("original Tokio dev features must be exactly rt-multi-thread")
     expected = copy.deepcopy(original)
     expected["dev-dependencies"]["tokio"]["features"] = ["rt-multi-thread", "test-util"]
+    if original.get("test"):
+        raise ValueError("original manifest unexpectedly declares integration tests")
+    expected["test"] = [{"name": "owned_api", "path": "tests/owned_api.rs"}]
     if prepared != expected:
-        raise ValueError("prepared manifest changed fields beyond Tokio dev test-util")
-    return {"normal_tokio_features_unchanged": True, "dev_tokio_test_util_only": True}
+        raise ValueError("prepared manifest changed fields beyond isolated test support")
+    return {"normal_tokio_features_unchanged": True, "dev_tokio_test_util_only": True,
+            "owned_api_test_target_only": True}
 
 
 def validate_tokio_build_features(normal_json_lines, test_json_lines, metadata_after):

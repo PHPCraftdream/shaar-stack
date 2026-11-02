@@ -9,7 +9,8 @@ def edits() -> dict[str, list[tuple[str, str]]]:
         "Cargo.toml": [
             (
                 '[dev-dependencies.tokio]\nversion = "1"\nfeatures = ["rt-multi-thread"]',
-                '[dev-dependencies.tokio]\nversion = "1"\nfeatures = ["rt-multi-thread", "test-util"]',
+                '[dev-dependencies.tokio]\nversion = "1"\nfeatures = ["rt-multi-thread", "test-util"]\n\n'
+                '[[test]]\nname = "owned_api"\npath = "tests/owned_api.rs"',
             ),
         ],
         "src/actor.rs": [

@@ -150,8 +150,9 @@ class GraphAuditTests(unittest.TestCase):
         verify("metadata duplicate Tokio node", metadata_case=lambda x: x["resolve"]["nodes"].append(copy.deepcopy(x["resolve"]["nodes"][0])))
         verify("metadata wrong Tokio node ID", metadata_case=lambda x: x["resolve"]["nodes"][0].update(id="wrong"))
 
-    def test_mainline_tokio_test_util_is_the_only_prepared_change(self):
+    def test_mainline_isolated_test_support_is_the_exact_prepared_change(self):
         original = {
+            "package": {"name": "n0-mainline", "version": "0.7.0", "autotests": False},
             "dependencies": {
                 "tokio": {
                     "version": "1.39",
@@ -165,13 +166,20 @@ class GraphAuditTests(unittest.TestCase):
         }
         prepared = copy.deepcopy(original)
         prepared["dev-dependencies"]["tokio"]["features"].append("test-util")
+        prepared["test"] = [{"name": "owned_api", "path": "tests/owned_api.rs"}]
 
         self.assertEqual(
             graph.validate_mainline_test_features(original, prepared),
-            {"normal_tokio_features_unchanged": True, "dev_tokio_test_util_only": True},
+            {"normal_tokio_features_unchanged": True, "dev_tokio_test_util_only": True,
+             "owned_api_test_target_only": True},
         )
 
         cases = (
+            ("missing owned API target", lambda x: x.pop("test")),
+            ("wrong owned API name", lambda x: x["test"][0].update(name="other")),
+            ("wrong owned API path", lambda x: x["test"][0].update(path="tests/other.rs")),
+            ("extra test target", lambda x: x["test"].append({"name": "other", "path": "tests/other.rs"})),
+            ("automatic test discovery enabled", lambda x: x["package"].update(autotests=True)),
             ("normal test-util leak", lambda x: x["dependencies"]["tokio"]["features"].append("test-util")),
             ("missing dev feature", lambda x: x["dev-dependencies"]["tokio"].update(features=[])),
             ("extra dev feature", lambda x: x["dev-dependencies"]["tokio"]["features"].append("time")),
