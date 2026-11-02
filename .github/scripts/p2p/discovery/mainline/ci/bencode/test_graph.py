@@ -77,7 +77,7 @@ class GraphAuditTests(unittest.TestCase):
             "features": ["rt", "sync", "time"],
         }
         test = copy.deepcopy(normal)
-        test["features"].extend(["rt-multi-thread", "test-util"])
+        test["features"].extend(["default", "rt-multi-thread", "test-util"])
 
         receipt = graph.validate_tokio_build_features(
             json.dumps(normal), json.dumps(test), metadata_after
@@ -137,6 +137,7 @@ class GraphAuditTests(unittest.TestCase):
         verify("features None", lambda x: x.update(features=None))
         verify("duplicate features", lambda x: x["features"].append(x["features"][0]))
         verify("normal includes test-util", lambda x: x["features"].append("test-util"))
+        verify("test missing default", test_case=lambda x: x["features"].remove("default"))
         verify("test missing test-util", test_case=lambda x: x["features"].remove("test-util"))
         verify("test missing rt-multi-thread", test_case=lambda x: x["features"].remove("rt-multi-thread"))
         verify("test extra feature", test_case=lambda x: x["features"].append("extra"))

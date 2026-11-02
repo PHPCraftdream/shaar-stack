@@ -195,7 +195,7 @@ def validate_tokio_build_features(normal_json_lines, test_json_lines, metadata_a
     test, test_profile, test_features = artifacts(test_json_lines)
     if normal_profile.get("test") is not False or test_profile.get("test") is not False:
         raise ValueError("Tokio library artifacts must not have test profile")
-    expected_test_features = normal_features | {"rt-multi-thread", "test-util"}
+    expected_test_features = normal_features | {"default", "rt-multi-thread", "test-util"}
     if "test-util" in normal_features or not {"rt-multi-thread", "test-util"}.issubset(test_features) or expected_test_features != test_features:
         raise ValueError("Tokio test feature selection mismatch")
     return {"package_id": tokio["id"], "source": tokio["source"], "version": tokio["version"],
