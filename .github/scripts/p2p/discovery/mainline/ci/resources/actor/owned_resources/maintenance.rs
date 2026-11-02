@@ -6,7 +6,21 @@ use super::*;
 
 impl Actor {
     pub(crate) fn owned_note_response(&mut self, transaction_id: u32) {
-        if let Some((tid, operation)) = self.socket.owned_response_operation()
+        let accepted = self.socket.owned_response_operation();
+        let routing_error = self.core.routing_table.owner_error();
+        let signed_error = self.core.signed_peers_routing_table.owner_error();
+        let error = routing_error.or(signed_error);
+        if let (Some(error), Some((tid, operation))) = (error, accepted)
+            && tid == transaction_id
+        {
+            self.fail_owned_operation(operation, error);
+            return;
+        }
+        if error.is_some() && self.owned_resources.is_some() && accepted.is_none() {
+            self.owned_fail(ResourceError::NotOwnedProfile);
+            return;
+        }
+        if let Some((tid, operation)) = accepted
             && tid == transaction_id
         {
             if let Some(owner) = self.owned_resources.as_mut() {
@@ -71,6 +85,7 @@ impl Actor {
                     .is_some_and(|deadline| deadline <= now)
             })
             .collect();
+        let mut completed_puts = Vec::new();
         for operation in expired {
             let targets: Vec<Id> = self
                 .owned_resources
@@ -85,6 +100,9 @@ impl Actor {
             for target in targets {
                 self.core.iterative_queries.remove(&target);
                 self.core.put_queries.remove(&target);
+                if let Some(active) = owner.active_puts.remove(&target) {
+                    completed_puts.push(active);
+                }
                 if let Some(senders) = self.put_senders.remove(&target) {
                     for sender in senders {
                         let _ = sender.send(Err(PutQueryError::Resource(
@@ -108,6 +126,14 @@ impl Actor {
                 .maintenance_nodes
                 .retain(|(_, tid, _, _)| self.socket.inflight(tid));
         }
+        for active in completed_puts {
+            let _ = active.result.send(Err(crate::resource::OwnedPutError::Resource(
+                ResourceError::DeadlineExceeded,
+            )));
+            drop(active.request_lease);
+            drop(active.result_lease);
+            let _ = active.cleanup.send(());
+        }
     }
 
     pub(crate) fn owned_next_deadline(&self) -> Option<tokio::time::Instant> {
@@ -126,6 +152,8 @@ impl Actor {
                     .map(|waiter| waiter.deadline),
             )
             .chain(owner.admissions.iter().map(|request| request.deadline))
+            .chain(owner.put_admissions.iter().map(|put| put.deadline))
+            .chain(owner.active_puts.values().map(|put| put.deadline))
             .chain(
                 self.core
                     .iterative_queries

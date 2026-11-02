@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::resource::ResourceError;
 
@@ -16,14 +16,12 @@ pub(crate) const VISITED_LIMIT: usize = 256;
 pub(crate) struct StoreBudget {
     holders: AtomicUsize,
     visited: AtomicUsize,
-    first_error: AtomicU8,
 }
 
 impl StoreBudget {
     /// Reserve one holder before inserting its node into an owning store.
     pub(crate) fn reserve_holder(self: &Arc<Self>) -> Result<HolderLease, ResourceError> {
-        reserve(&self.holders, HOLDER_LIMIT, ResourceError::CandidateLimit)
-            .map_err(|error| self.remember(error))?;
+        reserve(&self.holders, HOLDER_LIMIT, ResourceError::CandidateLimit)?;
         Ok(HolderLease {
             budget: Arc::clone(self),
         })
@@ -31,8 +29,7 @@ impl StoreBudget {
 
     /// Reserve one visited address before inserting it into an operation's visited set.
     pub(crate) fn reserve_visited(self: &Arc<Self>) -> Result<VisitedLease, ResourceError> {
-        reserve(&self.visited, VISITED_LIMIT, ResourceError::VisitedLimit)
-            .map_err(|error| self.remember(error))?;
+        reserve(&self.visited, VISITED_LIMIT, ResourceError::VisitedLimit)?;
         Ok(VisitedLease {
             budget: Arc::clone(self),
         })
@@ -44,36 +41,6 @@ impl StoreBudget {
 
     pub(crate) fn visited_count(&self) -> usize {
         self.visited.load(Ordering::Acquire)
-    }
-
-    /// Inspect the first capacity error without clearing the sticky owner status.
-    pub(crate) fn peek_error(&self) -> Option<ResourceError> {
-        match self.first_error.load(Ordering::Acquire) {
-            1 => Some(ResourceError::CandidateLimit),
-            2 => Some(ResourceError::VisitedLimit),
-            _ => None,
-        }
-    }
-
-    /// Return and clear the first capacity error recorded by this owner.
-    pub(crate) fn take_error(&self) -> Option<ResourceError> {
-        match self.first_error.swap(0, Ordering::AcqRel) {
-            1 => Some(ResourceError::CandidateLimit),
-            2 => Some(ResourceError::VisitedLimit),
-            _ => None,
-        }
-    }
-
-    fn remember(&self, error: ResourceError) -> ResourceError {
-        let code = match error {
-            ResourceError::CandidateLimit => 1,
-            ResourceError::VisitedLimit => 2,
-            _ => return error,
-        };
-        let _ = self
-            .first_error
-            .compare_exchange(0, code, Ordering::AcqRel, Ordering::Relaxed);
-        error
     }
 }
 

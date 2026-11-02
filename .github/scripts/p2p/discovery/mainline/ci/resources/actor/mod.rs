@@ -24,6 +24,8 @@ mod failure;
 mod maintenance;
 #[path = "owned_resources/queries.rs"]
 mod queries;
+#[path = "owned_resources/put.rs"]
+mod put;
 #[path = "owned_resources/tick.rs"]
 mod tick;
 
@@ -40,6 +42,26 @@ struct PendingAdmission {
     sender: tokio::sync::oneshot::Sender<RequestReply>,
     deadline: tokio::time::Instant,
     request_lease: Arc<RequestLease>,
+}
+#[derive(Debug)]
+pub(super) struct PendingPut {
+    pub(super) target: Id,
+    pub(super) request: crate::common::PutMutableRequestArguments,
+    pub(super) reply: tokio::sync::oneshot::Sender<Result<crate::resource::ChargedPutReceiver, ResourceError>>,
+    pub(super) cleanup: tokio::sync::oneshot::Sender<()>,
+    pub(super) cancel: tokio::sync::oneshot::Receiver<()>,
+    pub(super) request_lease: Arc<RequestLease>,
+    pub(super) deadline: tokio::time::Instant,
+}
+#[derive(Debug)]
+pub(super) struct ActivePut {
+    pub(super) operation: OperationId,
+    pub(super) result: tokio::sync::oneshot::Sender<Result<crate::resource::OwnedPutCompletion, crate::resource::OwnedPutError>>,
+    pub(super) cleanup: tokio::sync::oneshot::Sender<()>,
+    pub(super) cancel: tokio::sync::oneshot::Receiver<()>,
+    pub(super) result_lease: Arc<ResultLease>,
+    pub(super) request_lease: Arc<RequestLease>,
+    pub(super) deadline: tokio::time::Instant,
 }
 #[derive(Debug)]
 struct OwnedWaiter {
@@ -66,6 +88,8 @@ pub(crate) struct OwnedActor {
     maintenance_nodes: Vec<(SocketAddrV4, u32, HolderLease, VisitedLease)>,
     pending: VecDeque<PendingRequest>,
     admissions: VecDeque<PendingAdmission>,
+    put_admissions: VecDeque<PendingPut>,
+    active_puts: HashMap<Id, ActivePut>,
     request_budget: Arc<RequestBudget>,
 }
 
@@ -95,7 +119,7 @@ impl OwnedActor {
         deadline: tokio::time::Instant,
         request_lease: Arc<RequestLease>,
     ) {
-        if self.pending.len() + self.admissions.len() >= 16 {
+        if self.pending.len() + self.admissions.len() + self.put_admissions.len() >= 16 {
             let _ = sender.send(RequestReply::Error(ResourceError::OperationLimit));
         } else {
             self.admissions.push_back(PendingAdmission {
@@ -109,13 +133,30 @@ impl OwnedActor {
 
     #[cfg(test)]
     pub(crate) fn pending_len(&self) -> usize {
-        self.pending.len() + self.admissions.len()
+        self.pending.len() + self.admissions.len() + self.put_admissions.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_put_len(&self) -> usize {
+        self.active_puts.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn put_pending_len(&self) -> usize {
+        self.put_admissions.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reserve_result_for_test(&self) -> Option<Arc<ResultLease>> {
+        self.result_budget.acquire()
     }
 
     pub(crate) fn new(budget: Arc<StoreBudget>, bootstrap_leases: Vec<HolderLease>) -> Self {
+        let request_budget = Arc::new(RequestBudget::default());
+        let result_budget = Arc::new(ResultBudget::new(request_budget.cancellation_wake()));
         Self {
             budget,
-            result_budget: Arc::new(ResultBudget::default()),
+            result_budget,
             operations: HashMap::new(),
             maintenance: None,
             maintenance_retry_at: None,
@@ -129,8 +170,17 @@ impl OwnedActor {
             maintenance_nodes: Vec::new(),
             pending: VecDeque::new(),
             admissions: VecDeque::new(),
-            request_budget: Arc::new(RequestBudget::default()),
+            put_admissions: VecDeque::new(),
+            active_puts: HashMap::new(),
+            request_budget,
         }
+    }
+
+    fn operation_capacity_available(&self) -> bool {
+        let charged = self.operations.values().copied().collect::<HashSet<_>>();
+        let total =
+            charged.len() + usize::from(self.maintenance.is_some_and(|id| !charged.contains(&id)));
+        total < 8
     }
 
     fn operation_for(

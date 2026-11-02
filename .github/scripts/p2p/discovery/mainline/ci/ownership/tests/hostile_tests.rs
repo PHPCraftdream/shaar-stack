@@ -85,6 +85,15 @@ mod completion;
 #[path = "hostile_resource_tests/provenance_tests.rs"]
 mod provenance;
 
+#[path = "hostile_resource_tests/admission_wake_tests.rs"]
+mod admission_wake;
+
+#[path = "hostile_resource_tests/terminal_put_tests.rs"]
+mod terminal_put;
+
+#[path="hostile_resource_tests/newoverload_put_tests.rs"]
+mod overload_put;
+
 #[tokio::test]
 async fn socket_validated_hostile_referrals_hit_actual_candidate_limit() {
     let (peer, peer_address) = capture();
@@ -155,13 +164,10 @@ async fn socket_validated_hostile_referrals_hit_actual_candidate_limit() {
         receiver.await.expect("typed completion"),
         Err(ResourceError::CandidateLimit)
     ));
-    assert_eq!(actor.owned_error(), Some(ResourceError::CandidateLimit));
+    assert_eq!(actor.owned_error(), None);
     assert!(actor.core.iterative_queries.is_empty());
-    assert_eq!(
-        actor.socket.owned_test_state().unwrap().2,
-        0,
-        "failure cancels actual RPC entries"
-    );
+    assert_eq!(actor.socket.owned_test_state().unwrap().2, 0, "failure cancels actual RPC entries");
+    assert_eq!(actor.owned_resources.as_ref().unwrap().operations.get(&target), None);
 }
 
 #[tokio::test]
@@ -343,6 +349,9 @@ async fn terminal_owned_put_response_releases_receipt(success: bool) {
 
 #[path = "hostile_resource_tests/put_lifecycle_tests.rs"]
 mod put_lifecycle;
+
+#[path = "hostile_resource_tests/public_put_tests.rs"]
+mod public_put;
 
 #[tokio::test]
 async fn newer_owned_mutable_put_replaces_old_receipt_without_disturbing_other_operations() {

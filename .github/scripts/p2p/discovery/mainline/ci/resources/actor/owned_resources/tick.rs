@@ -7,6 +7,7 @@ use super::*;
 impl Actor {
     pub(crate) fn tick_owned(&mut self) {
         self.expire_owned_operations_at(tokio::time::Instant::now());
+        self.retire_owned_operation_errors();
         if let Some(error) = self.owned_failure() {
             self.owned_fail(error);
             return;
@@ -15,6 +16,7 @@ impl Actor {
             return;
         }
         self.maintain_owned_admissions_at(tokio::time::Instant::now());
+        self.maintain_owned_puts_at(tokio::time::Instant::now());
         self.periodic_node_maintaenance();
         if let Some(error) = self.owned_failure() {
             self.owned_fail(error);
@@ -24,6 +26,7 @@ impl Actor {
             query.visit_closest(&mut self.socket);
         }
         self.expire_owned_operations_at(tokio::time::Instant::now());
+        self.retire_owned_operation_errors();
         if let Some(error) = self.owned_failure() {
             self.owned_fail(error);
             return;
@@ -57,13 +60,16 @@ impl Actor {
                 self.owned_fail(error);
                 return;
             }
-            let pending_put = self.core.put_queries.contains_key(&target);
+            let mut pending_put = self.core.put_queries.contains_key(&target);
+            let mut terminal_put_failure = None;
+            let mut expire_put_deadline = false;
+            let mut query = self
+                .core
+                .iterative_queries
+                .remove(&target)
+                .expect("completed query retained");
             let leases = if pending_put {
-                let count = self
-                    .core
-                    .iterative_queries
-                    .get(&target)
-                    .map_or(0, |query| query.responders().len());
+                let count = query.responders().len();
                 let budget = Arc::clone(
                     &self
                         .owned_resources
@@ -72,30 +78,42 @@ impl Actor {
                         .budget,
                 );
                 let mut leases = Vec::with_capacity(count);
+                let mut reservation_error = None;
                 for _ in 0..count {
                     if let Some(error) = self.owned_failure() {
+                        drop(leases);
+                        drop(query);
                         self.owned_fail(error);
                         return;
                     }
                     match budget.reserve_holder() {
                         Ok(lease) => leases.push(lease),
                         Err(error) => {
-                            self.owned_fail(error);
-                            return;
+                            reservation_error = Some(error);
+                            break;
                         }
                     }
                 }
-                leases
+                if let Some(error) = reservation_error {
+                    drop(leases);
+                    let tids = self.core.put_queries.remove(&target)
+                        .map(|put| put.transaction_ids().to_vec())
+                        .unwrap_or_default();
+                    self.socket.cancel_owned_transactions(&tids);
+                    let put_error = PutError::Query(PutQueryError::Resource(error));
+                    terminal_put_failure = Some((put_error, tids));
+                    pending_put = false;
+                    Vec::new()
+                } else {
+                    leases
+                }
             } else {
                 Vec::new()
             };
-            let mut query = self
-                .core
-                .iterative_queries
-                .remove(&target)
-                .expect("completed query retained");
             if pending_put {
                 if let Some(error) = self.owned_failure() {
+                    drop(query);
+                    drop(leases);
                     self.owned_fail(error);
                     return;
                 }
@@ -126,26 +144,20 @@ impl Actor {
                         .put_queries
                         .get(&target)
                         .and_then(|put| put.owner_error());
-                    if let Some(put) = self.core.put_queries.get(&target) {
-                        self.socket
-                            .cancel_owned_transactions(&put.transaction_ids().to_vec());
-                    }
-                    if let Some(error) = resource_error {
-                        if error == ResourceError::DeadlineExceeded {
-                            self.expire_owned_operations_at(tokio::time::Instant::now());
-                            continue;
-                        }
-                        self.owned_fail(error);
-                        return;
-                    }
-                    self.core.put_queries.remove(&target);
-                    if let Some(senders) = self.put_senders.remove(&target) {
-                        for sender in senders {
-                            let _ = sender.send(Err(error.clone()));
-                        }
+                    let tids = self.core.put_queries.get(&target)
+                        .map(|put| put.transaction_ids().to_vec())
+                        .unwrap_or_default();
+                    self.socket.cancel_owned_transactions(&tids);
+                    if resource_error == Some(ResourceError::DeadlineExceeded) {
+                        expire_put_deadline = true;
+                    } else {
+                        self.core.put_queries.remove(&target);
+                        terminal_put_failure = Some((error, tids));
                     }
                 }
                 if let Some(error) = self.owned_failure() {
+                    drop(query);
+                    drop(leases);
                     self.owned_fail(error);
                     return;
                 }
@@ -191,25 +203,33 @@ impl Actor {
                     }
                 }
             }
+            drop(items);
             drop(query);
             drop(leases);
+            if expire_put_deadline {
+                self.expire_owned_operations_at(tokio::time::Instant::now());
+                continue;
+            }
+            if let Some((error, tids)) = terminal_put_failure {
+                self.owned_finish_put(target, Err(error.clone()), tids);
+                if let Some(senders) = self.put_senders.remove(&target) {
+                    for sender in senders {
+                        let _ = sender.send(Err(error.clone()));
+                    }
+                }
+            }
         }
         let now = tokio::time::Instant::now();
         let mut retry_deadline = false;
-        let mut retry_error = None;
-        for query in self.core.put_queries.values_mut() {
+        let mut retry_errors: Vec<(Id, PutError)> = Vec::new();
+        for (target, query) in self.core.put_queries.iter_mut() {
             if query.owned_retry_at().is_some() {
                 if let Err(error) = query.retry_owned_at(&mut self.socket, now) {
                     match error {
-                        PutError::Query(PutQueryError::Resource(
-                            ResourceError::DeadlineExceeded,
-                        )) => {
+                        PutError::Query(PutQueryError::Resource(ResourceError::DeadlineExceeded)) => {
                             retry_deadline = true;
                         }
-                        PutError::Query(PutQueryError::Resource(error)) => {
-                            retry_error = Some(error);
-                        }
-                        _ => retry_error = Some(ResourceError::RpcLimit),
+                        error => retry_errors.push((*target, error)),
                     }
                 }
             } else {
@@ -219,9 +239,25 @@ impl Actor {
         if retry_deadline {
             self.expire_owned_operations_at(now);
         }
-        if let Some(error) = retry_error {
-            self.owned_fail(error);
-            return;
+        for (target, error) in retry_errors {
+            let tids = self.core.put_queries.remove(&target)
+                .map(|query| query.transaction_ids().to_vec())
+                .unwrap_or_default();
+            self.socket.cancel_owned_transactions(&tids);
+            self.owned_finish_put(target, Err(error.clone()), tids);
+            if let Some(senders) = self.put_senders.remove(&target) {
+                for sender in senders {
+                    let _ = sender.send(Err(error.clone()));
+                }
+            }
+            if !self.core.iterative_queries.contains_key(&target) {
+                if let Some(owner) = self.owned_resources.as_mut() {
+                    if let Some(operation) = owner.operations.remove(&target) {
+                        owner.response_operations.remove(&operation);
+                        self.socket.retire_owned_deadline(operation);
+                    }
+                }
+            }
         }
         let done_put: Vec<(Id, Result<bool, PutError>, Vec<u32>)> = self
             .core
@@ -239,8 +275,9 @@ impl Actor {
             })
             .collect();
         for (target, result, tids) in done_put {
+            let tids = self.core.put_queries.remove(&target).map(|query| query.transaction_ids().to_vec()).unwrap_or(tids);
             self.socket.cancel_owned_transactions(&tids);
-            self.core.put_queries.remove(&target);
+            self.owned_finish_put(target, result.clone().map(|_| ()), tids.clone());
             if let Some(senders) = self.put_senders.remove(&target) {
                 let result = match result {
                     Ok(_)
@@ -274,6 +311,9 @@ impl Actor {
         }
         if let Some(error) = self.owned_failure() {
             self.owned_fail(error);
+            return;
         }
+        self.maintain_owned_admissions_at(tokio::time::Instant::now());
+        self.maintain_owned_puts_at(tokio::time::Instant::now());
     }
 }

@@ -21,7 +21,7 @@ def edits() -> dict[str, list[tuple[str, str]]]:
             ),
             (
                 "    fn tick(&mut self) {\n        self.periodic_node_maintaenance();",
-                "    fn tick(&mut self) {\n        if self.owned_resources.is_some() { self.expire_owned_operations_at(tokio::time::Instant::now()); }\n        if let Some(error) = self.socket.take_owned_failure() { self.owned_fail(error); }\n        if let Some(error) = self.owned_resources.as_ref().and_then(|owner| owner.budget.take_error()) { self.owned_fail(error); }\n        if self.owned_error().is_some() { return; }\n        if self.owned_resources.is_some() { self.tick_owned(); return; }\n        self.periodic_node_maintaenance();",
+                "    fn tick(&mut self) {\n        if self.owned_resources.is_some() { self.expire_owned_operations_at(tokio::time::Instant::now()); }\n        if let Some(error) = self.socket.take_owned_failure() { self.owned_fail(error); }\n        if self.owned_resources.is_some() { self.retire_owned_operation_errors(); }\n        if self.owned_error().is_some() { return; }\n        if self.owned_resources.is_some() { self.tick_owned(); return; }\n        self.periodic_node_maintaenance();",
             ),
             (
                 "    ) -> Result<(), PutError> {\n        self.core.check_concurrency_errors(&request)?;\n\n        let mut query = PutQuery::new(request.clone(), extra_nodes);",
@@ -36,6 +36,8 @@ def edits() -> dict[str, list[tuple[str, str]]]:
                 '''    fn periodic_node_maintaenance(&mut self) {
         if self.owned_resources.is_some() {
             #[cfg(test)]
+            if self.owned_disable_maintenance_for_test { return; }
+            #[cfg(test)]
             if let Some((threshold, _)) = self.owned_maintenance_after_operations.as_ref() {
                 if self.owned_resources.as_ref().is_some_and(|owner| owner.operations.len() < *threshold) { return; }
             }
@@ -49,11 +51,11 @@ def edits() -> dict[str, list[tuple[str, str]]]:
             if self.core.should_refresh_table() {
                 self.core.update_last_table_refresh();
                 if let Err(error) = self.owned_get(crate::core::iterative_query::GetRequestSpecific::FindNode(crate::common::FindNodeRequestArguments { target: maintenance_target }), None) {
-                    if error != crate::resource::ResourceError::OperationLimit { self.owned_fail(error); return; }
+                    if error != crate::resource::ResourceError::OperationLimit { if error == crate::resource::ResourceError::NotOwnedProfile { self.owned_fail(error); } else if let Some(operation) = self.owned_resources.as_ref().and_then(|owner| owner.maintenance) { self.fail_owned_operation(operation, error); } return; }
                 }
             } else if self.core.routing_table.is_empty() {
                 if let Err(error) = self.owned_get(crate::core::iterative_query::GetRequestSpecific::FindNode(crate::common::FindNodeRequestArguments { target: maintenance_target }), None) {
-                    if error != crate::resource::ResourceError::OperationLimit { self.owned_fail(error); return; }
+                    if error != crate::resource::ResourceError::OperationLimit { if error == crate::resource::ResourceError::NotOwnedProfile { self.owned_fail(error); } else if let Some(operation) = self.owned_resources.as_ref().and_then(|owner| owner.maintenance) { self.fail_owned_operation(operation, error); } return; }
                 }
             }
             if self.owned_error().is_some() { return; }
@@ -61,7 +63,7 @@ def edits() -> dict[str, list[tuple[str, str]]]:
                 self.core.update_last_table_ping();
                 for address in self.core.check_nodes_to_ping_and_remove_stale_nodes() {
                     if let Err(error) = self.owned_ping(address) {
-                        if error != crate::resource::ResourceError::OperationLimit { self.owned_fail(error); return; }
+                        if error != crate::resource::ResourceError::OperationLimit { if error == crate::resource::ResourceError::NotOwnedProfile { self.owned_fail(error); } else if let Some(operation) = self.owned_resources.as_ref().and_then(|owner| owner.maintenance) { self.fail_owned_operation(operation, error); } return; }
                     }
                     if self.owned_error().is_some() { return; }
                 }

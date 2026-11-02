@@ -10,6 +10,141 @@ use tokio::sync::Notify;
 const RESULT_LIMIT: usize = 8;
 const REQUEST_LIMIT: usize = 24;
 
+/// Typed terminal failure of a bounded mutable-item PUT.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub enum OwnedPutError {
+    /// The operation exceeded an owned resource or deadline bound.
+    Resource(crate::resource::ResourceError),
+    /// The native PUT query failed, preserving its actual error.
+    Put(crate::core::PutError),
+}
+
+/// Successful receipt for this PUT's actual transaction set.
+#[derive(Clone, Debug)]
+pub struct OwnedPutCompletion {
+    target: crate::Id,
+    operation: crate::resource::OperationId,
+    transactions: Arc<[u32]>,
+    _lease: Arc<ResultLease>,
+}
+
+impl OwnedPutCompletion {
+    pub(crate) fn new(
+        target: crate::Id,
+        operation: crate::resource::OperationId,
+        transactions: Vec<u32>,
+        lease: Arc<ResultLease>,
+    ) -> Self {
+        Self { target, operation, transactions: transactions.into(), _lease: lease }
+    }
+
+    /// Return the bounded actor operation identifier.
+    pub fn operation_id(&self) -> u64 { self.operation.value() }
+
+    /// Return the DHT target associated with this PUT.
+    pub fn target(&self) -> crate::Id { self.target }
+
+    /// Return this PUT's transaction identifiers (at most sixteen).
+    pub fn transaction_ids(&self) -> &[u32] { &self.transactions }
+}
+
+/// A cancellable admitted PUT retaining its bounded result charge.
+#[derive(Debug)]
+pub struct OwnedPutOperation {
+    receiver: ChargedPutReceiver,
+    cancel: Option<tokio::sync::oneshot::Sender<()>>,
+    cleanup: tokio::sync::oneshot::Receiver<()>,
+    wake: Arc<Notify>,
+    result: Option<Result<OwnedPutCompletion, OwnedPutError>>,
+    result_consumed: bool,
+    cleanup_done: bool,
+    cleanup_result: Option<Result<(), crate::resource::ResourceError>>,
+}
+
+impl OwnedPutOperation {
+    pub(crate) fn new(
+        receiver: ChargedPutReceiver,
+        cancel: tokio::sync::oneshot::Sender<()>,
+        cleanup: tokio::sync::oneshot::Receiver<()>,
+        wake: Arc<Notify>,
+    ) -> Self {
+        Self {
+            receiver,
+            cancel: Some(cancel),
+            cleanup,
+            wake,
+            result: None,
+            result_consumed: false,
+            cleanup_done: false,
+            cleanup_result: None,
+        }
+    }
+
+    /// Await the terminal PUT result while retaining its bounded result charge.
+    pub async fn wait(&mut self) -> Result<OwnedPutCompletion, OwnedPutError> {
+        if self.result.is_none() {
+            self.result = Some(match (&mut self.receiver).await {
+                Ok(result) => result,
+                Err(_) => Err(OwnedPutError::Resource(crate::resource::ResourceError::QueryCancelled)),
+            });
+        }
+        self.result_consumed = true;
+        self.result.as_ref().expect("result stored").clone()
+    }
+
+    /// Cancel future PUT work and wait until actor-side transaction cleanup finishes.
+    pub async fn cancel_and_wait(&mut self) -> Result<(), crate::resource::ResourceError> {
+        if let Some(result) = self.cleanup_result {
+            return result;
+        }
+        if let Some(cancel) = self.cancel.take() {
+            let _ = cancel.send(());
+            self.wake.notify_one();
+        }
+        let result = (&mut self.cleanup)
+            .await
+            .map_err(|_| crate::resource::ResourceError::QueryCancelled);
+        self.cleanup_done = result.is_ok();
+        self.cleanup_result = Some(result);
+        result
+    }
+}
+
+impl Drop for OwnedPutOperation {
+    fn drop(&mut self) {
+        if !self.cleanup_done {
+            if let Some(cancel) = self.cancel.take() {
+                let _ = cancel.send(());
+                self.wake.notify_one();
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ChargedPutReceiver {
+    receiver: tokio::sync::oneshot::Receiver<Result<OwnedPutCompletion, OwnedPutError>>,
+    _lease: Arc<ResultLease>,
+}
+
+impl ChargedPutReceiver {
+    pub(crate) fn new(
+        receiver: tokio::sync::oneshot::Receiver<Result<OwnedPutCompletion, OwnedPutError>>,
+        lease: Arc<ResultLease>,
+    ) -> Self {
+        Self { receiver, _lease: lease }
+    }
+}
+
+impl Future for ChargedPutReceiver {
+    type Output = Result<Result<OwnedPutCompletion, OwnedPutError>, tokio::sync::oneshot::error::RecvError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.receiver).poll(cx)
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct RequestBudget {
     count: AtomicUsize,
@@ -58,6 +193,7 @@ pub(crate) struct RequestLease(Arc<RequestBudget>);
 impl Drop for RequestLease {
     fn drop(&mut self) {
         self.0.count.fetch_sub(1, Ordering::AcqRel);
+        self.0.wake.notify_one();
     }
 }
 
@@ -111,17 +247,33 @@ pub(crate) enum RequestReply {
     Error(crate::resource::ResourceError),
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct ResultBudget(AtomicUsize);
+#[derive(Debug)]
+pub(crate) struct ResultBudget {
+    count: AtomicUsize,
+    wake: Arc<Notify>,
+}
+
+impl Default for ResultBudget {
+    fn default() -> Self {
+        Self::new(Arc::new(Notify::new()))
+    }
+}
 
 impl ResultBudget {
+    pub(crate) fn new(wake: Arc<Notify>) -> Self {
+        Self {
+            count: AtomicUsize::new(0),
+            wake,
+        }
+    }
+
     pub(crate) fn acquire(self: &Arc<Self>) -> Option<Arc<ResultLease>> {
-        let mut current = self.0.load(Ordering::Relaxed);
+        let mut current = self.count.load(Ordering::Relaxed);
         loop {
             if current >= RESULT_LIMIT {
                 return None;
             }
-            match self.0.compare_exchange_weak(
+            match self.count.compare_exchange_weak(
                 current,
                 current + 1,
                 Ordering::AcqRel,
@@ -139,7 +291,8 @@ pub(crate) struct ResultLease(Arc<ResultBudget>);
 
 impl Drop for ResultLease {
     fn drop(&mut self) {
-        self.0.0.fetch_sub(1, Ordering::AcqRel);
+        self.0.count.fetch_sub(1, Ordering::AcqRel);
+        self.0.wake.notify_one();
     }
 }
 

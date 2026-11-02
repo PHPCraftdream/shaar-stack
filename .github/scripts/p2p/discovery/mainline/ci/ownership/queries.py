@@ -6,6 +6,9 @@ from __future__ import annotations
 
 def edits() -> dict[str, list[tuple[str, str]]]:
     return {
+        "src/common/mutable.rs": [
+            ("    // === Getters ===\n", "    pub(crate) fn into_owned_put(self) -> Result<Self, MutableError> {\n        let Self { target, key, value, seq, signature, salt } = self;\n        Self::from_dht_message(target, &key, value, seq, &signature, salt)\n    }\n\n    // === Getters ===\n"),
+        ],
         "src/core/iterative_query.rs": [
             ("use std::collections::HashSet;\n", "use std::collections::HashSet;\nuse std::sync::Arc;\n"),
             ("use crate::core::Response;\n", "use crate::core::Response;\nuse crate::resource::{OperationId, ResourceError, StoreBudget, VisitedStore};\n"),

@@ -82,6 +82,79 @@ impl OwnedDhtHandle {
         result
     }
 
+    /// Submit a bounded, unsalted mutable PUT and retain its charged completion.
+    ///
+    /// The admission deadline includes request-budget acquisition, actor-channel
+    /// reservation, and actor admission. Dropping the pending future cancels its
+    /// admission (and cleanup). Dropping the returned capability requests cancellation;
+    /// `cancel_and_wait` observes when actor-side cleanup has finished.
+    pub async fn put_mutable(
+        &self,
+        item: crate::MutableItem,
+    ) -> Result<crate::resource::OwnedPutOperation, ResourceError> {
+        if let Some(error) = self.failure.get() {
+            return Err(*error);
+        }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        if item.salt().is_some() || item.value().len() > 1000 || item.seq() < 0 {
+            return Err(ResourceError::InvalidMutableItem);
+        }
+        let item = item
+            .into_owned_put()
+            .map_err(|_| ResourceError::InvalidMutableItem)?;
+        let lease = self
+            .request_budget
+            .acquire()
+            .ok_or(ResourceError::OperationLimit)?;
+        let _cancel_wake = self.request_budget.cancellation_guard();
+        let (admitted_tx, admitted_rx) = oneshot::channel();
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        let (cleanup_tx, cleanup_rx) = oneshot::channel();
+        let permit = tokio::time::timeout_at(deadline, self.sender.reserve())
+            .await
+            .map_err(|_| ResourceError::DeadlineExceeded)?
+            .map_err(|_| self.failure())?;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(ResourceError::DeadlineExceeded);
+        }
+        permit.send(ActorMessage::OwnedPut(
+            *item.target(),
+            item,
+            admitted_tx,
+            cleanup_tx,
+            cancel_rx,
+            deadline,
+            lease,
+        ));
+        let charged = tokio::time::timeout_at(deadline, admitted_rx)
+            .await
+            .map_err(|_| ResourceError::DeadlineExceeded)?
+            .map_err(|_| self.failure())??;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(ResourceError::DeadlineExceeded);
+        }
+        Ok(crate::resource::OwnedPutOperation::new(
+            charged,
+            cancel_tx,
+            cleanup_rx,
+            self.request_budget.cancellation_wake(),
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn test_put_control(
+        &self,
+        target: crate::Id,
+        jitter: u8,
+    ) -> Result<(), ResourceError> {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(ActorMessage::OwnedPutTestControl(target, jitter, tx))
+            .await
+            .map_err(|_| self.failure())?;
+        rx.await.map_err(|_| self.failure())
+    }
+
     /// Retrieve actor information.
     pub async fn info(&self) -> Result<actor::Info, ResourceError> {
         if let Some(error) = self.failure.get() {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddrV4;
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,7 @@ pub(super) struct OwnedSocket {
     outbox: VecDeque<OwnedPacket>,
     pub(super) last_response: Option<(u32, OperationId)>,
     pub(super) failure: Option<ResourceError>,
+    operation_errors: HashMap<OperationId, ResourceError>,
     transaction_exhausted: bool,
     #[cfg(test)]
     enqueue_failure: bool,
@@ -379,13 +380,22 @@ impl super::KrpcSocket {
                     continue;
                 }
                 Err(_) => {
+                    let operation = tid.and_then(|tid| owned.resources.operation(tid));
                     owned.outbox.pop_front();
                     owned.resources.sent(byte_len);
                     if let Some(tid) = tid {
                         self.inflight_requests.remove(tid);
                         owned.resources.rollback_rpc(tid);
                     }
-                    owned.failure = Some(ResourceError::Send);
+                    if let Some(operation) = operation {
+                        if owned.operation_errors.len() < 8 || owned.operation_errors.contains_key(&operation) {
+                            owned.operation_errors.insert(operation, ResourceError::Send);
+                        } else {
+                            owned.failure = Some(ResourceError::NotOwnedProfile);
+                        }
+                    } else {
+                        owned.failure = Some(ResourceError::NotOwnedProfile);
+                    }
                     return;
                 }
             }
@@ -396,6 +406,12 @@ impl super::KrpcSocket {
         let tids = self.owned.as_ref().map_or_else(Vec::new, |owned| {
             owned.resources.cancel_operation(operation)
         });
+        if let Some(owned) = self.owned.as_mut() {
+            owned.operation_errors.remove(&operation);
+            if owned.last_response.is_some_and(|(_, id)| id == operation) {
+                owned.last_response = None;
+            }
+        }
         self.cancel_owned_transactions(&tids);
         self.retire_owned_deadline(operation);
     }
@@ -503,6 +519,12 @@ impl super::KrpcSocket {
 
     pub(crate) fn owned_failure(&self) -> Option<ResourceError> {
         self.owned.as_ref()?.failure
+    }
+
+    pub(crate) fn take_owned_operation_errors(&mut self) -> Vec<(OperationId, ResourceError)> {
+        self.owned.as_mut().map_or_else(Vec::new, |owned| {
+            owned.operation_errors.drain().collect()
+        })
     }
 
     pub(crate) fn take_owned_failure(&mut self) -> Option<ResourceError> {

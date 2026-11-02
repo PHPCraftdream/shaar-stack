@@ -15,6 +15,25 @@ def edits() -> dict[str, list[tuple[str, str]]]:
         ],
         "src/actor.rs": [
             (
+                '    ToBootstrap(oneshot::Sender<Vec<String>>),',
+                '    #[cfg(test)]\n'
+                '    OwnedPutTestControl(Id, u8, oneshot::Sender<()>),\n'
+                '    ToBootstrap(oneshot::Sender<Vec<String>>),',
+            ),
+            (
+                '                        ActorMessage::ToBootstrap(sender) => {',
+                '                        #[cfg(test)]\n'
+                '                        ActorMessage::OwnedPutTestControl(target, jitter, ack) => {\n'
+                '                            if let Some(query) = actor.core.put_queries.get_mut(&target) {\n'
+                '                                query.set_owned_next_jitter(jitter);\n'
+                '                            }\n'
+                '                            actor.socket.expire_owned_requests(std::time::Duration::ZERO);\n'
+                '                            actor.tick();\n'
+                '                            let _ = ack.send(());\n'
+                '                        }\n'
+                '                        ActorMessage::ToBootstrap(sender) => {',
+            ),
+            (
                 '    hard_client_only: bool,\n}',
                 '    hard_client_only: bool,\n'
                 '    #[cfg(test)]\n'

@@ -271,7 +271,11 @@ async fn send_failure_and_timeout_release_actual_owned_transactions() {
         .unwrap();
     failed.fail_next_send_for_test();
     failed.flush_owned().await;
-    assert_eq!(failed.owned_failure(), Some(ResourceError::Send));
+    assert_eq!(failed.owned_failure(), None);
+    assert_eq!(
+        failed.take_owned_operation_errors(),
+        vec![(operation, ResourceError::Send)]
+    );
     assert_eq!(failed.owned_test_state(), Some((0, 0, 0, 0)));
     let (peer, destination) = capture();
     let mut socket = owned_socket();

@@ -12,6 +12,8 @@ mod store_resource_tests;
 #[path = "visited_store.rs"]
 mod visited_store;
 
+pub use completion::{OwnedPutCompletion, OwnedPutError, OwnedPutOperation};
+pub(crate) use completion::ChargedPutReceiver;
 pub use completion::OwnedQueryCompletion;
 pub(crate) use completion::{ChargedResultReceiver, RequestBudget, RequestLease, RequestReply};
 pub(crate) use completion::{ResultBudget, ResultLease};
@@ -25,6 +27,7 @@ impl OperationId {
     pub(crate) fn new(value: u64) -> Self {
         Self(value)
     }
+    pub(crate) fn value(self) -> u64 { self.0 }
 }
 
 /// Errors reported when an owned Mainline operation exceeds a resource or profile constraint.
@@ -59,6 +62,8 @@ pub enum ResourceError {
     QueryCancelled,
     /// The original absolute caller deadline elapsed.
     DeadlineExceeded,
+    /// The mutable item violates the owned unsalted PUT constraints.
+    InvalidMutableItem,
 }
 
 impl ResourceError {
@@ -74,6 +79,7 @@ impl ResourceError {
             Self::Send => std::io::ErrorKind::BrokenPipe,
             Self::QueryCancelled => std::io::ErrorKind::Interrupted,
             Self::DeadlineExceeded => std::io::ErrorKind::TimedOut,
+            Self::InvalidMutableItem => std::io::ErrorKind::InvalidInput,
             Self::DatagramTooLarge | Self::Encode | Self::Enqueue | Self::NotOwnedProfile => {
                 std::io::ErrorKind::InvalidInput
             }

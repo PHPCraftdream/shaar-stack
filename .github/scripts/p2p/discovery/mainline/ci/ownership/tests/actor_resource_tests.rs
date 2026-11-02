@@ -225,7 +225,9 @@ async fn coalesced_owned_mutable_waiter_observes_existing_candidate_fault() {
             .expect("first waiter receives latched error"),
         Err(ResourceError::CandidateLimit)
     ));
-    assert_eq!(actor.owned_error(), Some(ResourceError::CandidateLimit));
+    assert_eq!(actor.owned_error(), None);
+    assert!(!actor.core.iterative_queries.contains_key(&target));
+    assert!(!actor.owned_resources.as_ref().unwrap().operations.contains_key(&target));
 }
 
 #[tokio::test]
@@ -285,7 +287,7 @@ async fn candidate_limit_is_typed_and_bootstrap_lease_lives_until_actor_drop() {
         receiver.await.expect("typed result"),
         Err(ResourceError::CandidateLimit)
     ));
-    assert_eq!(actor.owned_error(), Some(ResourceError::CandidateLimit));
+    assert_eq!(actor.owned_error(), None);
     assert_eq!(actor.socket.owned_test_state().unwrap().2, 0);
     assert_eq!(budget.holder_count(), 1);
     drop(actor);

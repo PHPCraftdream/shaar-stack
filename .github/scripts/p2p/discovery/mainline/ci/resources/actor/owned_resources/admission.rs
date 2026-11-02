@@ -58,6 +58,20 @@ impl Actor {
             let _ = sender.send(RequestReply::Error(error));
             return;
         }
+        // Check operation capacity before acquiring a result lease. If admission
+        // must wait for an operation slot, dropping a speculative lease would
+        // notify this actor's own wake and spin the admission loop.
+        let target_is_requester = target == *self.core.routing_table.id();
+        let operation_available = owner.operations.contains_key(&target)
+            || (target_is_requester && owner.maintenance.is_some())
+            || owner.operation_capacity_available();
+        if !operation_available {
+            self.owned_resources
+                .as_mut()
+                .expect("owned actor initialized")
+                .enqueue_admission(target, sender, deadline, request_lease);
+            return;
+        }
         for waiters in self
             .owned_resources
             .as_mut()
