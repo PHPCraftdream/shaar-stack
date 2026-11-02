@@ -22,7 +22,14 @@ HERE = Path(__file__).resolve().parent
 MAINLINE = HERE.parent
 ROOT = MAINLINE.parents[4]
 VERIFY_PATH = ROOT / ".github/scripts/p2p/discovery/owned_dns/verify.py"
-PREFIXES = ("owned::tests::", "actor::owned_tests::", "common::messages::signed_peer_length_tests::", "common::messages::ingress_tests::", "actor::socket::ingress_tests::")
+PREFIXES = (
+    "owned::tests::", "actor::owned_tests::", "actor::resource_tests::",
+    "core::iterative_query::resource_tests::", "resource::store_resource_tests::",
+    "resource::visited_store::tests::", "common::messages::signed_peer_length_tests::",
+    "common::messages::ingress_tests::", "actor::socket::ingress_tests::",
+    "actor::socket::resource_tests::",
+    "actor::hostile_resource_tests::",
+)
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
@@ -75,6 +82,17 @@ def select_cases(listing: str, ignored_listing: str, verify) -> tuple[list[str],
             raise ValueError("required fixture prefix has no runnable cases: " + prefix)
         selected.extend(matches)
     return selected, sorted(name for name in ignored if any(name.startswith(prefix) for prefix in PREFIXES))
+
+
+def select_api_cases(listing: str, ignored_listing: str, verify) -> list[str]:
+    inventory_names = verify.parse_listing(listing, "")
+    ignored_names = verify.parse_listing(ignored_listing, "")
+    inventory, ignored = set(inventory_names), set(ignored_names)
+    if not inventory or len(inventory) != len(inventory_names) or ignored:
+        raise ValueError("external API inventory must be nonempty, unique, and contain no ignored cases")
+    if any(not name.startswith("owned_api_") for name in inventory):
+        raise ValueError("external API inventory contains an out-of-scope case")
+    return sorted(inventory)
 
 
 def verify_batch(batch: list[str], output: str, status: int, verify) -> list[str]:
@@ -253,6 +271,8 @@ def main() -> int:
             raise ValueError("fixed bencode graph auditor unavailable")
         graph = importlib.util.module_from_spec(graph_spec)
         graph_spec.loader.exec_module(graph)
+        receipt["test_feature_validation"] = graph.validate_mainline_test_features(
+            prepare.archive_files(archive)["Cargo.toml"], (source / "Cargo.toml").read_bytes())
         original_lock = lock.read_bytes()
         patch_config = '--config=patch.crates-io.serde_bencode.path=' + json.dumps(str(bencode_root))
         metadata_text, status = command("metadata-original", ["cargo", "metadata", "--locked", "--format-version", "1",
@@ -306,13 +326,52 @@ def main() -> int:
         target = receipt_dir / "build"
         env = dict(os.environ, CARGO_TARGET_DIR=str(target))
         normal_build = ["cargo", patch_config, "build", "--locked", "--manifest-path", str(source / "Cargo.toml"), "--lib", "--message-format=json"]
-        _, status = command("normal-build", normal_build, source, env, structured=True)
+        normal_text, status = command("normal-build", normal_build, source, env, structured=True)
         if status:
             raise ValueError("isolated normal library build failed: " + str(status))
         cargo = ["cargo", patch_config, "test", "--locked", "--manifest-path", str(source / "Cargo.toml"), "--lib", "--no-run", "--message-format=json"]
         build_text, status = command("build", cargo, source, env, structured=True)
         if status:
             raise ValueError("isolated library test compilation failed: " + str(status))
+        audit = graph.validate_tokio_build_features(normal_text, build_text, metadata_after)
+        build_labels = [entry.get("label") for entry in receipt["commands"]
+                        if entry.get("label") in {"normal-build", "build"}]
+        command_records = {entry["label"]: entry for entry in receipt["commands"]
+                           if entry.get("label") in {"normal-build", "build"}}
+        if (len(build_labels) != 2 or len(set(build_labels)) != 2
+                or set(command_records) != {"normal-build", "build"}):
+            raise ValueError("Tokio build command receipt records are missing or duplicated")
+        build_evidence = []
+        for label, text in (("normal-build", normal_text), ("build", build_text)):
+            record = command_records[label]
+            expected_log = evidence / (label + ".stdout.log")
+            if (record.get("exit_code") != 0 or record.get("cwd") != str(source)
+                    or record.get("argv") != (normal_build if label == "normal-build" else cargo)
+                    or record.get("stdout_log") != str(expected_log)
+                    or not expected_log.is_file() or expected_log.is_symlink()):
+                raise ValueError("Tokio build command receipt binding is invalid: " + label)
+            raw_sha256 = digest(expected_log)
+            if raw_sha256 != record.get("stdout_sha256"):
+                raise ValueError("Tokio build stdout digest binding is invalid: " + label)
+            parsed_text = expected_log.read_text(encoding="utf-8", errors="replace")
+            if parsed_text != text:
+                raise ValueError("Tokio build stdout text binding is invalid: " + label)
+            build_evidence.append({
+                "label": label, "argv": record["argv"], "cwd": record["cwd"],
+                "stdout_log": record["stdout_log"], "stdout_sha256": raw_sha256,
+                "parsed_text_sha256": hashlib.sha256(parsed_text.encode("utf-8")).hexdigest(),
+            })
+        audit["build_evidence"] = {
+            "commands": build_evidence,
+            "prepared_manifest_sha256": digest(source / "Cargo.toml"),
+            "overlay_lock_sha256": overlay_lock_hash,
+        }
+        receipt.update(tokio_build_features=audit, normal_command_label="normal-build", test_command_label="build",
+                       normal_stdout_sha256=hashlib.sha256(normal_text.encode("utf-8")).hexdigest(),
+                       test_stdout_sha256=hashlib.sha256(build_text.encode("utf-8")).hexdigest(),
+                       normal_command_stdout_sha256=command_records["normal-build"]["stdout_sha256"],
+                       test_command_stdout_sha256=command_records["build"]["stdout_sha256"],
+                       prepared_manifest_sha256=digest(source / "Cargo.toml"), overlay_lock_sha256=overlay_lock_hash)
         executables = set()
         for line in build_text.splitlines():
             item = json.loads(line)
@@ -353,6 +412,50 @@ def main() -> int:
             receipt["executed"].extend(verified)
         if not selected or Counter(receipt["executed"]) != Counter(selected):
             raise ValueError("selected and executed fixture inventories do not match required receipt")
+
+        api_build = ["cargo", patch_config, "test", "--locked", "--manifest-path", str(source / "Cargo.toml"),
+                     "--test", "owned_api", "--no-run", "--message-format=json"]
+        api_text, status = command("owned-api-build", api_build, source, env, structured=True)
+        if status:
+            raise ValueError("external owned API test compilation failed: " + str(status))
+        api_binaries = set()
+        expected_api_source = (source / "tests/owned_api.rs").resolve()
+        for line in api_text.splitlines():
+            item = json.loads(line)
+            target_info = item.get("target", {})
+            if (item.get("reason") == "compiler-artifact" and target_info.get("name") == "owned_api"
+                    and target_info.get("kind") == ["test"] and isinstance(target_info.get("src_path"), str)
+                    and Path(target_info["src_path"]).resolve() == expected_api_source
+                    and item.get("profile", {}).get("test") is True and item.get("executable")):
+                api_binary = Path(item["executable"]).resolve()
+                if target.resolve() not in api_binary.parents:
+                    raise ValueError("external API test binary escaped isolated target directory")
+                api_binaries.add(api_binary)
+        if len(api_binaries) != 1:
+            raise ValueError("Cargo did not report exactly one external API test binary")
+        api_binary = api_binaries.pop()
+        api_listing, status = command("owned-api-inventory", [str(api_binary), "--list", "--format", "terse"], source)
+        if status:
+            raise ValueError("external API test inventory failed")
+        api_ignored_listing, status = command("owned-api-ignored-inventory", [str(api_binary), "--list", "--ignored", "--format", "terse"], source)
+        if status:
+            raise ValueError("external API ignored inventory failed")
+        api_inventory_names = verify.parse_listing(api_listing, "")
+        api_ignored_names = verify.parse_listing(api_ignored_listing, "")
+        api_selected = select_api_cases(api_listing, api_ignored_listing, verify)
+        api_executed = []
+        receipt.update(api_inventory=api_selected, api_ignored=api_ignored_names, api_selected=api_selected, api_executed=api_executed)
+        for index, batch in enumerate(batches(api_selected)):
+            api_output, api_status = command("owned-api-tests-" + str(index),
+                [str(api_binary), "--exact", "--color", "never", *batch], source)
+            verify_batch(batch, api_output, api_status, verify)
+            if api_status:
+                raise ValueError("external API test cases failed: " + str(api_status))
+            api_executed.extend(batch)
+        if not api_selected or Counter(api_executed) != Counter(api_selected):
+            raise ValueError("external API selected and executed inventories differ")
+        receipt["api_executed"] = api_executed
+
         if digest(lock) != overlay_lock_hash:
             raise ValueError("Cargo.lock overlay changed during isolated build")
         receipt["lock_unchanged_during_commands"] = True

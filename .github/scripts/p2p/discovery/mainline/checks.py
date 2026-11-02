@@ -75,6 +75,31 @@ def run(archive: Path, destination: Path, receipt: dict | None = None) -> tuple[
         path = root / prepare.SOCKET_INGRESS_TESTS
         path.write_bytes(path.read_bytes() + b"\n")
 
+    def altered_owned_actor(root, receipt):
+        path = root / prepare.OWNED_ACTOR
+        path.write_bytes(path.read_bytes() + b"\n")
+
+    def altered_query_resource_tests(root, receipt):
+        path = root / prepare.QUERY_RESOURCE_TESTS
+        path.write_bytes(path.read_bytes() + b"\n")
+
+    def altered_owned_completion(root, receipt):
+        path = root / prepare.OWNED_COMPLETION
+        path.write_bytes(path.read_bytes() + b"\n")
+
+    def ownership_recipe_drift(root, receipt):
+        data = json.loads(receipt.read_text(encoding="utf-8"))
+        data["recipe_files"]["ci/ownership/queries.py"] = "0" * 64
+        receipt.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
+    def coordinated_resource_source_mutation(root, receipt):
+        path = root / prepare.OWNED_ACTOR
+        path.write_bytes(path.read_bytes() + b"\ncoordinated mutation\n")
+        data = json.loads(receipt.read_text(encoding="utf-8"))
+        data["prepared_files"][prepare.OWNED_ACTOR] = hashlib.sha256(path.read_bytes()).hexdigest()
+        data["changed_files"] = sorted(set(data["changed_files"]) | {prepare.OWNED_ACTOR})
+        receipt.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
     def altered_ingress_source(root, receipt):
         path = root / "src/common/messages.rs"
         path.write_bytes(path.read_bytes() + b"\n")
@@ -123,6 +148,11 @@ def run(archive: Path, destination: Path, receipt: dict | None = None) -> tuple[
         "altered-generated": lambda: rejected("altered-generated", altered_generated),
         "altered-ingress-generated": lambda: rejected("altered-ingress-generated", altered_ingress_generated),
         "altered-socket-generated": lambda: rejected("altered-socket-generated", altered_socket_generated),
+        "altered-owned-actor": lambda: rejected("altered-owned-actor", altered_owned_actor),
+        "altered-query-resource-tests": lambda: rejected("altered-query-resource-tests", altered_query_resource_tests),
+        "altered-owned-completion": lambda: rejected("altered-owned-completion", altered_owned_completion),
+        "ownership-recipe-drift": lambda: rejected("ownership-recipe-drift", ownership_recipe_drift),
+        "coordinated-resource-mutation": lambda: rejected("coordinated-resource-mutation", coordinated_resource_source_mutation),
         "altered-ingress-source": lambda: rejected("altered-ingress-source", altered_ingress_source),
         "ingress-recipe-drift": lambda: rejected("ingress-recipe-drift", ingress_recipe_drift),
         "coordinated-manifest-mutation": lambda: rejected("coordinated-manifest-mutation", coordinated_manifest_mutation),

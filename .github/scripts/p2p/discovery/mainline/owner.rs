@@ -7,17 +7,98 @@
 
 use std::io;
 use std::net::SocketAddrV4;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::actor;
-use crate::dht::{ACTOR_INBOX_CAPACITY, Dht};
+use crate::actor::ActorMessage;
+use crate::resource::{
+    OwnedQueryCompletion, RequestBudget, RequestLease, RequestReply, ResourceError,
+};
+
+/// A cloneable, limited capability for using an owned DHT actor.
+///
+/// Clones retain only the actor message sender and cannot retain its socket.
+#[derive(Clone)]
+pub struct OwnedDhtHandle {
+    sender: mpsc::Sender<ActorMessage>,
+    failure: Arc<OnceLock<ResourceError>>,
+    request_budget: Arc<RequestBudget>,
+}
+
+impl OwnedDhtHandle {
+    fn failure(&self) -> ResourceError {
+        self.failure
+            .get()
+            .copied()
+            .unwrap_or(ResourceError::QueryCancelled)
+    }
+
+    /// Resolve a mutable target and return its network-completion receipt.
+    pub async fn resolve_mutable(
+        &self,
+        target: crate::Id,
+    ) -> Result<OwnedQueryCompletion, ResourceError> {
+        if let Some(error) = self.failure.get() {
+            return Err(*error);
+        }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let request_lease = self
+            .request_budget
+            .acquire()
+            .ok_or(ResourceError::OperationLimit)?;
+        let _cancellation = self.request_budget.cancellation_guard();
+        let (admission_sender, admission_receiver) = oneshot::channel();
+        let permit = tokio::time::timeout_at(deadline, self.sender.reserve())
+            .await
+            .map_err(|_| ResourceError::DeadlineExceeded)?
+            .map_err(|_| self.failure())?;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(ResourceError::DeadlineExceeded);
+        }
+        permit.send(ActorMessage::OwnedAdmission(
+            target,
+            admission_sender,
+            deadline,
+            request_lease,
+        ));
+        let result_receiver = match tokio::time::timeout_at(deadline, admission_receiver)
+            .await
+            .map_err(|_| ResourceError::DeadlineExceeded)?
+            .map_err(|_| self.failure())?
+        {
+            RequestReply::Ready(receiver) => receiver,
+            RequestReply::Error(error) => return Err(error),
+        };
+        let result = tokio::time::timeout_at(deadline, result_receiver)
+            .await
+            .map_err(|_| ResourceError::DeadlineExceeded)?
+            .map_err(|_| self.failure())?;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(ResourceError::DeadlineExceeded);
+        }
+        result
+    }
+
+    /// Retrieve actor information.
+    pub async fn info(&self) -> Result<actor::Info, ResourceError> {
+        if let Some(error) = self.failure.get() {
+            return Err(*error);
+        }
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(ActorMessage::Info(sender))
+            .await
+            .map_err(|_| self.failure())?;
+        receiver.await.map_err(|_| self.failure())
+    }
+}
 
 /// A DHT handle paired with ownership of its actor task and shutdown signal.
 pub struct OwnedDht {
-    dht: Dht,
+    handle: OwnedDhtHandle,
     stop: Option<oneshot::Sender<()>>,
     join: Option<JoinHandle<()>>,
     terminal: Option<(io::ErrorKind, String)>,
@@ -39,25 +120,45 @@ impl OwnedDht {
             ));
         }
         let bootstrap = bootstrap.to_vec().into_boxed_slice();
-        let actor = actor::Actor::new_numeric(bind, bootstrap)?;
+        let mut actor = actor::Actor::new_numeric(bind, bootstrap)?;
+        actor
+            .enable_owned_resources()
+            .map_err(|error| io::Error::new(error.io_kind(), error))?;
         Ok(Self::from_actor(actor))
     }
 
-    pub(crate) fn from_actor(actor: actor::Actor) -> Self {
-        let (sender, receiver) = mpsc::channel(ACTOR_INBOX_CAPACITY);
+    pub(crate) fn from_actor(mut actor: actor::Actor) -> Self {
+        actor
+            .enable_owned_resources()
+            .expect("validated owned actor resource initialization");
+        let failure = actor.owned_failure_status();
+        let request_budget = actor.owned_request_budget();
+        let (sender, receiver) = mpsc::channel(16);
         let (stop, stop_receiver) = oneshot::channel();
         let join = tokio::spawn(actor::run_owned(actor, receiver, stop_receiver));
         Self {
-            dht: Dht(sender),
+            handle: OwnedDhtHandle {
+                sender,
+                failure,
+                request_budget,
+            },
             stop: Some(stop),
             join: Some(join),
             terminal: None,
         }
     }
 
-    /// Borrow the ordinary DHT handle for requests and queries.
-    pub fn dht(&self) -> &Dht {
-        &self.dht
+    /// Return a cloneable, limited capability for actor requests.
+    pub fn handle(&self) -> OwnedDhtHandle {
+        self.handle.clone()
+    }
+
+    /// Complete an owned mutable lookup with an explicit network-completion receipt.
+    pub async fn resolve_mutable(
+        &self,
+        target: crate::Id,
+    ) -> Result<OwnedQueryCompletion, ResourceError> {
+        self.handle.resolve_mutable(target).await
     }
 
     /// Request actor shutdown without waiting. Repeated calls are harmless.

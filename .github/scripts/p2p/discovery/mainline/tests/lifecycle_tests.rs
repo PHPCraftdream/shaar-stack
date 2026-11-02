@@ -23,14 +23,17 @@ fn bootstrap() -> (UdpSocket, SocketAddrV4) {
 async fn close_joins_actor_and_releases_exact_bind() {
     let (_bootstrap_socket, bootstrap) = bootstrap();
     let mut owner = OwnedDht::new(addr(0), &[bootstrap]).expect("start owned DHT");
-    let clone = owner.dht().clone();
-    let bind = owner.dht().info().await.expect("DHT info").local_addr();
+    let clone = owner.handle().clone();
+    let bind = owner.handle().info().await.expect("DHT info").local_addr();
     assert_eq!(*bind.ip(), Ipv4Addr::LOCALHOST);
     assert_ne!(bind.port(), 0);
 
     owner.close().await.expect("join actor");
     assert!(
-        clone.info().await.is_err(),
+        matches!(
+            clone.info().await,
+            Err(crate::ResourceError::QueryCancelled)
+        ),
         "retained clone is inert after close"
     );
     assert!(
@@ -50,8 +53,8 @@ async fn close_joins_actor_and_releases_exact_bind() {
 async fn close_reports_aborted_actor_join_failure_and_retains_terminal_error() {
     let (_bootstrap_socket, bootstrap) = bootstrap();
     let mut owner = OwnedDht::new(addr(0), &[bootstrap]).expect("start owned DHT");
-    let clone = owner.dht().clone();
-    let bind = owner.dht().info().await.expect("DHT info").local_addr();
+    let clone = owner.handle().clone();
+    let bind = owner.handle().info().await.expect("DHT info").local_addr();
     assert_eq!(*bind.ip(), Ipv4Addr::LOCALHOST);
     assert_ne!(bind.port(), 0);
 
@@ -69,7 +72,10 @@ async fn close_reports_aborted_actor_join_failure_and_retains_terminal_error() {
         .expect_err("terminal failure is retained");
     assert_eq!(second.kind(), first.kind());
     assert!(
-        clone.info().await.is_err(),
+        matches!(
+            clone.info().await,
+            Err(crate::ResourceError::QueryCancelled)
+        ),
         "retained clone is inert after actor abort"
     );
 

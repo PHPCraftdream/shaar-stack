@@ -25,56 +25,51 @@ def listing(*names: str) -> str:
 
 
 class SelectionTests(unittest.TestCase):
-    def test_selects_owned_runnable_cases_and_reports_ignored(self):
-        selected, ignored = RUNNER.select_cases(
-            listing("owned::tests::run", "actor::owned_tests::run",
-                    "common::messages::signed_peer_length_tests::run",
-                    "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run",
-                    "owned::tests::skipped", "dht::tests::upstream"),
-            listing("owned::tests::skipped"), VERIFY,
-        )
-        self.assertEqual(selected, [
-            "owned::tests::run", "actor::owned_tests::run",
-            "common::messages::signed_peer_length_tests::run",
-            "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run",
-        ])
-        self.assertEqual(ignored, ["owned::tests::skipped"])
+    def test_external_api_inventory_is_required_and_strictly_scoped(self):
+        names = ["owned_api_public_imports_are_type_checkable", "owned_api_handle_is_limited_and_reports_shutdown"]
+        self.assertEqual(RUNNER.select_api_cases(listing(*names), "", VERIFY), sorted(names))
+        for inventory, ignored in (("", ""), (listing(*names), listing(names[0])),
+                                   (listing(*names, "foreign_case"), ""), (listing(names[0], names[0]), "")):
+            with self.subTest(inventory=inventory, ignored=ignored):
+                with self.assertRaises(ValueError):
+                    RUNNER.select_api_cases(inventory, ignored, VERIFY)
+
+    def test_selects_every_declared_owned_prefix_and_reports_ignored(self):
+        cases = {prefix: prefix + "run" for prefix in RUNNER.PREFIXES}
+        cases["actor::hostile_resource_tests::"] = "actor::hostile_resource_tests::hostile_case"
+        ignored_name = RUNNER.PREFIXES[0] + "skipped"
+        inventory = listing(*cases.values(), ignored_name, "dht::tests::upstream")
+        selected, ignored = RUNNER.select_cases(inventory, listing(ignored_name), VERIFY)
+        self.assertEqual(selected, list(cases.values()))
+        self.assertEqual(ignored, [ignored_name])
 
     def test_rejects_empty_inventory(self):
         with self.assertRaises(ValueError):
             RUNNER.select_cases("", "", VERIFY)
 
     def test_rejects_missing_runnable_required_prefix(self):
+        cases = [prefix + "run" for prefix in RUNNER.PREFIXES[1:]]
         with self.assertRaises(ValueError):
-            RUNNER.select_cases(
-                listing("owned::tests::run", "actor::owned_tests::run"), "", VERIFY
-            )
+            RUNNER.select_cases(listing(*cases), "", VERIFY)
 
     def test_rejects_ignored_case_outside_inventory(self):
         with self.assertRaises(ValueError):
             RUNNER.select_cases(
-                listing("owned::tests::run", "actor::owned_tests::run",
-                        "common::messages::signed_peer_length_tests::run",
-                        "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run"),
+                listing(*[prefix + "run" for prefix in RUNNER.PREFIXES]),
                 listing("owned::tests::absent"), VERIFY,
             )
 
     def test_rejects_duplicate_inventory_entries(self):
         with self.assertRaises(ValueError):
             RUNNER.select_cases(
-                listing("owned::tests::run", "owned::tests::run",
-                        "actor::owned_tests::run",
-                        "common::messages::signed_peer_length_tests::run",
-                        "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run"), "", VERIFY
+                listing(*([prefix + "run" for prefix in RUNNER.PREFIXES] + [RUNNER.PREFIXES[0] + "run"])), "", VERIFY
             )
 
     def test_rejects_prefix_with_only_ignored_cases(self):
         with self.assertRaises(ValueError):
             RUNNER.select_cases(
-                listing("owned::tests::skipped", "actor::owned_tests::run",
-                        "common::messages::signed_peer_length_tests::run",
-                        "common::messages::ingress_tests::run", "actor::socket::ingress_tests::run"),
-                listing("owned::tests::skipped"), VERIFY,
+                listing(RUNNER.PREFIXES[0] + "skipped", *[prefix + "run" for prefix in RUNNER.PREFIXES[1:]]),
+                listing(RUNNER.PREFIXES[0] + "skipped"), VERIFY,
             )
 
 

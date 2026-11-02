@@ -108,6 +108,102 @@ def _node_signature(metadata, mapping):
     return result
 
 
+def validate_mainline_test_features(original_manifest, prepared_manifest):
+    """Allow only Tokio test-util in the prepared manifest's dev dependency."""
+    original = _parsed(original_manifest)
+    prepared = _parsed(prepared_manifest)
+    original_tokio = original.get("dependencies", {}).get("tokio", {})
+    original_features = original_tokio.get("features", [])
+    original_dev_tokio = original.get("dev-dependencies", {}).get("tokio", {})
+    if "test-util" in original_features:
+        raise ValueError("original normal Tokio features must not contain test-util")
+    if original_dev_tokio.get("features") != ["rt-multi-thread"]:
+        raise ValueError("original Tokio dev features must be exactly rt-multi-thread")
+    expected = copy.deepcopy(original)
+    expected["dev-dependencies"]["tokio"]["features"] = ["rt-multi-thread", "test-util"]
+    if prepared != expected:
+        raise ValueError("prepared manifest changed fields beyond Tokio dev test-util")
+    return {"normal_tokio_features_unchanged": True, "dev_tokio_test_util_only": True}
+
+
+def validate_tokio_build_features(normal_json_lines, test_json_lines, metadata_after):
+    """Bind normal and test Cargo artifacts to the exact pinned Tokio library."""
+    packages = metadata_after.get("packages")
+    if not isinstance(packages, list):
+        raise ValueError("metadata packages missing")
+    tokios = [p for p in packages if p.get("name") == "tokio"]
+    if len(tokios) != 1 or tokios[0].get("version") != "1.53.1" or tokios[0].get("source") != REGISTRY:
+        raise ValueError("expected unique registry Tokio 1.53.1 metadata package")
+    tokio = tokios[0]
+    tokio_id = tokio.get("id")
+    if not isinstance(tokio_id, str) or not tokio_id.startswith(REGISTRY + "#") or not tokio_id.endswith("#tokio@1.53.1"):
+        raise ValueError("expected canonical Tokio package ID")
+    resolve = metadata_after.get("resolve")
+    if not isinstance(resolve, dict) or not isinstance(resolve.get("nodes"), list):
+        raise ValueError("resolved metadata required")
+    matching_nodes = [node for node in resolve["nodes"] if isinstance(node, dict) and node.get("id") == tokio_id]
+    if len(matching_nodes) != 1:
+        raise ValueError("expected unique resolved Tokio package node")
+    targets_metadata = tokio.get("targets")
+    if not isinstance(targets_metadata, list) or any(not isinstance(t, dict) for t in targets_metadata):
+        raise ValueError("malformed Tokio metadata targets")
+    targets = [t for t in targets_metadata if t.get("name") == "tokio" and t.get("kind") == ["lib"]]
+    if len(targets) != 1 or not isinstance(targets[0].get("src_path"), str):
+        raise ValueError("expected unique Tokio library target")
+    target = targets[0]
+
+    def artifacts(text):
+        found = []
+        try:
+            for line in text.splitlines():
+                item = json.loads(line)
+                if not isinstance(item, dict):
+                    raise ValueError("Cargo JSON record must be an object")
+                if item.get("reason") != "compiler-artifact":
+                    continue
+                package_id = item.get("package_id")
+                ti = item.get("target")
+                if not isinstance(ti, dict):
+                    raise ValueError("malformed Cargo artifact target")
+                kind = ti.get("kind")
+                if ti.get("name") == "build-script-build" and kind == ["custom-build"]:
+                    continue
+                if ti.get("name") != "tokio" and not (package_id == tokio_id and isinstance(kind, list) and "lib" in kind):
+                    continue
+                if package_id != tokio_id:
+                    raise ValueError("Tokio artifact package ID mismatch")
+                if ti.get("name") != "tokio":
+                    raise ValueError("unexpected Tokio artifact target name")
+                if kind != ["lib"]:
+                    raise ValueError("unexpected Tokio artifact target kind")
+                if ti.get("src_path") != target["src_path"]:
+                    raise ValueError("Tokio artifact target source mismatch")
+                profile = item.get("profile")
+                if not isinstance(profile, dict):
+                    raise ValueError("malformed Cargo artifact profile")
+                features = item.get("features")
+                if not isinstance(features, list) or any(not isinstance(x, str) for x in features) or len(features) != len(set(features)):
+                    raise ValueError("Tokio artifact features missing or duplicated")
+                found.append((item, profile, set(features)))
+        except (json.JSONDecodeError, TypeError) as error:
+            raise ValueError("malformed Cargo JSON artifact stream") from error
+        if len(found) != 1:
+            raise ValueError("expected exactly one Tokio library artifact")
+        return found[0]
+
+    normal, normal_profile, normal_features = artifacts(normal_json_lines)
+    test, test_profile, test_features = artifacts(test_json_lines)
+    if normal_profile.get("test") is not False or test_profile.get("test") is not False:
+        raise ValueError("Tokio library artifacts must not have test profile")
+    expected_test_features = normal_features | {"rt-multi-thread", "test-util"}
+    if "test-util" in normal_features or not {"rt-multi-thread", "test-util"}.issubset(test_features) or expected_test_features != test_features:
+        raise ValueError("Tokio test feature selection mismatch")
+    return {"package_id": tokio["id"], "source": tokio["source"], "version": tokio["version"],
+            "target_name": target["name"], "target_kind": target["kind"], "target_src_path": target["src_path"],
+            "normal_profile": normal_profile, "test_profile": test_profile,
+            "normal_features": normal["features"], "test_features": test["features"]}
+
+
 def validate_metadata(before, after, nroot: Path, broot: Path):
     nroot, broot = Path(nroot), Path(broot)
     oldp, newp = _metadata_packages(before), _metadata_packages(after)

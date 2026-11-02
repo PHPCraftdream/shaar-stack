@@ -6,19 +6,30 @@
 def edits() -> dict[str, list[tuple[str, str]]]:
     """Return narrowly anchored patches for retained actor ownership."""
     return {
+        "Cargo.toml": [
+            (
+                '[dev-dependencies.tokio]\nversion = "1"\nfeatures = ["rt-multi-thread"]',
+                '[dev-dependencies.tokio]\nversion = "1"\nfeatures = ["rt-multi-thread", "test-util"]',
+            ),
+        ],
         "src/actor.rs": [
             (
                 '    hard_client_only: bool,\n}',
                 '    hard_client_only: bool,\n'
                 '    #[cfg(test)]\n'
                 '    owned_cleanup_gate: Option<(tokio::sync::oneshot::Sender<()>, '
-                'tokio::sync::oneshot::Receiver<()>)>,\n}',
+                'tokio::sync::oneshot::Receiver<()>)>,\n'
+                '    #[cfg(test)]\n'
+                '    owned_disable_maintenance_for_test: bool,\n}',
             ),
             (
-                '            hard_client_only,\n        })',
+                '            hard_client_only,\n'
+                '        })',
                 '            hard_client_only,\n'
                 '            #[cfg(test)]\n'
                 '            owned_cleanup_gate: None,\n'
+                '            #[cfg(test)]\n'
+                '            owned_disable_maintenance_for_test: false,\n'
                 '        })',
             ),
             (
@@ -47,6 +58,10 @@ def edits() -> dict[str, list[tuple[str, str]]]:
                 '    mut receiver: mpsc::Receiver<ActorMessage>,\n'
                 '    mut stop: Option<oneshot::Receiver<()>>,\n'
                 ') {\n'
+                '    #[cfg(test)]\n'
+                '    let owned_maintenance_enabled = !actor.owned_disable_maintenance_for_test;\n'
+                '    #[cfg(not(test))]\n'
+                '    let owned_maintenance_enabled = true;\n'
                 '    // Maintenance interval',
             ),
             (
@@ -54,16 +69,54 @@ def edits() -> dict[str, list[tuple[str, str]]]:
                 '        actor.socket.flush().await;\n\n'
                 '        tokio::select! {\n'
                 '            msg = receiver.recv() => {',
+                '        let owned_profile = actor.socket.is_owned_profile();\n'
+                '        let owned_wake = if owned_profile { Some(actor.owned_request_budget().cancellation_wake()) } else { None };\n'
+                '        let owned_deadline = actor.owned_next_deadline();\n'
                 '        tokio::select! {\n'
                 '            biased;\n'
                 '            _ = wait_stop(&mut stop) => break,\n'
+                '            _ = async {\n'
+                '                match &owned_wake {\n'
+                '                    Some(wake) => wake.notified().await,\n'
+                '                    None => std::future::pending::<()>().await,\n'
+                '                }\n'
+                '            } => {\n'
+                '                actor.tick();\n'
+                '                continue;\n'
+                '            }\n'
+                '            _ = async {\n'
+                '                match owned_deadline {\n'
+                '                    Some(deadline) => tokio::time::sleep_until(deadline).await,\n'
+                '                    None => std::future::pending::<()>().await,\n'
+                '                }\n'
+                '            }, if owned_profile => {\n'
+                '                actor.tick();\n'
+                '                continue;\n'
+                '            }\n'
+                '            _ = maintenance.tick(), if owned_profile && owned_maintenance_enabled => {\n'
+                '                actor.tick();\n'
+                '                continue;\n'
+                '            }\n'
                 '            _ = actor.socket.flush() => {}\n'
                 '        }\n\n'
+                '        let owned_deadline = actor.owned_next_deadline();\n'
                 '        tokio::select! {\n'
                 '            biased;\n'
                 '            _ = wait_stop(&mut stop) => break,\n'
                 '            keep_running = async {\n'
                 '                tokio::select! {\n'
+                '                    _ = async {\n'
+                '                        match owned_deadline {\n'
+                '                            Some(deadline) => tokio::time::sleep_until(deadline).await,\n'
+                '                            None => std::future::pending::<()>().await,\n'
+                '                        }\n'
+                '                    } => {}\n'
+                '                    _ = async {\n'
+                '                        match &owned_wake {\n'
+                '                            Some(wake) => wake.notified().await,\n'
+                '                            None => std::future::pending::<()>().await,\n'
+                '                        }\n'
+                '                    } => {}\n'
                 '            msg = receiver.recv() => {',
             ),
             (
@@ -112,6 +165,10 @@ def edits() -> dict[str, list[tuple[str, str]]]:
                 '#[cfg(test)]\n'
                 '#[path = "actor/owned_tests.rs"]\n'
                 'mod owned_tests;',
+            ),
+            (
+                '            _ = maintenance.tick() => {',
+                '            _ = maintenance.tick(), if owned_maintenance_enabled => {',
             ),
         ],
         "src/actor/socket.rs": [
@@ -163,7 +220,7 @@ def edits() -> dict[str, list[tuple[str, str]]]:
         "src/lib.rs": [
             (
                 'mod dht;',
-                'mod dht;\nmod owned;\npub use owned::OwnedDht;',
+                'mod dht;\nmod owned;\npub use owned::{OwnedDht, OwnedDhtHandle};',
             ),
         ],
         "src/dht.rs": [

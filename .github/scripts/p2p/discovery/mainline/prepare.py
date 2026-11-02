@@ -27,17 +27,35 @@ HERE = Path(__file__).resolve().parent
 TESTS = HERE / "tests"
 SOURCE = "src/common/messages.rs"
 INGRESS_TESTS = "src/common/messages/ingress_tests.rs"
-SOCKET_INGRESS_TESTS = "src/actor/socket/ingress_tests.rs"
 INGRESS_TEST_MODULE = '\n\n#[cfg(test)]\n#[path = "messages/ingress_tests.rs"]\nmod ingress_tests;\n'
 SOCKET_INGRESS_TEST_MODULE = '\n\n#[cfg(test)]\n#[path = "socket/ingress_tests.rs"]\nmod ingress_tests;\n'
+SOCKET_RESOURCE_TEST_MODULE = '\n#[cfg(test)]\n#[path = "socket/resource_tests.rs"]\nmod resource_tests;\n'
 OLD_GUARD = "    if !bytes.len().is_multiple_of(104) {\n        return Err(DecodeMessageError::InvalidSignedPeersEncodingLength);\n    }"
 NEW_GUARD = "    if bytes.len() != 104 {\n        return Err(DecodeMessageError::InvalidSignedPeersEncodingLength);\n    }"
 TEST_MODULE = '\n\n#[cfg(test)]\n#[path = "messages/signed_peer_length_tests.rs"]\nmod signed_peer_length_tests;\n'
 GENERATED = "src/common/messages/signed_peer_length_tests.rs"
 OWNER = "src/owned.rs"
 LIFECYCLE = "src/owned/lifecycle_tests.rs"
-OWNER_SUFFIX = '\n#[cfg(test)]\n#[path = "owned/lifecycle_tests.rs"]\nmod tests;\n'
 ACTOR_TESTS = "src/actor/owned_tests.rs"
+SOCKET_INGRESS_TESTS = "src/actor/socket/ingress_tests.rs"
+RESOURCE_MODULE = "src/resource.rs"
+SOCKET_RESOURCES = "src/actor/socket/resources.rs"
+SOCKET_OWNED = "src/actor/socket/owned.rs"
+STORE_OWNER = "src/store_owner.rs"
+VISITED_STORE = "src/visited_store.rs"
+SOCKET_RESOURCE_TESTS = "src/actor/socket/resource_tests.rs"
+STORE_TESTS = "src/store_resource_tests.rs"
+OWNED_ACTOR = "src/actor/owned_resources.rs"
+OWNED_COMPLETION = "src/owned_completion.rs"
+ACTOR_RESOURCE_TESTS = "src/actor/resource_tests.rs"
+ACTOR_LIFECYCLE_TESTS = "src/actor/resource_tests/lifecycle_tests.rs"
+HOSTILE_RESOURCE_TESTS = "src/actor/hostile_resource_tests.rs"
+QUERY_RESOURCE_TESTS = "src/core/iterative_query/resource_tests.rs"
+API_TESTS = "tests/owned_api.rs"
+QUERY_RESOURCE_TEST_MODULE = '\n#[cfg(test)]\n#[path = "iterative_query/resource_tests.rs"]\nmod resource_tests;\n'
+ACTOR_RESOURCE_MODULES = '\n#[cfg(test)]\n#[path = "actor/resource_tests.rs"]\nmod resource_tests;\n'
+HOSTILE_RESOURCE_MODULE = '\n#[cfg(test)]\n#[path = "actor/hostile_resource_tests.rs"]\nmod hostile_resource_tests;\n'
+OWNER_SUFFIX = '\n#[cfg(test)]\n#[path = "owned/lifecycle_tests.rs"]\nmod tests;\n'
 
 
 def digest(data: bytes) -> str:
@@ -50,8 +68,12 @@ def hashes(files: dict[str, bytes]) -> dict[str, str]:
 
 def load_edits(filename: str) -> dict[str, list[tuple[str, str]]]:
     path = (HERE / filename).resolve()
-    if (filename not in ("numeric.py", "lifetime.py", "ci/ingress.py")
-            or path != HERE / filename or not path.is_relative_to(HERE)):
+    allowed = (
+        "numeric.py", "lifetime.py", "ci/ingress.py", "ci/resources/edits.py",
+        "ci/resources/store_edits.py", "ci/ownership/actor.py", "ci/ownership/queries.py",
+        "ci/ownership/completion.py",
+    )
+    if filename not in allowed or path != HERE / filename or not path.is_relative_to(HERE):
         raise ValueError("invalid fixed edit-module path")
     name = "_mainline_" + filename.removesuffix(".py").replace("/", "_")
     spec = importlib.util.spec_from_file_location(name, path)
@@ -67,17 +89,37 @@ def load_edits(filename: str) -> dict[str, list[tuple[str, str]]]:
 
 def edit_map() -> dict[str, list[tuple[str, str]]]:
     merged: dict[str, list[tuple[str, str]]] = {}
-    for module in ("numeric.py", "lifetime.py", "ci/ingress.py"):
+    for module in (
+        "numeric.py", "lifetime.py", "ci/ingress.py", "ci/resources/edits.py",
+        "ci/resources/store_edits.py", "ci/ownership/actor.py", "ci/ownership/queries.py",
+        "ci/ownership/completion.py",
+    ):
         for path, pairs in load_edits(module).items():
             merged.setdefault(path, []).extend(pairs)
     return merged
 
 
 def recipe() -> dict[str, str]:
-    names = ("prepare.py", "tests/regressions.rs", "numeric.py", "lifetime.py",
-             "owner.rs", "tests/lifecycle_tests.rs", "tests/actor_tests.rs",
-             "ci/ingress.py", "ci/bencode/prepare.py", "ci/bencode/edits.py",
-             "tests/ingress_tests.rs", "tests/udp_ingress_tests.rs")
+    names = (
+        "prepare.py", "tests/regressions.rs", "numeric.py", "lifetime.py", "owner.rs",
+        "tests/lifecycle_tests.rs", "tests/actor_tests.rs", "ci/ingress.py",
+        "ci/bencode/prepare.py", "ci/bencode/edits.py", "ci/resources/edits.py",
+        "ci/resources/store_edits.py", "ci/ownership/actor.py", "ci/ownership/queries.py",
+        "ci/ownership/completion.py", "ci/resources/resource.rs", "ci/resources/stores/store_owner.rs",
+        "ci/resources/socket/socket_resources.rs", "ci/resources/socket/socket_owned.rs", "ci/resources/stores/visited_store.rs",
+        "ci/resources/actor/mod.rs", "ci/resources/actor/owned_resources/admission.rs",
+        "ci/resources/actor/owned_resources/maintenance.rs", "ci/resources/actor/owned_resources/tick.rs",
+        "ci/resources/actor/owned_resources/failure.rs", "ci/resources/actor/owned_resources/queries.rs", "ci/resources/tests/socket_resource_tests.rs",
+        "ci/resources/tests/store_resource_tests.rs", "ci/resources/tests/lifecycle/mod.rs",
+        "ci/ownership/tests/actor_resource_tests.rs", "ci/ownership/tests/actor_admission_tests.rs",
+        "ci/ownership/tests/actor_put_tests.rs", "ci/ownership/query_resource_tests.rs", "ci/ownership/completion.rs",
+        "ci/resources/tests/lifecycle/lifecycle_tests/put_start_tests.rs",
+        "ci/resources/tests/lifecycle/lifecycle_tests/retry_tests.rs",
+        "ci/ownership/tests/hostile_tests.rs", "ci/ownership/tests/hostile_resource_tests/completion_tests.rs",
+        "ci/ownership/tests/hostile_resource_tests/provenance_tests.rs",
+        "ci/ownership/tests/hostile_resource_tests/put_lifecycle_tests.rs",
+        "tests/ingress_tests.rs", "tests/udp_ingress_tests.rs", "tests/owned_api.rs",
+    )
     return {name: digest((HERE / name).read_bytes()) for name in names}
 
 
@@ -148,7 +190,8 @@ def validate_originals(files: dict[str, bytes]) -> None:
     manifest = tomllib.loads(files["Cargo.toml"].decode("utf-8"))
     package = manifest["package"]
     if (package.get("name"), package.get("version"), package.get("license")) != (
-            "n0-mainline", VERSION, "MIT OR Apache-2.0"):
+        "n0-mainline", VERSION, "MIT OR Apache-2.0"
+    ):
         raise ValueError("unexpected n0-mainline package identity/license")
     if not files.get("LICENSE-MIT") or not files.get("LICENSE-APACHE"):
         raise ValueError("upstream license files are missing")
@@ -169,36 +212,86 @@ def apply_edits(files: dict[str, bytes], edits: dict[str, list[tuple[str, str]]]
     return changed
 
 
-def reverse(files: dict[str, bytes], edits: dict[str, list[tuple[str, str]]]) -> dict[str, bytes]:
-    restored = dict(files)
-    expected_generated = {
+def generated_sources() -> dict[str, bytes]:
+    return {
         GENERATED: (TESTS / "regressions.rs").read_bytes(),
         OWNER: (HERE / "owner.rs").read_bytes() + OWNER_SUFFIX.encode("utf-8"),
         LIFECYCLE: (TESTS / "lifecycle_tests.rs").read_bytes(),
         ACTOR_TESTS: (TESTS / "actor_tests.rs").read_bytes(),
         INGRESS_TESTS: (TESTS / "ingress_tests.rs").read_bytes(),
         SOCKET_INGRESS_TESTS: (TESTS / "udp_ingress_tests.rs").read_bytes(),
+        RESOURCE_MODULE: (HERE / "ci/resources/resource.rs").read_bytes(),
+        SOCKET_RESOURCES: (HERE / "ci/resources/socket/socket_resources.rs").read_bytes(),
+        STORE_OWNER: (HERE / "ci/resources/stores/store_owner.rs").read_bytes(),
+        SOCKET_OWNED: (HERE / "ci/resources/socket/socket_owned.rs").read_bytes(),
+        VISITED_STORE: (HERE / "ci/resources/stores/visited_store.rs").read_bytes(),
+        SOCKET_RESOURCE_TESTS: (HERE / "ci/resources/tests/socket_resource_tests.rs").read_bytes(),
+        STORE_TESTS: (HERE / "ci/resources/tests/store_resource_tests.rs").read_bytes(),
+        OWNED_ACTOR: (HERE / "ci/resources/actor/mod.rs").read_bytes(),
+        "src/actor/owned_resources/admission.rs": (HERE / "ci/resources/actor/owned_resources/admission.rs").read_bytes(),
+        "src/actor/owned_resources/maintenance.rs": (HERE / "ci/resources/actor/owned_resources/maintenance.rs").read_bytes(),
+        "src/actor/owned_resources/tick.rs": (HERE / "ci/resources/actor/owned_resources/tick.rs").read_bytes(),
+        "src/actor/owned_resources/failure.rs": (HERE / "ci/resources/actor/owned_resources/failure.rs").read_bytes(),
+        "src/actor/owned_resources/queries.rs": (HERE / "ci/resources/actor/owned_resources/queries.rs").read_bytes(),
+        ACTOR_LIFECYCLE_TESTS: (HERE / "ci/resources/tests/lifecycle/mod.rs").read_bytes(),
+        ACTOR_RESOURCE_TESTS: (HERE / "ci/ownership/tests/actor_resource_tests.rs").read_bytes(),
+        "src/actor/resource_tests/admission_tests.rs": (HERE / "ci/ownership/tests/actor_admission_tests.rs").read_bytes(),
+        "src/actor/resource_tests/put_tests.rs": (HERE / "ci/ownership/tests/actor_put_tests.rs").read_bytes(),
+        "src/actor/resource_tests/lifecycle_tests/put_start_tests.rs": (HERE / "ci/resources/tests/lifecycle/lifecycle_tests/put_start_tests.rs").read_bytes(),
+        "src/actor/resource_tests/lifecycle_tests/retry_tests.rs": (HERE / "ci/resources/tests/lifecycle/lifecycle_tests/retry_tests.rs").read_bytes(),
+        QUERY_RESOURCE_TESTS: (HERE / "ci/ownership/query_resource_tests.rs").read_bytes(),
+        HOSTILE_RESOURCE_TESTS: (HERE / "ci/ownership/tests/hostile_tests.rs").read_bytes(),
+        "src/actor/hostile_resource_tests/completion_tests.rs": (HERE / "ci/ownership/tests/hostile_resource_tests/completion_tests.rs").read_bytes(),
+        "src/actor/hostile_resource_tests/provenance_tests.rs": (HERE / "ci/ownership/tests/hostile_resource_tests/provenance_tests.rs").read_bytes(),
+        "src/actor/hostile_resource_tests/put_lifecycle_tests.rs": (HERE / "ci/ownership/tests/hostile_resource_tests/put_lifecycle_tests.rs").read_bytes(),
+        OWNED_COMPLETION: (HERE / "ci/ownership/completion.rs").read_bytes(),
+        API_TESTS: (TESTS / "owned_api.rs").read_bytes(),
     }
-    for path, expected in expected_generated.items():
+
+
+def reverse(files: dict[str, bytes], edits: dict[str, list[tuple[str, str]]]) -> dict[str, bytes]:
+    restored = dict(files)
+    generated = generated_sources()
+    for path, expected in generated.items():
         if restored.get(path) != expected:
             raise ValueError(f"generated source content mismatch: {path}")
-    for path in expected_generated:
         del restored[path]
+    actor_declarations = ACTOR_RESOURCE_MODULES
+    actor_source = restored.get("src/actor.rs")
+    if actor_source is None:
+        raise ValueError("prepared owned actor source missing")
+    text = actor_source.decode("utf-8")
+    if text.count(actor_declarations) != 1:
+        raise ValueError("prepared owned actor module declaration mismatch")
+    if text.count(HOSTILE_RESOURCE_MODULE) != 1:
+        raise ValueError("prepared hostile actor test module declaration mismatch")
+    restored["src/actor.rs"] = text.replace(actor_declarations, "", 1).replace(HOSTILE_RESOURCE_MODULE, "", 1).encode("utf-8")
+    query_source = restored.get("src/core/iterative_query.rs")
+    if query_source is None:
+        raise ValueError("prepared iterative query source missing")
+    text = query_source.decode("utf-8")
+    if text.count(QUERY_RESOURCE_TEST_MODULE) != 1:
+        raise ValueError("prepared query test module declaration mismatch")
+    restored["src/core/iterative_query.rs"] = text.replace(QUERY_RESOURCE_TEST_MODULE, "", 1).encode("utf-8")
     data = restored.get(SOURCE)
     if data is None:
         raise ValueError("signed-peer source missing")
     text = data.decode("utf-8")
     if text.count(INGRESS_TEST_MODULE) != 1:
         raise ValueError("prepared ingress module shape mismatch")
-    text = text.replace(INGRESS_TEST_MODULE, "", 1)
-    restored[SOURCE] = text.encode("utf-8")
+    restored[SOURCE] = text.replace(INGRESS_TEST_MODULE, "", 1).encode("utf-8")
     data = restored.get("src/actor/socket.rs")
     if data is None:
         raise ValueError("prepared socket source missing")
     text = data.decode("utf-8")
-    if text.count(SOCKET_INGRESS_TEST_MODULE) != 1:
-        raise ValueError("prepared socket ingress module shape mismatch")
-    restored["src/actor/socket.rs"] = text.replace(SOCKET_INGRESS_TEST_MODULE, "", 1).encode("utf-8")
+    for declaration in (SOCKET_INGRESS_TEST_MODULE, SOCKET_RESOURCE_TEST_MODULE):
+        if text.count(declaration) != 1:
+            raise ValueError("prepared socket test module shape mismatch")
+        text = text.replace(declaration, "", 1)
+    restored["src/actor/socket.rs"] = text.encode("utf-8")
+    data = restored.get("src/lib.rs")
+    if data is None or data.decode("utf-8").count("mod resource;\n") != 1:
+        raise ValueError("prepared resource module declaration shape mismatch")
     for path, pairs in reversed(list(edits.items())):
         data = restored.get(path)
         if data is None:
@@ -221,45 +314,40 @@ def reverse(files: dict[str, bytes], edits: dict[str, list[tuple[str, str]]]) ->
 
 def transform(files: dict[str, bytes]) -> dict[str, bytes]:
     validate_originals(files)
-    if SOURCE not in files:
-        raise ValueError(f"required signed-peer source missing: {SOURCE}")
-    if OLD_GUARD not in files[SOURCE].decode("utf-8"):
+    if SOURCE not in files or OLD_GUARD not in files[SOURCE].decode("utf-8"):
         raise ValueError("signed-peer unique upstream guard anchor mismatch")
     edits = edit_map()
-    if set(edits) & {OWNER, LIFECYCLE, ACTOR_TESTS, INGRESS_TESTS, SOCKET_INGRESS_TESTS}:
+    generated = generated_sources()
+    if set(edits) & set(generated):
         raise ValueError("generated source collides with upstream edits")
     changed = apply_edits(files, edits)
     socket_text = changed["src/actor/socket.rs"].decode("utf-8")
-    if SOCKET_INGRESS_TEST_MODULE in socket_text:
-        raise ValueError("socket ingress module already exists")
-    changed["src/actor/socket.rs"] = (socket_text + SOCKET_INGRESS_TEST_MODULE).encode("utf-8")
+    if SOCKET_INGRESS_TEST_MODULE in socket_text or SOCKET_RESOURCE_TEST_MODULE in socket_text:
+        raise ValueError("socket test module already exists")
+    changed["src/actor/socket.rs"] = (socket_text + SOCKET_INGRESS_TEST_MODULE + SOCKET_RESOURCE_TEST_MODULE).encode("utf-8")
+    lib_text = changed["src/lib.rs"].decode("utf-8")
+    if lib_text.count("mod resource;\n") != 1:
+        raise ValueError("resource declaration must be introduced exactly once by recipe edits")
     text = changed[SOURCE].decode("utf-8")
     if text.count(OLD_GUARD) != 1 or NEW_GUARD in text or TEST_MODULE in text or INGRESS_TEST_MODULE in text:
         raise ValueError("signed-peer unique upstream guard anchor mismatch")
-    text = text.replace(OLD_GUARD, NEW_GUARD, 1)
-    changed[SOURCE] = (text + TEST_MODULE + INGRESS_TEST_MODULE).encode("utf-8")
-    generated = {
-        GENERATED: (TESTS / "regressions.rs").read_bytes(),
-        OWNER: (HERE / "owner.rs").read_bytes() + OWNER_SUFFIX.encode("utf-8"),
-        LIFECYCLE: (TESTS / "lifecycle_tests.rs").read_bytes(),
-        ACTOR_TESTS: (TESTS / "actor_tests.rs").read_bytes(),
-        INGRESS_TESTS: (TESTS / "ingress_tests.rs").read_bytes(),
-        SOCKET_INGRESS_TESTS: (TESTS / "udp_ingress_tests.rs").read_bytes(),
-    }
+    changed[SOURCE] = (text.replace(OLD_GUARD, NEW_GUARD, 1) + TEST_MODULE + INGRESS_TEST_MODULE).encode("utf-8")
     original_names = {name.casefold() for name in files}
     generated_names = [name.casefold() for name in generated]
     edit_names = {name.casefold() for name in edits}
-    if (len(set(generated_names)) != len(generated_names)
-            or set(generated_names) & original_names
-            or set(generated_names) & edit_names):
+    if len(set(generated_names)) != len(generated_names) or set(generated_names) & original_names or set(generated_names) & edit_names:
         raise ValueError("generated source collides with upstream files")
     for generated_name in generated_names:
         for existing in original_names | edit_names:
             if generated_name.startswith(existing + "/") or existing.startswith(generated_name + "/"):
                 raise ValueError("generated source path-prefix collision")
     changed.update(generated)
-    restored = reverse(changed, edits)
-    if hashes(restored) != hashes(files):
+    for path, suffix in (("src/actor.rs", ACTOR_RESOURCE_MODULES + HOSTILE_RESOURCE_MODULE), ("src/core/iterative_query.rs", QUERY_RESOURCE_TEST_MODULE)):
+        text = changed[path].decode("utf-8")
+        if suffix in text:
+            raise ValueError(f"generated module declarations already exist: {path}")
+        changed[path] = (text + suffix).encode("utf-8")
+    if hashes(reverse(changed, edits)) != hashes(files):
         raise ValueError("reverse transformation failed")
     return {name: data for name, data in changed.items() if files.get(name) != data}
 
@@ -280,10 +368,14 @@ def prepare(archive: Path, destination: Path) -> Path:
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_bytes(data)
         receipt = {
-            "package": "n0-mainline", "version": VERSION, "archive_sha256": ARCHIVE_SHA256,
+            "package": "n0-mainline",
+            "version": VERSION,
+            "archive_sha256": ARCHIVE_SHA256,
             "license": "MIT OR Apache-2.0 (upstream; not relicensed)",
-            "recipe_files": recipe(), "original_files": hashes(original),
-            "prepared_files": hashes(prepared), "changed_files": sorted(changes),
+            "recipe_files": recipe(),
+            "original_files": hashes(original),
+            "prepared_files": hashes(prepared),
+            "changed_files": sorted(changes),
         }
         (destination / "provenance.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     except BaseException:
@@ -305,10 +397,14 @@ def verify(root: Path, archive: Path) -> dict[str, bytes]:
     expected_prepared = dict(original)
     expected_prepared.update(expected_changes)
     expected_receipt = {
-        "package": "n0-mainline", "version": VERSION, "archive_sha256": ARCHIVE_SHA256,
+        "package": "n0-mainline",
+        "version": VERSION,
+        "archive_sha256": ARCHIVE_SHA256,
         "license": "MIT OR Apache-2.0 (upstream; not relicensed)",
-        "recipe_files": recipe(), "original_files": hashes(original),
-        "prepared_files": hashes(expected_prepared), "changed_files": sorted(expected_changes),
+        "recipe_files": recipe(),
+        "original_files": hashes(original),
+        "prepared_files": hashes(expected_prepared),
+        "changed_files": sorted(expected_changes),
     }
     if provenance != expected_receipt:
         raise ValueError("n0-mainline provenance does not match supplied archive and recipe")
@@ -331,8 +427,7 @@ def verify(root: Path, archive: Path) -> dict[str, bytes]:
         raise ValueError("prepared file/directory collision")
     if hashes(files) != hashes(expected_prepared) or files != expected_prepared:
         raise ValueError("prepared source differs from supplied archive transformation")
-    restored = reverse(files, edit_map())
-    if restored != original:
+    if reverse(files, edit_map()) != original:
         raise ValueError("prepared source does not reverse to supplied archive")
     return files
 
