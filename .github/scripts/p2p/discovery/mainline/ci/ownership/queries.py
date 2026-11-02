@@ -107,14 +107,14 @@ def edits() -> dict[str, list[tuple[str, str]]]:
         for node in &self.extra_nodes {
             if !seen.insert(node.address()) { continue; }
             if let Some(token) = node.token() {
-                let request = RequestSpecific {
+                let retry_request = RequestSpecific {
                     requester_id: Id::random(),
                     request_type: RequestTypeSpecific::Put(PutRequest {
                         token,
                         put_request_type: self.request.clone(),
                     }),
                 };
-                let tid = socket.request_owned(node.address(), request, operation)
+                let tid = socket.request_owned(node.address(), retry_request, operation)
                     .map_err(PutQueryError::Resource)?;
                 self.inflight_requests.push(tid);
             }
