@@ -106,7 +106,7 @@ async fn owned_actor_keeps_socket_until_receive_returns() {
 }
 
 #[tokio::test]
-async fn owned_resource_failure_remains_typed_after_join_and_socket_release() {
+async fn owned_query_failure_is_local_and_shutdown_cancels_retained_handle() {
     let bootstrap = UdpSocket::bind(loopback()).expect("bind bootstrap");
     let mut actor = Actor::new_numeric(loopback(), vec![ipv4(&bootstrap)].into_boxed_slice())
         .expect("create numeric actor");
@@ -138,15 +138,13 @@ async fn owned_resource_failure_remains_typed_after_join_and_socket_release() {
         receiver.await.expect("query reports resource failure"),
         Err(ResourceError::CandidateLimit)
     ));
+    retained.info().await.expect("query failure leaves actor live");
     owner.close().await.expect("join actor after failure");
     assert!(matches!(
         retained.resolve_mutable(target).await,
-        Err(ResourceError::CandidateLimit)
+        Err(ResourceError::QueryCancelled)
     ));
-    assert!(matches!(
-        retained.info().await,
-        Err(ResourceError::CandidateLimit)
-    ));
+    assert!(matches!(retained.info().await, Err(ResourceError::QueryCancelled)));
     let rebound = UdpSocket::bind(bind).expect("joined actor released its socket");
     drop(rebound);
     drop(retained);

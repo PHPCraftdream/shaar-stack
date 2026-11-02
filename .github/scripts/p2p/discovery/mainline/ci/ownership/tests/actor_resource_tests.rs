@@ -261,6 +261,7 @@ async fn actual_actor_coalesces_targets_and_charges_shared_visited_store() {
 async fn candidate_limit_is_typed_and_bootstrap_lease_lives_until_actor_drop() {
     let (_peer, bootstrap) = captured_peer();
     let mut actor = actor(bootstrap);
+    actor.owned_disable_maintenance_for_test = true;
     let budget = Arc::clone(&actor.owned_resources.as_ref().unwrap().budget);
     let target = target(42);
     let (sender, receiver) = oneshot::channel();

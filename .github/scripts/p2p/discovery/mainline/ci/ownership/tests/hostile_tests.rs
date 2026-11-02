@@ -98,6 +98,7 @@ mod overload_put;
 async fn socket_validated_hostile_referrals_hit_actual_candidate_limit() {
     let (peer, peer_address) = capture();
     let mut actor = bounded_actor(peer_address);
+    actor.owned_disable_maintenance_for_test = true;
     let budget =
         std::sync::Arc::clone(&actor.owned_resources.as_ref().expect("owned actor").budget);
     let target = Id::from([0x42; 20]);

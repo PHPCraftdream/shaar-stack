@@ -28,8 +28,10 @@ async fn visited_capacity_exhaustion_stops_only_the_real_query() {
 
     assert_eq!(budget.visited_count(), 256);
     let query = actor.core.iterative_queries.get_mut(&victim).unwrap();
-    query.add_candidate(hostile_node(900));
-    query.visit_closest(&mut actor.socket);
+    let hostile = hostile_node(900);
+    let hostile_address = hostile.address();
+    query.add_candidate(hostile);
+    query.visit(&mut actor.socket, hostile_address);
     assert_eq!(query.owner_error(), Some(ResourceError::VisitedLimit));
     actor.retire_owned_operation_errors();
     assert!(matches!(
@@ -92,8 +94,10 @@ async fn outbox_capacity_exhaustion_rolls_back_only_the_real_query() {
     }
 
     let query = actor.core.iterative_queries.get_mut(&victim).unwrap();
-    query.add_candidate(hostile_node(901));
-    query.visit_closest(&mut actor.socket);
+    let hostile = hostile_node(901);
+    let hostile_address = hostile.address();
+    query.add_candidate(hostile);
+    query.visit(&mut actor.socket, hostile_address);
     assert_eq!(query.owner_error(), Some(ResourceError::OutboxFull));
     actor.retire_owned_operation_errors();
     assert!(matches!(
@@ -223,8 +227,10 @@ async fn rpc_overflow_is_local_to_the_query_with_actual_socket_requests() {
     }
 
     let query = actor.core.iterative_queries.get_mut(&victim).unwrap();
-    query.add_candidate(hostile_node(700));
-    query.visit_closest(&mut actor.socket);
+    let hostile = hostile_node(700);
+    let hostile_address = hostile.address();
+    query.add_candidate(hostile);
+    query.visit(&mut actor.socket, hostile_address);
     assert_eq!(query.owner_error(), Some(ResourceError::RpcLimit));
     actor.retire_owned_operation_errors();
     assert!(matches!(
