@@ -3,12 +3,33 @@
 #![forbid(unsafe_code)]
 
 use crate::MutableItem;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
 use tokio::sync::Notify;
 
 const RESULT_LIMIT: usize = 8;
 const REQUEST_LIMIT: usize = 24;
+
+/// Whether actor-side cleanup is confirmed or unknown.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OwnedPutCleanup {
+    /// Actor acknowledged cleanup after rejecting or cancelling admission.
+    Clean,
+    /// No cleanup receipt was observed; actor-side work may remain.
+    Unknown,
+}
+
+/// A PUT admission failure with explicit cleanup provenance.
+#[derive(Clone, Debug)]
+pub struct OwnedPutAdmissionError {
+    /// The resource cause of admission failure.
+    pub error: crate::resource::ResourceError,
+    /// Whether actor-side cleanup is confirmed.
+    pub cleanup: OwnedPutCleanup,
+}
 
 /// Typed terminal failure of a bounded mutable-item PUT.
 #[non_exhaustive]
@@ -36,17 +57,204 @@ impl OwnedPutCompletion {
         transactions: Vec<u32>,
         lease: Arc<ResultLease>,
     ) -> Self {
-        Self { target, operation, transactions: transactions.into(), _lease: lease }
+        Self {
+            target,
+            operation,
+            transactions: transactions.into(),
+            _lease: lease,
+        }
     }
 
     /// Return the bounded actor operation identifier.
-    pub fn operation_id(&self) -> u64 { self.operation.value() }
+    pub fn operation_id(&self) -> u64 {
+        self.operation.value()
+    }
 
     /// Return the DHT target associated with this PUT.
-    pub fn target(&self) -> crate::Id { self.target }
+    pub fn target(&self) -> crate::Id {
+        self.target
+    }
 
     /// Return this PUT's transaction identifiers (at most sixteen).
-    pub fn transaction_ids(&self) -> &[u32] { &self.transactions }
+    pub fn transaction_ids(&self) -> &[u32] {
+        &self.transactions
+    }
+}
+
+/// A retained admission attempt, including cancellation and cleanup ownership.
+pub struct OwnedPutAdmission {
+    admitted: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
+    admission_result: tokio::sync::oneshot::Receiver<
+        Result<ChargedPutReceiver, crate::resource::ResourceError>,
+    >,
+    cancel: Option<tokio::sync::oneshot::Sender<()>>,
+    cleanup: Option<tokio::sync::oneshot::Receiver<()>>,
+    wake: Arc<Notify>,
+    deadline: tokio::time::Instant,
+    operation: Option<OwnedPutOperation>,
+    outcome: Option<Result<(), OwnedPutAdmissionError>>,
+    cleanup_result: Option<OwnedPutCleanup>,
+    pending_error: Option<crate::resource::ResourceError>,
+}
+
+impl std::fmt::Debug for OwnedPutAdmission {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("OwnedPutAdmission")
+            .field("deadline", &self.deadline)
+            .field("has_operation", &self.operation.is_some())
+            .field("cleanup_result", &self.cleanup_result)
+            .finish()
+    }
+}
+
+impl OwnedPutAdmission {
+    pub(crate) fn new(
+        admitted: Pin<Box<dyn Future<Output = ()> + Send>>,
+        admission_result: tokio::sync::oneshot::Receiver<
+            Result<ChargedPutReceiver, crate::resource::ResourceError>,
+        >,
+        cancel: tokio::sync::oneshot::Sender<()>,
+        cleanup: tokio::sync::oneshot::Receiver<()>,
+        wake: Arc<Notify>,
+        deadline: tokio::time::Instant,
+    ) -> Self {
+        Self {
+            admitted: Some(admitted),
+            admission_result,
+            cancel: Some(cancel),
+            cleanup: Some(cleanup),
+            wake,
+            deadline,
+            operation: None,
+            outcome: None,
+            cleanup_result: None,
+            pending_error: None,
+        }
+    }
+
+    /// Await admission while retaining cancellation and cleanup ownership.
+    pub async fn wait(&mut self) -> Result<(), OwnedPutAdmissionError> {
+        loop {
+            if let Some(outcome) = &self.outcome {
+                return outcome.clone();
+            }
+            if let Some(error) = self.pending_error {
+                self.signal_cancel();
+                self.submit().await;
+                let cleanup = self.wait_cleanup().await;
+                let failure = OwnedPutAdmissionError { error, cleanup };
+                self.outcome = Some(Err(failure.clone()));
+                return Err(failure);
+            }
+
+            let deadline = self.deadline;
+            let expired = tokio::select! {
+                biased;
+                _ = tokio::time::sleep_until(deadline) => true,
+                _ = self.submit() => false,
+            };
+            if expired {
+                self.pending_error = Some(crate::resource::ResourceError::DeadlineExceeded);
+                continue;
+            }
+
+            match tokio::time::timeout_at(self.deadline, &mut self.admission_result).await {
+                Ok(Ok(Ok(receiver))) if tokio::time::Instant::now() < self.deadline => {
+                    self.operation = Some(OwnedPutOperation::new(
+                        receiver,
+                        self.cancel
+                            .take()
+                            .expect("cancel handle retained until admission"),
+                        self.cleanup
+                            .take()
+                            .expect("cleanup receiver retained until admission"),
+                        Arc::clone(&self.wake),
+                    ));
+                    self.outcome = Some(Ok(()));
+                    return Ok(());
+                }
+                Ok(Ok(Err(error))) => {
+                    self.signal_cancel();
+                    self.pending_error = Some(error);
+                }
+                Ok(Err(_)) => {
+                    self.signal_cancel();
+                    self.pending_error = Some(crate::resource::ResourceError::QueryCancelled);
+                }
+                _ => {
+                    self.signal_cancel();
+                    self.pending_error = Some(crate::resource::ResourceError::DeadlineExceeded);
+                }
+            }
+        }
+    }
+
+    async fn submit(&mut self) {
+        if let Some(future) = self.admitted.as_mut() {
+            future.as_mut().await;
+            self.admitted = None;
+        }
+    }
+
+    /// Take the admitted operation after `wait` succeeds.
+    pub fn take_operation(&mut self) -> Option<OwnedPutOperation> {
+        let operation = self.operation.take();
+        if operation.is_some() {
+            self.cleanup_result = Some(OwnedPutCleanup::Unknown);
+        }
+        operation
+    }
+
+    /// Cancel admission or admitted operation and wait for actor cleanup.
+    pub async fn cancel_and_wait(&mut self) -> OwnedPutCleanup {
+        if let Some(result) = self.cleanup_result {
+            return result;
+        }
+        if self.operation.is_none() && matches!(self.outcome, Some(Ok(()))) {
+            return OwnedPutCleanup::Unknown;
+        }
+        if let Some(operation) = self.operation.as_mut() {
+            let status = match operation.cancel_and_wait().await {
+                Ok(()) => OwnedPutCleanup::Clean,
+                Err(_) => OwnedPutCleanup::Unknown,
+            };
+            self.cleanup_result = Some(status);
+            return status;
+        }
+        self.signal_cancel();
+        self.submit().await;
+        self.wait_cleanup().await
+    }
+
+    fn signal_cancel(&mut self) {
+        if let Some(cancel) = self.cancel.take() {
+            let _ = cancel.send(());
+            self.wake.notify_one();
+        }
+    }
+
+    async fn wait_cleanup(&mut self) -> OwnedPutCleanup {
+        match self.cleanup.as_mut() {
+            Some(cleanup) => {
+                let status = match cleanup.await {
+                    Ok(()) => OwnedPutCleanup::Clean,
+                    Err(_) => OwnedPutCleanup::Unknown,
+                };
+                self.cleanup.take();
+                self.cleanup_result = Some(status);
+                status
+            }
+            None => self.cleanup_result.unwrap_or(OwnedPutCleanup::Unknown),
+        }
+    }
+}
+
+impl Drop for OwnedPutAdmission {
+    fn drop(&mut self) {
+        if self.outcome.is_none() || self.operation.is_some() {
+            self.signal_cancel();
+        }
+    }
 }
 
 /// A cancellable admitted PUT retaining its bounded result charge.
@@ -86,7 +294,9 @@ impl OwnedPutOperation {
         if self.result.is_none() {
             self.result = Some(match (&mut self.receiver).await {
                 Ok(result) => result,
-                Err(_) => Err(OwnedPutError::Resource(crate::resource::ResourceError::QueryCancelled)),
+                Err(_) => Err(OwnedPutError::Resource(
+                    crate::resource::ResourceError::QueryCancelled,
+                )),
             });
         }
         self.result_consumed = true;
@@ -138,7 +348,10 @@ impl ChargedPutReceiver {
 }
 
 impl Future for ChargedPutReceiver {
-    type Output = Result<Result<OwnedPutCompletion, OwnedPutError>, tokio::sync::oneshot::error::RecvError>;
+    type Output = Result<
+        Result<OwnedPutCompletion, OwnedPutError>,
+        tokio::sync::oneshot::error::RecvError,
+    >;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.receiver).poll(cx)
@@ -196,10 +409,6 @@ impl Drop for RequestLease {
         self.0.wake.notify_one();
     }
 }
-
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 #[derive(Debug)]
 pub(crate) struct ChargedResultReceiver {

@@ -81,5 +81,13 @@ def edits() -> dict[str, list[tuple[str, str]]]:
                 "    pub(crate) fn send_datagram(&mut self, bytes: Vec<u8>, address: SocketAddrV4) {\n        self.outbox.push_back((bytes, address.into()));\n    }",
                 "    pub(crate) fn send_datagram(&mut self, bytes: Vec<u8>, address: SocketAddrV4) {\n        if self.owned.is_some() {\n            if let Err(error) = self.send_datagram_owned(bytes, address) {\n                if let Some(owned) = self.owned.as_mut() { owned.failure = Some(error); }\n            }\n        } else {\n            self.outbox.push_back((bytes, address.into()));\n        }\n    }",
             ),
+            (
+                "                                    \"Received response message\"\n                                );\n\n                                self.is_expected_response(&message, &from)",
+                "                                    \"Received response message\"\n                                );\n\n                                self.is_expected_owned_publication_response(&message, &from)",
+            ),
+            (
+                "                                    \"Received error message\"\n                                );\n\n                                self.is_expected_response(&message, &from)",
+                "                                    \"Received error message\"\n                                );\n\n                                self.is_expected_owned_publication_response(&message, &from)",
+            ),
         ],
     }

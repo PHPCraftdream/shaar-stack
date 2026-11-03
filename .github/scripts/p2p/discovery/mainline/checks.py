@@ -37,6 +37,37 @@ def run(archive: Path, destination: Path, receipt: dict | None = None) -> tuple[
 
     def positive():
         prepare.verify(root, archive)
+        resource_path = root / prepare.RESOURCE_MODULE
+        resource = resource_path.read_text(encoding="utf-8")
+        if resource_path != root / "src/resource.rs":
+            raise AssertionError("generated resource module path mismatch")
+        for export in ("OwnedPutAdmission", "OwnedPutAdmissionError", "OwnedPutCleanup", "OwnedPutError", "Observer", "CleanupHold"):
+            if export not in resource:
+                raise AssertionError(f"generated resource exports missing {export}")
+        library = (root / "src/lib.rs").read_text(encoding="utf-8")
+        for export in ("OwnedPutAdmission", "OwnedPutAdmissionError", "OwnedPutCleanup", "OwnedPutError", "Observer", "CleanupHold"):
+            if export not in library:
+                raise AssertionError(f"crate root exports missing {export}")
+        if "mod resource;" not in library:
+            raise AssertionError("crate root resource module declaration missing")
+        observer_path = root / prepare.PUBLICATION_OBSERVER
+        observer = observer_path.read_text(encoding="utf-8")
+        if not observer:
+            raise AssertionError("generated publication observer is empty")
+        actor = (root / "src/actor.rs").read_text(encoding="utf-8")
+        if actor.count("actor.process_owned_publication_message(message, from);") != 1:
+            raise AssertionError("owned actor publication dispatch mismatch")
+        if "actor.process_message(message, from);" in actor or "if has_response" in actor:
+            raise AssertionError("owned actor retains direct/duplicate response processing")
+        wrapper = (root / prepare.OWNED_ACTOR).read_text(encoding="utf-8")
+        if "self.process_message" not in wrapper or "self.owned_note_response" not in wrapper:
+            raise AssertionError("owned actor wrapper behavior mismatch")
+        socket_path = root / "src/actor/socket.rs"
+        socket = socket_path.read_text(encoding="utf-8")
+        if socket.count("is_expected_owned_publication_response(") != 2:
+            raise AssertionError("socket response publication wrapper mismatch")
+        if socket.count("Response") < 1 or socket.count("Error") < 1:
+            raise AssertionError("socket response/error trace missing")
 
     def rejected(name, mutate):
         case = destination / name
@@ -120,6 +151,39 @@ def run(archive: Path, destination: Path, receipt: dict | None = None) -> tuple[
         if data["archive_sha256"] != prepare.ARCHIVE_SHA256:
             raise AssertionError("mutation changed the pinned archive identity")
 
+    def changed(root, path, old, new):
+        file = root / path
+        text = file.read_text(encoding="utf-8")
+        if text.count(old) != 1:
+            raise AssertionError(f"mutation anchor is not unique: {path}")
+        file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+    def missing_observer_module(root, receipt):
+        changed(root, prepare.RESOURCE_MODULE, '#[path = "publication_observer.rs"]\nmod publication_observer;\n', "")
+
+    def missing_observer_file(root, receipt):
+        (root / prepare.PUBLICATION_OBSERVER).unlink()
+
+    def missing_root_export(root, receipt):
+        changed(root, "src/lib.rs", "OwnedPutAdmission,", "")
+
+    def reverted_actor_dispatch(root, receipt):
+        changed(root, "src/actor.rs", "actor.process_owned_publication_message(message, from);", "actor.process_message(message, from);")
+
+    def reverted_response_predicate(root, receipt):
+        changed(root, "src/actor/socket.rs", '                                    "Received response message"\n                                );\n\n                                self.is_expected_owned_publication_response(&message, &from)', '                                    "Received response message"\n                                );\n\n                                self.is_expected_response(&message, &from)')
+
+    def reverted_error_predicate(root, receipt):
+        changed(root, "src/actor/socket.rs", '                                    "Received error message"\n                                );\n\n                                self.is_expected_owned_publication_response(&message, &from)', '                                    "Received error message"\n                                );\n\n                                self.is_expected_response(&message, &from)')
+
+    def coordinated_observer_tamper(root, receipt):
+        path = root / prepare.PUBLICATION_OBSERVER
+        path.write_bytes(path.read_bytes() + b"\ncoordinated mutation\n")
+        data = json.loads(receipt.read_text(encoding="utf-8"))
+        data["prepared_files"][prepare.PUBLICATION_OBSERVER] = hashlib.sha256(path.read_bytes()).hexdigest()
+        data["changed_files"] = sorted(set(data["changed_files"]) | {prepare.PUBLICATION_OBSERVER})
+        receipt.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
     def wrong_archive():
         wrong = destination / "wrong-archive.crate"
         data = archive.read_bytes()
@@ -156,6 +220,13 @@ def run(archive: Path, destination: Path, receipt: dict | None = None) -> tuple[
         "altered-ingress-source": lambda: rejected("altered-ingress-source", altered_ingress_source),
         "ingress-recipe-drift": lambda: rejected("ingress-recipe-drift", ingress_recipe_drift),
         "coordinated-manifest-mutation": lambda: rejected("coordinated-manifest-mutation", coordinated_manifest_mutation),
+        "missing-observer-module": lambda: rejected("missing-observer-module", missing_observer_module),
+        "missing-observer-file": lambda: rejected("missing-observer-file", missing_observer_file),
+        "missing-root-export": lambda: rejected("missing-root-export", missing_root_export),
+        "reverted-actor-dispatch": lambda: rejected("reverted-actor-dispatch", reverted_actor_dispatch),
+        "reverted-response-predicate": lambda: rejected("reverted-response-predicate", reverted_response_predicate),
+        "reverted-error-predicate": lambda: rejected("reverted-error-predicate", reverted_error_predicate),
+        "coordinated-observer-tamper": lambda: rejected("coordinated-observer-tamper", coordinated_observer_tamper),
         "wrong-archive": wrong_archive,
         "missing-unique-anchor": missing_unique_anchor,
     }

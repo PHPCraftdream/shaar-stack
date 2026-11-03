@@ -10,17 +10,23 @@ use super::resources::SocketResources;
 use crate::common::{ErrorSpecific, MessageType, RequestSpecific, ResponseSpecific};
 use crate::resource::{OperationId, ResourceError};
 
+#[cfg(test)]
+#[path = "test_controls.rs"]
+mod test_controls;
+
 #[derive(Debug)]
 struct OwnedPacket {
     bytes: Vec<u8>,
     to: SocketAddrV4,
     tid: Option<u32>,
+    deadline: Option<tokio::time::Instant>,
 }
 
 #[derive(Debug, Default)]
 pub(super) struct OwnedSocket {
     pub(super) resources: SocketResources,
     outbox: VecDeque<OwnedPacket>,
+    publication_observer: Option<crate::resource::Observer>,
     pub(super) last_response: Option<(u32, OperationId)>,
     pub(super) failure: Option<ResourceError>,
     operation_errors: HashMap<OperationId, ResourceError>,
@@ -51,6 +57,30 @@ pub(super) struct OwnedSocket {
 impl super::KrpcSocket {
     pub(crate) fn enable_owned_resources(&mut self) {
         self.owned.get_or_insert_with(OwnedSocket::default);
+    }
+
+    pub(crate) fn set_owned_publication_observer(&mut self, observer: crate::resource::Observer) {
+        self.owned
+            .get_or_insert_with(OwnedSocket::default)
+            .publication_observer = Some(observer);
+    }
+
+    pub(crate) fn is_expected_owned_publication_response(
+        &mut self,
+        message: &crate::common::Message,
+        from: &SocketAddrV4,
+    ) -> bool {
+        let accepted = self.is_expected_response(message, from);
+        if !accepted {
+            if let Some(observer) = self
+                .owned
+                .as_ref()
+                .and_then(|owned| owned.publication_observer.as_ref())
+            {
+                let _ = observer.processed(message.transaction_id);
+            }
+        }
+        accepted
     }
 
     pub(crate) fn is_owned_profile(&self) -> bool {
@@ -104,6 +134,21 @@ impl super::KrpcSocket {
             .admit_owned_get_round(operation)
     }
 
+    pub(crate) fn register_owned_put_deadline(
+        &mut self,
+        target: crate::Id,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), ResourceError> {
+        self.owned.as_mut().ok_or(ResourceError::RpcLimit)?
+            .resources.register_owned_put_deadline(target, deadline)
+    }
+
+    pub(crate) fn retire_owned_put_deadline(&mut self, target: crate::Id) {
+        if let Some(owned) = self.owned.as_mut() {
+            owned.resources.retire_owned_put_deadline(target);
+        }
+    }
+
     pub(crate) fn request_owned(
         &mut self,
         address: SocketAddrV4,
@@ -121,6 +166,21 @@ impl super::KrpcSocket {
         if owned.transaction_exhausted {
             return Err(ResourceError::TransactionSpaceExhausted);
         }
+        let put_deadline = match &request.request_type {
+            crate::common::RequestTypeSpecific::Put(put) => {
+                owned.resources.owned_put_deadline(*put.put_request_type.target())
+            }
+            _ => None,
+        };
+        if put_deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            return Err(ResourceError::DeadlineExceeded);
+        }
+        let operation_deadline = owned.resources.owned_deadline(operation);
+        let deadline = match (operation_deadline, put_deadline) {
+            (Some(operation), Some(put)) => Some(operation.min(put)),
+            (Some(operation), None) => Some(operation),
+            (None, put) => put,
+        };
         let tid = self.inflight_requests.next_tid;
         owned.resources.admit_rpc(tid, operation, address)?;
 
@@ -199,6 +259,7 @@ impl super::KrpcSocket {
                 bytes,
                 to: address,
                 tid: Some(tid),
+                deadline,
             });
         Ok(tid)
     }
@@ -214,6 +275,7 @@ impl super::KrpcSocket {
             bytes,
             to: address,
             tid: None,
+            deadline: None,
         });
         Ok(())
     }
@@ -250,6 +312,7 @@ impl super::KrpcSocket {
             bytes,
             to: address,
             tid: None,
+            deadline: None,
         });
         Ok(())
     }
@@ -266,9 +329,14 @@ impl super::KrpcSocket {
             let byte_len = packet.bytes.len();
             let destination = packet.to;
 
-            let deadline = tid
+            let operation_deadline = tid
                 .and_then(|tid| owned.resources.operation(tid))
                 .and_then(|operation| owned.resources.owned_deadline(operation));
+            let deadline = match (packet.deadline, operation_deadline) {
+                (Some(packet), Some(operation)) => Some(packet.min(operation)),
+                (Some(packet), None) => Some(packet),
+                (None, operation) => operation,
+            };
 
             #[cfg(test)]
             if owned.persistent_send_gate.is_some() {
@@ -529,88 +597,5 @@ impl super::KrpcSocket {
 
     pub(crate) fn take_owned_failure(&mut self) -> Option<ResourceError> {
         self.owned.as_mut()?.failure.take()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn owned_test_state(&self) -> Option<(usize, usize, usize, usize)> {
-        let owned = self.owned.as_ref()?;
-        Some((
-            owned.resources.datagram_count(),
-            owned.resources.byte_count(),
-            owned.resources.rpc_len(),
-            self.inflight_requests.requests.len(),
-        ))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fail_next_encode_for_test(&mut self) {
-        self.owned
-            .get_or_insert_with(OwnedSocket::default)
-            .encode_failure = true;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fail_next_enqueue_for_test(&mut self) {
-        self.owned
-            .get_or_insert_with(OwnedSocket::default)
-            .enqueue_failure = true;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fail_next_send_for_test(&mut self) {
-        self.owned
-            .get_or_insert_with(OwnedSocket::default)
-            .send_failure = true;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn install_owned_charge_probe_for_test(
-        &mut self,
-        receiver: tokio::sync::mpsc::Receiver<
-            tokio::sync::oneshot::Sender<(usize, usize, usize, usize)>,
-        >,
-    ) {
-        self.owned
-            .get_or_insert_with(OwnedSocket::default)
-            .charge_probe = Some(receiver);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn hold_next_persistent_send_for_test(
-        &mut self,
-        entered: tokio::sync::oneshot::Sender<()>,
-        release: tokio::sync::oneshot::Receiver<()>,
-    ) {
-        self.owned
-            .get_or_insert_with(OwnedSocket::default)
-            .persistent_send_gate = Some((Some(entered), release, None));
-    }
-
-    #[cfg(test)]
-    pub(crate) fn hold_next_send_for_test(
-        &mut self,
-        entered: tokio::sync::oneshot::Sender<()>,
-        release: tokio::sync::oneshot::Receiver<()>,
-    ) {
-        self.owned
-            .get_or_insert_with(OwnedSocket::default)
-            .send_gate = Some((entered, release));
-    }
-
-    #[cfg(test)]
-    pub(crate) fn owned_counts(&self) -> Option<(usize, usize, usize)> {
-        let owned = self.owned.as_ref()?;
-        Some((
-            owned.resources.datagram_count(),
-            owned.resources.byte_count(),
-            owned.resources.rpc_len(),
-        ))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn operation_rpc_len(&self, operation: OperationId) -> usize {
-        self.owned
-            .as_ref()
-            .map_or(0, |owned| owned.resources.operation_rpc_len(operation))
     }
 }

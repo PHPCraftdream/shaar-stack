@@ -44,6 +44,7 @@ impl Actor {
                 OwnedActor::prune_waiters(waiters, now);
                 if waiters.is_empty()
                     && !self.core.put_queries.contains_key(target)
+                    && !owner.active_puts.contains_key(target)
                     && *target != *self.core.routing_table.id()
                     && !self.get_senders.contains_key(target)
                 {
@@ -100,7 +101,17 @@ impl Actor {
             for target in targets {
                 self.core.iterative_queries.remove(&target);
                 self.core.put_queries.remove(&target);
-                if let Some(active) = owner.active_puts.remove(&target) {
+                let held_put = owner.active_puts.contains_key(&target)
+                    && owner.publication_observer.cleanup_is_held_for(target);
+                if held_put {
+                    owner
+                        .active_puts
+                        .get_mut(&target)
+                        .expect("held put has an active operation")
+                        .pending_error
+                        .get_or_insert(ResourceError::DeadlineExceeded);
+                    owner.publication_observer.note_cleanup_entered(target);
+                } else if let Some(active) = owner.active_puts.remove(&target) {
                     completed_puts.push(active);
                 }
                 if let Some(senders) = self.put_senders.remove(&target) {
@@ -116,7 +127,10 @@ impl Actor {
                         let _ = waiter.sender.send(Err(ResourceError::DeadlineExceeded));
                     }
                 }
-                owner.operations.remove(&target);
+                if !held_put {
+                    owner.operations.remove(&target);
+                    self.socket.retire_owned_put_deadline(target);
+                }
             }
             owner.response_operations.remove(&operation);
             if owner.maintenance == Some(operation) {
@@ -153,7 +167,9 @@ impl Actor {
             )
             .chain(owner.admissions.iter().map(|request| request.deadline))
             .chain(owner.put_admissions.iter().map(|put| put.deadline))
-            .chain(owner.active_puts.values().map(|put| put.deadline))
+            .chain(owner.active_puts.iter().filter_map(|(target, put)| {
+                (!owner.publication_observer.cleanup_is_held_for(*target)).then_some(put.deadline)
+            }))
             .chain(
                 self.core
                     .iterative_queries

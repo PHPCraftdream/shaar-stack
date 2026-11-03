@@ -76,10 +76,12 @@ impl Actor {
             .as_mut()
             .and_then(|owner| owner.active_puts.remove(&target))
         else {
+            self.socket.retire_owned_put_deadline(target);
             return;
         };
         let operation = active.operation;
         let owner = self.owned_resources.as_mut().expect("active PUT owner exists");
+        self.socket.retire_owned_put_deadline(target);
         let has_get = self.core.iterative_queries.contains_key(&target)
             || owner.completions.get(&target).is_some_and(|waiters| !waiters.is_empty());
         if !has_get && owner.maintenance != Some(operation) {
@@ -215,6 +217,7 @@ impl Actor {
                     owner.operations.remove(&put.target);
                     owner.response_operations.remove(&operation);
                     self.socket.retire_owned_deadline(operation);
+                    self.socket.retire_owned_put_deadline(put.target);
                 }
                 let _ = put.cleanup.send(());
                 continue;
@@ -228,6 +231,7 @@ impl Actor {
                 result_lease: Arc::clone(&lease),
                 request_lease: put.request_lease,
                 deadline: put.deadline,
+                pending_error: None,
             };
             self.owned_resources
                 .as_mut()
@@ -245,6 +249,12 @@ impl Actor {
             .expect("owner checked")
             .put_admissions = retry;
 
+        let observer = self
+            .owned_resources
+            .as_ref()
+            .expect("owner checked")
+            .publication_observer
+            .clone();
         let targets: Vec<Id> = self
             .owned_resources
             .as_mut()
@@ -256,21 +266,55 @@ impl Actor {
                     Ok(()) | Err(tokio::sync::oneshot::error::TryRecvError::Closed) => true,
                     Err(tokio::sync::oneshot::error::TryRecvError::Empty) => false,
                 };
-                (active.result.is_closed() || now >= active.deadline || canceled)
-                    .then_some(*target)
+                let requested = active.pending_error.is_some()
+                    || active.result.is_closed()
+                    || now >= active.deadline
+                    || canceled;
+                if requested {
+                    Some(*target)
+                } else {
+                    None
+                }
             })
             .collect();
 
         for target in targets {
-            let Some(active) = self
+            if observer.cleanup_is_held_for(target) {
+                let (operation, shared_get, is_maintenance) = {
+                    let owner = self.owned_resources.as_ref().expect("owner checked");
+                    let active = owner
+                        .active_puts
+                        .get(&target)
+                        .expect("selected PUT remains active");
+                    (
+                        active.operation,
+                        owner
+                            .completions
+                            .get(&target)
+                            .is_some_and(|waiters| !waiters.is_empty()),
+                        owner.maintenance == Some(active.operation),
+                    )
+                };
+                if let Some(put) = self.core.put_queries.get(&target) {
+                    let tids = put.transaction_ids().to_vec();
+                    self.socket.cancel_owned_transactions(&tids);
+                    self.core.put_queries.remove(&target);
+                }
+                if !shared_get && !is_maintenance {
+                    self.core.iterative_queries.remove(&target);
+                    self.socket.cancel_owned_operation(operation);
+                    self.socket.retire_owned_deadline(operation);
+                }
+                observer.note_cleanup_entered(target);
+                continue;
+            }
+            let mut active = self
                 .owned_resources
                 .as_mut()
                 .expect("owner checked")
                 .active_puts
                 .remove(&target)
-            else {
-                continue;
-            };
+                .expect("selected PUT remains active");
             let tids = self
                 .core
                 .put_queries
@@ -290,11 +334,14 @@ impl Actor {
                 owner.response_operations.remove(&active.operation);
                 self.socket.retire_owned_deadline(active.operation);
             }
-            let error = if now >= active.deadline {
-                ResourceError::DeadlineExceeded
-            } else {
-                ResourceError::QueryCancelled
-            };
+            let error = active.pending_error.unwrap_or_else(|| {
+                if now >= active.deadline {
+                    ResourceError::DeadlineExceeded
+                } else {
+                    ResourceError::QueryCancelled
+                }
+            });
+            self.socket.retire_owned_put_deadline(target);
             let _ = active.result.send(Err(crate::resource::OwnedPutError::Resource(error)));
             drop(active.request_lease);
             drop(active.result_lease);

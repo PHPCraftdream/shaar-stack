@@ -79,6 +79,15 @@ async fn receive_response(actor: &mut Actor) -> (Message, SocketAddrV4) {
         .expect("socket accepts expected response")
 }
 
+#[path = "public_put/retirement.rs"]
+mod retirement;
+
+#[path="public_put/held_retirement.rs"]
+mod held_retirement;
+
+#[path = "public_put/fatal_retirement.rs"]
+mod fatal_retirement;
+
 #[path = "hostile_resource_tests/completion_tests.rs"]
 mod completion;
 
@@ -350,7 +359,6 @@ async fn terminal_owned_put_response_releases_receipt(success: bool) {
 
 #[path = "hostile_resource_tests/put_lifecycle_tests.rs"]
 mod put_lifecycle;
-
 #[path = "hostile_resource_tests/public_put_tests.rs"]
 mod public_put;
 

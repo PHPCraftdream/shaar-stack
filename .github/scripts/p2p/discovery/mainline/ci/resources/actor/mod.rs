@@ -62,6 +62,7 @@ pub(super) struct ActivePut {
     pub(super) result_lease: Arc<ResultLease>,
     pub(super) request_lease: Arc<RequestLease>,
     pub(super) deadline: tokio::time::Instant,
+    pub(super) pending_error: Option<ResourceError>,
 }
 #[derive(Debug)]
 struct OwnedWaiter {
@@ -91,6 +92,7 @@ pub(crate) struct OwnedActor {
     put_admissions: VecDeque<PendingPut>,
     active_puts: HashMap<Id, ActivePut>,
     request_budget: Arc<RequestBudget>,
+    publication_observer: crate::resource::Observer,
 }
 
 impl OwnedActor {
@@ -154,6 +156,8 @@ impl OwnedActor {
     pub(crate) fn new(budget: Arc<StoreBudget>, bootstrap_leases: Vec<HolderLease>) -> Self {
         let request_budget = Arc::new(RequestBudget::default());
         let result_budget = Arc::new(ResultBudget::new(request_budget.cancellation_wake()));
+        let publication_observer = crate::resource::Observer::default();
+        publication_observer.attach_actor_wake(request_budget.cancellation_wake());
         Self {
             budget,
             result_budget,
@@ -173,6 +177,7 @@ impl OwnedActor {
             put_admissions: VecDeque::new(),
             active_puts: HashMap::new(),
             request_budget,
+            publication_observer,
         }
     }
 
@@ -256,6 +261,8 @@ impl Actor {
         self.core.cached_iterative_queries.clear();
         self.socket.enable_owned_resources();
         self.owned_resources = Some(OwnedActor::new(budget, bootstrap_leases));
+        self.socket
+            .set_owned_publication_observer(self.owned_publication_observer());
         Ok(())
     }
 
@@ -267,6 +274,33 @@ impl Actor {
                 .expect("owned actor initialized")
                 .request_budget,
         )
+    }
+
+    pub(crate) fn owned_publication_observer(&self) -> crate::resource::Observer {
+        self.owned_resources
+            .as_ref()
+            .expect("owned actor initialized")
+            .publication_observer
+            .clone()
+    }
+
+    pub(crate) fn process_owned_publication_message(
+        &mut self,
+        message: crate::common::Message,
+        from: SocketAddrV4,
+    ) {
+        let transaction_id = message.transaction_id;
+        let has_response = matches!(
+            &message.message_type,
+            crate::common::MessageType::Response(_) | crate::common::MessageType::Error(_)
+        );
+        self.process_message(message, from);
+        if has_response {
+            self.owned_note_response(transaction_id);
+            if let Some(owner) = self.owned_resources.as_ref() {
+                let _ = owner.publication_observer.processed(transaction_id);
+            }
+        }
     }
 
     pub(crate) fn owned_failure_status(&self) -> Arc<OnceLock<ResourceError>> {

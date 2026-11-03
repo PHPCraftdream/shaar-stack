@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
+use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::time::Duration;
 
 use n0_mainline::{
     Id, MutableItem, OwnedDht, OwnedDhtHandle, OwnedPutOperation, ResourceError,
@@ -111,10 +113,213 @@ async fn owned_api_put_rejects_invalid_profiles() {
 }
 
 #[tokio::test]
+async fn owned_api_absolute_deadline_reports_clean_pre_enqueue_failure() {
+    let (bootstrap, bootstrap_addr) = loopback_bootstrap();
+    bootstrap
+        .set_nonblocking(true)
+        .expect("set bootstrap socket nonblocking");
+    let mut owner = OwnedDht::new(
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+        &[bootstrap_addr],
+    )
+    .expect("bind owned DHT");
+    let retained = owner.handle();
+    let expired = tokio::time::Instant::now();
+    let error = retained
+        .put_mutable_until(mutable_item(1), expired)
+        .expect_err("expired absolute deadline");
+    assert_eq!(error.error, ResourceError::DeadlineExceeded);
+    assert_eq!(error.cleanup, n0_mainline::OwnedPutCleanup::Clean);
+    let mut bytes = [0u8; 2048];
+    assert_eq!(
+        bootstrap
+            .recv_from(&mut bytes)
+            .expect_err("expired admission sent no datagram")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    drop(bootstrap);
+    owner.close().await.expect("join owned actor");
+}
+
+#[tokio::test]
+async fn owned_api_admission_can_be_cancelled_before_poll() {
+    let (bootstrap, bootstrap_addr) = loopback_bootstrap();
+    let mut owner = OwnedDht::new(
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+        &[bootstrap_addr],
+    )
+    .expect("bind owned DHT");
+    let retained = owner.handle();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut admission = retained
+        .put_mutable_until(mutable_item(2), deadline)
+        .expect("start bounded admission");
+    assert_eq!(
+        admission.cancel_and_wait().await,
+        n0_mainline::OwnedPutCleanup::Clean,
+    );
+    assert!(retained.info().await.is_ok(), "actor remains usable");
+    drop(bootstrap);
+    owner.close().await.expect("join owned actor");
+}
+
+#[tokio::test]
+async fn owned_api_cleanup_hold_observes_real_actor_cleanup() {
+    let (bootstrap, bootstrap_addr) = loopback_bootstrap();
+    let mut owner = OwnedDht::new(
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+        &[bootstrap_addr],
+    )
+    .expect("bind owned DHT");
+    let retained = owner.handle();
+    let observer = retained.publication_observer();
+    let mut item = mutable_item(3);
+    let target = *item.target();
+    let hold = observer
+        .hold_cleanup_for_target(target)
+        .expect("acquire target-specific cleanup hold");
+    assert!(observer.hold_cleanup_for_target(target).is_err(), "cleanup hold is bounded to one");
+
+    let mut admission = retained
+        .put_mutable_until(item, tokio::time::Instant::now() + std::time::Duration::from_secs(5))
+        .expect("start bounded PUT admission");
+    admission.wait().await.expect("admit PUT operation");
+    let mut operation = admission.take_operation().expect("admitted operation retained");
+    let mut cleanup = Box::pin(operation.cancel_and_wait());
+    std::future::poll_fn(|cx| {
+        assert!(cleanup.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    observer.wait_cleanup_held().await;
+    std::future::poll_fn(|cx| {
+        assert!(cleanup.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+
+    hold.release();
+    cleanup.await.expect("cleanup completes after releasing hold");
+    drop(bootstrap);
+    owner.close().await.expect("join owned actor");
+}
+
+#[tokio::test(start_paused = true)]
+async fn owned_api_far_future_unpolled_admission_is_clamped_before_enqueue() {
+    let (bootstrap, bootstrap_addr) = loopback_bootstrap();
+    let mut owner = OwnedDht::new(
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+        &[bootstrap_addr],
+    )
+    .expect("bind owned DHT");
+    let retained = owner.handle();
+    let entry = tokio::time::Instant::now();
+    let mut admission = retained
+        .put_mutable_until(mutable_item(4), entry + Duration::from_secs(3600))
+        .expect("create bounded admission");
+    let mut other_admissions: Vec<_> = (0..23)
+        .map(|index| {
+            retained
+                .put_mutable_until(
+                    mutable_item(100 + index),
+                    entry + Duration::from_secs(3600),
+                )
+                .expect("create additional bounded admission")
+        })
+        .collect();
+    let error = retained
+        .put_mutable_until(mutable_item(200), entry + Duration::from_secs(3600))
+        .expect_err("25th admission exceeds capacity");
+    assert_eq!(error.error, ResourceError::OperationLimit);
+    assert_eq!(error.cleanup, n0_mainline::OwnedPutCleanup::Clean);
+    tokio::time::advance(Duration::from_secs(10)).await;
+    assert_eq!(tokio::time::Instant::now(), entry + Duration::from_secs(10));
+
+    let mut wait = Box::pin(admission.wait());
+    std::future::poll_fn(|cx| {
+        match wait.as_mut().poll(cx) {
+            std::task::Poll::Ready(Err(error)) => {
+                assert_eq!(error.error, ResourceError::DeadlineExceeded);
+                assert_eq!(error.cleanup, n0_mainline::OwnedPutCleanup::Clean);
+            }
+            std::task::Poll::Ready(Ok(())) => panic!("expired admission unexpectedly succeeded"),
+            std::task::Poll::Pending => panic!("expired admission enqueued and remained pending"),
+        }
+        std::task::Poll::Ready(())
+    })
+    .await;
+    drop(wait);
+    let mut replacement = retained
+        .put_mutable_until(
+            mutable_item(201),
+            tokio::time::Instant::now() + Duration::from_secs(10),
+        )
+        .expect("expired principal lease was released");
+    assert_eq!(
+        replacement.cancel_and_wait().await,
+        n0_mainline::OwnedPutCleanup::Clean
+    );
+    for other in &mut other_admissions {
+        assert_eq!(
+            other.cancel_and_wait().await,
+            n0_mainline::OwnedPutCleanup::Clean
+        );
+    }
+    assert_eq!(admission.cancel_and_wait().await, n0_mainline::OwnedPutCleanup::Clean);
+    assert_eq!(admission.cancel_and_wait().await, n0_mainline::OwnedPutCleanup::Clean);
+
+    drop(bootstrap);
+    owner.close().await.expect("join owned actor");
+}
+
+#[tokio::test(start_paused = true)]
+async fn owned_api_shorter_deadline_expires_before_default_clamp() {
+    let (bootstrap, bootstrap_addr) = loopback_bootstrap();
+    let mut owner = OwnedDht::new(
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+        &[bootstrap_addr],
+    )
+    .expect("bind owned DHT");
+    let retained = owner.handle();
+    let entry = tokio::time::Instant::now();
+    let mut admission = retained
+        .put_mutable_until(mutable_item(5), entry + Duration::from_secs(3))
+        .expect("create short bounded admission");
+    tokio::time::advance(Duration::from_secs(3)).await;
+    assert_eq!(tokio::time::Instant::now(), entry + Duration::from_secs(3));
+
+    let mut wait = Box::pin(admission.wait());
+    std::future::poll_fn(|cx| {
+        match wait.as_mut().poll(cx) {
+            std::task::Poll::Ready(Err(error)) => {
+                assert_eq!(error.error, ResourceError::DeadlineExceeded);
+                assert_eq!(error.cleanup, n0_mainline::OwnedPutCleanup::Clean);
+            }
+            std::task::Poll::Ready(Ok(())) => panic!("expired admission unexpectedly succeeded"),
+            std::task::Poll::Pending => panic!("expired admission enqueued and remained pending"),
+        }
+        std::task::Poll::Ready(())
+    })
+    .await;
+    drop(wait);
+    assert_eq!(
+        admission.cancel_and_wait().await,
+        n0_mainline::OwnedPutCleanup::Clean
+    );
+
+    drop(bootstrap);
+    owner.close().await.expect("join owned actor");
+}
+
+#[tokio::test]
 async fn owned_api_put_accepts_maximum_value_size() {
     let (bootstrap, bootstrap_addr) = loopback_bootstrap();
-    let mut owner = OwnedDht::new(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), &[bootstrap_addr])
-        .expect("bind owned DHT");
+    let mut owner = OwnedDht::new(
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+        &[bootstrap_addr],
+    )
+    .expect("bind owned DHT");
     let retained = owner.handle();
     let signer = ed25519_dalek::SigningKey::from_bytes(&[0x26; 32]);
     let mut operation = retained

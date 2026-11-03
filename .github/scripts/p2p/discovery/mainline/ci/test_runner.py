@@ -43,6 +43,20 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(selected, list(cases.values()))
         self.assertEqual(ignored, [ignored_name])
 
+    def test_selects_nested_hostile_and_observer_tests_and_reports_ignored(self):
+        cases = {prefix: prefix + "run" for prefix in RUNNER.PREFIXES}
+        hostile = "actor::hostile_resource_tests::public_put_tests::deadline_tests::public_put_until_deadline"
+        observer = "resource::publication_observer::tests::observer_case"
+        cases["actor::hostile_resource_tests::"] = hostile
+        cases["resource::publication_observer::tests::"] = observer
+        ignored_name = "actor::hostile_resource_tests::public_put_tests::deadline_tests::ignored_case"
+        inventory = listing(*cases.values(), ignored_name, "dht::tests::upstream")
+        selected, ignored = RUNNER.select_cases(inventory, listing(ignored_name), VERIFY)
+        self.assertIn(hostile, selected)
+        self.assertIn(observer, selected)
+        self.assertEqual(selected, list(cases.values()))
+        self.assertEqual(ignored, [ignored_name])
+
     def test_rejects_empty_inventory(self):
         with self.assertRaises(ValueError):
             RUNNER.select_cases("", "", VERIFY)

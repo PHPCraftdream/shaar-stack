@@ -26,9 +26,15 @@ pub struct OwnedDhtHandle {
     sender: mpsc::Sender<ActorMessage>,
     failure: Arc<OnceLock<ResourceError>>,
     request_budget: Arc<RequestBudget>,
+    publication_observer: crate::resource::Observer,
 }
 
 impl OwnedDhtHandle {
+    /// Return a bounded cleanup observer for owned publication operations.
+    pub fn publication_observer(&self) -> crate::resource::Observer {
+        self.publication_observer.clone()
+    }
+
     fn failure(&self) -> ResourceError {
         self.failure
             .get()
@@ -82,63 +88,102 @@ impl OwnedDhtHandle {
         result
     }
 
-    /// Submit a bounded, unsalted mutable PUT and retain its charged completion.
-    ///
-    /// The admission deadline includes request-budget acquisition, actor-channel
-    /// reservation, and actor admission. Dropping the pending future cancels its
-    /// admission (and cleanup). Dropping the returned capability requests cancellation;
-    /// `cancel_and_wait` observes when actor-side cleanup has finished.
+    /// Start a mutable PUT using the caller's deadline, capped at 10 seconds from entry.
+    pub fn put_mutable_until(
+        &self,
+        item: crate::MutableItem,
+        deadline: tokio::time::Instant,
+    ) -> Result<crate::resource::OwnedPutAdmission, crate::resource::OwnedPutAdmissionError> {
+        let entry = tokio::time::Instant::now();
+        let deadline = deadline.min(entry + Duration::from_secs(10));
+        let clean = |error| crate::resource::OwnedPutAdmissionError {
+            error,
+            cleanup: crate::resource::OwnedPutCleanup::Clean,
+        };
+        let unknown = |error| crate::resource::OwnedPutAdmissionError {
+            error,
+            cleanup: crate::resource::OwnedPutCleanup::Unknown,
+        };
+        if let Some(error) = self.failure.get() {
+            return Err(unknown(*error));
+        }
+        if item.salt().is_some() || item.value().len() > 1000 || item.seq() < 0 {
+            return Err(clean(ResourceError::InvalidMutableItem));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(clean(ResourceError::DeadlineExceeded));
+        }
+        let item = item
+            .into_owned_put()
+            .map_err(|_| clean(ResourceError::InvalidMutableItem))?;
+        let lease = self
+            .request_budget
+            .acquire()
+            .ok_or_else(|| clean(ResourceError::OperationLimit))?;
+        let (admitted_tx, admitted_rx) = oneshot::channel();
+        let (cancel_tx, mut cancel_rx) = oneshot::channel();
+        let (cleanup_tx, cleanup_rx) = oneshot::channel();
+        let sender = self.sender.clone();
+        let wake = self.request_budget.cancellation_wake();
+        let failure_status = Arc::clone(&self.failure);
+        let send = async move {
+            tokio::select! {
+                biased;
+                _ = &mut cancel_rx => {
+                    drop(item);
+                    drop(lease);
+                    let _ = admitted_tx.send(Err(ResourceError::QueryCancelled));
+                    let _ = cleanup_tx.send(());
+                }
+                permit = tokio::time::timeout_at(deadline, sender.reserve()) => {
+                    match permit {
+                        Ok(Ok(permit)) if tokio::time::Instant::now() < deadline => {
+                            permit.send(ActorMessage::OwnedPut(
+                                *item.target(), item, admitted_tx, cleanup_tx, cancel_rx,
+                                deadline, lease,
+                            ));
+                        }
+                        Err(_) => {
+                            drop(item);
+                            drop(lease);
+                            let _ = admitted_tx.send(Err(ResourceError::DeadlineExceeded));
+                            let _ = cleanup_tx.send(());
+                        }
+                        Ok(Err(_)) => {
+                            drop(item);
+                            drop(lease);
+                            let error = failure_status
+                                .get()
+                                .copied()
+                                .unwrap_or(ResourceError::QueryCancelled);
+                            let _ = admitted_tx.send(Err(error));
+                            let _ = cleanup_tx.send(());
+                        }
+                        Ok(Ok(permit)) => {
+                            drop(permit);
+                            drop(item);
+                            drop(lease);
+                            let _ = admitted_tx.send(Err(ResourceError::DeadlineExceeded));
+                            let _ = cleanup_tx.send(());
+                        }
+                    }
+                }
+            }
+        };
+        Ok(crate::resource::OwnedPutAdmission::new(
+            Box::pin(send), admitted_rx, cancel_tx, cleanup_rx, wake, deadline,
+        ))
+    }
+
+    /// Await admission while retaining cancellation and cleanup ownership.
     pub async fn put_mutable(
         &self,
         item: crate::MutableItem,
     ) -> Result<crate::resource::OwnedPutOperation, ResourceError> {
-        if let Some(error) = self.failure.get() {
-            return Err(*error);
-        }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        if item.salt().is_some() || item.value().len() > 1000 || item.seq() < 0 {
-            return Err(ResourceError::InvalidMutableItem);
-        }
-        let item = item
-            .into_owned_put()
-            .map_err(|_| ResourceError::InvalidMutableItem)?;
-        let lease = self
-            .request_budget
-            .acquire()
-            .ok_or(ResourceError::OperationLimit)?;
-        let _cancel_wake = self.request_budget.cancellation_guard();
-        let (admitted_tx, admitted_rx) = oneshot::channel();
-        let (cancel_tx, cancel_rx) = oneshot::channel();
-        let (cleanup_tx, cleanup_rx) = oneshot::channel();
-        let permit = tokio::time::timeout_at(deadline, self.sender.reserve())
-            .await
-            .map_err(|_| ResourceError::DeadlineExceeded)?
-            .map_err(|_| self.failure())?;
-        if tokio::time::Instant::now() >= deadline {
-            return Err(ResourceError::DeadlineExceeded);
-        }
-        permit.send(ActorMessage::OwnedPut(
-            *item.target(),
-            item,
-            admitted_tx,
-            cleanup_tx,
-            cancel_rx,
-            deadline,
-            lease,
-        ));
-        let charged = tokio::time::timeout_at(deadline, admitted_rx)
-            .await
-            .map_err(|_| ResourceError::DeadlineExceeded)?
-            .map_err(|_| self.failure())??;
-        if tokio::time::Instant::now() >= deadline {
-            return Err(ResourceError::DeadlineExceeded);
-        }
-        Ok(crate::resource::OwnedPutOperation::new(
-            charged,
-            cancel_tx,
-            cleanup_rx,
-            self.request_budget.cancellation_wake(),
-        ))
+        let mut admission = self.put_mutable_until(item, deadline).map_err(|failure| failure.error)?;
+        admission.wait().await.map_err(|failure| failure.error)?;
+        admission.take_operation().ok_or(ResourceError::QueryCancelled)
     }
 
     #[cfg(test)]
@@ -166,6 +211,226 @@ impl OwnedDhtHandle {
             .await
             .map_err(|_| self.failure())?;
         receiver.await.map_err(|_| self.failure())
+    }
+}
+
+#[cfg(test)]
+mod failed_admission_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::task::Poll;
+    use std::future::Future;
+
+    #[tokio::test]
+    async fn cancel_before_first_poll_releases_local_admission_cleanly() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let budget = Arc::new(RequestBudget::default());
+        let handle = OwnedDhtHandle {
+            sender,
+            failure: Arc::new(OnceLock::new()),
+            request_budget: Arc::clone(&budget),
+            publication_observer: crate::resource::Observer::default(),
+        };
+        let item = crate::MutableItem::new(
+            &ed25519_dalek::SigningKey::from_bytes(&[0x52; 32]),
+            b"cancel-before-poll",
+            1,
+            None,
+        );
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut admission = handle
+            .put_mutable_until(item, deadline)
+            .expect("admission");
+        assert_eq!(
+            admission.cancel_and_wait().await,
+            crate::resource::OwnedPutCleanup::Clean
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "cancelled reservation must not enqueue"
+        );
+        assert_eq!(
+            admission.cancel_and_wait().await,
+            crate::resource::OwnedPutCleanup::Clean
+        );
+        assert!(
+            budget.acquire().is_some(),
+            "pre-enqueue cancellation released the request lease"
+        );
+    }
+
+    #[tokio::test]
+    async fn absolute_deadline_fails_before_enqueue_with_clean_provenance() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let budget = Arc::new(RequestBudget::default());
+        let handle = OwnedDhtHandle {
+            sender,
+            failure: Arc::new(OnceLock::new()),
+            request_budget: Arc::clone(&budget),
+            publication_observer: crate::resource::Observer::default(),
+        };
+        let item = crate::MutableItem::new(
+            &ed25519_dalek::SigningKey::from_bytes(&[0x54; 32]),
+            b"expired-deadline",
+            1,
+            None,
+        );
+        let deadline = tokio::time::Instant::now();
+        let error = handle
+            .put_mutable_until(item, deadline)
+            .expect_err("expired absolute deadline");
+        assert_eq!(error.error, ResourceError::DeadlineExceeded);
+        assert_eq!(
+            error.cleanup,
+            crate::resource::OwnedPutCleanup::Clean
+        );
+        assert!(receiver.try_recv().is_err());
+        assert!(budget.acquire().is_some());
+    }
+
+    #[tokio::test]
+    async fn cancelled_wait_can_resume_cleanup_without_repolling_submission() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let budget = Arc::new(RequestBudget::default());
+        let handle = OwnedDhtHandle {
+            sender,
+            failure: Arc::new(OnceLock::new()),
+            request_budget: Arc::clone(&budget),
+            publication_observer: crate::resource::Observer::default(),
+        };
+        let item = crate::MutableItem::new(
+            &ed25519_dalek::SigningKey::from_bytes(&[0x53; 32]),
+            b"cancelled-wait",
+            1,
+            None,
+        );
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut admission = handle
+            .put_mutable_until(item, deadline)
+            .expect("admission");
+        let mut wait = Box::pin(admission.wait());
+        std::future::poll_fn(|cx| {
+            assert!(wait.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        let message = receiver.recv().await.expect("PUT message");
+        let ActorMessage::OwnedPut(_, _, admitted, cleanup, mut cancel, _, lease) = message else {
+            panic!("expected owned PUT");
+        };
+        let admitted = admitted
+            .send(Err(ResourceError::OperationLimit));
+        admitted.expect("reject admission");
+        drop(wait);
+        let mut cleanup_wait = Box::pin(admission.cancel_and_wait());
+        std::future::poll_fn(|cx| {
+            assert!(cleanup_wait.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        assert_eq!(cancel.try_recv(), Ok(()));
+        drop(lease);
+        cleanup.send(()).expect("complete actor cleanup");
+        assert_eq!(
+            (&mut cleanup_wait).await,
+            crate::resource::OwnedPutCleanup::Clean
+        );
+        drop(cleanup_wait);
+        assert_eq!(
+            admission.cancel_and_wait().await,
+            crate::resource::OwnedPutCleanup::Clean
+        );
+    }
+
+    #[tokio::test]
+    async fn lost_cleanup_receipt_is_classified_unknown() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let budget = Arc::new(RequestBudget::default());
+        let handle = OwnedDhtHandle {
+            sender,
+            failure: Arc::new(OnceLock::new()),
+            request_budget: Arc::clone(&budget),
+            publication_observer: crate::resource::Observer::default(),
+        };
+        let item = crate::MutableItem::new(
+            &ed25519_dalek::SigningKey::from_bytes(&[0x55; 32]),
+            b"lost-cleanup-receipt",
+            1,
+            None,
+        );
+        let mut admission = handle
+            .put_mutable_until(item, tokio::time::Instant::now() + Duration::from_secs(5))
+            .expect("admission");
+        let mut waiting = Box::pin(admission.wait());
+        std::future::poll_fn(|cx| {
+            assert!(waiting.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        let message = receiver.recv().await.expect("PUT actor message");
+        let ActorMessage::OwnedPut(_, _, admitted, cleanup, _, _, lease) = message else {
+            panic!("expected owned PUT message");
+        };
+        admitted
+            .send(Err(ResourceError::OperationLimit))
+            .expect("reject actor admission");
+        drop(cleanup);
+        drop(lease);
+        let error = waiting.await.expect_err("admission must fail");
+        assert_eq!(error.error, ResourceError::OperationLimit);
+        assert_eq!(
+            error.cleanup,
+            crate::resource::OwnedPutCleanup::Unknown
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_admission_waits_for_actor_cleanup_receipt() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let budget = Arc::new(RequestBudget::default());
+        let handle = OwnedDhtHandle {
+            sender,
+            failure: Arc::new(OnceLock::new()),
+            request_budget: Arc::clone(&budget),
+            publication_observer: crate::resource::Observer::default(),
+        };
+        let item = crate::MutableItem::new(
+            &ed25519_dalek::SigningKey::from_bytes(&[0x51; 32]),
+            b"rejected-admission",
+            1,
+            None,
+        );
+        let mut request = Box::pin(handle.put_mutable(item));
+        std::future::poll_fn(|cx| {
+            assert!(request.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        let message = receiver.recv().await.expect("PUT actor message");
+        let ActorMessage::OwnedPut(_, _, admitted, cleanup, mut cancel, _, lease) = message else {
+            panic!("expected owned PUT message");
+        };
+        admitted
+            .send(Err(ResourceError::OperationLimit))
+            .expect("report rejection");
+        std::future::poll_fn(|cx| {
+            assert!(request.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        assert_eq!(cancel.try_recv(), Ok(()));
+
+        drop(lease);
+        cleanup.send(()).expect("report completed cleanup");
+        assert!(matches!(request.await, Err(ResourceError::OperationLimit)));
+        let leases: Vec<_> = (0..24)
+            .map(|_| budget.acquire().expect("released request-budget slot"))
+            .collect();
+        assert!(
+            budget.acquire().is_none(),
+            "request budget has 24 slots"
+        );
+        drop(leases);
     }
 }
 
@@ -206,6 +471,7 @@ impl OwnedDht {
             .expect("validated owned actor resource initialization");
         let failure = actor.owned_failure_status();
         let request_budget = actor.owned_request_budget();
+        let publication_observer = actor.owned_publication_observer();
         let (sender, receiver) = mpsc::channel(16);
         let (stop, stop_receiver) = oneshot::channel();
         let join = tokio::spawn(actor::run_owned(actor, receiver, stop_receiver));
@@ -214,6 +480,7 @@ impl OwnedDht {
                 sender,
                 failure,
                 request_budget,
+                publication_observer,
             },
             stop: Some(stop),
             join: Some(join),

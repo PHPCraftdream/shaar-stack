@@ -6,13 +6,15 @@ use super::*;
 
 impl Actor {
     pub(crate) fn tick_owned(&mut self) {
+        if self.owned_error().is_some() {
+            self.maintain_owned_puts_at(tokio::time::Instant::now());
+            return;
+        }
         self.expire_owned_operations_at(tokio::time::Instant::now());
         self.retire_owned_operation_errors();
         if let Some(error) = self.owned_failure() {
             self.owned_fail(error);
-            return;
-        }
-        if self.owned_error().is_some() {
+            self.maintain_owned_puts_at(tokio::time::Instant::now());
             return;
         }
         self.maintain_owned_admissions_at(tokio::time::Instant::now());
@@ -194,7 +196,9 @@ impl Actor {
                         let _ = waiter.sender.send(result);
                     }
                 }
-                if !self.core.put_queries.contains_key(&target) {
+                if !self.core.put_queries.contains_key(&target)
+                    && !owner.active_puts.contains_key(&target)
+                {
                     owner.operations.remove(&target);
                     if owner.maintenance != Some(operation) {
                         self.socket.retire_owned_deadline(operation);

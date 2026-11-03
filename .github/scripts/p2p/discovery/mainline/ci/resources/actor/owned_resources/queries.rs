@@ -165,6 +165,13 @@ impl Actor {
             return Err(PutQueryError::Resource(ResourceError::DeadlineExceeded).into());
         }
         let target = *request.target();
+        if self
+            .owned_resources
+            .as_ref()
+            .is_some_and(|owner| owner.active_puts.contains_key(&target))
+        {
+            return Err(PutQueryError::Resource(ResourceError::OperationLimit).into());
+        }
         let had_put = self.core.put_queries.contains_key(&target);
         let previous = self
             .owned_resources
@@ -178,14 +185,12 @@ impl Actor {
             if let Some(operation) = previous {
                 self.socket.cancel_owned_operation(operation);
                 self.core.iterative_queries.remove(&target);
-                let owner = self
-                    .owned_resources
-                    .as_mut()
-                    .expect("owned actor initialized");
+                let owner = self.owned_resources.as_mut().expect("owned actor initialized");
                 owner.operations.remove(&target);
                 owner.response_operations.remove(&operation);
                 self.socket.retire_owned_deadline(operation);
             }
+            self.socket.retire_owned_put_deadline(target);
         }
         let owner = self
             .owned_resources
@@ -195,9 +200,16 @@ impl Actor {
         if let Some(error) = owner.terminal {
             return Err(PutQueryError::Resource(error).into());
         }
-        let operation = owner
-            .operation_for(target, &mut self.socket, deadline)
+        self.socket
+            .register_owned_put_deadline(target, deadline)
             .map_err(PutQueryError::Resource)?;
+        let operation = match owner.operation_for(target, &mut self.socket, deadline) {
+            Ok(operation) => operation,
+            Err(error) => {
+                self.socket.retire_owned_put_deadline(target);
+                return Err(PutQueryError::Resource(error).into());
+            }
+        };
         let has_active_get = self.core.iterative_queries.contains_key(&target);
         let query = match PutQuery::new_owned(
             request.clone(),
@@ -211,6 +223,7 @@ impl Actor {
                     owner.operations.remove(&target);
                     self.socket.retire_owned_deadline(operation);
                 }
+                self.socket.retire_owned_put_deadline(target);
                 return Err(PutQueryError::Resource(error).into());
             }
         };
@@ -229,7 +242,9 @@ impl Actor {
                     .expect("owned actor initialized");
                 owner.operations.remove(&target);
                 owner.response_operations.remove(&operation);
+                self.socket.retire_owned_deadline(operation);
             }
+            self.socket.retire_owned_put_deadline(target);
             return Err(PutQueryError::Resource(error).into());
         }
         Ok(())

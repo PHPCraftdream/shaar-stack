@@ -18,13 +18,13 @@ def edits() -> dict[str, list[tuple[str, str]]]:
             ),
             (
                 "        actor.process_message(message, from);",
-                "        let transaction_id = message.transaction_id;\n        let has_response = matches!(&message.message_type, MessageType::Response(_) | MessageType::Error(_));\n        actor.process_message(message, from);\n        if has_response { actor.owned_note_response(transaction_id); }",
+                "        actor.process_owned_publication_message(message, from);",
             ),
         ],
         "src/lib.rs": [
             (
                 "mod resource;",
-                "mod resource;\npub use resource::{OwnedQueryCompletion, OwnedPutCompletion, OwnedPutError, OwnedPutOperation, ResourceError};",
+                "mod resource;\npub use resource::{OwnedQueryCompletion, OwnedPutCompletion, OwnedPutError, OwnedPutOperation, OwnedPutAdmission, OwnedPutAdmissionError, OwnedPutCleanup, Observer, CleanupHold, ResourceError};",
             ),
         ],
     }

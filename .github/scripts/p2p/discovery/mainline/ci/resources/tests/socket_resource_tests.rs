@@ -39,6 +39,25 @@ fn new_operation(socket: &mut KrpcSocket) -> OperationId {
     socket.allocate_operation().expect("operation")
 }
 
+#[test]
+fn put_deadline_index_is_bounded_and_reusable_after_retirement() {
+    let mut resources = super::resources::SocketResources::default();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let targets: Vec<_> = (0..8u8).map(|value| Id::from([value; 20])).collect();
+    for target in targets.iter().copied() {
+        resources.register_owned_put_deadline(target, deadline).unwrap();
+    }
+    let ninth = Id::from([8; 20]);
+    assert_eq!(
+        resources.register_owned_put_deadline(ninth, deadline),
+        Err(ResourceError::OperationLimit),
+    );
+    assert_eq!(resources.owned_put_deadline(ninth), None);
+    resources.retire_owned_put_deadline(targets[0]);
+    resources.register_owned_put_deadline(ninth, deadline).unwrap();
+    assert_eq!(resources.owned_put_deadline(ninth), Some(deadline));
+}
+
 #[tokio::test]
 async fn past_deadline_request_is_rejected_without_resource_growth() {
     let (_, destination) = capture();

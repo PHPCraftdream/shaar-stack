@@ -5,6 +5,56 @@
 use super::*;
 
 #[tokio::test]
+async fn held_put_keeps_operation_charge_after_shared_get_deadline() {
+    let (_bootstrap_peer, bootstrap) = captured_peer();
+    let mut actor = actor(bootstrap);
+    actor.owned_disable_maintenance_for_test = true;
+    let now = tokio::time::Instant::now();
+    let deadline = now + std::time::Duration::from_secs(5);
+    let put_deadline = now + std::time::Duration::from_secs(10);
+    let item = crate::common::MutableItem::new(
+        &ed25519_dalek::SigningKey::from_bytes(&[0xA8; 32]),
+        b"held shared get",
+        1,
+        None,
+    );
+    let target = *item.target();
+    let (get_sender, mut get_receiver) = oneshot::channel();
+    actor.owned_mutable_until(target, get_sender, deadline).expect("actual owned GET admitted");
+    let operation = actor.owned_resources.as_ref().unwrap().operations[&target];
+    let observer = actor.owned_resources.as_ref().unwrap().publication_observer.clone();
+    let hold = observer.hold_cleanup_for_target(target).expect("hold acquired");
+    let (reply, mut reply_rx) = oneshot::channel();
+    let (cleanup, mut cleanup_rx) = oneshot::channel();
+    let (cancel, cancel_rx) = oneshot::channel();
+    let lease = actor.owned_request_budget().acquire().expect("actual request lease");
+    actor.owned_put_admission_until(target, item, reply, cleanup, cancel_rx, put_deadline, lease);
+    actor.maintain_owned_puts_at(now);
+    let charged_operation = reply_rx.try_recv().expect("PUT admitted").expect("no admission error");
+    cancel.send(()).expect("request cancellation");
+    actor.maintain_owned_puts_at(now);
+    assert_eq!(cleanup_rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty));
+    assert!(actor.owned_resources.as_ref().unwrap().active_puts.contains_key(&target));
+
+    actor.expire_owned_operations_at(deadline);
+    assert!(matches!(get_receiver.try_recv(), Ok(Err(ResourceError::DeadlineExceeded))));
+    assert!(actor.owned_resources.as_ref().unwrap().active_puts.contains_key(&target));
+    assert_eq!(actor.owned_resources.as_ref().unwrap().operations.get(&target), Some(&operation));
+    assert_eq!(actor.socket.owned_put_deadline_for_test(target), Some(put_deadline));
+
+    hold.release();
+    actor.maintain_owned_puts_at(deadline);
+    assert!(matches!(
+        charged_operation.await,
+        Ok(Err(crate::resource::OwnedPutError::Resource(ResourceError::DeadlineExceeded)))
+    ));
+    assert_eq!(cleanup_rx.try_recv(), Ok(()));
+    assert!(!actor.owned_resources.as_ref().unwrap().active_puts.contains_key(&target));
+    assert!(!actor.owned_resources.as_ref().unwrap().operations.contains_key(&target));
+    assert_eq!(actor.socket.owned_put_deadline_for_test(target), None);
+}
+
+#[tokio::test]
 async fn failed_put_reservation_rolls_back_new_operation_and_preserves_coalesced_get() {
     let (_bootstrap_peer, bootstrap) = captured_peer();
     let mut actor = actor(bootstrap);

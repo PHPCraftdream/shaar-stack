@@ -44,6 +44,7 @@ SOCKET_OWNED = "src/actor/socket/owned.rs"
 STORE_OWNER = "src/store_owner.rs"
 VISITED_STORE = "src/visited_store.rs"
 SOCKET_RESOURCE_TESTS = "src/actor/socket/resource_tests.rs"
+PUBLICATION_OBSERVER = "src/publication_observer.rs"
 STORE_TESTS = "src/store_resource_tests.rs"
 OWNED_ACTOR = "src/actor/owned_resources.rs"
 OWNED_COMPLETION = "src/owned_completion.rs"
@@ -106,7 +107,7 @@ def recipe() -> dict[str, str]:
         "ci/bencode/prepare.py", "ci/bencode/edits.py", "ci/resources/edits.py",
         "ci/resources/store_edits.py", "ci/ownership/actor.py", "ci/ownership/queries.py",
         "ci/ownership/completion.py", "ci/resources/resource.rs", "ci/resources/stores/store_owner.rs",
-        "ci/resources/socket/socket_resources.rs", "ci/resources/socket/socket_owned.rs", "ci/resources/stores/visited_store.rs",
+        "ci/resources/socket/socket_resources.rs", "ci/resources/socket/socket_owned.rs", "ci/resources/socket/publication_observer.rs", "ci/resources/stores/visited_store.rs",
         "ci/resources/actor/mod.rs", "ci/resources/actor/owned_resources/admission.rs",
         "ci/resources/actor/owned_resources/maintenance.rs", "ci/resources/actor/owned_resources/tick.rs",
         "ci/resources/actor/owned_resources/failure.rs", "ci/resources/actor/owned_resources/queries.rs", "ci/resources/actor/owned_resources/put.rs", "ci/resources/tests/socket_resource_tests.rs",
@@ -122,6 +123,9 @@ def recipe() -> dict[str, str]:
         "ci/ownership/tests/hostile_resource_tests/newoverload_put_tests.rs",
         "ci/ownership/tests/hostile_resource_tests/put_lifecycle_tests.rs",
         "ci/ownership/tests/hostile_resource_tests/public_put_tests.rs",
+        "ci/ownership/tests/public_put/deadline.rs", "ci/ownership/tests/public_put/retirement.rs",
+        "ci/ownership/tests/public_put/held_retirement.rs", "ci/ownership/tests/public_put/fatal_retirement.rs",
+        "ci/resources/socket/test_controls.rs",
         "tests/ingress_tests.rs", "tests/udp_ingress_tests.rs", "tests/owned_api.rs",
     )
     return {name: digest((HERE / name).read_bytes()) for name in names}
@@ -228,6 +232,7 @@ def generated_sources() -> dict[str, bytes]:
         SOCKET_RESOURCES: (HERE / "ci/resources/socket/socket_resources.rs").read_bytes(),
         STORE_OWNER: (HERE / "ci/resources/stores/store_owner.rs").read_bytes(),
         SOCKET_OWNED: (HERE / "ci/resources/socket/socket_owned.rs").read_bytes(),
+        PUBLICATION_OBSERVER: (HERE / "ci/resources/socket/publication_observer.rs").read_bytes(),
         VISITED_STORE: (HERE / "ci/resources/stores/visited_store.rs").read_bytes(),
         SOCKET_RESOURCE_TESTS: (HERE / "ci/resources/tests/socket_resource_tests.rs").read_bytes(),
         STORE_TESTS: (HERE / "ci/resources/tests/store_resource_tests.rs").read_bytes(),
@@ -253,6 +258,11 @@ def generated_sources() -> dict[str, bytes]:
         "src/actor/hostile_resource_tests/newoverload_put_tests.rs": (HERE / "ci/ownership/tests/hostile_resource_tests/newoverload_put_tests.rs").read_bytes(),
         "src/actor/hostile_resource_tests/put_lifecycle_tests.rs": (HERE / "ci/ownership/tests/hostile_resource_tests/put_lifecycle_tests.rs").read_bytes(),
         "src/actor/hostile_resource_tests/public_put_tests.rs": (HERE / "ci/ownership/tests/hostile_resource_tests/public_put_tests.rs").read_bytes(),
+        "src/actor/public_put/deadline.rs": (HERE / "ci/ownership/tests/public_put/deadline.rs").read_bytes(),
+        "src/actor/public_put/retirement.rs": (HERE / "ci/ownership/tests/public_put/retirement.rs").read_bytes(),
+        "src/actor/public_put/held_retirement.rs": (HERE / "ci/ownership/tests/public_put/held_retirement.rs").read_bytes(),
+        "src/actor/public_put/fatal_retirement.rs": (HERE / "ci/ownership/tests/public_put/fatal_retirement.rs").read_bytes(),
+        "src/actor/socket/test_controls.rs": (HERE / "ci/resources/socket/test_controls.rs").read_bytes(),
         OWNED_COMPLETION: (HERE / "ci/ownership/completion.rs").read_bytes(),
         API_TESTS: (TESTS / "owned_api.rs").read_bytes(),
     }

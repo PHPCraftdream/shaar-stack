@@ -142,3 +142,89 @@ async fn actual_put_start_deadline_fails_coalesced_put_and_get_waiters() {
     assert!(actor.socket.operation_rpc_len(maintenance_operation) > 0);
     drop(maintenance_peer);
 }
+
+#[tokio::test(start_paused = true)]
+async fn shared_socket_put_deadline_preserves_get_packet_deadline() {
+    use crate::common::{
+        GetValueRequestArguments, Id, Message, MessageType, MutableItem, PutMutableRequestArguments,
+        PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific,
+    };
+    use ed25519_dalek::SigningKey;
+
+    let (peer, bootstrap) = captured_peer();
+    let mut actor = actor(bootstrap);
+    let operation = actor.socket.allocate_operation().expect("operation");
+    let address = bootstrap;
+    let original_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    actor
+        .socket
+        .register_owned_deadline(operation, original_deadline)
+        .expect("operation deadline");
+    let signing_key = SigningKey::from_bytes(&[3; 32]);
+    let item = MutableItem::new(&signing_key, b"value", 1, None);
+    let target = *item.target();
+    let put_deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+    actor
+        .socket
+        .register_owned_put_deadline(target, put_deadline)
+        .expect("PUT deadline");
+
+    let get_tid = actor
+        .socket
+        .request_owned(
+            address,
+            RequestSpecific {
+                requester_id: Id::random(),
+                request_type: RequestTypeSpecific::GetValue(GetValueRequestArguments {
+                    target,
+                    seq: None,
+                    salt: None,
+                }),
+            },
+            operation,
+        )
+        .expect("enqueue actual GET");
+    let put_tid = actor
+        .socket
+        .request_owned(
+            address,
+            RequestSpecific {
+                requester_id: Id::random(),
+                request_type: RequestTypeSpecific::Put(PutRequest {
+                    token: Box::new([7]),
+                    put_request_type: PutRequestSpecific::PutMutable(
+                        PutMutableRequestArguments::from(item, None),
+                    ),
+                }),
+            },
+            operation,
+        )
+        .expect("enqueue actual PUT");
+
+    tokio::time::advance(Duration::from_millis(100)).await;
+    tokio::time::resume();
+    actor.socket.flush_owned().await;
+    let mut bytes = [0_u8; 4096];
+    let (length, _) = tokio::time::timeout(Duration::from_secs(2), peer.recv_from(&mut bytes))
+        .await
+        .expect("GET receipt timeout")
+        .expect("receive actual GET");
+    let message = Message::from_bytes(&bytes[..length]).expect("decode GET");
+    assert_eq!(message.transaction_id, get_tid);
+    assert!(matches!(
+        message.message_type,
+        MessageType::Request(RequestSpecific {
+            request_type: RequestTypeSpecific::GetValue(GetValueRequestArguments { target: actual, .. }),
+            ..
+        }) if actual == target
+    ));
+    assert!(actor.socket.inflight(&get_tid));
+    assert!(!actor.socket.inflight(&put_tid));
+    assert_eq!(actor.socket.operation_rpc_len(operation), 1);
+    assert_eq!(actor.socket.owned_deadline(operation), Some(original_deadline));
+    assert_eq!(
+        peer.try_recv_from(&mut bytes).unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "expired PUT must not be transmitted"
+    );
+}

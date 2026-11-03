@@ -563,3 +563,6 @@ async fn public_active_put_expires_without_late_send() {
     owner.close().await.expect("close owner");
     drop(UdpSocket::bind(actor_addr).expect("owner released actor socket"));
 }
+
+#[path = "../public_put/deadline.rs"]
+mod deadline_tests;

@@ -4,6 +4,8 @@
 
 #[path = "owned_completion.rs"]
 mod completion;
+#[path = "publication_observer.rs"]
+mod publication_observer;
 #[path = "store_owner.rs"]
 mod store_owner;
 #[cfg(test)]
@@ -12,7 +14,8 @@ mod store_resource_tests;
 #[path = "visited_store.rs"]
 mod visited_store;
 
-pub use completion::{OwnedPutCompletion, OwnedPutError, OwnedPutOperation};
+pub use publication_observer::{CleanupHold, Observer};
+pub use completion::{OwnedPutAdmission, OwnedPutAdmissionError, OwnedPutCleanup, OwnedPutCompletion, OwnedPutError, OwnedPutOperation};
 pub(crate) use completion::ChargedPutReceiver;
 pub use completion::OwnedQueryCompletion;
 pub(crate) use completion::{ChargedResultReceiver, RequestBudget, RequestLease, RequestReply};

@@ -8,6 +8,27 @@ use std::time::{Duration, Instant};
 
 use crate::resource::{OperationId, ResourceError};
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owned_put_deadline_index_is_bounded_and_reusable() {
+        let mut resources = SocketResources::default();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let targets: Vec<_> = (0..8u8).map(|value| crate::Id::from([value; 20])).collect();
+        for target in targets.iter().copied() {
+            resources.register_owned_put_deadline(target, deadline).unwrap();
+        }
+        let ninth = crate::Id::from([8; 20]);
+        assert_eq!(resources.register_owned_put_deadline(ninth, deadline), Err(ResourceError::OperationLimit));
+        assert_eq!(resources.owned_put_deadline(ninth), None);
+        resources.retire_owned_put_deadline(targets[0]);
+        resources.register_owned_put_deadline(ninth, deadline).unwrap();
+        assert_eq!(resources.owned_put_deadline(ninth), Some(deadline));
+    }
+}
+
 #[derive(Debug)]
 struct RpcOwner {
     operation: OperationId,
@@ -21,6 +42,7 @@ pub(crate) struct SocketResources {
     rpc: HashMap<u32, RpcOwner>,
     per_operation: HashMap<OperationId, usize>,
     deadlines: HashMap<OperationId, (tokio::time::Instant, u8)>,
+    put_deadlines: HashMap<crate::Id, tokio::time::Instant>,
     next_operation: u64,
     datagrams: usize,
     bytes: usize,
@@ -41,6 +63,29 @@ impl SocketResources {
         }
         self.deadlines.insert(operation, (deadline, 0));
         Ok(())
+    }
+
+    pub(crate) fn register_owned_put_deadline(
+        &mut self,
+        target: crate::Id,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), ResourceError> {
+        if self.put_deadlines.contains_key(&target) {
+            return Err(ResourceError::OperationLimit);
+        }
+        if self.put_deadlines.len() >= 8 {
+            return Err(ResourceError::OperationLimit);
+        }
+        self.put_deadlines.insert(target, deadline);
+        Ok(())
+    }
+
+    pub(crate) fn owned_put_deadline(&self, target: crate::Id) -> Option<tokio::time::Instant> {
+        self.put_deadlines.get(&target).copied()
+    }
+
+    pub(crate) fn retire_owned_put_deadline(&mut self, target: crate::Id) {
+        self.put_deadlines.remove(&target);
     }
 
     pub(crate) fn owned_deadline(&self, operation: OperationId) -> Option<tokio::time::Instant> {
