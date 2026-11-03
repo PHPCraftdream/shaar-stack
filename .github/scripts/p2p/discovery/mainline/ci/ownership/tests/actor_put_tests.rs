@@ -22,7 +22,7 @@ async fn held_put_keeps_operation_charge_after_shared_get_deadline() {
     let (get_sender, mut get_receiver) = oneshot::channel();
     actor.owned_mutable_until(target, get_sender, deadline).expect("actual owned GET admitted");
     let operation = actor.owned_resources.as_ref().unwrap().operations[&target];
-    let observer = actor.owned_resources.as_ref().unwrap().publication_observer.clone();
+    let observer = actor.owned_publication_observer();
     let hold = observer.hold_cleanup_for_target(target).expect("hold acquired");
     let (reply, mut reply_rx) = oneshot::channel();
     let (cleanup, mut cleanup_rx) = oneshot::channel();
@@ -34,11 +34,11 @@ async fn held_put_keeps_operation_charge_after_shared_get_deadline() {
     cancel.send(()).expect("request cancellation");
     actor.maintain_owned_puts_at(now);
     assert_eq!(cleanup_rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty));
-    assert!(actor.owned_resources.as_ref().unwrap().active_puts.contains_key(&target));
+    assert_eq!(actor.owned_resources.as_ref().unwrap().active_put_len(), 1);
 
     actor.expire_owned_operations_at(deadline);
     assert!(matches!(get_receiver.try_recv(), Ok(Err(ResourceError::DeadlineExceeded))));
-    assert!(actor.owned_resources.as_ref().unwrap().active_puts.contains_key(&target));
+    assert_eq!(actor.owned_resources.as_ref().unwrap().active_put_len(), 1);
     assert_eq!(actor.owned_resources.as_ref().unwrap().operations.get(&target), Some(&operation));
     assert_eq!(actor.socket.owned_put_deadline_for_test(target), Some(put_deadline));
 
@@ -49,7 +49,7 @@ async fn held_put_keeps_operation_charge_after_shared_get_deadline() {
         Ok(Err(crate::resource::OwnedPutError::Resource(ResourceError::DeadlineExceeded)))
     ));
     assert_eq!(cleanup_rx.try_recv(), Ok(()));
-    assert!(!actor.owned_resources.as_ref().unwrap().active_puts.contains_key(&target));
+    assert_eq!(actor.owned_resources.as_ref().unwrap().active_put_len(), 0);
     assert!(!actor.owned_resources.as_ref().unwrap().operations.contains_key(&target));
     assert_eq!(actor.socket.owned_put_deadline_for_test(target), None);
 }
