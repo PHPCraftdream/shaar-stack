@@ -21,7 +21,7 @@ def edits() -> dict[str, list[tuple[str, str]]]:
             ),
             (
                 "    fn tick(&mut self) {\n        self.periodic_node_maintaenance();",
-                "    fn tick(&mut self) {\n        if self.owned_resources.is_some() { self.expire_owned_operations_at(tokio::time::Instant::now()); }\n        if let Some(error) = self.socket.take_owned_failure() { self.owned_fail(error); }\n        if self.owned_resources.is_some() { self.retire_owned_operation_errors(); }\n        if self.owned_error().is_some() { return; }\n        if self.owned_resources.is_some() { self.tick_owned(); return; }\n        self.periodic_node_maintaenance();",
+                "    fn tick(&mut self) {\n        if self.owned_resources.is_some() { self.retire_owned_operation_errors(); }\n        if self.owned_resources.is_some() { self.expire_owned_operations_at(tokio::time::Instant::now()); }\n        if let Some(error) = self.socket.take_owned_failure() { self.owned_fail(error); }\n        if self.owned_error().is_some() { return; }\n        if self.owned_resources.is_some() { self.tick_owned(); return; }\n        self.periodic_node_maintaenance();",
             ),
             (
                 "    ) -> Result<(), PutError> {\n        self.core.check_concurrency_errors(&request)?;\n\n        let mut query = PutQuery::new(request.clone(), extra_nodes);",
