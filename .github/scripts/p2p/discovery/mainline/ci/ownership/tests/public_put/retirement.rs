@@ -20,10 +20,16 @@ async fn failed_public_put_send_retires_target_and_allows_wire_success() {
     let item = crate::common::MutableItem::new(&signer, b"send failure", 1, None);
     let target = *item.target();
     let mut failed = handle.put_mutable(item).await.expect("public admission");
-    assert!(matches!(
-        failed.wait().await,
-        Err(OwnedPutError::Resource(crate::resource::ResourceError::Send))
-    ));
+    let result = tokio::time::timeout(std::time::Duration::from_secs(2), failed.wait())
+        .await
+        .expect("local send failure progresses without an unrelated actor wake");
+    assert!(
+        matches!(
+            &result,
+            Err(OwnedPutError::Resource(crate::resource::ResourceError::Send))
+        ),
+        "expected local Send failure, got {result:?}"
+    );
     failed.cancel_and_wait().await.expect("failure cleanup");
 
     let item = crate::common::MutableItem::new(&signer, b"retry", 2, None);
@@ -275,4 +281,41 @@ async fn send_failure_preserves_unrelated_get_and_maintenance_state() {
     actor.owned_put(PutRequestSpecific::PutMutable(
         crate::common::PutMutableRequestArguments::from(retry, None),
     ), None).expect("same-target legacy re-admission");
+}
+
+#[tokio::test(start_paused = true)]
+async fn recorded_send_error_precedes_put_deadline_expiry() {
+    let (_peer, address) = capture();
+    let mut actor = bounded_actor(address);
+    actor.owned_disable_maintenance_for_test = true;
+    let deadline = Instant::now() + Duration::from_millis(250);
+    let item = crate::common::MutableItem::new(
+        &SigningKey::from_bytes(&[0xCE; 32]),
+        b"recorded send before expiry",
+        1,
+        None,
+    );
+    let target = *item.target();
+    let (reply, mut reply_rx) = oneshot::channel();
+    let (cleanup, mut cleanup_rx) = oneshot::channel();
+    let (_cancel, cancel_rx) = oneshot::channel();
+    let lease = actor.owned_request_budget().acquire().expect("request lease");
+    actor.owned_put_admission_until(target, item, reply, cleanup, cancel_rx, deadline, lease);
+    actor.maintain_owned_puts_at(Instant::now());
+    let charged = reply_rx.try_recv().expect("admission receipt").expect("admitted PUT");
+    actor.socket.fail_next_send_for_test();
+    actor.socket.flush().await;
+    tokio::time::advance(Duration::from_millis(250)).await;
+    actor.tick();
+    let result = charged.await.expect("typed result sender retained");
+    assert!(
+        matches!(
+            &result,
+            Err(OwnedPutError::Resource(ResourceError::Send))
+        ),
+        "recorded Send must win expiry: {result:?}"
+    );
+    assert_eq!(cleanup_rx.try_recv(), Ok(()));
+    assert_eq!(actor.socket.owned_put_deadline_for_test(target), None);
+    assert!(!actor.owned_resources.as_ref().unwrap().operations.contains_key(&target));
 }

@@ -10,8 +10,8 @@ impl Actor {
             self.maintain_owned_puts_at(tokio::time::Instant::now());
             return;
         }
-        self.expire_owned_operations_at(tokio::time::Instant::now());
         self.retire_owned_operation_errors();
+        self.expire_owned_operations_at(tokio::time::Instant::now());
         if let Some(error) = self.owned_failure() {
             self.owned_fail(error);
             self.maintain_owned_puts_at(tokio::time::Instant::now());
@@ -27,8 +27,8 @@ impl Actor {
         for query in self.core.iterative_queries.values_mut() {
             query.visit_closest(&mut self.socket);
         }
-        self.expire_owned_operations_at(tokio::time::Instant::now());
         self.retire_owned_operation_errors();
+        self.expire_owned_operations_at(tokio::time::Instant::now());
         if let Some(error) = self.owned_failure() {
             self.owned_fail(error);
             return;

@@ -5,7 +5,7 @@
 use super::*;
 
 impl Actor {
-    pub(super) fn owned_failure(&self) -> Option<ResourceError> {
+    pub(crate) fn owned_failure(&self) -> Option<ResourceError> {
         let owner = self.owned_resources.as_ref()?;
         owner.terminal.or_else(|| self.socket.owned_failure())
     }
