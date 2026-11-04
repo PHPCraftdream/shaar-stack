@@ -45,3 +45,24 @@ After CI, independently inspect the DATA and freeze the actual tuple for #261.
 Only a test of the real SDK decoder against those frozen external bytes can
 establish interoperability. A same-library verification is merely a generator
 sanity check. No tuple is claimed before CI actually produces it.
+
+## Frozen tuple and SDK regression contract
+
+The parent verified feature CI `41769210931` and upstream CI `41769776477`, both at
+source SHA `464071279795fcfbd331ab95179da4b5e6967dac`, on Linux and Windows.
+All four runs produced the same 206-byte `native-record.bin`, SHA-256
+`df80e08650a170f7da4c11a1ef1ab1e41eaa98dd6ec07f6776c1112dfeef4101`.
+Consumed source, generator, lock, command-log and record commitments were checked
+independently; this is not a registry-equivalence or legal-clearance claim.
+
+The frozen literal in `crates/shaar/src/native_discovery/tests/codec.rs` must be
+copied from those authenticated artifact bytes, never reconstructed with the SDK
+encoder. The existing decoder must accept its expected RFC 8032 public key,
+sequence/timestamp 1700000000000000 and exact address `127.0.0.1:9000`, retain the
+signed bytes, and pass the decoded observation into the real policy owner.
+Controls must reject the wrong expected key, each byte mutation, every truncated
+prefix and an appended suffix. The real policy owner must enforce the inclusive
+300-second age and 30-second future boundaries and cap cache lifetime by the
+remaining signed freshness. No new signer, DNS encoder or product dependency is
+needed. Authored SDK regressions are not an executed interoperability result;
+that claim requires their exact-SHA Linux/Windows CI and reviewed delivery.

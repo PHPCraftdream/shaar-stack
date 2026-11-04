@@ -11,6 +11,121 @@ use iroh_dns::{
 };
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+// Frozen external pkarr output; provenance is in publication/tests/reference/README.md.
+const INDEPENDENT_NATIVE_RECORD: [u8; 206] = [
+    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+    0x85, 0xdb, 0x20, 0xcc, 0x17, 0x28, 0x45, 0xba, 0x00, 0x1d, 0x1d, 0x65, 0xfa, 0x78, 0xba, 0x9c,
+    0xb3, 0xe0, 0x45, 0x65, 0xe6, 0x8b, 0x43, 0x85, 0x6a, 0xd9, 0xe2, 0xb9, 0xc2, 0xd0, 0xce, 0x8a,
+    0xb9, 0xc7, 0x8c, 0x7e, 0xf6, 0x6b, 0xb8, 0x61, 0x07, 0x8e, 0x25, 0xbe, 0xb9, 0x0d, 0x3f, 0x95,
+    0x47, 0xdc, 0x99, 0x05, 0x63, 0xf8, 0xaa, 0xae, 0x75, 0x34, 0x8e, 0xd3, 0x8e, 0x85, 0x8e, 0x0e,
+    0x00, 0x06, 0x0a, 0x24, 0x18, 0x1e, 0x40, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x05, 0x5f, 0x69, 0x72, 0x6f, 0x68, 0x34, 0x34, 0x37, 0x70, 0x6a, 0x6f,
+    0x79, 0x63, 0x6e, 0x73, 0x72, 0x66, 0x6d, 0x78, 0x69, 0x6b, 0x6d, 0x39, 0x35, 0x6a, 0x68, 0x31,
+    0x33, 0x79, 0x38, 0x38, 0x65, 0x38, 0x71, 0x6e, 0x68, 0x7a, 0x75, 0x35, 0x6b, 0x75, 0x6e, 0x67,
+    0x6a, 0x70, 0x78, 0x79, 0x65, 0x70, 0x67, 0x74, 0x37, 0x61, 0x38, 0x6b, 0x72, 0x70, 0x79, 0x00,
+    0x00, 0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1e, 0x00, 0x14, 0x13, 0x61, 0x64, 0x64, 0x72, 0x3d,
+    0x31, 0x32, 0x37, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x31, 0x3a, 0x39, 0x30, 0x30, 0x30,
+];
+
+#[test]
+fn independent_native_record_decodes_and_enters_real_policy_owner() {
+    let bytes = &INDEPENDENT_NATIVE_RECORD;
+    let decoded = decode_record(bytes, id(PUB1)).expect("independent native signed record");
+    let timestamp = 1_700_000_000_000_000;
+    let address: SocketAddr = "127.0.0.1:9000".parse().expect("fixed reference address");
+    assert_eq!(decoded.key, id(PUB1));
+    assert_eq!(decoded.signed_sequence, timestamp);
+    assert_eq!(decoded.signed_at_us, timestamp);
+    assert_eq!(decoded.signed_bytes.as_slice(), bytes.as_slice());
+    assert_eq!(decoded.addresses(), &[address]);
+    assert!(decoded.metadata().is_empty());
+    let mut owner = crate::native_discovery::PolicyOwner::new();
+    owner
+        .admit_expected_key(id(PUB1))
+        .expect("authorized reference key");
+    let at = crate::native_discovery::ClockSample {
+        wall_us: timestamp + 10_000_000,
+        monotonic_us: 50_000_000,
+    };
+    owner
+        .complete_query(
+            id(PUB1),
+            crate::native_discovery::CompletedQuery::new(
+                crate::native_discovery::QuerySource::Network,
+                at,
+                vec![decoded.into()],
+            ),
+        )
+        .expect("real policy owner accepts verified external record");
+    assert_eq!(owner.winner_bytes(id(PUB1)), Some(bytes.as_slice()));
+    assert_eq!(owner.winner_sequence(id(PUB1)), Some(timestamp));
+    assert_eq!(owner.addresses(id(PUB1), at), Ok([address].as_slice()));
+    assert_eq!(owner.cache_deadline(id(PUB1)), Some(80_000_000));
+}
+
+#[test]
+fn independent_native_record_rejects_wrong_key_mutations_and_every_prefix() {
+    let bytes = &INDEPENDENT_NATIVE_RECORD;
+    assert!(matches!(
+        decode_record(bytes, id(PUB2)),
+        Err(DecodeError::WrongKey)
+    ));
+    for index in 0..bytes.len() {
+        let mut changed = *bytes;
+        changed[index] ^= 1;
+        assert!(
+            decode_record(&changed, id(PUB1)).is_err(),
+            "accepted changed byte {index}"
+        );
+    }
+    for length in 0..bytes.len() {
+        assert!(
+            decode_record(&bytes[..length], id(PUB1)).is_err(),
+            "accepted prefix {length}"
+        );
+    }
+    let mut suffix = bytes.to_vec();
+    suffix.push(0);
+    assert!(decode_record(&suffix, id(PUB1)).is_err());
+}
+
+#[test]
+fn independent_native_record_obeys_actual_policy_freshness_boundaries() {
+    use crate::native_discovery::{
+        ClockSample, CompletedQuery, PolicyOwner, QuerySource, RecordError,
+    };
+    let timestamp = 1_700_000_000_000_000;
+    for (offset, expected, deadline) in [
+        (-30_000_000, Ok(()), Some(80_000_000)),
+        (-30_000_001, Err(RecordError::TooFarFuture), None),
+        (299_999_999, Ok(()), Some(50_000_001)),
+        (300_000_000, Ok(()), Some(50_000_000)),
+        (300_000_001, Err(RecordError::TooOld), None),
+    ] {
+        let decoded = decode_record(&INDEPENDENT_NATIVE_RECORD, id(PUB1)).expect("external vector");
+        let mut owner = PolicyOwner::new();
+        owner.admit_expected_key(id(PUB1)).expect("authorized key");
+        let at = ClockSample {
+            wall_us: timestamp + offset,
+            monotonic_us: 50_000_000,
+        };
+        assert_eq!(
+            owner.complete_query(
+                id(PUB1),
+                CompletedQuery::new(QuerySource::Network, at, vec![decoded.into()],)
+            ),
+            expected,
+            "signed age offset {offset}"
+        );
+        assert_eq!(
+            owner.cache_deadline(id(PUB1)),
+            deadline,
+            "signed age offset {offset}"
+        );
+    }
+}
+
 fn signed(addresses: Vec<iroh_base::TransportAddr>) -> Vec<u8> {
     let owner = identity();
     EndpointInfo::from_parts(id(owner.public_key_bytes()), EndpointData::new(addresses))
