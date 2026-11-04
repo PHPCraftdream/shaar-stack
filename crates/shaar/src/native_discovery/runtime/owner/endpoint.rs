@@ -14,9 +14,12 @@ use tokio::task::JoinHandle;
 
 use super::options::NativeDiscoveryOptions;
 use super::{RuntimeError, RuntimeOwner, endpoint_key};
-use crate::network::{Allowlist, Endpoint, Limits, NetworkError};
+use crate::network::{Allowlist, Endpoint, Limits, NetworkError, Session};
 
 const ENDPOINT_CLOSE_BOUND: Duration = Duration::from_secs(5);
+const ATTEMPT_BOUND: Duration = Duration::from_secs(10);
+// Matches the four-address cap of a native record.
+const MAX_ATTEMPTS: usize = 4;
 
 #[derive(Debug)]
 pub(in crate::native_discovery) enum NativeEndpointError {
@@ -24,6 +27,8 @@ pub(in crate::native_discovery) enum NativeEndpointError {
     Runtime(RuntimeError),
     Start(std::io::Error),
     Closed,
+    Deadline,
+    NoAddress,
     CloseTimeout,
     CloseJoin,
 }
@@ -106,6 +111,55 @@ impl NativeDiscoveredEndpoint {
             .withdraw()
             .await
             .map_err(NativeEndpointError::Runtime)
+    }
+
+    /// Resolves `expected` once, then dials its addresses one at a time through the existing
+    /// exact-key `Endpoint::connect`, all under one caller deadline. The result lease is held
+    /// until the attempts finish; a session completed after the deadline is closed, not returned.
+    /// cancel-safe: NO — a cancelled handshake is abandoned, not replayed.
+    pub(in crate::native_discovery) async fn connect_until(
+        &mut self,
+        expected: PublicKey,
+        deadline: tokio::time::Instant,
+    ) -> Result<Session, NativeEndpointError> {
+        if self.closing {
+            return Err(NativeEndpointError::Closed);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(NativeEndpointError::Deadline);
+        }
+        let endpoint = self.endpoint.as_ref().ok_or(NativeEndpointError::Closed)?;
+        let resolved = self
+            .runtime
+            .resolve_until(expected, deadline)
+            .await
+            .map_err(NativeEndpointError::Runtime)?;
+        if resolved.addresses().is_empty() {
+            return Err(NativeEndpointError::NoAddress);
+        }
+        let mut last = NetworkError::Deadline;
+        for address in resolved.addresses().iter().take(MAX_ATTEMPTS) {
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                return Err(NativeEndpointError::Deadline);
+            }
+            let attempt = deadline.min(now + ATTEMPT_BOUND);
+            match tokio::time::timeout_at(attempt, endpoint.connect(expected, *address)).await {
+                Ok(Ok(session)) => {
+                    if tokio::time::Instant::now() >= deadline {
+                        session.close();
+                        return Err(NativeEndpointError::Deadline);
+                    }
+                    return Ok(session);
+                }
+                Ok(Err(error @ (NetworkError::Closed | NetworkError::Capacity))) => {
+                    return Err(NativeEndpointError::Network(error));
+                }
+                Ok(Err(error)) => last = error,
+                Err(_) => last = NetworkError::Deadline,
+            }
+        }
+        Err(NativeEndpointError::Network(last))
     }
 
     /// Both backends are driven to completion without one failure hiding the other;
