@@ -25,6 +25,8 @@ decode through this library, while every other multibase encoding the product us
 (base58btc, base64, base64url, base32, and the generic decode path used by multiaddr) is
 unchanged. The upstream MIT license text of multibase is retained in the prepared tree, and
 the modification is identified by the generated provenance receipt; the patched crate remains
-upstream MIT and is not relicensed by this project. This removal does not itself certify
+upstream MIT and is not relicensed by this project. Upstream's own development `Cargo.lock`
+inside the archive still lists the removed crates; Cargo never reads a dependency's lock
+file, so it is kept byte-identical and is not part of the product graph. This removal does not itself certify
 license compliance of the rest of the dependency graph: the dependency-license gate, notice
 collection, and review of third-party terms remain separate obligations.

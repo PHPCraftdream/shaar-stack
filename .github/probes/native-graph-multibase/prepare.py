@@ -26,6 +26,9 @@ CHANGE_FILES = (
     "src/impls.rs",
     "tests/lib.rs",
 )
+# The archive carries upstream's own development Cargo.lock. Cargo never reads a
+# dependency's lock file, so it stays byte-identical and is exempt from the sweep.
+INERT_FILES = ("Cargo.lock",)
 MAX_ARCHIVE = 2 * 1024 * 1024
 MAX_ENTRIES = 512
 MAX_MEMBER = 1024 * 1024
@@ -239,6 +242,8 @@ def _apply(original: dict[str, bytes]) -> dict[str, bytes]:
     tree = dict(original)
     tree.update(changed)
     for name, data in tree.items():
+        if name in INERT_FILES:
+            continue
         if b"base256emoji" in data.lower():
             raise ValueError("multibase prepared tree still references base256emoji in " + name)
         if ROCKET in data:

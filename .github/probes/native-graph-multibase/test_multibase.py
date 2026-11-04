@@ -102,6 +102,9 @@ def original_files() -> dict[str, bytes]:
         "tests/lib.rs": tests_rs,
         "README.md": b"# multibase\n",
         "LICENSE": b"MIT License\n",
+        # Faithful to the real archive: upstream's own dev lock names the chain.
+        "Cargo.lock": b'[[package]]\nname = "base256emoji"\nversion = "1.0.2"\n'
+                      b'dependencies = [\n "const-str",\n "match-lookup",\n]\n',
     }
 
 
@@ -148,6 +151,16 @@ class RecipeTransformTests(unittest.TestCase):
             with self.subTest(mutation=index):
                 with self.assertRaises(ValueError):
                     recipe.transform(mutate(original_files()))
+
+    def test_inert_upstream_lock_is_retained_byte_identical(self):
+        # Regression for the first CI run: the real archive carries a dev Cargo.lock that
+        # still names base256emoji; Cargo ignores it, so it must neither fail the sweep nor change.
+        files = original_files()
+        self.assertIn(b"base256emoji", files["Cargo.lock"])
+        changed = recipe.transform(files)
+        self.assertNotIn("Cargo.lock", changed)
+        self.assertEqual(recipe.reverse(files, changed), files)
+        self.assertEqual(recipe.INERT_FILES, ("Cargo.lock",))
 
     def test_transform_rejects_leftover_references(self):
         mutated = {**original_files(), "README.md": b"see base256emoji docs\n"}
