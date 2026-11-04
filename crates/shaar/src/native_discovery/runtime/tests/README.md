@@ -2,7 +2,7 @@
 
 # Native publisher runtime tests
 
-This report describes source and authored coverage for the private `native_discovery` runtime. The loopback fixture sends real Mainline PUTs and observes actual receipts/cleanup; it uses no public network, observed/bound-address harvesting, synchronization sleeps, or synthetic success receipts. The changes do not add a public SDK API. The original source pass ran no build or tests. Later actual SDK CI `41812873830` at `d75d6a8` compiled and executed the selected suite on both OS: 77 passed, one deadline/recovery case failed. That failed run is not publisher or P09 acceptance; the corrected setup below still needs fresh CI.
+This report describes source and authored coverage for the private `native_discovery` runtime. The loopback fixture sends real Mainline PUTs and observes actual receipts/cleanup; it uses no public network, observed/bound-address harvesting, synchronization sleeps, or synthetic success receipts. The changes do not add a public SDK API. The original source pass ran no build or tests. Later actual SDK CI `41812873830` at `d75d6a8` compiled and executed the selected suite on both OS: 77 passed, one deadline/recovery case failed. That failed run is not publisher or P09 acceptance. Corrected runtime `dc96f5a` passed all 78 selected cases on both OS in CI `41824086364`, with independently checked inventories and execution logs. The additional source-preservation change described below still needs fresh exact-SHA CI.
 
 ## Runtime contract and authored coverage
 
@@ -46,6 +46,17 @@ no public API or blanket lint suppression is added. Source parsing/formatting
 is not compilation. A previous graph proof cannot certify the changed SDK source;
 combined source-bound integration remains task #253.
 
+## Retained original contracts
+
+`contracts/` preserves the seven original unwired #246 proposal files from primary
+commit `e4e0046` byte-for-byte. They predate this compiled publisher and include
+resolution and other original scenario obligations. Their old filenames collided
+with the new executable fixtures during primary transfer; they are retained in a
+distinct namespace rather than silently overwritten or discarded. No test-support
+adapter, stub, module wiring or new public API is introduced. They remain unwired,
+not executed, and must be reconciled under existing integration task #253. Passing
+the 78-case runtime suite does not establish those proposal scenarios as covered.
+
 ## Remaining gaps / verification
 
 The deadline case previously withheld an ACK but did not keep completion pending
@@ -57,8 +68,9 @@ for actual held cleanup, releases it, then observes the cleanup barrier and real
 recovery publication. Recovery resumes normal Tokio time before UDP exchange;
 there are no synchronization sleeps, synthetic success receipts or relaxed errors.
 
-This setup repair has not run. The existing Mainline retry/deadline and resource
-checks remain separate obligations, without a frozen inventory. Independent
+The setup repair passed at `dc96f5a`; the retained contract namespace is not new
+execution coverage. Existing Mainline retry/deadline and resource checks remain
+separate obligations, without a frozen inventory. Independent
 record evidence and SDK regressions are already accepted under #263/#261; they do
 not prove this publisher's lifecycle. Full source-bound integration and production
 caller wiring remain #253. `Clean` means cleanup confirmed; `Unknown` is terminal.
