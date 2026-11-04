@@ -1,6 +1,8 @@
 """Workflow routing contracts for the repository's fixed layout, not a generic YAML parser."""
 
 import hashlib
+import importlib.util
+import tomllib
 from pathlib import Path
 import re
 import subprocess
@@ -112,6 +114,42 @@ def validate_preparation_logs(action):
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_sdk_publisher_dev_codec_resolution_changes_only_one_existing_edge(self):
+        sdk = tomllib.loads((ROOT / "crates/shaar/Cargo.toml").read_text(encoding="utf-8"))
+        self.assertNotIn("serde_bencode", sdk["dependencies"])
+        self.assertEqual(sdk["dev-dependencies"]["serde_bencode"], "=0.2.4")
+        self.assertIn("test-util", sdk["dev-dependencies"]["tokio"]["features"])
+        self.assertNotIn("test-util", sdk["dependencies"]["tokio"]["features"])
+        spec = importlib.util.spec_from_file_location("publisher_lock_graph", ROOT / ".github/probes/native-graph/graph.py")
+        graph = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(graph)
+        text = (ROOT / "Cargo.lock").read_text(encoding="utf-8")
+        marker = '[[package]]\nname = "shaar"\n'
+        prefix, rest = text.split(marker, 1)
+        body, suffix = rest.split("\n[[package]]", 1)
+        before_body = body.replace(' "serde_bencode",\n', '')
+        after_body = before_body.replace('dependencies = [\n', 'dependencies = [\n "serde_bencode",\n', 1)
+        def lock_bytes(value):
+            return (prefix + marker + value + "\n[[package]]" + suffix).encode()
+        before, after = lock_bytes(before_body), lock_bytes(after_body)
+        result = graph.audit_lock_delta(before, after)
+        self.assertEqual(result, {"added": [], "removed": [], "source_changed": []})
+        for changed in (
+            after_body.replace(' "n0-mainline",\n', ''),
+            after_body.replace(' "serde_bencode",\n', ' "serde_bencode",\n "serde_bencode",\n'),
+            after_body.replace(' "serde_bencode",\n', ' "serde_bencode",\n "unapproved",\n'),
+            after_body.replace('dependencies = [\n', 'extra = "forged"\ndependencies = [\n', 1),
+        ):
+            with self.subTest(body=changed), self.assertRaises(ValueError):
+                graph.audit_lock_delta(before, lock_bytes(changed))
+        altered_dns = after.replace(b'name = "iroh-dns"\n', b'name = "iroh-dns"\nextra = "forged"\n', 1)
+        altered_version = after.replace(b'name = "serde_bencode"\nversion = "0.2.4"',
+                                        b'name = "serde_bencode"\nversion = "0.2.5"', 1)
+        for changed in (altered_dns, altered_version):
+            self.assertNotEqual(changed, after)
+            with self.assertRaises(ValueError):
+                graph.audit_lock_delta(before, changed)
+
     def test_workflow_extraction_preserves_exact_commands_and_structural_contract(self):
         text = WORKFLOW.read_text(encoding="utf-8")
         self.assertLessEqual(len(text.splitlines()), 700)

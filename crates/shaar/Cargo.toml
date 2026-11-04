@@ -29,6 +29,7 @@ libp2p-identity = { version = "=0.3.0", default-features = false, features = ["e
 shaar-platform = { path = "../shaar-platform" }
 
 [dev-dependencies]
+serde_bencode = "=0.2.4"
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.20", default-features = false, features = ["fmt", "registry"] }
 futures = "=0.3.34"
@@ -37,4 +38,4 @@ n0-future = "=0.3.2"
 netwatch = "=0.19.3"
 tokio-util = { version = "=0.7.20", features = ["rt"] }
 # Multi-thread execution and deterministic test coordination only.
-tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "process"] }
+tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "process", "test-util"] }
