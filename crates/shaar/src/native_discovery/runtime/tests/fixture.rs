@@ -108,9 +108,9 @@ impl LoopbackPeer {
             Value::Bytes(b"PUT rejected".to_vec()),
         ]);
         let packet = encode(&dict([
-            (b"e", error),
-            (b"t", Value::Bytes(transaction.to_vec())),
-            (b"y", Value::Bytes(b"e".to_vec())),
+            (b"e".as_slice(), error),
+            (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
+            (b"y".as_slice(), Value::Bytes(b"e".to_vec())),
         ]));
         self.socket
             .send_to(&packet, source)
@@ -219,8 +219,8 @@ fn response(transaction: &[u8], kind: ReplyKind) -> Vec<u8> {
         ReplyKind::Ping | ReplyKind::PutAcknowledgement => {}
     }
     encode(&dict([
-        (b"r", dict(response)),
-        (b"t", Value::Bytes(transaction.to_vec())),
-        (b"y", Value::Bytes(b"r".to_vec())),
+        (b"r".as_slice(), dict(response)),
+        (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
+        (b"y".as_slice(), Value::Bytes(b"r".to_vec())),
     ]))
 }

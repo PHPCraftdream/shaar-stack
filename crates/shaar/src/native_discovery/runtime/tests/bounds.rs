@@ -141,7 +141,7 @@ async fn queued_replace_keeps_original_deadline_through_held_cleanup() {
     .expect("owned loopback DHT");
     let mut old = Box::pin(owner.replace(vec![address(9401)]));
     let held = peer.capture_put();
-    let (source, transaction, initial) = tokio::select! {
+    let (source, transaction, _) = tokio::select! {
         held = held => held,
         result = &mut old => panic!("initial PUT ended before held reply: {result:?}"),
     };
