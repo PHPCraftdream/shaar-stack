@@ -655,5 +655,24 @@ class CargoAliasTests(unittest.TestCase):
             with self.subTest(row=row), self.assertRaises(ValueError):
                 target_crate_types(row)
 
+    def test_capture_collector_requires_real_capture_directories(self):
+        import features
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            target, capture = root / "target", root / "capture"
+            target.mkdir()
+            capture.mkdir()
+            context = {
+                "role": "candidate", "revision": "fixture-revision",
+                "nonce": "fixture-nonce", "recipe_sha256": "a" * 64,
+                "compiler": str(root / "rustc"),
+                "env": {"RUSTC_WRAPPER": str(root / "wrapper"),
+                        "RUSTC_WORKSPACE_WRAPPER": "",
+                        "CARGO_TARGET_DIR": str(target)},
+            }
+            with self.assertRaises(ValueError):
+                features.collect_capture(capture, target, context)
+
+
 if __name__ == "__main__":
     unittest.main()

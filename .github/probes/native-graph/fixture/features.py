@@ -8,6 +8,14 @@ import re
 _ROLES = ("baseline", "approved_route", "candidate")
 _KINDS = ("metadata", "tree", "build")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_SDK_TEST_SOURCE_TRANSITIONS = {
+    ("183956ce9ae1b99245953ce3e65b76e44ea64bba5de113fc193af462ea8d4712",
+     "59987da7663e14b9d1c8441c051a8cdcbebd497327a021b1ea7f84fdf8fe1e41"):
+        "cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88",
+    ("e2fe4d5ff2a65b45848bcc128af2ef474ad9c836374763353d532a9d15f042a5",
+     "c0fbceaea9b9df00f45dffd55bd2057c9e549a14c1e6e5c956ef1b1c88aefde6"):
+        "2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a",
+}
 _ADDED = {("iroh-mainline-address-lookup", "0.6.1"), ("iroh-dns", "1.3.0"), ("n0-mainline", "0.7.0"), ("serde_bencode", "0.2.4"), ("n0-future", "0.3.2")}
 _REVIEWED_REGISTRY = {
     ("crc", "3.4.0"): "5eb8a2a1cd12ab0d987a5d5e825195d372001a4094a0376319d5a0ad71c1ba0d",
@@ -127,10 +135,8 @@ def _stable_source(pkg, bindings, pid, proof):
     tree = b["tree_sha256"]
     # Upstream 70b55f4 changes only the cfg(test) codec fixture; retain raw bindings in the proof digest.
     if (proof["role"] == "candidate" and b["identity"] == "workspace"
-            and (b["package"], b["version"]) == ("shaar", "0.1.0")
-            and b["archive_sha256"] == "183956ce9ae1b99245953ce3e65b76e44ea64bba5de113fc193af462ea8d4712"
-            and tree == "59987da7663e14b9d1c8441c051a8cdcbebd497327a021b1ea7f84fdf8fe1e41"):
-        tree = "cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88"
+            and (b["package"], b["version"]) == ("shaar", "0.1.0")):
+        tree = _SDK_TEST_SOURCE_TRANSITIONS.get((b["archive_sha256"], tree), tree)
     return "path:" + b["identity"] + ":" + b["package"] + "@" + b["version"] + ":archive=" + b["archive_sha256"] + ":tree=" + tree + (":recipe=" + b["recipe_sha256"] if b["identity"] == "prepared" else "")
 
 

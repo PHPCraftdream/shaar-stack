@@ -26,25 +26,40 @@ class AliasIntegrationTests(unittest.TestCase):
 
     def test_reviewed_sdk_test_only_tree_transition_retains_raw_provenance(self):
         from test_features import _compare
-        old = "cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88"
-        new = "59987da7663e14b9d1c8441c051a8cdcbebd497327a021b1ea7f84fdf8fe1e41"
-        archive = "183956ce9ae1b99245953ce3e65b76e44ea64bba5de113fc193af462ea8d4712"
-        proofs = _proofs()
-        for proof in proofs:
-            binding = next(b for b in proof["source_bindings"].values() if b["package"] == "shaar")
-            binding.update(tree_sha256=old, archive_sha256=archive)
-        original = _compare(proofs)
-        candidate = next(b for b in proofs[2]["source_bindings"].values() if b["package"] == "shaar")
-        candidate["tree_sha256"] = new
-        changed = _compare(proofs)
-        self.assertNotEqual(original["proof_sha256"]["candidate"], changed["proof_sha256"]["candidate"])
-        self.assertEqual(candidate["tree_sha256"], new)
-        for role, field in ((2, "tree_sha256"), (2, "archive_sha256"), (0, "tree_sha256"), (1, "tree_sha256")):
-            forged = copy.deepcopy(proofs)
-            binding = next(b for b in forged[role]["source_bindings"].values() if b["package"] == "shaar")
-            binding[field] = new if role != 2 else "d" * 64
-            with self.subTest(role=role, field=field), self.assertRaises(features.AuditError):
-                _compare(forged)
+        cases = (
+            ("183956ce9ae1b99245953ce3e65b76e44ea64bba5de113fc193af462ea8d4712",
+             "cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88",
+             "59987da7663e14b9d1c8441c051a8cdcbebd497327a021b1ea7f84fdf8fe1e41"),
+            ("e2fe4d5ff2a65b45848bcc128af2ef474ad9c836374763353d532a9d15f042a5",
+             "2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a",
+             "c0fbceaea9b9df00f45dffd55bd2057c9e549a14c1e6e5c956ef1b1c88aefde6"),
+        )
+        for index, (archive, old, new) in enumerate(cases):
+            proofs = _proofs()
+            for proof in proofs:
+                binding = next(b for b in proof["source_bindings"].values() if b["package"] == "shaar")
+                binding.update(tree_sha256=old, archive_sha256=archive)
+            original = _compare(proofs)
+            candidate = next(b for b in proofs[2]["source_bindings"].values() if b["package"] == "shaar")
+            candidate["tree_sha256"] = new
+            changed = _compare(proofs)
+            self.assertNotEqual(original["proof_sha256"]["candidate"], changed["proof_sha256"]["candidate"])
+            self.assertEqual(candidate["tree_sha256"], new)
+            for role, field, value in (
+                (2, "tree_sha256", "d" * 64), (2, "archive_sha256", cases[1 - index][0]),
+                (0, "tree_sha256", new), (1, "tree_sha256", new),
+            ):
+                forged = copy.deepcopy(proofs)
+                binding = next(b for b in forged[role]["source_bindings"].values() if b["package"] == "shaar")
+                binding[field] = value
+                with self.subTest(index=index, role=role, field=field), self.assertRaises(features.AuditError):
+                    _compare(forged)
+            unknown_archive = copy.deepcopy(proofs)
+            for proof in unknown_archive:
+                binding = next(b for b in proof["source_bindings"].values() if b["package"] == "shaar")
+                binding["archive_sha256"] = "d" * 64
+            with self.subTest(index=index, unknown_archive=True), self.assertRaises(features.AuditError):
+                _compare(unknown_archive)
 
     @staticmethod
     def _intrinsic_proofs(spelling=("--extern", "proc_macro")):
@@ -671,22 +686,6 @@ class AliasIntegrationTests(unittest.TestCase):
         metadata = json.loads(proof["artifacts"][record["stdout"]])
         return metadata["packages"], {node["id"]: node for node in metadata["resolve"]["nodes"]}
 
-    def test_capture_collector_requires_real_capture_directories(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp).resolve()
-            target, capture = root / "target", root / "capture"
-            target.mkdir()
-            capture.mkdir()
-            context = {
-                "role": "candidate", "revision": "fixture-revision",
-                "nonce": "fixture-nonce", "recipe_sha256": "a" * 64,
-                "compiler": str(root / "rustc"),
-                "env": {"RUSTC_WRAPPER": str(root / "wrapper"),
-                        "RUSTC_WORKSPACE_WRAPPER": "",
-                        "CARGO_TARGET_DIR": str(target)},
-            }
-            with self.assertRaises(ValueError):
-                features.collect_capture(capture, target, context)
 
 
 if __name__ == "__main__":

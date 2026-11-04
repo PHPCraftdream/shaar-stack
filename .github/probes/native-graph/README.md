@@ -102,6 +102,17 @@ retain the original strict comparison; prepared dependency identities are unchan
 Regressions cover this exact transition, raw-provenance digest changes and rejection
 of forged bindings. Their execution and combined-SHA acceptance remain pending CI.
 
+Windows DATA from CI `41775391999` proves the same accepted transition in exact
+CRLF bytes: archive `e2fe4d5ff2a65b45848bcc128af2ef474ad9c836374763353d532a9d15f042a5`,
+new tree `c0fbceaea9b9df00f45dffd55bd2057c9e549a14c1e6e5c956ef1b1c88aefde6`,
+historical tree `2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a`.
+The parent verified the actual archive hash, all 45 SDK source members against
+fixed Git BASE with exact LF-to-CRLF conversion, and both old/new tree digests.
+The second tuple is accepted as a whole, not as interchangeable archive/tree
+components. No runtime newline stripping or generic source normalization occurs;
+raw bindings still distinguish platform bytes. Regressions cover both tuples,
+cross-pair rejection, unlisted archives and wrong-role changes on every OS.
+
 ## License
 
 This documentation is available under either the MIT License or the Apache License, Version 2.0, at your option.
