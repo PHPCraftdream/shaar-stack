@@ -4021,6 +4021,7 @@ dependencies = [
  "n0-mainline",
  "netwatch",
  "serde",
+ "serde_bencode",
  "shaar-p2p",
  "shaar-platform",
  "shaar-ygg",
