@@ -327,8 +327,10 @@ class GraphTests(unittest.TestCase):
                  mock.patch.object(base, "prepare_sources"), \
                  mock.patch.object(base, "collect_output_aliases", return_value=[]), \
                  mock.patch.object(base, "apply_route", return_value={"before": "d" * 64, "after": "e" * 64}), \
+                 mock.patch.object(base, "projection_lock", return_value=lock_bytes()) as seeds, \
                  mock.patch.object(features, "compare_proofs", return_value=expected):
                 result = evidence.run(repo, {}, prepared, graph, runner)
+                self.assertEqual([call.args[0] for call in seeds.call_args_list], expected["roles"])
 
             report_path = Path(result["evidence"])
             self.assertTrue(report_path.is_file())
