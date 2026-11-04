@@ -56,8 +56,10 @@ pub(super) enum Command {
     Barrier(oneshot::Sender<super::publisher::CleanupReceipt>),
 }
 
+mod endpoint;
 #[path = "../publisher/owner_loop.rs"]
 mod loop_state;
+mod options;
 mod resolver;
 
 pub(in crate::native_discovery) struct RuntimeOwner {
@@ -379,6 +381,9 @@ mod resolver_regressions;
 #[cfg(test)]
 #[path = "../tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "wiring_tests/mod.rs"]
+mod wiring_tests;
 
 pub(super) fn to_mutable(packet: &SignedSnapshot) -> Result<MutableItem, RuntimeError> {
     let bytes = &packet.bytes;

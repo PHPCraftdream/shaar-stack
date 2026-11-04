@@ -152,7 +152,9 @@ impl LoopbackPeer {
         captured.into_iter().next().expect("one captured PUT")
     }
 
-    pub(super) async fn capture_put(&mut self) -> (SocketAddr, Vec<u8>, CapturedPut) {
+    pub(in crate::native_discovery::runtime::owner) async fn capture_put(
+        &mut self,
+    ) -> (SocketAddr, Vec<u8>, CapturedPut) {
         let captured = self.serve_puts(1).await;
         let (source, transaction) = self
             .pending_puts
@@ -166,7 +168,11 @@ impl LoopbackPeer {
         )
     }
 
-    pub(super) async fn acknowledge(&mut self, source: SocketAddr, transaction: &[u8]) {
+    pub(in crate::native_discovery::runtime::owner) async fn acknowledge(
+        &mut self,
+        source: SocketAddr,
+        transaction: &[u8],
+    ) {
         self.pending_puts
             .retain(|(pending_source, pending_transaction)| {
                 *pending_source != source || pending_transaction.as_slice() != transaction
@@ -277,8 +283,8 @@ impl LoopbackPeer {
     }
 }
 
-pub(super) struct CapturedPut {
-    pub(super) key: Vec<u8>,
+pub(in crate::native_discovery::runtime::owner) struct CapturedPut {
+    pub(in crate::native_discovery::runtime::owner) key: Vec<u8>,
     pub(super) signature: Vec<u8>,
     pub(super) value: Vec<u8>,
     pub(super) sequence: i64,
