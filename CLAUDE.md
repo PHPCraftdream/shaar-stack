@@ -9,6 +9,28 @@ English is the language of repository content. All maintained repository
 content — comments, docstrings, diagnostics, and new commit/PR text — must be
 written in English. The directory `docs/checkpoints/` may remain in Russian.
 
+## North star (read first; reloaded after every context compaction)
+
+- Goal: one Ed25519 key reaches a service anywhere. The client knows only the
+  server key, finds the server through the Mainline DHT, connects, and falls back
+  to Yggdrasil when direct QUIC is blocked. No TUN, root, router changes or n0
+  infrastructure.
+- Four networks, each covering another's weakness: iroh/QUIC (fast direct data
+  path, priority), Mainline DHT (signed address records by key), libp2p
+  (negotiation only, never application data), Yggdrasil (key-derived address,
+  blockade resilience).
+- The synergy lives in path policy (P10). Before P10 starts, record measurable
+  efficiency criteria with the user: time to first byte, failover time under
+  controlled blocking, share of direct paths.
+- Every leaf names the end-to-end scenario step it advances; without one it is
+  out of scope. Every ~10 tasks compare the TaskList with this goal.
+- Scope changes only by the user, recorded with date and quote in the decision
+  log of `docs/plans/north-star.md`. Torrent-style file sharing is future work.
+- Checkpoints are always committed. Standing process principles: see the north-star
+  file below.
+
+@docs/plans/north-star.md
+
 ## 1. No unsafe outside the FFI boundary
 
 - Our own Rust code contains no `unsafe` except the minimal code required at
@@ -136,6 +158,43 @@ written in English. The directory `docs/checkpoints/` may remain in Russian.
 - Do not bump project or dependency versions without an explicit user request.
 - Do not commit, push, or run subagents without an explicit user request.
 - Comments in code are concise and written in English.
+
+## V1 execution focus
+
+- Follow `docs/plans/v1-focus.md` and the bounded-delivery rule in development
+  plan section 6.4. Standing reminders are operator checks, not product leaves
+  or evidence of live execution.
+- Finish existing P09 acceptance before opening new product work, proof mechanisms,
+  or CI segments; only a specific uncovered failing case justifies an exception.
+  After P09 acceptance, complete permission-gated P07 (#224/#33/#34), then start
+  existing P10 #214. Do not open P07 in parallel with unfinished P09.
+- Decision history: on 2026-11-04 the user restored P07/Yggdrasil to v1,
+  superseding the 2026-10-31 deferral. P10, P13 and P16 require accepted P07.
+  Preserve one Ed25519 identity, native QUIC priority and strict signaling-only
+  libp2p. Yggdrasil is an explicit negotiation/standby path; libp2p relay never
+  carries application data.
+- P07 uses an isolated safe Rust adapter over the reviewed pinned external core:
+  no unsafe, Go, FFI, TUN, root or route changes. Integration and public-peer
+  execution need their separate permissions; returning P07 to scope opens neither.
+  Record acceptance/non-goals before P07. The user separately approved pinned
+  integration after P09 and made controlled blockade resilience mandatory on
+  2026-11-04; public smoke is conditional on agreed exact peers and enforceable
+  budgets in `docs/plans/v1-focus.md`. Torrent-style file exchange remains future work.
+- Before working on a leaf, record one observable acceptance criterion and its
+  non-goals. Stop scope growth when that boundary is exceeded.
+- After three consecutive CI failures of one leaf, stop incremental repair/push
+  cycles. Review all available causes together, make one bounded reviewed repair
+  commit, and report it before resuming CI.
+- At session entry, verify HEAD, the latest checkpoint, actual executors and the
+  single repository owner. Do not launch work while another owner is active.
+- Repeat the local build/test/project-Python prohibition in every worker prompt;
+  inspect execution evidence after completion, not just the worker's claims.
+- Give every primary dirty file an explicit custodian and disposition. Remove
+  worktrees only after verified transfer; preserve untransferred changes.
+- Collect human permission/legal/reference decisions early. Never synthesize
+  license text or infer public-network/release permission from general approval.
+- Start each checkpoint with the distance to v1: accepted stages, active stages,
+  unstarted stages, next step and blockers. Use 5–8 short summary bullets.
 
 ## CI selection and sprint acceptance
 

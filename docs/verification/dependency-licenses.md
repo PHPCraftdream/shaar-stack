@@ -18,4 +18,22 @@ The paragraphs above describe the change as authored. With explicit owner permis
 
 With the original `MIT`/`Apache-2.0` allowlist, `check` failed: 35 locked-graph packages declare other licenses (Unicode-3.0, BSD-3-Clause, BSD-2-Clause, ISC, Zlib, Unlicense, CDLA-Permissive-2.0, and the compound expressions `Apache-2.0 AND ISC` and `(MIT OR Apache-2.0) AND Unicode-3.0`). This also showed AND expressions being evaluated per term. The owner requested that only licenses compatible with distributing this project under `MIT OR Apache-2.0` be allowed. The allowlist now adds exactly those seven permissive licenses; with it, `check` reports `licenses ok` with no warnings. Copyleft and unknown licenses remain denied. Keeping the dependencies' license texts and copyright notices in distributions remains a separate obligation, as described above.
 
+## Delivered graph guard (2026-10-29)
+
+The historical inventory-only CI draft is superseded by the executable gate and
+selected-source guard delivered in `86080b9`, retained in `3a7eb65`. Full CI
+`40814009922` and `40822279246` passed on Linux and Windows. The list probe checks
+current graph-option compatibility and requires the eight reviewed prepared path
+sources. This is not equality with every Cargo metadata graph or coverage of every
+target. The original draft's locked preparation, explicit identities, preserved
+reports and fail-closed requirements are owned by this implementation, not a second
+parallel license workflow. Notice assembly and distribution obligations remain
+separate and unaccepted; the candidate collector has unresolved missing evidence.
+
+## CI graph evidence (2026-10-28)
+
+Full CI run `40738356646` passed the license action on Linux and Windows for commit `d46c508`. Both uploaded license reports contain `licenses ok`, the prepared-source receipts, and unfiltered Cargo metadata with 501 package identities, including eight prepared path-package manifests. The separately uploaded host-filtered resolver-baseline metadata contains 388 identities on Linux and 386 on Windows. Each metadata set includes `attohttpc 0.30.1`, which declares `MPL-2.0`, via `igd-next` and optional `libp2p-upnp`; its appearance in metadata alone does not establish that it is activated in a shipped artifact or checked by cargo-deny.
+
+A separate diagnostic CI run `40766791321` on commit `dc24dc5` ran `cargo tree --locked --workspace --all-features --invert attohttpc@0.30.1` on both hosts. Each returned `warning: nothing to print`, without an inverse path in that selected Cargo tree. This observation does not establish that cargo-deny uses exactly the same graph, that other targets exclude the package, or that distribution obligations are satisfied. A release must identify the actual dependency graph and review included license texts and notices; unknown and unapproved licenses must not be silently allowed.
+
 The provenance receipts help identify selected upstream archive and patch inputs, but they are not a complete source-history record and do not prove cargo-deny checked those prepared source trees: their relationship to the configured graph is not established here. In particular, checks of modified/copied sources, retained third-party notices and license texts, and distribution obligations remain separate work. `--locked` prevents lockfile updates, but alone does not prove complete or reproducible dependency resolution; registry access may still be needed. No legal-compliance conclusion follows from the gate or its artifact.

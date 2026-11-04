@@ -1,17 +1,26 @@
 # P08 real-carrier frame acceptance
 
-Status: scoped acceptance plan, not execution evidence. Tasks 201–204 implement
-this remaining part of task 63. Public infrastructure, Yggdrasil, host routes,
-TUN/root operations and a full-workspace campaign are not authorized by this plan.
+Status: #203 finite bootstrap accepted; this record includes historical plan and
+execution evidence. Tasks 201–204 cover this part of task 63. Public infrastructure,
+Yggdrasil, host routes, TUN/root operations and a full-workspace campaign are not
+authorized by this plan.
 
-Task #202 is complete as **source contracts only** at `ff7c5997b56b40423571abb04c5e88eca6a710c5`:
-feature CI `41056322410` and post-integration CI `41057285706` passed on Linux and
-Windows. The companion bridge run `41057285755` is not that CI. The eight Python
-contracts and four Rust observer cases per OS establish source/graph and observer
-contracts only; the actual wire proof has never been compiled or executed. Preserve
-that distinction: the bootstrap defined below is a proposed, unaccepted #203 slice.
+Task #202 is complete as **source contracts only** at
+`ff7c5997b56b40423571abb04c5e88eca6a710c5`: feature CI `41056322410` and
+post-integration CI `41057285706` passed on Linux and Windows. Companion bridge
+run `41057285755` is not that CI. The eight Python contracts and four Rust observer
+cases per OS establish source/graph and observer contracts only; they are not wire
+evidence. #203 is separately accepted as the finite wire proof below.
 
-## #203 finite bootstrap boundary
+#203 was accepted at `56303d351233486337bcef393663c00a3a17586b`. Feature CI
+41252896400
+and upstream postdelivery CI
+[41253787814](https://github.com/PHPCraftdream/shaar-stack/actions/runs/41253787814)
+passed on Linux and Windows. Exact-byte primary integration `0d0c3d8` was not itself
+CI-tested; local checkpoint commits were not pushed. This closes only the finite
+bootstrap slice, not full P08.
+
+## #203 finite bootstrap boundary — accepted
 
 #203 is limited to a finite Linux/Windows bootstrap proof over an actually owned
 Rust relay, TCP/Noise/Yamux carrier, and the actual Iroh/Noq bridge. Reuse the
@@ -36,13 +45,27 @@ execution. Before execution, obtain fresh human approval of the exact targets an
 time/traffic/socket limits. No automatic run is authorized. A green bootstrap is not
 full P08, public-readiness, NAT-readiness, or full-sprint acceptance.
 
+The accepted run selected and executed 52 product cases per OS, including six
+private owner cases and actual fault tests (burst eight per direction, held
+inbound, Core plain-Send pinning, ledger, and Connect priority); none were ignored.
+Dynamic wire inventory included six cases per variant, including the actual
+scenario/oracle/supplement controls; the positive inventory count is not frozen.
+Strict mode observed zero STREAM/DATAGRAM qlog metadata; fixture allow-all observed
+four STREAM and two DATAGRAM frames across both senders. Qlog construction alone
+does not establish physical egress: actual correlation assertions do. The proof
+also checked exact ciphertext/authenticated receive correlation, bidirectional FIN,
+zero unobserved payload, exact bidirectional application bytes, continuing strict
+control, stable Noq connection IDs, joined endpoint/pump/carrier/relay close,
+retained-factory/handle rejection, and UDP/TCP socket rebind.
+
 ## Accepted implementation and the remaining gap
 
-| Component | Accepted revision | Evidence and boundary |
-|---|---|---|
-| Bounded query/source ownership | `1823bc1d5002446af4b075eddb9fbe51f3909007` | Feature CI 41023910350 and integration CI 41024712641, Linux/Windows; 260/262 selected project cases, including owned seed-to-referral traffic. |
-| Discovery-to-reservation handoff | `e29134fc4ce0515029fcb0fe227811e7fb9c8614` | Feature CI 41031834416 and integration CI 41033123351, 87 selected project cases per OS, including seven new gate/handoff cases. |
-| Configured SDK caller | `07a9a9c941661db9ca18c18ea7b546b5656fc961` | Feature CI 41037773356 and integration CI 41039119278, 49 selected SDK cases per OS, including five new startup/identity/owned-DNS-shutdown cases. |
+| Component | Related tasks | Accepted revision | Evidence and boundary |
+|---|---|---|---|
+| Bounded query/source ownership | #139/#190 | `1823bc1d5002446af4b075eddb9fbe51f3909007` | Feature CI 41023910350 and integration CI 41024712641, Linux/Windows; 260/262 selected project cases, including owned seed-to-referral traffic. |
+| Discovery-to-reservation handoff | #140/#196–198 | `e29134fc4ce0515029fcb0fe227811e7fb9c8614` | Feature CI 41031834416 and integration CI 41033123351, 87 selected project cases per OS, including seven new gate/handoff cases. |
+| Configured SDK caller | #141/#199–200 | `07a9a9c941661db9ca18c18ea7b546b5656fc961` | Feature CI 41037773356 and integration CI 41039119278, 49 selected SDK cases per OS, including five new startup/identity/owned-DNS-shutdown cases. |
+
 
 These are component acceptance results, not a new full-sprint run. SDK discovery
 configuration is explicit and in-memory; Server/Client ktav schemas and direct-only
@@ -191,19 +214,19 @@ silently become full scope. Full remains a current standalone `[ci:full]` line o
 manual Actions `scope: full`, and is not requested here. No local compilation or
 tests: only standalone formatting, syntax and own isolated data readers locally.
 
-#202 is complete as source contracts only; #203 remains open until the exact
-finite bootstrap candidate passes Linux/Windows CI and its integration receipts
-are reviewed. Bootstrap completion is not full P08, public-infrastructure,
-NAT-readiness or full-sprint acceptance.
+#202 remains complete as source contracts only; #203 is accepted by the finite
+bootstrap evidence above. Bootstrap completion is not full P08, public-infrastructure,
+NAT-readiness or full-sprint acceptance. The exact candidate receipt and integration
+were reviewed; the clean integrated worktree was removed after fresh clean check.
+The primary integration SHA `0d0c3d8` was not CI-tested, and local checkpoint
+commits were not pushed. The accepted source/graph receipts preserve exact
+reversibility and the reviewed two-root observation closure; no product graph
+change is implied.
 
-After the exact candidate passes both OSes, inspect inventories, expected events,
-negative/sensitivity preconditions, source/graph receipts and cleanup evidence.
-Fetch collaborators before exact-SHA integration, watch post-integration CI and
-remove the clean integrated worktree. Update the acceptance record with real run
-IDs, hashes, limits and exclusions.
-
-Task #204 remains separately permission-gated and unexecuted. Its P13 schedule is
-not authorization: no cron, goal, task completion or local-fixture result authorizes
-execution. Before execution, obtain fresh human approval of the exact targets and
-time/traffic/socket limits. No automatic run is authorized. Yggdrasil and release
-permissions remain separate as well.
+This acceptance does not complete P08. Task #204 remains unexecuted and separately
+permission-gated; its P13 schedule is not authorization. Obtain fresh human approval
+for exact targets and time/traffic/socket limits before execution. No automatic run
+is authorized. Native path gain/loss, automatic re-punch and carrier disconnect/
+reconnect remain deferred to P10 task #215; the integrated fault matrix remains P13
+task #218. NAT/arbitrary public/home/mobile readiness and Yggdrasil/release readiness
+are not proved.

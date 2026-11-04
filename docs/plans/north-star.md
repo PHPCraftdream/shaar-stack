@@ -1,0 +1,98 @@
+# North star
+
+This file is the fixed goal of the project. It is imported by `CLAUDE.md`, so it is
+loaded into every session and after every context compaction. Only the user changes
+its scope; every change is recorded in the decision log below with date and quote.
+
+## Goal
+
+A device is identified by one Ed25519 key. Any device can reach a service on any
+other device by that key alone: no IP address, no TUN or VPN, no root, no router
+port forwarding, no n0 infrastructure. The aim is a very efficient solution built
+from the strengths of four existing peer-to-peer networks, without Tor-style
+anonymization overhead.
+
+## End-to-end scenario (the measure of progress)
+
+1. The server publishes a signed address record under its key in the Mainline DHT.
+2. The client is configured with the server key only.
+3. The client resolves the record and tries direct QUIC to the published addresses.
+4. If direct paths fail, the client negotiates through libp2p (signaling only) and
+   hole-punches; direct QUIC has data priority.
+5. If UDP/QUIC is blocked, the client uses the Yggdrasil path derived from the same
+   key. Yggdrasil carries negotiation in `signal` mode and payload fallback in
+   `standby` mode.
+6. The server checks the client key against its allowlist, then forwards the stream
+   to one fixed internal TCP service. A disallowed client causes no target connection.
+
+Every task must name the step it advances. A task that advances none is out of scope.
+
+## Four networks, one key
+
+| Network | Strength | Role |
+|---|---|---|
+| iroh / QUIC | Fast encrypted direct path, NAT hole punching, stream multiplexing | Primary data path |
+| Mainline DHT | Large serverless network, lookup by key | Publish and resolve signed address records |
+| libp2p (relay, Amino) | Mature signaling and relay machinery | Negotiation only; never application data |
+| Yggdrasil | Global mesh, address derived from the key, works where UDP/QUIC is cut | Blockade resilience and DHT-failure fallback |
+
+Each network covers another's weakness. The synergy is realized by path policy (P10):
+find, negotiate, choose the fastest available path, fail over under blocking.
+
+## Efficiency criteria (proposed; to be agreed with the user before P10)
+
+- Time from "client knows the key" to the first forwarded byte.
+- Failover time to Yggdrasil under controlled blocking of direct paths.
+- Share of connections that end on the direct path when it is available.
+- Bounded resource use per connection and per resolver (see the native Mainline
+  contract).
+
+## Non-goals of v1
+
+UDP forwarding, multiple published services, a GUI, a single CLI replacing separate
+Server and Client, DHT record encryption, system packages, automated release
+publication, and torrent-style file sharing (future work over the finished channel).
+An in-house Yggdrasil implementation is not permitted.
+
+## Process principles
+
+- Goal first: before each leaf, name the end-to-end scenario step it advances. Add
+  no new proof mechanism or CI segment without a concrete uncovered failing case.
+  Every ~10 tasks compare the TaskList with this goal.
+- Three consecutive CI failures of one leaf: stop point-fix pushes. Review all
+  causes together (feature contexts, paths, selectors, formatting, resources,
+  oracle assumptions), make one reviewed repair commit and report it before CI
+  resumes. A task change or context compaction does not reset the streak; only a
+  real success does.
+- Execution limits: no local builds, tests, Cargo, project Python, dependency
+  preparation, smoke runs, benchmarks or fake load; verification happens in GitHub
+  CI. Locally only formatting, syntax checks and own stdlib DATA readers (`python -I`).
+  Downloaded material is untrusted DATA in a new empty directory, never executed or
+  imported. Repeat this limit in every worker prompt and inspect execution evidence
+  after the worker finishes. No new subagents without the user's explicit request.
+- One owner and an ordered repository: at session entry verify HEAD, the latest
+  checkpoint, live executors and the single repository owner; do not start work
+  while another owner is active. Every dirty file has a custodian and a disposition;
+  remove worktrees only after a verified transfer; keep no stray branches.
+- Checkpoints are always committed and start with the distance to v1 (5-8 short
+  bullets).
+- Honest reports: distinguish written, compiled, executed in CI and accepted. A
+  green CI does not prove case counts; compare selected with executed. Never
+  synthesize license text. A tick, notification or cron is not user consent.
+- Gates: public-network, Yggdrasil peers, legal and release actions need the user's
+  separate permission for exact targets and budgets. Collect these decisions early
+  and send them to the user as one package.
+
+## Decision log
+
+| Date | Decision | User words |
+|---|---|---|
+| 2026-10-31 | P07/Yggdrasil deferred beyond v1 | Superseded on 2026-11-04 |
+| 2026-11-04 | Yggdrasil restored to v1; original architecture kept | "придерживаемся изначального плана" |
+| 2026-11-04 | Controlled blockade resilience is mandatory for v1 | Recorded in `v1-focus.md` |
+| 2026-11-04 | Checkpoints are always committed | "чекпоинты комитим всегда" |
+| 2026-11-04 | Goal text lives in `CLAUDE.md` and is reloaded after compaction | "да, делай как ты говоришь" |
+| 2026-11-04 | Replace base256emoji with base58 | "давай просто перейдем на base58" |
+| 2026-11-04 | Authentic upstream license texts may be collected as isolated DATA for notices | "да" |
+| 2026-11-04 | Pinned Yggdrasil-ng integration is approved after P09 | "да" |
+| 2026-11-04 | Public smoke targets are chosen by the engineer; they must be legal and working, within agreed bounds | "нужно выбрать что-то - не важно, главное чтобы легально и чтобы работало" |

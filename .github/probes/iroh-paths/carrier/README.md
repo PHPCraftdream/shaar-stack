@@ -1,9 +1,14 @@
 # Real-carrier bootstrap frame fixture
 
-Current status: **bootstrap candidate wired; execution and acceptance pending**.
-The wire case is deliberately labeled bootstrap-only. Native path gain/loss,
-re-punch, reconnect, public-network, NAT, Yggdrasil and TUN claims are out of
-scope; the separate public smoke remains permission-gated.
+Current status: **finite bootstrap accepted** at
+`56303d351233486337bcef393663c00a3a17586b`. Feature CI
+41252896400
+and upstream postdelivery CI
+[41253787814](https://github.com/PHPCraftdream/shaar-stack/actions/runs/41253787814)
+passed on Linux and Windows. Exact-byte primary integration `0d0c3d8` was not
+CI-tested. This is bootstrap-only, not full P08; native path gain/loss, re-punch,
+reconnect, public-network, NAT, Yggdrasil and TUN claims remain out of scope. The
+separate public smoke remains permission-gated.
 
 `probe.rs` is installed only in a disposable copy of shaar-p2p. Its hook runs in
 `SignalingPump::receive_loop` after production authenticated/current-link and
@@ -46,8 +51,13 @@ ignored cases, and checks that the mandatory scenario, oracle, and supplemental
 control selectors each ran. Newly added controls matching those selectors are
 included automatically; the complete suite's names and count are not frozen.
 The normal `run.py` path remains source-contract-only. CI invokes both paths and
-uploads their receipts. CI execution remains pending/unaccepted; no local build,
-test, preparation, or project Python execution is permitted for this task.
+uploads their receipts. The accepted run selected/executed 52 product cases per
+OS, with no ignored cases, and six wire cases per variant. Strict mode observed
+zero STREAM/DATAGRAM qlog metadata; allow-all observed four STREAM and two
+DATAGRAM frames across both senders. Physical egress is established by actual
+ciphertext/authenticated-receive correlation assertions, not qlog construction
+alone. See the [acceptance record](../../../../docs/plans/p08-carrier-frame-acceptance.md).
+No local build, test, preparation, or project Python execution is permitted.
 
 Pure `checks.py` source-contract cases are not protocol evidence. Existing
 product graph and CI ownership keep this fixture isolated under `carrier_frames`.
