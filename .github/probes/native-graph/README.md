@@ -20,6 +20,25 @@ product tree, and reject kind/condition/requirement/source/root-snapshot/archive
 prepared-source/receipt/retained-edge/patch-path mutations. Local execution is
 not acceptance; fresh exact-SHA CI is required before adopting this extension.
 
+## Independent approved-route lock
+
+CI `41797750366` reached the same control-lock failure on both OS: the approved
+route used the candidate lock, including its new SDK dev-codec edge, against the
+unchanged control SDK manifest. Its product metadata correctly rejected this with
+`--locked`. The baseline and normal projection fixtures passed before that failure;
+the failed run is not acceptance of the complete comparison.
+
+The control now reads raw `Cargo.lock` bytes only from accepted graph revision
+`ab96feb3f3503f91936664257a338b5486dfba0e` through a retained `git show` command.
+SHA-256 must equal
+`c5b9de68e430b865378fc5d9adf3489ba87885dcfc6783d734df3365c893c030`.
+No lock is synthesized, refreshed or copied from the evolving candidate into the
+control. Historical BASE `67e10f3`, its independent manifest transformation, source
+bindings and all locked checks remain unchanged. Baseline and candidate still use
+their own raw locks. Regressions cover all three roles, candidate-lock changes,
+unknown roles, wrong bytes/types and exact CRLF rejection without normalization.
+This repair requires fresh CI; authored regressions are not passing test evidence.
+
 ## N0-future Tokio feature comparison
 
 The n0-future 0.3.2 archive is pinned to SHA-256 e2ab99dfb861450e68853d34ae665243a88b8c493d01ba957321a1e9b2312bbe. Historical BASE retains the registry source; approved-route and candidate use the prepared source. Only Cargo.toml changes: native Tokio retains requirement 1.28 and normal rt/time/macros, while test-util is dev-only. All other archive bytes stay unchanged, with exact inventory and reversal provenance.

@@ -276,8 +276,8 @@ def run(repo, archives, prepare_module, graph_module, runner):
                 "[patch.crates-io]\n" + "\n".join(patch_lines) + "\n")
             manifest = consumer / "Cargo.toml"
             manifest.write_text(cargo_manifest, encoding="utf-8")
-            seed_root = base_roots["baseline"][0] if role == "baseline" else repo
-            seed = (seed_root / "Cargo.lock").read_bytes()
+            seed = base.projection_lock(role, roots["baseline"], repo,
+                                        lambda argv: command(argv, repo, "approved_route-lock"))
             product_args = ['cargo', 'metadata', '--locked', '--format-version', '1']
             if role == 'approved_route':
                 (root / 'Cargo.lock').write_bytes(seed)

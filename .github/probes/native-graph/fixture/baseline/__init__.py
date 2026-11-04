@@ -14,9 +14,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import graph as graph_module
 
 BASE = "67e10f3d836b48b954e9f82cc9ffb1d12bb1d71f"
+APPROVED_LOCK_REVISION = "ab96feb3f3503f91936664257a338b5486dfba0e"
+APPROVED_LOCK_SHA256 = "c5b9de68e430b865378fc5d9adf3489ba87885dcfc6783d734df3365c893c030"
 MAX_ARCHIVE = 256 * 1024 * 1024
 MAX_ENTRIES = 20_000
 INPUTS = ("Cargo.toml", "crates/shaar/Cargo.toml", "Cargo.lock")
+
+
+def projection_lock(role, baseline_root, candidate_root, run):
+    """Keep the accepted control lock independent of the evolving candidate."""
+    if role == "baseline":
+        return (Path(baseline_root) / "Cargo.lock").read_bytes()
+    if role == "candidate":
+        return (Path(candidate_root) / "Cargo.lock").read_bytes()
+    if role != "approved_route":
+        raise ValueError("unknown projection lock role")
+    raw = run(["git", "show", APPROVED_LOCK_REVISION + ":Cargo.lock"])
+    if not isinstance(raw, bytes) or hashlib.sha256(raw).hexdigest() != APPROVED_LOCK_SHA256:
+        raise ValueError("approved-route lock identity mismatch")
+    return raw
 
 
 def capture_inventory(directory):
