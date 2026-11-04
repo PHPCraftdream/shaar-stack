@@ -66,12 +66,6 @@ def create(repository, destination, relay_source, swarm_source, kad_source, dns_
             raise ValueError("production backend must be prepared before candidate resolution")
         manifest = replace(manifest, f'path = "{relative}"', f"path = {json.dumps(actual.as_posix())}")
     root_patches = tomllib.loads(manifest)["patch"]["crates-io"]
-    multibase_previous = root_patches.get("multibase", {}).get("path")
-    if multibase_previous:
-        multibase_source = (repository / "target/native-graph/multibase-0.9.3").resolve()
-        if not (multibase_source / "Cargo.toml").is_file():
-            raise ValueError("reviewed multibase source is missing")
-        manifest = replace(manifest, f'path = "{multibase_previous}"', f"path = {json.dumps(multibase_source.as_posix())}")
     for name, path in (("libp2p-relay", relay_source), ("libp2p-swarm", swarm_source), ("libp2p-kad", kad_source), ("libp2p-dns", dns_source), ("hickory-resolver", resolver_source), ("simple-dns", simple_dns_source)):
         previous = root_patches.get(name, {}).get("path")
         if previous:

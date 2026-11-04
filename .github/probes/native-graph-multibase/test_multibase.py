@@ -117,6 +117,10 @@ class RecipeTransformTests(unittest.TestCase):
         self.assertEqual(prepared["README.md"], files["README.md"])
         self.assertEqual(prepared["LICENSE"], files["LICENSE"])
         for name, data in prepared.items():
+            if name in recipe.INERT_FILES:
+                # Upstream's dev lock is exempt from the sweep and must stay byte-identical.
+                self.assertEqual(data, files[name], name)
+                continue
             self.assertNotIn(b"base256emoji", data.lower(), name)
             self.assertNotIn(recipe.ROCKET, data, name)
         self.assertEqual(recipe.reverse(files, changed), files)
