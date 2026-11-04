@@ -13,8 +13,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import graph as graph_module
 
-BASE = "67e10f3d836b48b954e9f82cc9ffb1d12bb1d71f"
-APPROVED_LOCK_REVISION = "ab96feb3f3503f91936664257a338b5486dfba0e"
+BASE = "516b023ad13e7f389a4dfa8051baf26072dfb308"
+APPROVED_LOCK_REVISION = "b2f1d5f82edc84d152f85534d4b550db328c159b"
 APPROVED_LOCK_SHA256 = "c5b9de68e430b865378fc5d9adf3489ba87885dcfc6783d734df3365c893c030"
 MAX_ARCHIVE = 256 * 1024 * 1024
 MAX_ENTRIES = 20_000

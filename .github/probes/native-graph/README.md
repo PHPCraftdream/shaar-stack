@@ -1,6 +1,6 @@
 # Native SDK dependency graph contracts
 
-**Status:** the base graph at `ab96feb` passed exact-SHA feature CI `41778932723` and upstream CI `41782801796` on both OS with independent DATA inspection. Earlier authoring-only notes below describe their original source passes, not the absence of later execution. The SDK dev-codec extension is currently authored and awaiting fresh CI; this document is not publisher or complete P09 acceptance proof.
+**Status:** the base graph at `b2f1d5f` passed exact-SHA feature CI `41778932723` and upstream CI `41782801796` on both OS with independent DATA inspection. Earlier authoring-only notes below describe their original source passes, not the absence of later execution. The SDK dev-codec extension is currently authored and awaiting fresh CI; this document is not publisher or complete P09 acceptance proof.
 
 ## SDK dev-codec projection
 
@@ -29,11 +29,11 @@ unchanged control SDK manifest. Its product metadata correctly rejected this wit
 the failed run is not acceptance of the complete comparison.
 
 The control now reads raw `Cargo.lock` bytes only from accepted graph revision
-`ab96feb3f3503f91936664257a338b5486dfba0e` through a retained `git show` command.
+`b2f1d5f82edc84d152f85534d4b550db328c159b` through a retained `git show` command.
 SHA-256 must equal
 `c5b9de68e430b865378fc5d9adf3489ba87885dcfc6783d734df3365c893c030`.
 No lock is synthesized, refreshed or copied from the evolving candidate into the
-control. Historical BASE `67e10f3`, its independent manifest transformation, source
+control. Historical BASE `516b023`, its independent manifest transformation, source
 bindings and all locked checks remain unchanged. Baseline and candidate still use
 their own raw locks. Regressions cover all three roles, candidate-lock changes,
 unknown roles, wrong bytes/types and exact CRLF rejection without normalization.
@@ -73,7 +73,7 @@ The projection evidence binds both Cargo metadata JSON payloads to SHA-256 diges
 
 ## Source-bound three-proof contract
 
-`fixture/baseline/__init__.py` extracts the baseline only from pinned commit `67e10f3d836b48b954e9f82cc9ffb1d12bb1d71f` via `git archive`, checks the resolved commit, and records archive and input hashes. `prepare_sources` invokes the fixed preparation scripts with supplied local archives. The baseline and approved-route roots are separate extractions; only the approved-route root receives the exact manifest edits in `apply_route`. The candidate is the committed checkout at its recorded `HEAD`; its generated sources are verified, not edited by the route step.
+`fixture/baseline/__init__.py` extracts the baseline only from pinned commit `516b023ad13e7f389a4dfa8051baf26072dfb308` via `git archive`, checks the resolved commit, and records archive and input hashes. `prepare_sources` invokes the fixed preparation scripts with supplied local archives. The baseline and approved-route roots are separate extractions; only the approved-route root receives the exact manifest edits in `apply_route`. The candidate is the committed checkout at its recorded `HEAD`; its generated sources are verified, not edited by the route step.
 
 The comparison requires exactly three distinct normal-consumer proofs: `baseline` and `approved_route` at the pinned base, plus `candidate` at the recorded candidate revision. Each includes locked metadata, normal-feature cargo tree, and library build artifacts with command records and hashes. `expected_control` binds the route to the baseline root-manifest hash and exact route-receipt hash. Comparison checks the observed package and feature delta against the approved-route control and requires candidate features to match that route; it does not presume a successful result. Independent reference-263 and legal gates are not waived.
 
@@ -122,7 +122,7 @@ One compiler invocation remains one unit and retains all direct outputs. Repeate
 
 ## Accepted SDK test-only source transition
 
-Historical BASE `67e10f3` and its independently transformed control remain unchanged.
+Historical BASE `516b023` and its independently transformed control remain unchanged.
 Delivered `70b55f4` changes only `crates/shaar/src/native_discovery/tests/codec.rs`,
 behind the existing `cfg(test)` module; its 43-case native SDK suite passed on both
 OS in feature CI `41772815878`. The normal source files and dependency manifests are
@@ -169,7 +169,7 @@ fetches the pinned archive. The expected lock transition (multibase registry -> 
 removed) is produced by CI resolution only; the CI-generated candidate lock bytes are pending
 and must not be invented. The committed lock shows the emoji chain is reachable only through
 multibase. The three-proof comparison admits exactly this one new control-to-candidate
-transition; historical BASE `67e10f3` and the pinned control lock `ab96feb` stay untouched,
+transition; historical BASE `516b023` and the pinned control lock `b2f1d5f` stay untouched,
 and the lock-delta audit requires the chain removal to be complete and exclusive. Product
 regressions in `crates/shaar-p2p/tests/multibase_base58.rs` cover base58btc PeerId text,
 `/p2p/` text and binary, z-prefixed multibase decode (empty, zero-prefixed, arbitrary,
