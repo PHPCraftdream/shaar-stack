@@ -2,7 +2,7 @@
 
 # Native publisher runtime tests
 
-This report describes source and authored coverage for the private `native_discovery` runtime. The loopback fixture sends real Mainline PUTs and observes actual receipts/cleanup; it uses no public network, observed/bound-address harvesting, synchronization sleeps, or synthetic success receipts. The changes do not add a public SDK API. No build, tests, or CI were run in this source-only work; authored coverage must not be confused with parent CI execution or acceptance.
+This report describes source and authored coverage for the private `native_discovery` runtime. The loopback fixture sends real Mainline PUTs and observes actual receipts/cleanup; it uses no public network, observed/bound-address harvesting, synchronization sleeps, or synthetic success receipts. The changes do not add a public SDK API. The original source pass ran no build or tests. Later actual SDK CI `41812873830` at `d75d6a8` compiled and executed the selected suite on both OS: 77 passed, one deadline/recovery case failed. That failed run is not publisher or P09 acceptance; the corrected setup below still needs fresh CI.
 
 ## Runtime contract and authored coverage
 
@@ -37,7 +37,8 @@ rounding uncertainty: a lower endpoint is one microsecond below the truncated
 value (saturating at zero), and the upper endpoint is one above (checked).
 An equal-rate, phase-shifted clock regression and zero/boundary/overflow cases
 exercise this sampling contract. Controlled-clock samples and strict rollback
-checks remain unchanged. These new tests have not run.
+checks remain unchanged. All three clock tests passed on both OS in the failed
+`d75d6a8` run; this does not certify the remaining runtime cases.
 
 The composed runtime remains private and awaits its existing P09 integration
 caller. The non-test dead-code expectation is limited to that unwired module;
@@ -47,4 +48,17 @@ combined source-bound integration remains task #253.
 
 ## Remaining gaps / verification
 
-There is no authored full interoperability coverage for the separate task-263 gate, and authored SDK tests are not executed acceptance coverage; dependency-cap-128 and other baseline tests are reused, not all newly authored SDK integration. The native `public_put_until_preserves_entry_deadline_across_retries` test is authored, as are the existing three-attempt 100/200-jitter tests; the parent must rerun them, with no frozen inventory. Parent must confirm the exact source bindings and CI ownership above, reconcile source-integrity checks, then run the relevant tests/CI. Until then, implementation and authored tests are not verified by execution. Publication KRPC recovery has real tests; no gap is claimed there. For result handling, `Clean` means cleanup confirmed; `Unknown` is terminal. Graph/CI reconciliation and execution remain pending: the source scope is authored, not an isolated partial implementation, and no tests were executed here.
+The deadline case previously withheld an ACK but did not keep completion pending
+through the caller deadline. Native retries or an earlier operation bound may end
+work sooner; the exact failing result variant was not printed and is unknown.
+The corrected setup holds actual Mainline cleanup before the real PUT starts,
+checks the pending caller, retains the exact `DeadlineExceeded` assertion, waits
+for actual held cleanup, releases it, then observes the cleanup barrier and real
+recovery publication. Recovery resumes normal Tokio time before UDP exchange;
+there are no synchronization sleeps, synthetic success receipts or relaxed errors.
+
+This setup repair has not run. The existing Mainline retry/deadline and resource
+checks remain separate obligations, without a frozen inventory. Independent
+record evidence and SDK regressions are already accepted under #263/#261; they do
+not prove this publisher's lifecycle. Full source-bound integration and production
+caller wiring remain #253. `Clean` means cleanup confirmed; `Unknown` is terminal.

@@ -179,6 +179,13 @@ async fn deadline_expiring_during_real_put_cleans_generation_and_owner_recovers(
         &[bootstrap],
     )
     .expect("owned DHT");
+    let observer = owner
+        .dht_handle()
+        .expect("actual owned DHT handle")
+        .publication_observer();
+    let hold = observer
+        .hold_cleanup()
+        .expect("retain actual PUT cleanup through caller deadline");
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut request = Box::pin(owner.replace_until(
@@ -192,13 +199,24 @@ async fn deadline_expiring_during_real_put_cleans_generation_and_owner_recovers(
         result = &mut request => panic!("replace completed before real peer held its PUT: {result:?}"),
     };
 
+    std::future::poll_fn(|cx| {
+        assert!(
+            request.as_mut().poll(cx).is_pending(),
+            "cleanup hold keeps the caller pending"
+        );
+        std::task::Poll::Ready(())
+    })
+    .await;
     tokio::time::pause();
     tokio::time::advance(deadline - tokio::time::Instant::now()).await;
     let result = request.await;
-    assert!(matches!(
-        result,
-        Err(super::super::RuntimeError::DeadlineExceeded)
-    ));
+    assert!(
+        matches!(&result, Err(super::super::RuntimeError::DeadlineExceeded)),
+        "original caller deadline must win while actual cleanup is held: {result:?}"
+    );
+    observer.wait_cleanup_held().await;
+    hold.release();
+    tokio::time::resume();
     let cleanup = owner
         .barrier()
         .await
@@ -220,7 +238,6 @@ async fn deadline_expiring_during_real_put_cleans_generation_and_owner_recovers(
         receipt.sequence > held.2.sequence,
         "recovery uses a newer signed generation"
     );
-    tokio::time::resume();
     owner
         .close()
         .await
