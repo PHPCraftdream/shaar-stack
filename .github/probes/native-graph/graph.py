@@ -81,6 +81,7 @@ GENERATED_PATHS = {
     "serde_bencode": "target/native-graph/serde_bencode-0.2.4",
     "iroh-dns": "target/native-graph/iroh-dns-1.3.0",
     "n0-future": "target/native-graph/n0-future-0.3.2",
+    "multibase": "target/native-graph/multibase-0.9.3",
 }
 ALLOWED_ADDITIONS = {
     ("iroh-mainline-address-lookup", "0.6.1", "path"),
@@ -108,7 +109,8 @@ REVIEWED_TRANSITIVES = {
 REQUIRED_NORMAL = {"iroh-mainline-address-lookup": "0.6.1", "n0-mainline": "0.7.0",
                    "serde_bencode": "0.2.4", "iroh-dns": "1.3.0", "tokio": "1.54.1",
                    "serde": "1.0.229", "noq-udp": "1.3.0", "iroh": "1.3.0",
-                   "iroh-base": "1.3.0", "noq": "1.3.0", "noq-proto": "1.3.0", "n0-future": "0.3.2"}
+                   "iroh-base": "1.3.0", "noq": "1.3.0", "noq-proto": "1.3.0", "n0-future": "0.3.2",
+                   "multibase": "0.9.3"}
 
 
 def audit_product_workspace(manifest: dict) -> None:
@@ -261,10 +263,37 @@ def audit_lock_delta(before_bytes: bytes, after_bytes: bytes) -> dict[str, list[
     shaar_changed = shaar_key in before and shaar_key in after and before[shaar_key] != after[shaar_key]
     n0_old = ("n0-future", "0.3.2", REGISTRY)
     n0_new = ("n0-future", "0.3.2", "path")
+    multibase_old = ("multibase", "0.9.3", REGISTRY)
+    multibase_new = ("multibase", "0.9.3", "path")
+    multibase_checksum = "7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6"
+    emoji_chain_versions = {"base256emoji": "1.0.2", "const-str": "0.4.3",
+                            "match-lookup": "0.1.3"}
+    emoji_chain_checksums = {
+        "base256emoji": "b5e9430d9a245a77c92176e649af6e275f20839a48389859d1661e9a128d077c",
+        "const-str": "2f421161cb492475f1661ddc9815a745a1c894592070661180fdec3d4872e9c3",
+        "match-lookup": "549e39695cc0b640f3cb378053832db3d2133422d49e8dcae5c866a2aaf1f730",
+    }
+    emoji_chain = {(name, version, REGISTRY) for name, version in emoji_chain_versions.items()}
+    multibase_switch = multibase_old in before and multibase_new in after
+    if multibase_switch:
+        multibase_before, multibase_after = before[multibase_old], after[multibase_new]
+        if multibase_before.get("checksum") != multibase_checksum or "checksum" in multibase_after:
+            raise ValueError("multibase registry checksum replacement mismatch")
+        if (multibase_before.get("dependencies", []) != ["base-x", "base256emoji", "base45", "data-encoding", "data-encoding-macro"]
+                or multibase_after.get("dependencies", []) != ["base-x", "base45", "data-encoding", "data-encoding-macro"]):
+            raise ValueError("multibase replacement must drop exactly the base256emoji edge")
+        for name, version in emoji_chain_versions.items():
+            key = (name, version, REGISTRY)
+            if key not in before or before[key].get("checksum") != emoji_chain_checksums[name]:
+                raise ValueError("emoji-chain registry identity mismatch before removal: " + name)
     permitted_removed = ({dns_old} if dns_old in before and dns_new in after else set())
     if n0_new in after and n0_old in before and before[n0_old].get("checksum") == "e2ab99dfb861450e68853d34ae665243a88b8c493d01ba957321a1e9b2312bbe":
         permitted_removed.add(n0_old)
+    if multibase_switch:
+        permitted_removed |= emoji_chain | {multibase_old}
     permitted_added = ALLOWED_ADDITIONS | set(REVIEWED_TRANSITIVES)
+    if multibase_switch:
+        permitted_added.add(multibase_new)
     unexpected_removed = removed - permitted_removed
     unexpected_added = added - permitted_added
     if unexpected_removed or unexpected_added:
@@ -326,6 +355,15 @@ def audit_lock_delta(before_bytes: bytes, after_bytes: bytes) -> dict[str, list[
         for field in set(shaar_old) | set(shaar_new):
             if field != "dependencies" and shaar_old.get(field) != shaar_new.get(field):
                 raise ValueError(f"shaar lock fields changed beyond reviewed dependency edges: {field}")
+    if multibase_switch:
+        dropped = emoji_chain | {multibase_old}
+        if not dropped <= removed or dropped & set(after):
+            raise ValueError("multibase emoji chain removal must be complete and exclusive")
+        for owner, package in after.items():
+            for dependency in package.get("dependencies", []):
+                if dependency.split()[0] in emoji_chain_versions:
+                    raise ValueError(f"retained lock package still references a removed emoji-chain helper: {owner}")
+        source_changes.append((multibase_old, multibase_new))
     return {"added": sorted(added), "removed": sorted(removed), "source_changed": source_changes}
 
 

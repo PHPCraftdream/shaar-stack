@@ -18,8 +18,10 @@ PREPARED = {
     "libp2p-kad": ("0.49.0", "target/p2p/kad/libp2p-kad-0.49.0"),
     "libp2p-relay": ("0.22.0", "target/p2p/relay/libp2p-relay-0.22.0"),
     "libp2p-swarm": ("0.48.0", "target/p2p/swarm/libp2p-swarm-0.48.0"),
+    "multibase": ("0.9.3", "target/native-graph/multibase-0.9.3"),
 }
 NAMES = (*PREPARED, "attohttpc")
+FORBIDDEN = ("base256emoji",)
 
 
 def unique_object(pairs):
@@ -64,6 +66,9 @@ def summarize(raw):
         name = package_id.partition(" ")[0]
         if name in selected:
             selected[name].append(package_id)
+    for package_id in data:
+        if package_id.partition(" ")[0] in FORBIDDEN:
+            raise ValueError(f"removed package present in license list: {package_id}")
     for name, (version, suffix) in PREPARED.items():
         matches = [item for item in selected[name] if item.startswith(f"{name} {version} ")]
         if len(matches) != 1 or not matches[0].startswith(f"{name} {version} path+file:"):

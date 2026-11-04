@@ -150,6 +150,34 @@ components. No runtime newline stripping or generic source normalization occurs;
 raw bindings still distinguish platform bytes. Regressions cover both tuples,
 cross-pair rejection, unlisted archives and wrong-role changes on every OS.
 
+## Reviewed multibase removal (authored, pending CI)
+
+The product removes `base256emoji` 1.0.2 (emoji-table license/notice provenance could not be
+established) via a reviewed same-version prepared patch of `multibase` 0.9.3; multiaddr keeps
+working with Base58Btc, Base64, Base32Lower, Base64Url and generic multibase decode. The
+recipe module `.github/probes/native-graph-multibase/prepare.py` is loaded by `prepare.py`
+through the fixed-module mechanism; it pins registry archive SHA-256
+`7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6`, changes exactly six files
+(`Cargo.toml`, `Cargo.toml.orig`, `src/base.rs`, `src/error.rs`, `src/impls.rs`,
+`tests/lib.rs`), anchors emoji lines structurally with ASCII byte escapes, and proves
+exactness through the reversal check and receipt hashes. The upstream MIT license text is
+retained; the modification is identified by the provenance receipt; the prepared tree and
+receipt live under ignored `target/native-graph/`. Root `Cargo.toml` gains the
+`[patch.crates-io]` path entry like the other native-graph patches, and the preparation action
+fetches the pinned archive. The expected lock transition (multibase registry -> path with the
+`base256emoji` edge dropped; `base256emoji` 1.0.2, `const-str` 0.4.3, `match-lookup` 0.1.3
+removed) is produced by CI resolution only; the CI-generated candidate lock bytes are pending
+and must not be invented. The committed lock shows the emoji chain is reachable only through
+multibase. The three-proof comparison admits exactly this one new control-to-candidate
+transition; historical BASE `67e10f3` and the pinned control lock `ab96feb` stay untouched,
+and the lock-delta audit requires the chain removal to be complete and exclusive. Product
+regressions in `crates/shaar-p2p/tests/multibase_base58.rs` cover base58btc PeerId text,
+`/p2p/` text and binary, z-prefixed multibase decode (empty, zero-prefixed, arbitrary,
+malformed), the now-failing emoji prefix, and Base64/Base32Lower/Base64Url preservation; the
+CI policy selects the new integration test by its owned name and accepts a `Cargo.lock`
+change together with a root `Cargo.toml` change. All of this is authored only; no tests, builds, or
+CI were executed, and no passing result is claimed.
+
 ## License
 
 This documentation is available under either the MIT License or the Apache License, Version 2.0, at your option.

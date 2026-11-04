@@ -426,14 +426,14 @@ class PreparationTests(unittest.TestCase):
 
     def fake_modules(self, archives: dict[str, Path]) -> dict[str, object]:
         modules: dict[str, object] = {}
-        for name in ("mainline", "bencode", "dns"):
+        for name in ("mainline", "bencode", "dns", "multibase"):
             source = {"src/lib.rs": f"{name}-original".encode()}
             changed = {"src/lib.rs": f"{name}-prepared".encode()}
             modules[name] = types.SimpleNamespace(
                 ARCHIVE_SHA256=hashlib.sha256(archives[name].read_bytes()).hexdigest(),
                 archive_files=lambda _archive, content=source: content,
                 transform=lambda _files, content=changed: content,
-                reverse=lambda _files, _changed: None,
+                reverse=lambda files, _changed: files,
                 recipe=lambda n=name: {f"{n}/prepare.py": hashlib.sha256(n.encode()).hexdigest()},
             )
         return modules
@@ -446,7 +446,7 @@ class PreparationTests(unittest.TestCase):
         archives = {"adapter": self.write_archive(base, "adapter", adapter_bytes)}
         future_bytes = self.future_archive()
         archives["future"] = self.write_archive(base, "future", future_bytes)
-        for name in ("mainline", "bencode", "dns"):
+        for name in ("mainline", "bencode", "dns", "multibase"):
             archives[name] = self.write_archive(base, name, name.encode())
         return adapter_bytes, archives
 
@@ -572,7 +572,7 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(future_receipt["changed_files"], ["Cargo.toml"])
             self.assertEqual(future_receipt["archive_sha256"], hashlib.sha256(archives["future"].read_bytes()).hexdigest())
             self.assertEqual(future_receipt["recipe_files"], {".github/probes/native-graph/prepare.py": hashlib.sha256(Path(prepare.__file__).read_bytes()).hexdigest()})
-            for tree in ("adapter", "n0-mainline-0.7.0", "serde_bencode-0.2.4", "iroh-dns-1.3.0", "n0-future-0.3.2"):
+            for tree in ("adapter", "n0-mainline-0.7.0", "serde_bencode-0.2.4", "iroh-dns-1.3.0", "n0-future-0.3.2", "multibase-0.9.3"):
                 self.assertTrue((destination / f"{tree}.provenance.json").is_file())
 
     def test_adapter_transform_and_reverse_validation(self) -> None:

@@ -121,7 +121,7 @@ def _binding(root, path, pkg, base_archive):
 
     if name == 'iroh-mainline-address-lookup':
         receipt = root / "target" / "native-graph" / "adapter.provenance.json"
-    elif name in {'n0-mainline','serde_bencode','iroh-dns','n0-future'}:
+    elif name in {'n0-mainline','serde_bencode','iroh-dns','n0-future','multibase'}:
         receipt = root / "target" / "native-graph" / f'{name}-{version}.provenance.json'
     elif name in {'iroh','noq','noq-proto'}:
         receipt = root / "target" / "backend" / "provenance.json"

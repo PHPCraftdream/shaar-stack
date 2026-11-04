@@ -78,7 +78,8 @@ def checked(argv: list[str], *, cwd: Path = ROOT, log_name: str) -> str:
 
 def archive_args() -> dict[str, Path]:
     names = {"adapter": "adapter-source.tar.gz", "mainline": "n0-mainline-0.7.0.crate", "future": "n0-future-0.3.2.crate",
-             "bencode": "serde_bencode-0.2.4.crate", "dns": "iroh-dns-1.3.0.crate"}
+             "bencode": "serde_bencode-0.2.4.crate", "dns": "iroh-dns-1.3.0.crate",
+             "multibase": "multibase-0.9.3.crate"}
     paths = {name: ARCHIVE_DIR / filename for name, filename in names.items()}
     missing = [str(path) for path in paths.values() if not path.is_file() or path.is_symlink()]
     if missing:
@@ -400,6 +401,7 @@ def verify_locked() -> dict:
             (["cargo", "metadata", "--locked", "--format-version", "1"], ROOT, "product-metadata.json"),
             ([sys.executable, "-I", "-m", "unittest", "discover", "-s", str(HERE), "-p", "test_*.py"], ROOT, "native-graph-tests.log"),
             ([sys.executable, "-I", "-m", "unittest", "discover", "-s", str(HERE / "fixture"), "-p", "test_*.py"], ROOT, "native-graph-fixture-tests.log"),
+            ([sys.executable, "-I", "-m", "unittest", "discover", "-s", str(HERE.parent / "native-graph-multibase"), "-p", "test_*.py"], ROOT, "native-graph-multibase-tests.log"),
         ):
             output = checked(argv, cwd=cwd, log_name=name)
             if name == "product-metadata.json":

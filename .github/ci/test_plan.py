@@ -113,6 +113,33 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(result["selection"]["full"])
         self.assertFalse(result["selection"]["backend"])
 
+    def test_lock_with_root_manifest_selects_workspace_contract_cases(self):
+        result = POLICY.select(["Cargo.lock", "Cargo.toml"])
+        self.assertEqual(result["targets"], [POLICY.target("shaar"), POLICY.target("shaar-p2p")])
+        self.assertEqual(result["suites"], ["workspace-manifest"])
+        self.assertTrue(result["selection"]["license"])
+        self.assertFalse(result["selection"]["full"])
+        cumulative = POLICY.select(["Cargo.lock", "Cargo.toml",
+                                   ".github/probes/native-graph-multibase/prepare.py"])
+        self.assertTrue(cumulative["selection"]["native_graph"])
+        self.assertEqual({(target["package"], target["kind"], target["name"])
+                          for target in cumulative["targets"]},
+                         {("shaar", "lib", "shaar"), ("shaar", "test", "native_graph_witness"),
+                          ("shaar-p2p", "lib", "shaar_p2p")})
+        with self.assertRaisesRegex(ValueError, "No test impact rule"):
+            POLICY.select(["Cargo.lock"])
+
+    def test_integration_test_source_selects_only_its_owned_target(self):
+        result = POLICY.select(["crates/shaar-p2p/tests/multibase_base58.rs"])
+        self.assertEqual(result["targets"],
+                         [POLICY.target("shaar-p2p", kind="test", name="multibase_base58")])
+        self.assertEqual(result["suites"], ["integration:multibase_base58"])
+        self.assertTrue(result["selection"]["product"])
+        self.assertTrue(result["selection"]["rust"])
+        self.assertFalse(result["selection"]["full"])
+        with self.assertRaisesRegex(ValueError, "No test impact rule"):
+            POLICY.select(["crates/shaar-unknown/tests/new.rs"])
+
     def test_native_discovery_wiring_and_manifest_lock_contracts_are_wide(self):
         module = POLICY.select(["crates/shaar/src/lib.rs", "crates/shaar/src/native_discovery/mod.rs"])
         self.assertEqual(module["targets"], [POLICY.target("shaar", ("", "native_discovery::"))])
