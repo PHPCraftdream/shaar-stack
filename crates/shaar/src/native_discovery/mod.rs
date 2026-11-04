@@ -5,6 +5,8 @@
 mod address;
 mod codec;
 mod policy;
+#[cfg_attr(not(test), expect(dead_code, reason = "P09 runtime wiring is pending"))]
+mod runtime;
 
 use address::validate_addresses;
 #[cfg(test)]
