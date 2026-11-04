@@ -19,6 +19,44 @@ POLICY = PLAN.POLICY
 
 
 class PolicyTests(unittest.TestCase):
+    def test_native_graph_ownership_is_narrow(self):
+        result = POLICY.select([".github/probes/native-graph/graph.py"])
+        self.assertEqual([key for key in POLICY.DOMAINS if result["selection"][key]], ["native_graph"])
+        self.assertFalse(result["selection"]["full"])
+        self.assertFalse(result["selection"]["sdk"])
+        self.assertEqual(result["targets"], [POLICY.target("shaar", kind="test", name="native_graph_witness")])
+        manifest = POLICY.select(["crates/shaar/Cargo.toml"])
+        self.assertEqual(manifest["targets"], [POLICY.target("shaar")])
+        bundled = POLICY.select([".github/probes/native-graph/graph.py", "Cargo.toml",
+                                 "crates/shaar/Cargo.toml", "Cargo.lock"])
+        self.assertEqual({(target["package"], target["kind"], target["name"]) for target in bundled["targets"]},
+                         {("shaar", "test", "native_graph_witness"), ("shaar", "lib", "shaar"),
+                          ("shaar-p2p", "lib", "shaar_p2p")})
+        self.assertTrue(bundled["selection"]["native_graph"])
+        mixed = POLICY.select([".github/probes/native-graph/README.md", "Cargo.toml",
+                               "crates/shaar/Cargo.toml", "Cargo.lock"])
+        self.assertEqual(mixed["targets"], [POLICY.target("shaar"), POLICY.target("shaar-p2p")])
+        self.assertFalse(mixed["selection"]["native_graph"])
+        code_manifest = POLICY.select([".github/probes/native-graph/graph.py", "crates/shaar/Cargo.toml"])
+        self.assertEqual({(target["kind"], target["name"]) for target in code_manifest["targets"]},
+                         {("test", "native_graph_witness"), ("lib", "shaar")})
+        with self.assertRaisesRegex(ValueError, "No test impact rule"):
+            POLICY.select([".github/probes/native-graph/graph.py", "crates/unknown/Cargo.toml"])
+        generic = POLICY.select(["Cargo.toml", "crates/shaar-p2p/Cargo.toml", "Cargo.lock"])
+        self.assertEqual({target["package"] for target in generic["targets"]}, {"shaar", "shaar-p2p"})
+
+    def test_native_graph_proof_helpers_share_narrow_case_ownership(self):
+        expected = [POLICY.target("shaar", kind="test", name="native_graph_witness")]
+        for path in (".github/probes/native-graph-proof/cargo_aliases.py",
+                     ".github/probes/native-graph-proof/test_aliases.py"):
+            with self.subTest(path=path):
+                result = POLICY.select([path])
+                self.assertTrue(result["selection"]["native_graph"])
+                self.assertFalse(result["selection"]["sdk"])
+                self.assertFalse(result["selection"]["full"])
+                self.assertEqual(result["targets"], expected)
+                self.assertEqual(result["suites"], ["native_graph"])
+
     def test_publication_fixture_has_narrow_independent_ownership(self):
         prefix = ".github/scripts/p2p/discovery/mainline/ci/publication/"
         for name in ("prepare.py", "execution/ci.py", "execution/verify.sh", "runner.py", "graph.py", "test_source.py", "tests/publication_tests.rs"):

@@ -2,7 +2,7 @@
 
 import re
 
-DOMAINS = ("dns", "discovery", "mainline", "publication", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license")
+DOMAINS = ("dns", "discovery", "mainline", "publication", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license", "native_graph")
 PACKAGES = {
     "shaar-p2p": ("lib", "shaar_p2p"), "shaar": ("lib", "shaar"),
     "shaar-platform": ("lib", "shaar_platform"), "shaar-ygg": ("lib", "shaar_ygg"),
@@ -77,6 +77,8 @@ RULES = (
     ("crates/shaar/src/network/forwarding/", ("sdk-forwarding",)),
 )
 PROOFS = (
+    (".github/probes/native-graph-proof/", "native_graph"),
+    (".github/probes/native-graph/", "native_graph"),
     (".github/probes/iroh-paths/carrier/", "carrier_frames"),
     (".github/probes/iroh-paths/gate/bridge/support/packet_identity.py", "carrier_frames"),
     (".github/scripts/p2p/carrier-wire-proof/", "carrier"),
@@ -88,6 +90,8 @@ PROOFS = (
     (".github/scripts/p2p/discovery/dns/", "dns"),
     (".github/scripts/p2p/discovery/owned_dns/", "ci_policy"),
     (".github/scripts/p2p/discovery/foundation", "dns"),
+    (".github/probes/iroh-paths/ci/protocol_close.sh", "ci_policy"),
+    (".github/probes/iroh-paths/ci/windows_native_lifecycle.sh", "ci_policy"),
     (".github/scripts/backend/", "backend"),
     (".github/scripts/tests/noq_driver/", "backend"),
     (".github/actions/dependency-license/", "license"),
@@ -118,8 +122,8 @@ def select(paths, *, full=False):
     targets, suites, reasons = {}, ({"full"} if full else set()), []
     if not paths and not full:
         raise ValueError("No comparison paths established; specify a valid base or explicit full trigger")
-    manifest_packages = {p.split("/")[1] for p in paths
-                         if re.fullmatch(r"crates/[^/]+/Cargo.toml", p)}
+    manifest_packages = {path.split("/")[1] for path in paths
+                         if re.fullmatch(r"crates/[^/]+/Cargo.toml", path)}
 
     def add(spec):
         key = (spec["package"], spec["kind"], spec["name"])
@@ -137,18 +141,23 @@ def select(paths, *, full=False):
         elif path in {"LICENSE-MIT", "LICENSE-APACHE"}:
             flags["license"] = True
             owned = ["license"]
+        elif path == "crates/shaar/Cargo.toml":
+            add(target("shaar"))
+            flags["license"] = True
+            owned = ["package:shaar"]
         elif path == "Cargo.toml":
-            # Only these libraries consume the patched sources; shaar-ygg has no tests and
-            # shaar-platform is OS-gated, so a package-wide selector would match no runnable case.
             for package in ("shaar", "shaar-p2p"):
                 add(target(package))
             flags["license"] = True
             owned = ["workspace-manifest"]
-        elif path == "Cargo.lock" and manifest_packages:
-            flags["license"] = True
-            for package in sorted(manifest_packages):
-                add(target(package))
-            owned = sorted(manifest_packages)
+        elif path == "Cargo.lock":
+            if manifest_packages:
+                flags["license"] = True
+                for package in sorted(manifest_packages):
+                    add(target(package))
+                owned = sorted(manifest_packages)
+            else:
+                raise ValueError("No test impact rule for Cargo.lock change without an owned manifest; no automatic full fallback")
         else:
             for prefix, names in RULES:
                 if path.startswith(prefix):
@@ -161,6 +170,8 @@ def select(paths, *, full=False):
                 for prefix, proof in PROOFS:
                     if path.startswith(prefix):
                         flags[proof] = True
+                        if proof == "native_graph":
+                            add(target("shaar", kind="test", name="native_graph_witness"))
                         owned = [proof]
                         break
             if not owned:

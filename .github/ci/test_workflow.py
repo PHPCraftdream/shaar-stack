@@ -1,7 +1,10 @@
 """Workflow routing contracts for the repository's fixed layout, not a generic YAML parser."""
 
+import hashlib
 from pathlib import Path
 import re
+import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,7 +17,127 @@ def named_steps(text):
             for index, match in enumerate(starts)}
 
 
+def job_blocks(text):
+    starts = list(re.finditer(r"^  ([A-Za-z_][A-Za-z0-9_-]*):\s*$", text, re.MULTILINE))
+    jobs_start = text.find("jobs:\n")
+    return {match[1]: text[match.end():starts[index + 1].start() if index + 1 < len(starts) else len(text)]
+            for index, match in enumerate(starts) if match.start() > jobs_start}
+
+
+def validate_capture_helper(text):
+    required = (
+        'local log_dir="target/native-graph-preparation-logs"',
+        'mkdir -p "$log_dir"',
+        'stdout_log="${log_dir}/${stem}.stdout.log"',
+        'stderr_log="${log_dir}/${stem}.stderr.log"',
+        'status_log="${log_dir}/${stem}.status"',
+        "exec 3>&1 4>&2",
+        "exec 1>&3 2>&4",
+        'wait "$stdout_pid"',
+        'wait "$stderr_pid"',
+        "trap capture_finish EXIT",
+        'printf \'%s\\n\' "$status" > "$status_log"',
+        "if ((status == 0 && tee_status != 0)); then",
+    )
+    for fragment in required:
+        if fragment not in text:
+            raise AssertionError("capture helper is missing required contract: " + fragment)
+
+
+def validate_native_graph_routing(text):
+    jobs = job_blocks(text)
+    manual = jobs.get("native_graph_resolve", "")
+    checks = jobs.get("checks", "")
+    manual_if = next((line for line in manual.splitlines() if line.startswith("    if:")), "")
+    if manual_if != "    if: github.event_name == 'workflow_dispatch' && inputs.native_graph_resolve":
+        raise AssertionError("manual resolver job must be dispatch-input gated")
+    checks_if = next((line for line in checks.splitlines() if line.startswith("    if:")), "")
+    if checks_if != "    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.native_graph_resolve) }}":
+        raise AssertionError("ordinary checks must exclude manual resolver dispatch")
+    prepare = re.search(r"^      - uses: \.\/.github/actions/prepare-sources\n(?P<body>.*?)(?=^      - |\Z)", checks, re.MULTILINE | re.DOTALL)
+    owners = ("product", "dns", "discovery", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license")
+    if not prepare:
+        raise AssertionError("ordinary prepare-sources action is missing")
+    body = prepare["body"]
+    owner_if = next((line for line in body.splitlines() if line.startswith("        if:")), "")
+    if ("fromJSON(needs.plan.outputs.selection).native_graph" not in owner_if
+            or "native_graph_resolve" in owner_if
+            or any("fromJSON(needs.plan.outputs.selection)." + owner not in owner_if for owner in owners)):
+        raise AssertionError("ordinary prepare-sources owner gate is invalid")
+    if 'resolve_only: "true"' not in manual or '"native_graph":true' not in manual:
+        raise AssertionError("manual resolver must select native_graph with resolve_only")
+    if not re.search(r"^      - name: Resolve native graph candidate\n        run: python -I \.github/probes/native-graph/ci.py resolve$", manual, re.MULTILINE):
+        raise AssertionError("manual resolver command is missing")
+    candidate = named_steps(text).get("Preserve native graph candidate evidence", "")
+    verification = named_steps(text).get("Preserve native graph verification receipt", "")
+    future_dev_files = ("target/native-graph-future-dev/Cargo.toml", "target/native-graph-future-dev/Cargo.lock")
+    if any(path not in verification for path in future_dev_files):
+        raise AssertionError("verification artifact must preserve exact future-dev manifest and lock paths")
+    candidate_paths = ("Cargo.lock", "target/native-graph/Cargo.before.lock", "target/native-graph/Cargo.candidate.lock",
+                       "target/native-graph/ci-receipt.json", "target/native-graph/logs/",
+                       "target/native-graph/*.provenance.json")
+    if any(path not in {line.strip() for line in candidate.splitlines()} for path in candidate_paths):
+        raise AssertionError("candidate artifact must preserve exact lock, receipt, logs, and provenance paths")
+    if "target/native-graph-future-dev/" in candidate or "target/native-graph-evidence/" in candidate:
+        raise AssertionError("candidate artifact must not include future-dev or evidence directories")
+    if "if: always()" not in candidate or "if-no-files-found: error" not in candidate:
+        raise AssertionError("candidate artifact must preserve raw logs with fail-closed upload")
+    preparation = named_steps(text).get("Preserve native graph preparation diagnostics", "")
+    if ("if: always()" not in preparation or "target/native-graph-preparation-logs/" not in preparation
+            or "if-no-files-found: error" not in preparation or "name: native-graph-preparation-diagnostics" not in preparation):
+        raise AssertionError("preparation diagnostics require a distinct always-uploaded artifact")
+    if "Cargo.lock" in preparation:
+        raise AssertionError("preparation diagnostics must not fall back to Cargo.lock")
+
+
+def validate_preparation_logs(action):
+    starts = list(re.finditer(r"^    - name: (.+)$", action, re.MULTILINE))
+    steps = {match[1]: action[match.end():starts[index + 1].start() if index + 1 < len(starts) else len(action)]
+             for index, match in enumerate(starts)}
+    expected = {
+        "Prepare native graph source archives": "native-graph",
+        "Prepare reviewed production backend sources": "backend",
+        "Prepare reviewed strict DNS parser dependency": "simple-dns",
+        "Prepare reviewed signaling dependencies and expiry controls": "relay",
+        "Prepare reviewed DNS expansion boundary": "dns",
+        "Prepare reviewed resolver locking boundary": "resolver",
+        "Prepare reviewed Kademlia referral retention": "kad",
+    }
+    if set(steps) != set(expected):
+        raise AssertionError("preparation action must contain the seven logged source preparation steps")
+    for name, stem in expected.items():
+        block = steps[name]
+        if ("set -euo pipefail" not in block or ".github/actions/prepare-sources/capture.sh " + stem not in block):
+            raise AssertionError("source preparation step must capture stdout, stderr, and exact status")
+
+
 class WorkflowTests(unittest.TestCase):
+    def test_workflow_extraction_preserves_exact_commands_and_structural_contract(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertLessEqual(len(text.splitlines()), 700)
+        witness = ROOT / ".github/probes/native-graph/fixture/witness.rs"
+        self.assertEqual(witness.read_text(encoding="utf-8").splitlines()[0], "#![forbid(unsafe_code)]")
+        steps = named_steps(text)
+        for name, script, digest in (
+            ("Verify high-PTO shutdown negative control after production proofs", "protocol_close.sh",
+             "3ab60d371da20ecac726b5989d7a017dcbc7c60bec2f01be5755c3443ac87af1"),
+            ("Diagnose native-after-signaling path lifecycle (Windows only)", "windows_native_lifecycle.sh",
+             "86ee241ef65937721ba083c7c5e7c1aa21c8caf053a77aecc9409595c2a4f257"),
+        ):
+            relative = ".github/probes/iroh-paths/ci/" + script
+            self.assertIn("run: bash " + relative, steps[name])
+            self.assertIn("shell: bash", steps[name])
+            lines = (ROOT / relative).read_text(encoding="utf-8").splitlines(keepends=True)
+            self.assertEqual(lines[0], "#!/usr/bin/env bash\n")
+            self.assertEqual(hashlib.sha256("".join(lines[3:]).encode()).hexdigest(), digest)
+            from test_plan import POLICY
+            impact = POLICY.select([relative])
+            self.assertTrue(impact["selection"]["ci_policy"])
+            self.assertFalse(any(impact["selection"][owner] for owner in POLICY.DOMAINS))
+            self.assertEqual(impact["targets"], [])
+        self.assertIn("matrix.os == 'windows-latest' && fromJSON(needs.plan.outputs.selection).full",
+                      steps["Diagnose native-after-signaling path lifecycle (Windows only)"])
+
     def test_proof_groups_keep_explicit_owner_gates(self):
         steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))
         expected = {
@@ -67,10 +190,98 @@ class WorkflowTests(unittest.TestCase):
         evidence = steps["Preserve mainline lifecycle evidence"]
         self.assertIn("always() && fromJSON(needs.plan.outputs.selection).mainline", evidence)
         self.assertIn("if-no-files-found: error", evidence)
-        prepare = next(step for step in text.split("      - ") if "./.github/actions/prepare-sources" in step)
+        ordinary_checks = text.split("  checks:\n", 1)[1]
+        prepare = next(step for step in ordinary_checks.split("      - ") if "./.github/actions/prepare-sources" in step)
         for owner in ("product", "dns", "discovery", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license"):
             self.assertIn("fromJSON(needs.plan.outputs.selection)." + owner, prepare)
         self.assertNotIn("selection).mainline", prepare)
+        validate_native_graph_routing(text)
+        validate_preparation_logs((ROOT / ".github/actions/prepare-sources/action.yml").read_text(encoding="utf-8"))
+
+    def test_native_graph_routing_rejects_broken_dispatch_and_selection_gates(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        validate_native_graph_routing(text)
+        mutations = (
+            ("if: github.event_name == 'workflow_dispatch' && inputs.native_graph_resolve", "if: always()"),
+            ("if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.native_graph_resolve) }}", "if: always()"),
+            ("selection).product", "selection).not_product"),
+            ('resolve_only: "true"', 'resolve_only: "false"'),
+            ('"native_graph":true', '"native_graph":false'),
+            ("    if: github.event_name == 'workflow_dispatch' && inputs.native_graph_resolve\n", ""),
+            ("    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.native_graph_resolve) }}\n", ""),
+            ('          resolve_only: "true"\n', ""),
+            ("target/native-graph-preparation-logs/", "target/native-graph/"),
+        )
+        for old, new in mutations:
+            with self.subTest(mutation=old):
+                self.assertIn(old, text)
+                with self.assertRaises(AssertionError):
+                    validate_native_graph_routing(text.replace(old, new, 1))
+
+    def test_candidate_evidence_rejects_missing_logs_and_always_upload(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        candidate = named_steps(text)["Preserve native graph candidate evidence"]
+        verification = named_steps(text)["Preserve native graph verification receipt"]
+        self.assertTrue(all(path in verification for path in ("target/native-graph-future-dev/Cargo.toml", "target/native-graph-future-dev/Cargo.lock")))
+        for old, new in (("            Cargo.lock\n", ""), ("target/native-graph/logs/", "target/native-graph/not-logs/"),
+                         ("if: always()", "if: failure()"),
+                         ("if-no-files-found: error", "if-no-files-found: warn"),
+                         ("target/native-graph/Cargo.before.lock", "target/native-graph/*"),
+                         ("target/native-graph/*.provenance.json", "target/native-graph/provenance.json")):
+            with self.subTest(mutation=old):
+                self.assertIn(old, candidate)
+                with self.assertRaises(AssertionError):
+                    validate_native_graph_routing(text.replace(candidate, candidate.replace(old, new, 1), 1))
+
+        for path in ("target/native-graph-future-dev/Cargo.toml", "target/native-graph-evidence/"):
+            with self.subTest(injected_path=path):
+                with self.assertRaises(AssertionError):
+                    validate_native_graph_routing(text.replace(candidate, candidate + "\n          - " + path, 1))
+
+    def test_capture_helper_preserves_logs_on_initial_failure(self):
+        helper = (ROOT / ".github/actions/prepare-sources/capture.sh").resolve().as_posix()
+        with tempfile.TemporaryDirectory() as temporary:
+            for status in (23, 0):
+                with self.subTest(status=status):
+                    script = (
+                        "set -eu; source \"" + helper + "\" test-" + str(status) + "; "
+                        "printf 'stdout message\\n'; printf 'stderr message\\n' >&2; exit " + str(status)
+                    )
+                    result = subprocess.run(["bash", "-c", script], cwd=temporary, capture_output=True, text=True)
+                    log_dir = Path(temporary) / "target/native-graph-preparation-logs"
+                    self.assertEqual(result.returncode, status)
+                    self.assertEqual((log_dir / f"test-{status}.stdout.log").read_text(), "stdout message\n")
+                    self.assertEqual((log_dir / f"test-{status}.stderr.log").read_text(), "stderr message\n")
+                    self.assertEqual((log_dir / f"test-{status}.status").read_text(), f"{status}\n")
+
+    def test_capture_helper_contract_rejects_missing_stderr_wait(self):
+        helper = (ROOT / ".github/actions/prepare-sources/capture.sh").read_text(encoding="utf-8")
+        validate_capture_helper(helper)
+        old = '    wait "$stderr_pid" || tee_status=$?\n'
+        self.assertIn(old, helper)
+        with self.assertRaises(AssertionError):
+            validate_capture_helper(helper.replace(old, "", 1))
+
+    def test_product_source_preparation_diagnostics_contract(self):
+        steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))
+        preparation = steps["Preserve source preparation diagnostics"]
+        self.assertIn("if: always()", preparation)
+        self.assertIn("steps.prepare_sources.outcome != 'skipped'", preparation)
+        self.assertIn("''", preparation)
+        self.assertIn("target/native-graph-preparation-logs/", preparation)
+        self.assertIn("if-no-files-found: error", preparation)
+        self.assertNotIn("Cargo.lock", preparation)
+
+    def test_preparation_logs_reject_missing_capture_call(self):
+        action = (ROOT / ".github/actions/prepare-sources/action.yml").read_text(encoding="utf-8")
+        broken = action.replace("source .github/actions/prepare-sources/capture.sh native-graph\n", "", 1)
+        with self.assertRaises(AssertionError):
+            validate_preparation_logs(broken)
+
+    def test_future_archive_arguments_are_present(self):
+        action = (ROOT / ".github/actions/prepare-sources/action.yml").read_text(encoding="utf-8")
+        self.assertIn("--future-archive target/native-graph-archives/n0-future-0.3.2.crate", action)
+        self.assertIn("--output target/native-graph-archives/n0-future-0.3.2.crate", action)
 
     def test_full_and_targeted_paths_do_not_both_execute(self):
         steps = named_steps(WORKFLOW.read_text(encoding="utf-8"))

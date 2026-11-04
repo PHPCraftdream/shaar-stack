@@ -94,6 +94,33 @@ class RunnerTests(unittest.TestCase):
                     RUN.safe_text(log)
             self.assertNotIn("unsafe fixture output", log.read_text(encoding="utf-8"))
 
+    def test_external_native_witness_requires_exact_registered_source_and_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / "crates/shaar/../../.github/probes/native-graph/fixture/witness.rs"
+            binary = root / "target/debug/deps/native_graph_witness-unit"
+            spec = RUN.POLICY.target("shaar", kind="test", name="native_graph_witness")
+            artifact = {"reason": "compiler-artifact", "profile": {"test": True},
+                        "target": {"kind": ["test"], "name": spec["name"], "src_path": str(source)},
+                        "executable": str(binary)}
+            with patch.object(RUN, "ROOT", root):
+                self.assertEqual(RUN.executable(json.dumps(artifact), spec), binary)
+                for wrong_source in (root / ".github/probes/other/fixture/witness.rs",
+                                     root / "crates/shaar/tests/witness.rs",
+                                     root / "outside/witness.rs"):
+                    wrong = {**artifact, "target": {**artifact["target"], "src_path": str(wrong_source)}}
+                    with self.subTest(source=wrong_source), self.assertRaises(ValueError):
+                        RUN.executable(json.dumps(wrong), spec)
+                for change in ({"package": "shaar-p2p"}, {"kind": "lib"}, {"name": "other"}):
+                    with self.subTest(change=change), self.assertRaises(ValueError):
+                        RUN.executable(json.dumps(artifact), {**spec, **change})
+                outside = {**artifact, "executable": str(root / "outside/binary")}
+                with self.assertRaisesRegex(ValueError, "escaped"):
+                    RUN.executable(json.dumps(outside), spec)
+                second = {**artifact, "executable": str(root / "target/debug/deps/other")}
+                with self.assertRaisesRegex(ValueError, "exactly one"):
+                    RUN.executable(json.dumps(artifact) + "\n" + json.dumps(second), spec)
+
     def test_build_artifact_is_from_exact_selected_target_and_workspace(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -75,6 +75,9 @@ def cargo_target(spec):
 def executable(messages, spec):
     found = set()
     source_root = (ROOT / "crates" / spec["package"]).resolve()
+    external_source = None
+    if (spec["package"], spec["kind"], spec["name"]) == ("shaar", "test", "native_graph_witness"):
+        external_source = (ROOT / ".github/probes/native-graph/fixture/witness.rs").resolve()
     for line in messages.splitlines():
         item = json.loads(line)
         if item.get("reason") != "compiler-artifact" or item.get("profile", {}).get("test") is not True:
@@ -83,7 +86,9 @@ def executable(messages, spec):
         if target.get("kind") != [spec["kind"]] or target.get("name") != spec["name"]:
             continue
         source = Path(target["src_path"]).resolve()
-        if not source.is_relative_to(source_root):
+        if external_source is None and not source.is_relative_to(source_root):
+            continue
+        if external_source is not None and source != external_source:
             continue
         binary = Path(item["executable"]).resolve()
         if not binary.is_relative_to((ROOT / "target").resolve()):
