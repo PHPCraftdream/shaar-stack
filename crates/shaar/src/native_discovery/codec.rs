@@ -128,6 +128,34 @@ impl From<SnapshotError> for DecodeError {
     }
 }
 
+/// Reuse the signed-envelope verifier for an unsalted native mutable item.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P09 actor boundary is not wired yet")
+)]
+pub(super) fn decode_mutable_record(
+    item: &n0_mainline::MutableItem,
+    expected: EndpointId,
+) -> Result<DecodedRecord, DecodeError> {
+    if item.salt().is_some() {
+        return Err(DecodeError::InvalidPacket);
+    }
+    let value = item.value();
+    if value.len() > MAX_DNS_BYTES {
+        return Err(DecodeError::OverLimit);
+    }
+    if item.seq() < 0 {
+        return Err(DecodeError::InvalidSequence);
+    }
+    let mut envelope = [0; SIGNED_HEADER_BYTES + MAX_DNS_BYTES];
+    envelope[..32].copy_from_slice(item.key());
+    envelope[32..96].copy_from_slice(item.signature());
+    envelope[96..SIGNED_HEADER_BYTES].copy_from_slice(&item.seq().to_be_bytes());
+    let end = SIGNED_HEADER_BYTES + value.len();
+    envelope[SIGNED_HEADER_BYTES..end].copy_from_slice(value);
+    decode_record(&envelope[..end], expected)
+}
+
 /// Verify the upstream signed envelope, then enforce this leaf's strict DNS/TXT profile.
 #[cfg_attr(
     not(test),
