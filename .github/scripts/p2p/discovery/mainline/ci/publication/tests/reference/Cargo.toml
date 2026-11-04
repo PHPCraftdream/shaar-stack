@@ -1,0 +1,16 @@
+[package]
+name = "native-record-reference"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[workspace]
+resolver = "3"
+
+[[bin]]
+name = "native-record-reference"
+path = "main.rs"
+
+[dependencies]
+pkarr = { version = "=8.1.0", git = "https://github.com/pubky/pkarr", rev = "f6ae1eb8c41e53a583341cb790db71ab266b9383", default-features = false, features = ["signed_packet"] }

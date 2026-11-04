@@ -14,3 +14,6 @@ python -I .github/scripts/p2p/discovery/mainline/ci/publication/execution/ci.py 
   --archive target/publication-archives/iroh-dns-1.3.0.crate \
   --simple-dns-archive target/publication-archives/simple-dns-0.12.0.crate \
   --evidence target/publication-evidence
+python -I -m unittest discover \
+  -s .github/scripts/p2p/discovery/mainline/ci/publication/tests/reference -p 'test_*.py'
+python -I .github/scripts/p2p/discovery/mainline/ci/publication/tests/reference/ci.py
