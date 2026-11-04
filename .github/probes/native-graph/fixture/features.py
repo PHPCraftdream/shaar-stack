@@ -19,6 +19,10 @@ _SDK_TEST_SOURCE_TRANSITIONS = {
     ("a9ce98ea03cbf9a6dfa63a0676d97dd63a8feb75493b8e7be97a04d763416f09",
      "758a1ca5888acabea6a99ca3580b0405974fb0cd8fb4f81b1cfe2fa7d31c1abc"):
         "cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88",
+    # Same source delta on the Windows runner, whose control tree differs.
+    ("bd0c1843a330d5b9b3255ae2abb5b89007363a49ee13c49b8a98e64c956b1971",
+     "af2aa516670e451abf9eeaf7bf54b3c13b1f43f4ddf264ed840ab4dba33bd425"):
+        "2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a",
 }
 _ADDED = {("iroh-mainline-address-lookup", "0.6.1"), ("iroh-dns", "1.3.0"), ("n0-mainline", "0.7.0"), ("serde_bencode", "0.2.4"), ("n0-future", "0.3.2")}
 _REVIEWED_REGISTRY = {
@@ -36,7 +40,6 @@ _APPROVED_ARCHIVES = {
     "tokio-1.54.1-test-util": "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3",
     "multibase": "7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6",
 }
-
 
 _MULTIBASE_IDENTITY = ("multibase", "0.9.3")
 _MULTIBASE_CHECKSUM = "7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6"
