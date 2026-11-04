@@ -66,6 +66,80 @@ impl LoopbackPeer {
         }
     }
 
+    pub(super) async fn capture_get(&mut self, target: n0_mainline::Id) -> (SocketAddr, Vec<u8>) {
+        loop {
+            let mut packet = [0; MAX_PACKET];
+            let (length, source) = self
+                .socket
+                .recv_from(&mut packet)
+                .await
+                .expect("receive query");
+            let parsed: Value = serde_bencode::from_bytes(&packet[..length]).expect("bounded KRPC");
+            assert_eq!(bytes_field(&parsed, b"y"), Some(b"q".as_slice()));
+            let transaction = bytes_field(&parsed, b"t").expect("transaction id");
+            let query = bytes_field(&parsed, b"q").expect("method");
+            if query == b"get" {
+                let arguments = field(&parsed, b"a").expect("GET arguments");
+                let raw = bytes_field(arguments, b"target").expect("GET target");
+                let actual =
+                    n0_mainline::Id::from(<[u8; 20]>::try_from(raw).expect("target length"));
+                if actual == target {
+                    return (source, transaction.to_vec());
+                }
+            }
+            let kind = match query {
+                b"get" => ReplyKind::Get,
+                b"find_node" => ReplyKind::FindNode,
+                b"ping" => ReplyKind::Ping,
+                _ => panic!("unexpected method while resolving"),
+            };
+            self.socket
+                .send_to(&response(transaction, kind), source)
+                .await
+                .expect("bootstrap reply");
+        }
+    }
+
+    pub(super) async fn reply_empty_get(&self, source: SocketAddr, transaction: &[u8]) {
+        self.socket
+            .send_to(&response(transaction, ReplyKind::Get), source)
+            .await
+            .expect("actual empty GET response");
+    }
+
+    pub(super) async fn reply_get(
+        &self,
+        source: SocketAddr,
+        transaction: &[u8],
+        item: &n0_mainline::MutableItem,
+    ) {
+        let fields = vec![
+            (b"id".as_slice(), Value::Bytes(NODE_ID.to_vec())),
+            (b"token".as_slice(), Value::Bytes(TOKEN.to_vec())),
+            (b"k".as_slice(), Value::Bytes(item.key().to_vec())),
+            (b"sig".as_slice(), Value::Bytes(item.signature().to_vec())),
+            (b"seq".as_slice(), Value::Int(item.seq())),
+            (b"v".as_slice(), Value::Bytes(item.value().to_vec())),
+        ];
+        let packet = encode(&dict([
+            (b"r".as_slice(), dict(fields)),
+            (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
+            (b"y".as_slice(), Value::Bytes(b"r".to_vec())),
+        ]));
+        self.socket
+            .send_to(&packet, source)
+            .await
+            .expect("actual GET response");
+    }
+
+    pub(super) async fn serve_record(&mut self, item: &n0_mainline::MutableItem) {
+        let target = n0_mainline::MutableItem::target_from_key(item.key(), None);
+        loop {
+            let (source, transaction) = self.capture_get(target).await;
+            self.reply_get(source, &transaction, item).await;
+        }
+    }
+
     pub(super) async fn serve_until_put(&mut self) -> CapturedPut {
         let captured = self.serve_puts(1).await;
         self.acknowledge_next().await;

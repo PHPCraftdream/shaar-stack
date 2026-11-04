@@ -10,6 +10,8 @@ mod fixture;
 mod lifetime;
 #[path = "tests/publication.rs"]
 mod publication;
+#[path = "tests/resolution.rs"]
+mod resolution;
 
 use super::*;
 use crate::native_discovery::runtime::clock::ClockSample;

@@ -134,6 +134,11 @@ pub(super) async fn publisher_loop(
                     current.revoked = true;
                     replace_queued(&mut queued, snapshot, deadline, reply);
                 }
+                Event::Command(Some(Command::Sample(deadline, reply))) => {
+                    let result = sample_clock(&mut state, &clock, &mut terminal, deadline);
+                    current.revoked |= terminal;
+                    let _ = reply.send(result);
+                }
                 Event::Command(Some(Command::Withdraw(reply))) => {
                     revoke(&mut state, &mut terminal);
                     current.revoked = true;
@@ -330,6 +335,9 @@ pub(super) async fn publisher_loop(
                     revoke(&mut state, &mut terminal);
                     replace_queued(&mut queued, snapshot, deadline, reply);
                 }
+                Some(Command::Sample(deadline, reply)) => {
+                    let _ = reply.send(sample_clock(&mut state, &clock, &mut terminal, deadline));
+                }
                 Some(Command::Withdraw(reply)) => {
                     revoke(&mut state, &mut terminal);
                     let _ = reply.send(if terminal { Err(RuntimeError::Closed) } else { Ok(()) });
@@ -353,6 +361,29 @@ pub(super) async fn publisher_loop(
             }
         }
     }
+}
+
+fn sample_clock(
+    state: &mut PublisherState,
+    clock: &Clock,
+    terminal: &mut bool,
+    deadline: tokio::time::Instant,
+) -> Result<super::super::clock::ClockSample, RuntimeError> {
+    if expired(deadline) {
+        return Err(RuntimeError::DeadlineExceeded);
+    }
+    if *terminal {
+        return Err(RuntimeError::Closed);
+    }
+    let result = clock.sample().and_then(|sample| {
+        state.check_clock(sample).map_err(RuntimeError::Publish)?;
+        Ok(sample)
+    });
+    if result.is_err() {
+        revoke(state, terminal);
+        *terminal = true;
+    }
+    result
 }
 
 async fn work_event(work: &mut Work) -> Event {

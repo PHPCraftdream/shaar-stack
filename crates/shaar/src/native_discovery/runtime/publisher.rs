@@ -146,7 +146,7 @@ impl PublisherState {
         self.active.is_some() && self.generation == generation
     }
 
-    fn check_clock(&mut self, sample: ClockSample) -> Result<(), PublishError> {
+    pub(super) fn check_clock(&mut self, sample: ClockSample) -> Result<(), PublishError> {
         if self.clock_fault {
             return Err(PublishError::ClockFault);
         }

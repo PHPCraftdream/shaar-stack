@@ -11,10 +11,11 @@ use n0_mainline::{MutableItem, OwnedDht, OwnedPutAdmissionError, OwnedPutError};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use self::resolver::{ResolveError, ResolvedAddresses, ResolverState};
 use super::super::address::SnapshotError;
-use super::clock::Clock;
 #[cfg(test)]
 use super::clock::TestClock;
+use super::clock::{Clock, ClockSample};
 #[cfg(test)]
 use super::publisher::PublisherState;
 use super::publisher::{PublishError, SignedSnapshot};
@@ -28,6 +29,7 @@ const COMMANDS: usize = 8;
 #[derive(Clone, Debug)]
 pub(in crate::native_discovery) enum RuntimeError {
     Publish(PublishError),
+    Resolve(ResolveError),
     Put(OwnedPutError),
     PutAdmission(OwnedPutAdmissionError),
     Resource(n0_mainline::ResourceError),
@@ -45,12 +47,17 @@ pub(super) enum Command {
         oneshot::Sender<Result<(), RuntimeError>>,
     ),
     Withdraw(oneshot::Sender<Result<(), RuntimeError>>),
+    Sample(
+        tokio::time::Instant,
+        oneshot::Sender<Result<ClockSample, RuntimeError>>,
+    ),
     #[cfg(test)]
     Barrier(oneshot::Sender<super::publisher::CleanupReceipt>),
 }
 
-#[path = "publisher/owner_loop.rs"]
+#[path = "../publisher/owner_loop.rs"]
 mod loop_state;
+mod resolver;
 
 pub(in crate::native_discovery) struct RuntimeOwner {
     commands: mpsc::Sender<Command>,
@@ -58,6 +65,7 @@ pub(in crate::native_discovery) struct RuntimeOwner {
     publisher: Option<JoinHandle<()>>,
     dht: Option<OwnedDht>,
     close_error: Option<RuntimeError>,
+    resolver: ResolverState,
 }
 
 impl RuntimeOwner {
@@ -104,6 +112,7 @@ impl RuntimeOwner {
             publisher: Some(publisher),
             dht: Some(dht),
             close_error: None,
+            resolver: ResolverState::new(),
         })
     }
 
@@ -138,6 +147,74 @@ impl RuntimeOwner {
     ) -> Result<(), RuntimeError> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         self.replace_until(snapshot, deadline).await
+    }
+
+    /// cancel-safe: NO — dropping GET requests backend cleanup; no detached cache writer exists.
+    pub(in crate::native_discovery) async fn resolve_until(
+        &mut self,
+        key: EndpointId,
+        deadline: tokio::time::Instant,
+    ) -> Result<ResolvedAddresses, RuntimeError> {
+        let deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(10));
+        let sample = self.sample_until(deadline).await?;
+        if let Some(cached) = self
+            .resolver
+            .begin(key, sample)
+            .map_err(RuntimeError::Resolve)?
+        {
+            if tokio::time::Instant::now() >= deadline {
+                return Err(RuntimeError::DeadlineExceeded);
+            }
+            return Ok(cached);
+        }
+        let handle = self.dht.as_ref().ok_or(RuntimeError::Closed)?.handle();
+        let target = MutableItem::target_from_key(key.as_bytes(), None);
+        let completion = handle
+            .resolve_mutable_until(target, deadline)
+            .await
+            .map_err(|error| match error {
+                n0_mainline::ResourceError::DeadlineExceeded => RuntimeError::DeadlineExceeded,
+                other => RuntimeError::Resource(other),
+            })?;
+        let sample = self.sample_until(deadline).await?;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(RuntimeError::DeadlineExceeded);
+        }
+        self.resolver
+            .complete(key, completion, sample)
+            .map_err(RuntimeError::Resolve)
+    }
+
+    /// cancel-safe: NO — a proven clock fault remains terminal and revokes publication.
+    async fn sample_until(
+        &self,
+        deadline: tokio::time::Instant,
+    ) -> Result<ClockSample, RuntimeError> {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(RuntimeError::DeadlineExceeded);
+        }
+        let (reply, response) = oneshot::channel();
+        tokio::time::timeout_at(
+            deadline,
+            self.commands.send(Command::Sample(deadline, reply)),
+        )
+        .await
+        .map_err(|_| RuntimeError::DeadlineExceeded)?
+        .map_err(|_| RuntimeError::Closed)?;
+        let result = tokio::time::timeout_at(deadline, response)
+            .await
+            .map_err(|_| RuntimeError::DeadlineExceeded)?
+            .map_err(|_| RuntimeError::Closed)?;
+        if matches!(
+            result,
+            Err(RuntimeError::Clock | RuntimeError::Publish(PublishError::ClockFault))
+        ) {
+            // The barrier cannot acknowledge until any revoked PUT has cleaned up.
+            let _ = tokio::time::timeout_at(deadline, self.withdraw())
+                .await
+                .map_err(|_| RuntimeError::DeadlineExceeded)?;
+        }
+        result
     }
 
     #[cfg(test)]
@@ -228,7 +305,7 @@ fn bounded_replace(snapshot: Vec<TransportAddr>) -> Result<Vec<TransportAddr>, S
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "../tests.rs"]
 mod tests;
 
 pub(super) fn to_mutable(packet: &SignedSnapshot) -> Result<MutableItem, RuntimeError> {

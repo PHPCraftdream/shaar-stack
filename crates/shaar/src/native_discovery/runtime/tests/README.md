@@ -74,3 +74,27 @@ separate obligations, without a frozen inventory. Independent
 record evidence and SDK regressions are already accepted under #263/#261; they do
 not prove this publisher's lifecycle. Full source-bound integration and production
 caller wiring remain #253. `Clean` means cleanup confirmed; `Unknown` is terminal.
+
+## Private resolver composition under #253
+
+The private owner now resolves through its actual retained DHT handle using the
+caller's original absolute deadline. The same publisher task serializes clock
+samples for publication and resolution; a proven rollback revokes publication
+and remains terminal. Resolution currently borrows the owner exclusively, so
+SDK GETs are serialized without a detached worker or a cache-write race after
+caller cancellation. This private seam is not the final startup/TLS integration.
+
+Only an actual opaque backend completion can mark the handoff as network-derived.
+Its result lease remains owned by the delivered SDK result, not merely until DNS
+decoding ends. Existing key authorization, 64 lifetime slots, signed freshness,
+equal-sequence conflict and cache rules remain in `PolicyOwner`. The bounded
+field adapter invokes the existing verifier; no custom crypto/DNS/DHT is added.
+
+`tests/resolution.rs` authors real loopback GET cases for cache expiry, late
+responses after cancellation, the original deadline, shared terminal clock
+faults, eight delivered result leases and recovery, and empty/invalid records.
+The ninth result waits in actual backend admission: the expected failure is the
+original deadline, not a fabricated immediate `ResultLimit` receipt. These new
+cases have not yet run. The previously reviewed `eb1c288` CI passed 80 native
+cases on each OS, including both field-adapter regressions; it predates this
+resolver source. No P09, startup/TLS or final normal-graph acceptance is claimed.
