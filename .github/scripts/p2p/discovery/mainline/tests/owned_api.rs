@@ -330,3 +330,108 @@ async fn owned_api_put_accepts_maximum_value_size() {
     drop(bootstrap);
     owner.close().await.expect("join owned actor");
 }
+
+#[tokio::test]
+async fn owned_api_get_expired_absolute_deadline_never_enqueues() {
+    let (bootstrap, bootstrap_addr) = loopback_bootstrap();
+    bootstrap.set_nonblocking(true).expect("nonblocking peer");
+    let mut owner = OwnedDht::new(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), &[bootstrap_addr])
+        .expect("owned loopback DHT");
+    let handle = owner.handle();
+    assert!(matches!(
+        handle
+            .resolve_mutable_until(Id::random(), tokio::time::Instant::now())
+            .await,
+        Err(ResourceError::DeadlineExceeded)
+    ));
+    let mut bytes = [0; 2048];
+    assert_eq!(
+        bootstrap
+            .recv_from(&mut bytes)
+            .expect_err("expired GET sent no packet")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    owner.close().await.expect("actual actor joined");
+}
+
+#[tokio::test(start_paused = true)]
+async fn owned_api_get_original_deadline_precedes_budget_admission_after_waiting() {
+    for elapsed in [0, 3] {
+        let (bootstrap, bootstrap_addr) = loopback_bootstrap();
+        let mut owner = OwnedDht::new(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), &[bootstrap_addr])
+            .expect("owned loopback DHT");
+        let handle = owner.handle();
+        let entry = tokio::time::Instant::now();
+        let mut admissions: Vec<_> = (0..24)
+            .map(|index| {
+                handle
+                    .put_mutable_until(mutable_item(300 + index), entry + Duration::from_secs(10))
+                    .expect("retain actual request budget before polling")
+            })
+            .collect();
+        let mut request = Box::pin(
+            handle.resolve_mutable_until(Id::random(), entry + Duration::from_secs(elapsed)),
+        );
+        if elapsed != 0 {
+            tokio::time::advance(Duration::from_secs(elapsed)).await;
+        }
+        std::future::poll_fn(|cx| {
+            match request.as_mut().poll(cx) {
+                std::task::Poll::Ready(Err(ResourceError::DeadlineExceeded)) => {}
+                other => panic!("original deadline must precede full-budget admission: {other:?}"),
+            }
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(request);
+        for admission in &mut admissions {
+            assert_eq!(
+                admission.cancel_and_wait().await,
+                n0_mainline::OwnedPutCleanup::Clean
+            );
+        }
+        drop(bootstrap);
+        owner.close().await.expect("actual actor joined");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn owned_api_get_short_and_far_future_deadlines_keep_the_effective_bound() {
+    for (requested, effective) in [(3, 3), (3600, 10)] {
+        let (bootstrap, bootstrap_addr) = loopback_bootstrap();
+        let mut owner = OwnedDht::new(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), &[bootstrap_addr])
+            .expect("owned loopback DHT");
+        let handle = owner.handle();
+        let local = handle.info().await.expect("actual actor info").local_addr();
+        let entry = tokio::time::Instant::now();
+        let mut request = Box::pin(
+            handle.resolve_mutable_until(Id::random(), entry + Duration::from_secs(requested)),
+        );
+        std::future::poll_fn(|cx| {
+            assert!(
+                request.as_mut().poll(cx).is_pending(),
+                "GET admission is pending"
+            );
+            std::task::Poll::Ready(())
+        })
+        .await;
+        tokio::time::advance(Duration::from_secs(effective)).await;
+        std::future::poll_fn(|cx| {
+            match request.as_mut().poll(cx) {
+                std::task::Poll::Ready(Err(ResourceError::DeadlineExceeded)) => {}
+                other => panic!("GET must expire at its effective original bound: {other:?}"),
+            }
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert_eq!(
+            tokio::time::Instant::now(),
+            entry + Duration::from_secs(effective)
+        );
+        drop(request);
+        drop(bootstrap);
+        owner.close().await.expect("actual actor joined");
+        drop(UdpSocket::bind(local).expect("joined actor released its real socket"));
+    }
+}

@@ -43,14 +43,33 @@ impl OwnedDhtHandle {
     }
 
     /// Resolve a mutable target and return its network-completion receipt.
+    /// cancel-safe: NO — cancellation requests actor cleanup but does not join it.
     pub async fn resolve_mutable(
         &self,
         target: crate::Id,
     ) -> Result<OwnedQueryCompletion, ResourceError> {
+        self.resolve_mutable_until(
+            target,
+            tokio::time::Instant::now() + Duration::from_secs(10),
+        )
+        .await
+    }
+
+    /// Use the caller's absolute deadline, capped at ten seconds from execution entry.
+    /// cancel-safe: NO — cancellation requests actor cleanup but does not join it.
+    pub async fn resolve_mutable_until(
+        &self,
+        target: crate::Id,
+        deadline: tokio::time::Instant,
+    ) -> Result<OwnedQueryCompletion, ResourceError> {
+        let entry = tokio::time::Instant::now();
         if let Some(error) = self.failure.get() {
             return Err(*error);
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let deadline = deadline.min(entry + Duration::from_secs(10));
+        if tokio::time::Instant::now() >= deadline {
+            return Err(ResourceError::DeadlineExceeded);
+        }
         let request_lease = self
             .request_budget
             .acquire()
