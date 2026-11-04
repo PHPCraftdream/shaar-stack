@@ -57,7 +57,10 @@ mod tests {
     fn fixed_reference_is_deterministic_and_verifies() {
         let first = signed();
         assert_eq!(first.as_bytes(), signed().as_bytes());
-        assert!(SignedPacket::from_bytes(first.as_bytes()).is_ok());
+        assert!(
+            SignedPacket::from_relay_payload(&first.public_key(), &first.to_relay_payload())
+                .is_ok()
+        );
         assert_eq!(&first.as_bytes()[..32], &PUBLIC_KEY);
         assert_eq!(&first.as_bytes()[96..104], &TIMESTAMP.to_be_bytes());
         assert!((105..=1104).contains(&first.as_bytes().len()));
@@ -66,19 +69,27 @@ mod tests {
     #[test]
     fn key_signature_timestamp_and_dns_tampering_are_rejected() {
         let packet = signed();
-        for index in [0, 32, 96, 104, packet.as_bytes().len() - 1] {
-            let mut altered = packet.as_bytes().to_vec();
+        let payload = packet.to_relay_payload();
+        let other = Keypair::from_secret_key(&[0x42; 32]).public_key();
+        assert!(SignedPacket::from_relay_payload(&other, &payload).is_err());
+        for index in [0, 64, 72, payload.len() - 1] {
+            let mut altered = payload.to_vec();
             altered[index] ^= 1;
-            assert!(SignedPacket::from_bytes(&altered.into()).is_err());
+            assert!(
+                SignedPacket::from_relay_payload(&packet.public_key(), &altered.into()).is_err()
+            );
         }
     }
 
     #[test]
     fn empty_and_truncated_envelopes_are_rejected() {
         let packet = signed();
-        for length in [0, 31, 32, 95, 96, 103, 104, packet.as_bytes().len() - 1] {
-            let truncated = packet.as_bytes()[..length].to_vec();
-            assert!(SignedPacket::from_bytes(&truncated.into()).is_err());
+        let payload = packet.to_relay_payload();
+        for length in [0, 31, 32, 63, 64, 71, 72, payload.len() - 1] {
+            let truncated = payload[..length].to_vec();
+            assert!(
+                SignedPacket::from_relay_payload(&packet.public_key(), &truncated.into()).is_err()
+            );
         }
     }
 }
