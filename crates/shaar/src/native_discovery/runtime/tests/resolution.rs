@@ -337,3 +337,55 @@ async fn real_empty_get_is_a_cache_miss_and_signed_invalid_profile_cannot_poison
         .await
         .expect("actual joins after empty and invalid records");
 }
+
+#[tokio::test]
+async fn completed_real_get_cannot_commit_after_the_original_handoff_deadline() {
+    use crate::native_discovery::runtime::clock::ClockSample;
+    use crate::native_discovery::runtime::owner::resolver::ResolveError;
+
+    let (mut peer, mut owner, _) = setup().await;
+    let item = record(0x7a, WALL);
+    let key = iroh_base::EndpointId::from_bytes(item.key()).expect("key");
+    let target = MutableItem::target_from_key(item.key(), None);
+    let handle = owner.dht_handle().expect("actual actor handle");
+    let completion = tokio::select! {
+        result = handle.resolve_mutable(target) => result.expect("actual backend completion"),
+        _ = peer.serve_record(&item) => unreachable!("serve until completion"),
+    };
+    assert!(completion.network_completed());
+    assert!(!completion.items().is_empty());
+    let sample = ClockSample {
+        wall_us: WALL,
+        monotonic_before_us: 0,
+        monotonic_after_us: 0,
+    };
+    assert!(
+        owner
+            .resolver
+            .begin(key, sample)
+            .expect("admit expected key")
+            .is_none()
+    );
+    assert!(matches!(
+        owner
+            .resolver
+            .complete(key, completion, sample, Instant::now()),
+        Err(ResolveError::DeadlineExceeded)
+    ));
+
+    let mut request = Box::pin(owner.resolve_until(key, Instant::now() + Duration::from_secs(10)));
+    let (source, transaction) = tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::select! {
+            held = peer.capture_get(target) => held,
+            result = &mut request => panic!("expired handoff populated usable cache: {result:?}"),
+        }
+    })
+    .await
+    .expect("fresh network query required");
+    peer.reply_get(source, &transaction, &item).await;
+    drop(request.await.expect("fresh response accepted"));
+    owner
+        .close()
+        .await
+        .expect("actual joins after rejected handoff");
+}

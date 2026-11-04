@@ -17,6 +17,7 @@ pub(in crate::native_discovery) enum ResolveError {
     Policy(RecordError),
     Decode(DecodeError),
     NoNetworkCompletion,
+    DeadlineExceeded,
 }
 
 #[derive(Debug)]
@@ -78,6 +79,7 @@ impl ResolverState {
         key: EndpointId,
         completion: OwnedQueryCompletion,
         sample: ClockSample,
+        deadline: tokio::time::Instant,
     ) -> Result<ResolvedAddresses, ResolveError> {
         if !completion.network_completed() {
             return Err(ResolveError::NoNetworkCompletion);
@@ -94,6 +96,10 @@ impl ResolverState {
                     .map_err(ResolveError::Decode)
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // Verification time belongs to the original caller budget too.
+        if tokio::time::Instant::now() >= deadline {
+            return Err(ResolveError::DeadlineExceeded);
+        }
         let query = CompletedQuery::new(QuerySource::Network, policy_clock(sample), records);
         let addresses = self
             .policy

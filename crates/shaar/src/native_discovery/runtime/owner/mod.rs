@@ -181,8 +181,11 @@ impl RuntimeOwner {
             return Err(RuntimeError::DeadlineExceeded);
         }
         self.resolver
-            .complete(key, completion, sample)
-            .map_err(RuntimeError::Resolve)
+            .complete(key, completion, sample, deadline)
+            .map_err(|error| match error {
+                ResolveError::DeadlineExceeded => RuntimeError::DeadlineExceeded,
+                other => RuntimeError::Resolve(other),
+            })
     }
 
     /// cancel-safe: NO — a proven clock fault remains terminal and revokes publication.
