@@ -13,7 +13,9 @@ use tokio::sync::{mpsc, oneshot};
 use super::super::super::address::SnapshotError;
 use super::super::clock::Clock;
 use super::super::owner::{Command, RuntimeError, to_mutable};
-use super::super::publisher::{CleanupReceipt, PublishError, PublisherState, SignedSnapshot};
+#[cfg(test)]
+use super::super::publisher::CleanupReceipt;
+use super::super::publisher::{PublishError, PublisherState, SignedSnapshot};
 use crate::identity::Identity;
 use iroh_base::{EndpointId, TransportAddr};
 
@@ -108,9 +110,7 @@ pub(super) async fn publisher_loop(
                         &mut state,
                         &identity,
                         &handle,
-                        snapshot,
-                        deadline,
-                        reply,
+                        (snapshot, deadline, reply),
                         &mut timer,
                         &mut terminal,
                         &clock,
@@ -274,9 +274,7 @@ pub(super) async fn publisher_loop(
                                 &mut state,
                                 &identity,
                                 &handle,
-                                snapshot,
-                                deadline,
-                                reply,
+                                (snapshot, deadline, reply),
                                 &mut timer,
                                 &mut terminal,
                                 &clock,
@@ -313,9 +311,7 @@ pub(super) async fn publisher_loop(
                 &mut state,
                 &identity,
                 &handle,
-                snapshot,
-                deadline,
-                reply,
+                (snapshot, deadline, reply),
                 &mut timer,
                 &mut terminal,
                 &clock,
@@ -485,13 +481,12 @@ fn make_replacement(
     state: &mut PublisherState,
     identity: &Identity,
     handle: &OwnedDhtHandle,
-    snapshot: Result<Vec<TransportAddr>, SnapshotError>,
-    deadline: tokio::time::Instant,
-    reply: oneshot::Sender<Result<(), RuntimeError>>,
+    request: Queued,
     timer: &mut tokio::time::Interval,
     terminal: &mut bool,
     clock: &Clock,
 ) -> Option<Flight> {
+    let (snapshot, deadline, reply) = request;
     if reply.is_closed() {
         revoke(state, terminal);
         return None;
