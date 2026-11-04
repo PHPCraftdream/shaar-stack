@@ -15,6 +15,10 @@ _SDK_TEST_SOURCE_TRANSITIONS = {
     ("e2fe4d5ff2a65b45848bcc128af2ef474ad9c836374763353d532a9d15f042a5",
      "c0fbceaea9b9df00f45dffd55bd2057c9e549a14c1e6e5c956ef1b1c88aefde6"):
         "2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a",
+    # Unwired private native runtime added to shaar/src since the control; no dependency edge changes.
+    ("a9ce98ea03cbf9a6dfa63a0676d97dd63a8feb75493b8e7be97a04d763416f09",
+     "758a1ca5888acabea6a99ca3580b0405974fb0cd8fb4f81b1cfe2fa7d31c1abc"):
+        "cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88",
 }
 _ADDED = {("iroh-mainline-address-lookup", "0.6.1"), ("iroh-dns", "1.3.0"), ("n0-mainline", "0.7.0"), ("serde_bencode", "0.2.4"), ("n0-future", "0.3.2")}
 _REVIEWED_REGISTRY = {
