@@ -154,7 +154,9 @@ class PolicyTests(unittest.TestCase):
 
     def test_native_discovery_cumulative_repair_keeps_each_case_obligation(self):
         paths = ["crates/shaar/src/native_discovery/tests/address.rs",
-                 "crates/shaar/src/native_discovery/tests/codec.rs"]
+                 "crates/shaar/src/native_discovery/tests/codec.rs",
+                 "crates/shaar/src/native_discovery/tests/codec/mod.rs",
+                 "crates/shaar/src/native_discovery/tests/codec/mutable.rs"]
         result = POLICY.select(paths)
         self.assertEqual(result["targets"], [POLICY.target("shaar", ("native_discovery::",))])
         self.assertEqual(result["suites"], ["native-discovery"])

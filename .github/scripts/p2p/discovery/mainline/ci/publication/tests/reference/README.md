@@ -55,7 +55,7 @@ All four runs produced the same 206-byte `native-record.bin`, SHA-256
 Consumed source, generator, lock, command-log and record commitments were checked
 independently; this is not a registry-equivalence or legal-clearance claim.
 
-The frozen literal in `crates/shaar/src/native_discovery/tests/codec.rs` must be
+The frozen literal in `crates/shaar/src/native_discovery/tests/codec/mod.rs` must be
 copied from those authenticated artifact bytes, never reconstructed with the SDK
 encoder. The existing decoder must accept its expected RFC 8032 public key,
 sequence/timestamp 1700000000000000 and exact address `127.0.0.1:9000`, retain the
