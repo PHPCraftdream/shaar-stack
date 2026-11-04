@@ -28,6 +28,8 @@ MAX_TOTAL = 4 * 1024 * 1024
 FUTURE_SHA = "e2ab99dfb861450e68853d34ae665243a88b8c493d01ba957321a1e9b2312bbe"
 FUTURE_TOP = "n0-future-0.3.2"
 FUTURE_TARGET = 'cfg(not(all(target_family = "wasm", target_os = "unknown")))'
+MULTIBASE_SHA = "7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6"
+MULTIBASE_TOP = "multibase-0.9.3"
 
 
 def sha(data: bytes) -> str:
@@ -333,20 +335,29 @@ def build_expected(archives: dict[str, Path], modules: dict[str, object]):
     modules["dns"].reverse(dns, dns_changed)
     dns_prepared = dict(dns)
     dns_prepared.update(dns_changed)
+    multibase = modules["multibase"].archive_files(archives["multibase"])
+    multibase_changed = modules["multibase"].transform(multibase)
+    if modules["multibase"].reverse(multibase, multibase_changed) != multibase:
+        raise ValueError("multibase reverse check failed")
+    multibase_prepared = dict(multibase)
+    multibase_prepared.update(multibase_changed)
     return {"adapter": ("adapter", adapter, adapter_prepared, ADAPTER_SHA),
             "future": ("n0-future-0.3.2", future, future_prepared, FUTURE_SHA),
             "mainline": ("n0-mainline-0.7.0", mainline, mainline_prepared, modules["mainline"].ARCHIVE_SHA256),
             "bencode": ("serde_bencode-0.2.4", bencode, bencode_prepared, modules["bencode"].ARCHIVE_SHA256),
-            "dns": ("iroh-dns-1.3.0", dns, dns_prepared, modules["dns"].ARCHIVE_SHA256)}
+            "dns": ("iroh-dns-1.3.0", dns, dns_prepared, modules["dns"].ARCHIVE_SHA256),
+            "multibase": (MULTIBASE_TOP, multibase, multibase_prepared, MULTIBASE_SHA)}
 
 
 def verify_all(archives: dict[str, Path], destination: Path) -> dict[str, Path]:
     mainline_path = REPO / ".github/scripts/p2p/discovery/mainline/prepare.py"
     bencode_path = REPO / ".github/scripts/p2p/discovery/mainline/ci/bencode/prepare.py"
     dns_path = REPO / ".github/scripts/p2p/discovery/mainline/ci/publication/prepare.py"
+    multibase_path = REPO / ".github/probes/native-graph-multibase/prepare.py"
     modules = {"mainline": fixed_module("mainline", mainline_path),
                "bencode": fixed_module("bencode", bencode_path),
-               "dns": fixed_module("dns", dns_path)}
+               "dns": fixed_module("dns", dns_path),
+               "multibase": fixed_module("multibase", multibase_path)}
     expected = build_expected(archives, modules)
     roots: dict[str, Path] = {}
     for name, (relative, original, prepared, archive_sha) in expected.items():
@@ -370,9 +381,14 @@ def verify_all(archives: dict[str, Path], destination: Path) -> dict[str, Path]:
         elif name == "bencode":
             recipe = recipe_map(modules[name]); source = {"kind": "registry-archive", "archive_sha256": archive_sha}
             package = "serde_bencode"; version = "0.2.4"
-        else:
+        elif name == "dns":
             recipe = recipe_map(modules[name]); source = {"kind": "registry-archive", "archive_sha256": archive_sha}
             package = "iroh-dns"; version = "1.3.0"
+        elif name == "multibase":
+            recipe = recipe_map(modules[name]); source = {"kind": "registry-archive", "archive_sha256": archive_sha}
+            package = "multibase"; version = "0.9.3"
+        else:
+            raise ValueError(f"unexpected prepared package: {name}")
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         changed = sorted(name for name in prepared if original.get(name) != prepared[name])
         expected_receipt = {"package": package, "version": version, "source": source,
@@ -390,7 +406,8 @@ def prepare_all(archives: dict[str, Path], destination: Path) -> dict[str, Path]
         raise ValueError("output root must be new and parent must exist")
     paths = {"mainline": REPO / ".github/scripts/p2p/discovery/mainline/prepare.py",
              "bencode": REPO / ".github/scripts/p2p/discovery/mainline/ci/bencode/prepare.py",
-             "dns": REPO / ".github/scripts/p2p/discovery/mainline/ci/publication/prepare.py"}
+             "dns": REPO / ".github/scripts/p2p/discovery/mainline/ci/publication/prepare.py",
+             "multibase": REPO / ".github/probes/native-graph-multibase/prepare.py"}
     modules = {name: fixed_module(name, path) for name, path in paths.items()}
     expected = build_expected(archives, modules)
     destination.mkdir()
@@ -410,7 +427,7 @@ def prepare_all(archives: dict[str, Path], destination: Path) -> dict[str, Path]
                 version = "0.3.2"
             else:
                 recipe = recipe_map(modules[name]); source = {"kind": "registry-archive", "archive_sha256": archive_sha}
-                package, version = {"mainline": ("n0-mainline", "0.7.0"), "bencode": ("serde_bencode", "0.2.4"), "dns": ("iroh-dns", "1.3.0")}[name]
+                package, version = {"mainline": ("n0-mainline", "0.7.0"), "bencode": ("serde_bencode", "0.2.4"), "dns": ("iroh-dns", "1.3.0"), "multibase": ("multibase", "0.9.3")}[name]
             receipt = {"package": package, "version": version, "source": source,
                        "archive_sha256": archive_sha, "recipe_files": recipe,
                        "original_files": hashes(original), "prepared_files": hashes(prepared),
@@ -594,11 +611,11 @@ def cargo_output_aliases(unit, artifact, package, target_dir, host, root_manifes
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("adapter", "mainline", "bencode", "dns", "future"):
+    for name in ("adapter", "mainline", "bencode", "dns", "future", "multibase"):
         parser.add_argument("--" + name + "-archive", type=Path, required=True)
     parser.add_argument("--destination", type=Path, required=True)
     args = parser.parse_args()
-    names = ("adapter", "mainline", "bencode", "dns", "future")
+    names = ("adapter", "mainline", "bencode", "dns", "future", "multibase")
     roots = prepare_all({name: getattr(args, name + "_archive") for name in names}, args.destination)
     for name, root in roots.items():
         print(f"{name}={root}")

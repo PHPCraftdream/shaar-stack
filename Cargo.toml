@@ -27,6 +27,7 @@ n0-mainline = { path = "target/native-graph/n0-mainline-0.7.0" }
 n0-future = { path = "target/native-graph/n0-future-0.3.2" }
 serde_bencode = { path = "target/native-graph/serde_bencode-0.2.4" }
 iroh-dns = { path = "target/native-graph/iroh-dns-1.3.0" }
+multibase = { path = "target/native-graph/multibase-0.9.3" }
 libp2p-swarm = { path = "target/p2p/swarm/libp2p-swarm-0.48.0" }
 noq-proto = { path = "target/backend/noq-proto/noq-proto-1.3.0" }
 iroh = { path = "target/backend/iroh/iroh-1.3.0" }

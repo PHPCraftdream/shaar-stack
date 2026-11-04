@@ -88,12 +88,13 @@ class DependencyLicenseTests(unittest.TestCase):
             "libp2p-kad 0.49.0 path+file:///work/target/p2p/kad/libp2p-kad-0.49.0",
             "libp2p-relay 0.22.0 path+file:///work/target/p2p/relay/libp2p-relay-0.22.0",
             "libp2p-swarm 0.48.0 path+file:///work/target/p2p/swarm/libp2p-swarm-0.48.0",
+            "multibase 0.9.3 path+file:///work/target/native-graph/multibase-0.9.3",
         ]
         data = {item: {"licenses": ["MIT"]} for item in prepared}
         data[atto] = {"licenses": ["MPL-2.0"]}
         raw = json.dumps(data).encode()
         summary = probe.summarize(raw)
-        self.assertEqual(summary["package_count"], 9)
+        self.assertEqual(summary["package_count"], 10)
         self.assertEqual(summary["selected"]["iroh"], [iroh])
         self.assertEqual(summary["selected"]["attohttpc"], [atto])
         with mock.patch.object(probe, "MAX_BYTES", 1):
@@ -125,6 +126,10 @@ class DependencyLicenseTests(unittest.TestCase):
         ambiguous["iroh 1.3.0 registry+https://example.invalid/index"] = {"licenses": ["MIT"]}
         with self.assertRaisesRegex(ValueError, "missing or ambiguous"):
             probe.summarize(json.dumps(ambiguous).encode())
+        forbidden = dict(data)
+        forbidden["base256emoji 1.0.2 registry+https://example.invalid/index"] = {"licenses": ["MIT"]}
+        with self.assertRaisesRegex(ValueError, "removed package present"):
+            probe.summarize(json.dumps(forbidden).encode())
 
     def test_list_probe_rejects_graph_policy_drift(self):
         policy = b'[graph]\nall-features = true\n[licenses]\ninclude-dev = true\ninclude-build = true\n'

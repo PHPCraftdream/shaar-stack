@@ -78,6 +78,7 @@ RULES = (
 )
 PROOFS = (
     (".github/probes/native-graph-proof/", "native_graph"),
+    (".github/probes/native-graph-multibase/", "native_graph"),
     (".github/probes/native-graph/", "native_graph"),
     (".github/probes/iroh-paths/carrier/", "carrier_frames"),
     (".github/probes/iroh-paths/gate/bridge/support/packet_identity.py", "carrier_frames"),
@@ -156,6 +157,11 @@ def select(paths, *, full=False):
                 for package in sorted(manifest_packages):
                     add(target(package))
                 owned = sorted(manifest_packages)
+            elif "Cargo.toml" in paths:
+                flags["license"] = True
+                for package in ("shaar", "shaar-p2p"):
+                    add(target(package))
+                owned = ["workspace-manifest"]
             else:
                 raise ValueError("No test impact rule for Cargo.lock change without an owned manifest; no automatic full fallback")
         else:

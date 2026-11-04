@@ -15,6 +15,14 @@ _SDK_TEST_SOURCE_TRANSITIONS = {
     ("e2fe4d5ff2a65b45848bcc128af2ef474ad9c836374763353d532a9d15f042a5",
      "c0fbceaea9b9df00f45dffd55bd2057c9e549a14c1e6e5c956ef1b1c88aefde6"):
         "2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a",
+    # Unwired private native runtime added to shaar/src since the control; no dependency edge changes.
+    ("a9ce98ea03cbf9a6dfa63a0676d97dd63a8feb75493b8e7be97a04d763416f09",
+     "758a1ca5888acabea6a99ca3580b0405974fb0cd8fb4f81b1cfe2fa7d31c1abc"):
+        "cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88",
+    # Same source delta on the Windows runner, whose control tree differs.
+    ("bd0c1843a330d5b9b3255ae2abb5b89007363a49ee13c49b8a98e64c956b1971",
+     "af2aa516670e451abf9eeaf7bf54b3c13b1f43f4ddf264ed840ab4dba33bd425"):
+        "2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a",
 }
 _ADDED = {("iroh-mainline-address-lookup", "0.6.1"), ("iroh-dns", "1.3.0"), ("n0-mainline", "0.7.0"), ("serde_bencode", "0.2.4"), ("n0-future", "0.3.2")}
 _REVIEWED_REGISTRY = {
@@ -30,7 +38,17 @@ _APPROVED_ARCHIVES = {
     "serde_bencode": "a70dfc7b7438b99896e7f8992363ab8e2c4ba26aa5ec675d32d1c3c2c33d413e",
     "n0-future": "e2ab99dfb861450e68853d34ae665243a88b8c493d01ba957321a1e9b2312bbe",
     "tokio-1.54.1-test-util": "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3",
+    "multibase": "7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6",
 }
+
+_MULTIBASE_IDENTITY = ("multibase", "0.9.3")
+_MULTIBASE_CHECKSUM = "7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6"
+_EMOJI_DROPS = {
+    "base256emoji": ("1.0.2", "b5e9430d9a245a77c92176e649af6e275f20839a48389859d1661e9a128d077c"),
+    "const-str": ("0.4.3", "2f421161cb492475f1661ddc9815a745a1c894592070661180fdec3d4872e9c3"),
+    "match-lookup": ("0.1.3", "549e39695cc0b640f3cb378053832db3d2133422d49e8dcae5c866a2aaf1f730"),
+}
+_DEPENDENCY_OWNER_FIELDS = ("package", "target", "kind", "crate_types", "context", "triple", "features")
 
 
 def _validate_reviewed_graph(proof, parsed):
@@ -280,6 +298,76 @@ def _validate_n0future(proof, parsed, require_route=False):
     _need(proof.get("lock_checksums", {}).get(tokio) and _DIGEST.fullmatch(str(proof["lock_checksums"][tokio])), role + ": tokio checksum missing")
 
 
+def _candidate_matches_control(parsed, unitsets):
+    """Admit only the exact approved control-to-candidate multibase transition."""
+    cf, xf = parsed["approved_route"][4], parsed["candidate"][4]
+    registry_key = next((k for k in cf if k[:2] == _MULTIBASE_IDENTITY
+                         and k[2] == _REVIEWED_SOURCE + ":" + _MULTIBASE_CHECKSUM), None)
+    chain_keys = {k for k in cf if k[0] in _EMOJI_DROPS
+                  and k[1] == _EMOJI_DROPS[k[0]][0]
+                  and k[2] == _REVIEWED_SOURCE + ":" + _EMOJI_DROPS[k[0]][1]}
+    present = any(k[0] in _EMOJI_DROPS for k in cf)
+    if registry_key is None and not present:
+        _need(xf == cf, "candidate package features differ from approved route")
+        _need(unitsets["approved_route"] == unitsets["candidate"],
+              "candidate compiler units differ from approved route")
+        return
+    _need(registry_key is not None and present and len(chain_keys) == 3,
+          "approved multibase transition control state mismatch")
+    _need(set(cf) - set(xf) == chain_keys | {registry_key},
+          "unapproved control-to-candidate package removal")
+    _need(len(set(xf) - set(cf)) == 1, "unapproved control-to-candidate package addition")
+    prepared_key = next(iter(set(xf) - set(cf)))
+    _need(prepared_key[:2] == _MULTIBASE_IDENTITY and prepared_key[2].startswith(
+        "path:prepared:multibase@0.9.3:archive=" + _APPROVED_ARCHIVES["multibase"] + ":"),
+        "unapproved prepared multibase identity")
+    _need(cf[registry_key] == xf[prepared_key],
+          "multibase feature drift across the approved transition")
+    candidate_packages, bindings = parsed["candidate"][1], parsed["candidate"][6]
+    ids = [pid for pid, pkg in candidate_packages.items() if pkg.get("name") == "multibase"]
+    _need(len(ids) == 1 and candidate_packages[ids[0]].get("version") == "0.9.3"
+          and candidate_packages[ids[0]].get("source") is None,
+          "candidate multibase metadata identity mismatch")
+    binding = bindings.get(ids[0], {})
+    _need(binding.get("identity") == "prepared" and binding.get("package") == "multibase"
+          and binding.get("archive_sha256") == _APPROVED_ARCHIVES["multibase"],
+          "candidate multibase is not the pinned prepared archive")
+    _need(not any(u["package"][0] in _EMOJI_DROPS for u in unitsets["candidate"]),
+          "removed emoji-chain package still compiles")
+    for unit in unitsets["candidate"]:
+        for dep in unit.get("dependencies", []):
+            _need(dep["unit"]["package"][0] not in _EMOJI_DROPS,
+                  "retained unit still depends on a removed emoji-chain package: " + unit["package"][0])
+
+    def _unit_form(unit):
+        # Compare units by identity, dependency edges and dependency-owner fields;
+        # only the recursive sha256 digests are dropped, because the approved
+        # transition legitimately cascades them through every dependent unit.
+        form = {key: value for key, value in unit.items() if key not in ("sha256", "dependencies")}
+        package = form["package"]
+        if package[:2] == _MULTIBASE_IDENTITY:
+            form["package"] = (package[0], package[1], "multibase-transition")
+        edges = []
+        for dep in unit.get("dependencies", []):
+            target = dep["unit"]["package"]
+            if target[0] in _EMOJI_DROPS:
+                continue
+            if target[:2] == _MULTIBASE_IDENTITY:
+                target = (target[0], target[1], "multibase-transition")
+            owner = {key: dep["unit"][key] for key in _DEPENDENCY_OWNER_FIELDS}
+            owner["package"] = target
+            edges.append({"alias": dep["alias"], "kind": dep["kind"], "unit": owner})
+        form["dependencies"] = sorted(edges, key=lambda item: json.dumps(item, sort_keys=True))
+        return form
+
+    def _sorted_forms(units):
+        return sorted((_unit_form(u) for u in units
+                       if u["package"][0] not in _EMOJI_DROPS),
+                      key=lambda item: json.dumps(item, sort_keys=True))
+    _need(_sorted_forms(unitsets["approved_route"]) == _sorted_forms(unitsets["candidate"]),
+          "candidate compiler units differ beyond the approved multibase transition")
+
+
 def compare_proofs(proofs, expected_base, expected_candidate, expected_control=None):
     """Validate role-bound Cargo evidence and return canonical content digests."""
     _need(isinstance(proofs, list) and len(proofs) == 3 and all(isinstance(p, dict) for p in proofs), "exactly three proof objects required")
@@ -347,8 +435,7 @@ def compare_proofs(proofs, expected_base, expected_candidate, expected_control=N
     delta = [{"package": list(k), "baseline": list(bf.get(k, ())), "approved_route": list(cf.get(k, ()))} for k in sorted(set(bf) | set(cf)) if bf.get(k) != cf.get(k)]
     allowed = control.get("approved_feature_deltas")
     _need(isinstance(allowed, list) and allowed == delta, "approved feature delta commitment mismatch")
-    _need(xf == cf, "candidate package features differ from approved route")
-    _need(unitsets["approved_route"] == unitsets["candidate"], "candidate compiler units differ from approved route")
+    _candidate_matches_control(parsed, unitsets)
     for role in ("baseline", "approved_route", "candidate"):
         _need(emitted[role] <= set(parsed[role][1]), role + ": invalid emitted artifacts")
     return {
