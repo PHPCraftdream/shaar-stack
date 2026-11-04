@@ -220,12 +220,26 @@ async fn resolution_clock_fault_revokes_publication_and_stays_terminal_after_cat
             .expect("actual cleanup barrier")
             .active
     );
+    // The contract requires the explicit clock error after a terminal fault, not Closed.
     clock.set_wall(WALL + 1);
     assert!(matches!(
         owner
             .resolve_until(key, Instant::now() + Duration::from_secs(10))
             .await,
-        Err(RuntimeError::Closed)
+        Err(RuntimeError::Publish(
+            crate::native_discovery::runtime::publisher::PublishError::ClockFault
+        ))
+    ));
+    // A fault found by resolve also stops later publication with the explicit error.
+    assert!(matches!(
+        owner
+            .replace(vec![TransportAddr::Ip(
+                "127.0.0.1:9030".parse().expect("address")
+            )])
+            .await,
+        Err(RuntimeError::Publish(
+            crate::native_discovery::runtime::publisher::PublishError::ClockFault
+        ))
     ));
     owner
         .close()

@@ -130,3 +130,13 @@ preparation and commit (the controlled wall clock advances at the test-only
 cooperative point): exactly 300 seconds of signed age is accepted with no cache
 lifetime, one microsecond past it is rejected without any commit. None of these
 cases has been executed; GitHub CI remains the only run.
+
+Terminal clock fault reporting (task 44): the owner remembers the first terminal clock
+fault it observes (through its own resolve sampling, a rejected replacement, or a local
+clock read failure). Later publish and resolve calls then return the explicit
+`PublishError::ClockFault` immediately, with no queue, backend or network work; `Closed`
+stays only for a genuinely closed owner. The publisher task keeps its internal terminal
+routing, so a command already queued before the fault may still be answered `Closed`.
+The two catch-up expectations that formerly expected `Closed` now expect the explicit
+error for exactly this reason. Validated in-memory options and startup attachment belong to
+task 45; nothing here has been executed, and GitHub CI is the only run.

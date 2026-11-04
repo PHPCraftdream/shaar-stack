@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use std::net::SocketAddrV4;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 #[cfg(test)]
@@ -66,6 +67,9 @@ pub(in crate::native_discovery) struct RuntimeOwner {
     dht: Option<OwnedDht>,
     close_error: Option<RuntimeError>,
     clock: Clock,
+    // First terminal clock fault seen by this owner: later publish and resolve report
+    // the explicit error instead of `Closed` and do no queue, network or backend work.
+    clock_fault: AtomicBool,
     resolver: ResolverState,
 }
 
@@ -118,12 +122,26 @@ impl RuntimeOwner {
             dht: Some(dht),
             close_error: None,
             clock: owner_clock.clone(),
+            clock_fault: AtomicBool::new(false),
             resolver: ResolverState::new(owner_clock),
         })
     }
 
     /// cancel-safe: NO — revocation is not rolled back; pre-ack cancellation cleans work.
     pub(super) async fn replace_until(
+        &self,
+        snapshot: Vec<TransportAddr>,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), RuntimeError> {
+        if let Some(error) = self.clock_fault_error() {
+            return Err(error);
+        }
+        let result = self.replace_inner(snapshot, deadline).await;
+        self.note_clock_fault(&result);
+        result
+    }
+
+    async fn replace_inner(
         &self,
         snapshot: Vec<TransportAddr>,
         deadline: tokio::time::Instant,
@@ -161,6 +179,9 @@ impl RuntimeOwner {
         key: EndpointId,
         deadline: tokio::time::Instant,
     ) -> Result<ResolvedAddresses, RuntimeError> {
+        if let Some(error) = self.clock_fault_error() {
+            return Err(error);
+        }
         let deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(10));
         let sample = self.sample_until(deadline).await?;
         if let Some(cached) = self
@@ -194,6 +215,7 @@ impl RuntimeOwner {
                 // A local clock read failure is terminal, mirroring the
                 // mediated sampling path.
                 self.resolver.note_terminal_clock_fault();
+                self.clock_fault.store(true, Ordering::Release);
                 let _ = tokio::time::timeout_at(deadline, self.withdraw())
                     .await
                     .map_err(|_| RuntimeError::DeadlineExceeded)?;
@@ -240,12 +262,28 @@ impl RuntimeOwner {
             // while the replay watermarks stay retained for the owner
             // lifetime.
             self.resolver.note_terminal_clock_fault();
+            self.clock_fault.store(true, Ordering::Release);
             // The barrier cannot acknowledge until any revoked PUT has cleaned up.
             let _ = tokio::time::timeout_at(deadline, self.withdraw())
                 .await
                 .map_err(|_| RuntimeError::DeadlineExceeded)?;
         }
         result
+    }
+
+    fn clock_fault_error(&self) -> Option<RuntimeError> {
+        self.clock_fault
+            .load(Ordering::Acquire)
+            .then_some(RuntimeError::Publish(PublishError::ClockFault))
+    }
+
+    fn note_clock_fault<T>(&self, result: &Result<T, RuntimeError>) {
+        if matches!(
+            result,
+            Err(RuntimeError::Clock | RuntimeError::Publish(PublishError::ClockFault))
+        ) {
+            self.clock_fault.store(true, Ordering::Release);
+        }
     }
 
     #[cfg(test)]

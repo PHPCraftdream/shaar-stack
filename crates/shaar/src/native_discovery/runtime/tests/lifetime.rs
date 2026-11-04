@@ -363,6 +363,7 @@ async fn wall_clock_rollback_remains_terminal_after_wall_time_catches_up() {
             crate::native_discovery::runtime::publisher::PublishError::ClockFault
         ))
     ));
+    // The contract requires the explicit clock error after a terminal fault, not Closed.
     clock.set(1_700_000_000_000_001);
     assert!(
         matches!(
@@ -371,7 +372,9 @@ async fn wall_clock_rollback_remains_terminal_after_wall_time_catches_up() {
                     "127.0.0.1:9019".parse().expect("later address"),
                 )])
                 .await,
-            Err(super::super::RuntimeError::Closed)
+            Err(super::super::RuntimeError::Publish(
+                crate::native_discovery::runtime::publisher::PublishError::ClockFault
+            ))
         ),
         "wall-clock catch-up does not resume a faulted publisher"
     );
