@@ -1,6 +1,24 @@
 # Native SDK dependency graph contracts
 
-**Status:** source generator, normal edges, type witness, graph audits, and CI orchestration are authored. No tests or CI have been run; this document is not execution proof.
+**Status:** the base graph at `ab96feb` passed exact-SHA feature CI `41778932723` and upstream CI `41782801796` on both OS with independent DATA inspection. Earlier authoring-only notes below describe their original source passes, not the absence of later execution. The SDK dev-codec extension is currently authored and awaiting fresh CI; this document is not publisher or complete P09 acceptance proof.
+
+## SDK dev-codec projection
+
+The existing dev-edge proof admits only `n0-future` 0.3.2 and `serde_bencode` 0.2.4
+registry declarations resolved to their approved prepared paths. It requires an
+exact dev-only declaration and condition set, a snapshotted root patch, exact
+package path/version, original archive identity, full prepared-source inventory
+and the exact provenance receipt. A retained codec package reached normally by
+Mainline does not permit retaining a direct SDK dev edge in the normal consumer.
+No normal/build edge, arbitrary registry replacement or unbound archive is allowed.
+
+`fixture/baseline/` separates baseline materialization from this projection check
+without adding a CI segment or changing the historical BASE. The graph module
+keeps its existing entry point and delegates the proof to `baseline.projection`.
+Tests use isolated copies of the already prepared CI source, never alter the
+product tree, and reject kind/condition/requirement/source/root-snapshot/archive/
+prepared-source/receipt/retained-edge/patch-path mutations. Local execution is
+not acceptance; fresh exact-SHA CI is required before adopting this extension.
 
 ## N0-future Tokio feature comparison
 
@@ -36,7 +54,7 @@ The projection evidence binds both Cargo metadata JSON payloads to SHA-256 diges
 
 ## Source-bound three-proof contract
 
-`fixture/baseline.py` extracts the baseline only from pinned commit `67e10f3d836b48b954e9f82cc9ffb1d12bb1d71f` via `git archive`, checks the resolved commit, and records archive and input hashes. `prepare_sources` invokes the fixed preparation scripts with supplied local archives. The baseline and approved-route roots are separate extractions; only the approved-route root receives the exact manifest edits in `apply_route`. The candidate is the committed checkout at its recorded `HEAD`; its generated sources are verified, not edited by the route step.
+`fixture/baseline/__init__.py` extracts the baseline only from pinned commit `67e10f3d836b48b954e9f82cc9ffb1d12bb1d71f` via `git archive`, checks the resolved commit, and records archive and input hashes. `prepare_sources` invokes the fixed preparation scripts with supplied local archives. The baseline and approved-route roots are separate extractions; only the approved-route root receives the exact manifest edits in `apply_route`. The candidate is the committed checkout at its recorded `HEAD`; its generated sources are verified, not edited by the route step.
 
 The comparison requires exactly three distinct normal-consumer proofs: `baseline` and `approved_route` at the pinned base, plus `candidate` at the recorded candidate revision. Each includes locked metadata, normal-feature cargo tree, and library build artifacts with command records and hashes. `expected_control` binds the route to the baseline root-manifest hash and exact route-receipt hash. Comparison checks the observed package and feature delta against the approved-route control and requires candidate features to match that route; it does not presume a successful result. Independent reference-263 and legal gates are not waived.
 
@@ -46,7 +64,7 @@ Keep existing product pins unchanged: Tokio 1.54.1, serde 1.0.229, iroh/base/dns
 
 The adapter runtime source remains unchanged; its prepared manifest adds only `package.workspace = ".."` to retain the upstream workspace and lint inheritance under the product tree. This exact difference is recorded and reversed by source verification. Lifecycle/runtime hardening is a separate sibling responsibility and is not supplied by this graph witness.
 
-A Cargo registry dependency declaration may resolve through an approved root patch; the sole permitted proof is `n0-future` 0.3.2 with its exact registry declaration and requirement, a binding root `Cargo.toml` hash and exact patch target, the pinned archive's original/prepared inventories and recipe hashes, receipt, and target-manifest identity. Record the proof hashes. The direct-path route remains distinct and requires exact metadata path evidence; plain-registry guards are unchanged, and the historical unpatched baseline remains registry-sourced. This is a projection contract only: no passing CI or local execution is claimed.
+A Cargo registry dependency declaration may resolve through an approved root patch; the only permitted identities are `n0-future` 0.3.2 and `serde_bencode` 0.2.4, each with its exact registry declaration and requirement, a binding root `Cargo.toml` hash and exact patch target, the pinned archive's original/prepared inventories and recipe hashes, receipt, and target-manifest identity. Record the proof hashes. The direct-path route remains distinct and requires exact metadata path evidence; plain-registry guards are unchanged, and the historical unpatched baseline remains registry-sourced. This is a projection contract only: no passing CI or local execution is claimed.
 
 
 ## Compiler capture (authored CI-only recipe)

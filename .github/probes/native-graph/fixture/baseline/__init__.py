@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 """CI-only extraction of the pinned baseline source archive."""
 
-import graph as graph_module
 import hashlib
 import io
 import json
@@ -10,6 +9,9 @@ import tarfile
 import tomllib
 from pathlib import Path
 import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import graph as graph_module
 
 BASE = "67e10f3d836b48b954e9f82cc9ffb1d12bb1d71f"
 MAX_ARCHIVE = 256 * 1024 * 1024

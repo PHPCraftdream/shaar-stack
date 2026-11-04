@@ -292,7 +292,7 @@ def run(repo, archives, prepare_module, graph_module, runner):
                 product_output, projection, product_record=product_record,
                 consumer_record=consumer_record, product_argv=product_args,
                 consumer_argv=projection_args, product_cwd=root, consumer_cwd=consumer,
-                product_root_manifest=root / "Cargo.toml", future_archive=archives.get("future"))
+                product_root_manifest=root / "Cargo.toml", future_archive=archives.get("future"), bencode_archive=archives.get("bencode"))
             projection_audit = graph_module.audit_consumer_lock(seed, projected, projection_context=projection_context)
 
             proof_records, artifacts = [], {}

@@ -169,6 +169,33 @@ def future_archive(archive: Path) -> dict[str, bytes]:
     return files
 
 
+def verify_bencode_provenance(archive: Path, root: Path) -> dict:
+    module = fixed_module("projection_bencode", REPO / ".github/scripts/p2p/discovery/mainline/ci/bencode/prepare.py")
+    original = module.archive_files(archive)
+    prepared = {**original, **module.transform(original)}
+    source = root / "target/native-graph/serde_bencode-0.2.4"
+    if any(path.is_symlink() for path in (root, root / "target", source.parent, source)):
+        raise ValueError("linked bencode provenance path")
+    if inventory(source) != hashes(prepared):
+        raise ValueError("prepared source inventory mismatch: bencode")
+    recipe = recipe_map(module)
+    expected = {"package": "serde_bencode", "version": "0.2.4",
+                "source": {"kind": "registry-archive", "archive_sha256": module.ARCHIVE_SHA256},
+                "archive_sha256": module.ARCHIVE_SHA256, "recipe_files": recipe,
+                "original_files": hashes(original), "prepared_files": hashes(prepared),
+                "changed_files": sorted(name for name in prepared if original.get(name) != prepared[name])}
+    receipt_path = source.parent / "serde_bencode-0.2.4.provenance.json"
+    if receipt_path.is_symlink() or not receipt_path.is_file():
+        raise ValueError("prepared receipt missing or linked: bencode")
+    raw = receipt_path.read_bytes()
+    if json.loads(raw) != expected:
+        raise ValueError("prepared receipt mismatch: bencode")
+    return {"prepared_manifest_path": str(source / "Cargo.toml"),
+            "prepared_manifest_sha256": sha(prepared["Cargo.toml"]),
+            "prepared_receipt_path": str(receipt_path), "prepared_receipt_sha256": sha(raw),
+            "archive_sha256": module.ARCHIVE_SHA256, "recipe_files": recipe}
+
+
 def verify_future_provenance(archive: Path, root: Path) -> dict:
     original = future_archive(archive)
     changed = future_transform(original)

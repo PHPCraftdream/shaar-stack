@@ -185,6 +185,7 @@ def normal_projection_lock() -> tuple[Path, dict]:
         consumer_cwd=CONSUMER,
         product_root_manifest=ROOT / "Cargo.toml",
         future_archive=ARCHIVE_DIR / "n0-future-0.3.2.crate",
+        bencode_archive=ARCHIVE_DIR / "serde_bencode-0.2.4.crate",
     )
     delta = graph.audit_consumer_lock(product_lock, projected, projection_context=context)
     (DESTINATION / "normal-consumer.projection.json").write_text(json.dumps(delta, indent=2) + "\n", encoding="utf-8")
