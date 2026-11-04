@@ -4,6 +4,7 @@
 
 mod connect;
 mod lifecycle;
+mod records;
 
 use super::endpoint::{NativeDiscoveredEndpoint, NativeEndpointError};
 use super::options::NativeDiscoveryOptions;

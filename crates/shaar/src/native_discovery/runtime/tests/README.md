@@ -46,16 +46,31 @@ no public API or blanket lint suppression is added. Source parsing/formatting
 is not compilation. A previous graph proof cannot certify the changed SDK source;
 combined source-bound integration remains task #253.
 
-## Retained original contracts
+## Disposition of the original #246 contract files (task 47)
 
-`contracts/` preserves the seven original unwired #246 proposal files from primary
-commit `e4e0046` byte-for-byte. They predate this compiled publisher and include
-resolution and other original scenario obligations. Their old filenames collided
-with the new executable fixtures during primary transfer; they are retained in a
-distinct namespace rather than silently overwritten or discarded. No test-support
-adapter, stub, module wiring or new public API is introduced. They remain unwired,
-not executed, and must be reconciled under existing integration task #253. Passing
-the 78-case runtime suite does not establish those proposal scenarios as covered.
+The seven original unwired #246 contract files, preserved from primary commit `e4e0046`,
+were reconciled scenario by scenario against the accepted runtime at `ad13c2b` and removed
+as obsolete proposal sources. They were never executed and are not counted as coverage;
+they stay recoverable from Git history. Covered scenarios map to executed suites
+(`tests/bounds.rs`, `tests/lifetime.rs`, `tests/publication.rs`, `tests/resolution.rs`,
+`owner/resolver_regressions.rs`, `owner/wiring_tests/*`, `native_discovery/tests/*` and the
+dependency actor tests). Rejected as stale: the hypothetical cloneable request handle and
+ticket API, exactly-two-RPC fixtures, a production fixture-destination allowlist, scripted
+reject replies expected to retry three times, and a frozen-wall refresh oracle that
+contradicts the paired-clock rollback policy. Ported here: negative records (stale, future
+and relay-claiming) never start a dial while a valid record does
+(`owner/wiring_tests/records.rs`).
+
+Outstanding real-seam obligations, not covered by any executed test yet and owned by P09
+acceptance (task 51): P7 checked network ordering and equal-sequence conflict recovery
+through the real GET fixture with multiple responders; P10 cancelling `connect_until` before
+the GET response must leave no late dial or cache commit; P3 the sample-command wait and the
+GET share one deadline; P4 a dropped unpolled resolve future changes no state; P8 replay
+and local-PUT provenance never renew the cache; P2 sixty-four signed winners survive expiry,
+conflict and lower replay; at dependency level: P5 GET cancellation and deadline retain
+their charge until cleanup, P6 stop while the socket flush is held, P1 eight active plus
+sixteen queued distinct keys. This record does not establish P10 pathing, Server/Client
+integration or public-network acceptance.
 
 ## Remaining gaps / verification
 

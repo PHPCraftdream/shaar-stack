@@ -6,6 +6,12 @@
 
 Provide signed, bounded address discovery over Mainline/pkarr for an explicitly expected peer key. Discovery only: no application data, public-data route, custom `#213` address, or Yggdrasil v1. Publication is an explicitly supplied approved snapshot, never addresses harvested by observing or binding sockets. Both IPv4 and IPv6 may be in the signed payload although the researched candidate DHT socket is IPv4.
 
+Decision (task 48): nothing from the libp2p adapter (its authenticated custom addresses, relay
+descriptors, reservations or discovery claims) enters Mainline records in v1; only
+caller-approved native IP snapshots are published, and records that claim a relay or custom
+address are rejected whole. The adapter's local addresses are process-local references, not
+portable peer claims.
+
 Preserve the selected upstream primitives and narrow repairs; do not rewrite DHT. Acceptance tests and implementation follow policy review. Do not infer production/runtime readiness from design or narrow tests.
 
 ## 2. Versions and evidence boundary

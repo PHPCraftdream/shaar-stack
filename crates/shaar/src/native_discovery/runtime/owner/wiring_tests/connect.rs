@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::Instant;
 
-fn now_us() -> i64 {
+pub(super) fn now_us() -> i64 {
     let elapsed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock after the epoch");
@@ -24,10 +24,19 @@ fn now_us() -> i64 {
 }
 
 /// A record signed by `identity` advertising `address`, fresh against the system clock.
-fn signed_record(identity: &Identity, address: SocketAddr) -> MutableItem {
+pub(super) fn signed_record(identity: &Identity, address: SocketAddr) -> MutableItem {
+    signed_record_at(identity, address, now_us())
+}
+
+/// The same record signed at an explicit wall time (for stale and future negatives).
+pub(super) fn signed_record_at(
+    identity: &Identity,
+    address: SocketAddr,
+    wall_us: i64,
+) -> MutableItem {
     let mut publisher = PublisherState::new(endpoint_key(identity).expect("key"));
     let sample = ClockSample {
-        wall_us: now_us(),
+        wall_us,
         monotonic_before_us: 0,
         monotonic_after_us: 0,
     };
