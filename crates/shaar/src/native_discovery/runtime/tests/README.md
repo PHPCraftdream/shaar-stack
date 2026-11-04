@@ -98,3 +98,35 @@ original deadline, not a fabricated immediate `ResultLimit` receipt. These new
 cases have not yet run. The previously reviewed `eb1c288` CI passed 80 native
 cases on each OS, including both field-adapter regressions; it predates this
 resolver source. No P09, startup/TLS or final normal-graph acceptance is claimed.
+
+The resolver commit is transactional: `PolicyOwner::prepare_query` computes
+the delivery plan without mutating winner or cache-deadline state (clock
+bookkeeping, including an immediate terminal fault on a backward sample,
+still runs first), `ResolverState::complete` rechecks the original caller
+deadline once after preparation and before the synchronous commit, and only
+then `commit_query_deliver`/`commit_query_conflict` mutate state. At the
+commit point a current-use wall sample re-checks signed age against the
+300-second limit, and the cache deadline is
+`R + min(30s, max(0, 300s - max(0, W - signed)))` with `R` the backend
+receipt monotonic and `W` that current-use wall time. The receipt itself is
+sampled locally from the shared clock clone the moment the backend future
+returns, so command-queue delay cannot shift it; the publisher task remains
+the mediated fault gate. A terminal clock fault observed by the resolver clears usable cache
+deadlines through `note_terminal_clock_fault` while replay watermarks stay retained. The publisher's
+terminal routing is unchanged: later publication and resolve after a fault still report `Closed`; making
+them report the explicit clock error is deferred to the coordinator leaf, which owns that lifecycle. Synchronous policy work cannot be
+interrupted in production, so the paused-clock deadline regression pins the
+pre-commit check between preparation and commit via a test-only cooperative
+point. Network results and cache hits are charged alike to one owner-wide
+eight-result delivery budget; a cache hit beyond it fails with `DeliveryLimit`
+before any address allocation, while a network resolution first passes backend
+admission and is charged when its result is delivered. The relocated resolver regressions now live in
+`runtime/owner/resolver_regressions.rs` (`tests/` stays within its
+seven-item limit): a deadline passing during preparation, cached results
+exhausting and recovering the shared budget with rejection before
+allocation, current-use freshness boundaries driven through the production
+sampling path (receipt-anchored 30-second cap), and a result that ages out between
+preparation and commit (the controlled wall clock advances at the test-only
+cooperative point): exactly 300 seconds of signed age is accepted with no cache
+lifetime, one microsecond past it is rejected without any commit. None of these
+cases has been executed; GitHub CI remains the only run.

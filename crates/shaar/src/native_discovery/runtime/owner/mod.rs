@@ -65,6 +65,7 @@ pub(in crate::native_discovery) struct RuntimeOwner {
     publisher: Option<JoinHandle<()>>,
     dht: Option<OwnedDht>,
     close_error: Option<RuntimeError>,
+    clock: Clock,
     resolver: ResolverState,
 }
 
@@ -98,6 +99,10 @@ impl RuntimeOwner {
         let key = endpoint_key(&identity)?;
         let (commands, receiver) = mpsc::channel(COMMANDS);
         let (stop, stop_receiver) = oneshot::channel();
+        // The owner keeps a clone of the shared clock authority so resolve
+        // can sample the receipt locally, immediately after the backend
+        // future returns.
+        let owner_clock = clock.clone();
         let publisher = tokio::spawn(loop_state::publisher_loop(
             identity,
             key,
@@ -112,7 +117,8 @@ impl RuntimeOwner {
             publisher: Some(publisher),
             dht: Some(dht),
             close_error: None,
-            resolver: ResolverState::new(),
+            clock: owner_clock.clone(),
+            resolver: ResolverState::new(owner_clock),
         })
     }
 
@@ -176,12 +182,30 @@ impl RuntimeOwner {
                 n0_mainline::ResourceError::DeadlineExceeded => RuntimeError::DeadlineExceeded,
                 other => RuntimeError::Resource(other),
             })?;
-        let sample = self.sample_until(deadline).await?;
+        // Receipt sample: taken locally from the shared clock authority the
+        // moment the backend future returns, so command-queue delay cannot
+        // shift the receipt. The publisher task stays the mediated fault
+        // gate; a rollback between samples faults the resolver policy on
+        // this sample, and the commit-time current-use freshness check is
+        // the safety net for any later verification or scheduling delay.
+        let sample = match self.clock.sample() {
+            Ok(sample) => sample,
+            Err(error) => {
+                // A local clock read failure is terminal, mirroring the
+                // mediated sampling path.
+                self.resolver.note_terminal_clock_fault();
+                let _ = tokio::time::timeout_at(deadline, self.withdraw())
+                    .await
+                    .map_err(|_| RuntimeError::DeadlineExceeded)?;
+                return Err(error);
+            }
+        };
         if tokio::time::Instant::now() >= deadline {
             return Err(RuntimeError::DeadlineExceeded);
         }
         self.resolver
             .complete(key, completion, sample, deadline)
+            .await
             .map_err(|error| match error {
                 ResolveError::DeadlineExceeded => RuntimeError::DeadlineExceeded,
                 other => RuntimeError::Resolve(other),
@@ -190,7 +214,7 @@ impl RuntimeOwner {
 
     /// cancel-safe: NO — a proven clock fault remains terminal and revokes publication.
     async fn sample_until(
-        &self,
+        &mut self,
         deadline: tokio::time::Instant,
     ) -> Result<ClockSample, RuntimeError> {
         if tokio::time::Instant::now() >= deadline {
@@ -212,6 +236,10 @@ impl RuntimeOwner {
             result,
             Err(RuntimeError::Clock | RuntimeError::Publish(PublishError::ClockFault))
         ) {
+            // Terminal clock fault: drop usable resolver cache deadlines
+            // while the replay watermarks stay retained for the owner
+            // lifetime.
+            self.resolver.note_terminal_clock_fault();
             // The barrier cannot acknowledge until any revoked PUT has cleaned up.
             let _ = tokio::time::timeout_at(deadline, self.withdraw())
                 .await
@@ -307,6 +335,9 @@ fn bounded_replace(snapshot: Vec<TransportAddr>) -> Result<Vec<TransportAddr>, S
     }
 }
 
+#[cfg(test)]
+#[path = "resolver_regressions.rs"]
+mod resolver_regressions;
 #[cfg(test)]
 #[path = "../tests.rs"]
 mod tests;

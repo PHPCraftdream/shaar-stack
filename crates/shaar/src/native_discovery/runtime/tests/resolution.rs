@@ -369,7 +369,8 @@ async fn completed_real_get_cannot_commit_after_the_original_handoff_deadline() 
     assert!(matches!(
         owner
             .resolver
-            .complete(key, completion, sample, Instant::now()),
+            .complete(key, completion, sample, Instant::now())
+            .await,
         Err(ResolveError::DeadlineExceeded)
     ));
 

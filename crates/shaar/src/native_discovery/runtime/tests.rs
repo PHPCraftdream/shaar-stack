@@ -5,7 +5,7 @@
 #[path = "tests/bounds.rs"]
 mod bounds;
 #[path = "tests/fixture.rs"]
-mod fixture;
+pub(super) mod fixture;
 #[path = "tests/lifetime.rs"]
 mod lifetime;
 #[path = "tests/publication.rs"]

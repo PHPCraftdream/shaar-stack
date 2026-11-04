@@ -47,14 +47,14 @@ fn encode(value: &Value) -> Vec<u8> {
     packet
 }
 
-pub(super) struct LoopbackPeer {
+pub(in crate::native_discovery::runtime::owner) struct LoopbackPeer {
     socket: UdpSocket,
-    pub(super) address: SocketAddr,
+    pub(in crate::native_discovery::runtime::owner) address: SocketAddr,
     pending_puts: Vec<(SocketAddr, Vec<u8>)>,
 }
 
 impl LoopbackPeer {
-    pub(super) async fn bind() -> Self {
+    pub(in crate::native_discovery::runtime::owner) async fn bind() -> Self {
         let socket = UdpSocket::bind("127.0.0.1:0")
             .await
             .expect("bind owned loopback peer");
@@ -66,7 +66,10 @@ impl LoopbackPeer {
         }
     }
 
-    pub(super) async fn capture_get(&mut self, target: n0_mainline::Id) -> (SocketAddr, Vec<u8>) {
+    pub(in crate::native_discovery::runtime::owner) async fn capture_get(
+        &mut self,
+        target: n0_mainline::Id,
+    ) -> (SocketAddr, Vec<u8>) {
         loop {
             let mut packet = [0; MAX_PACKET];
             let (length, source) = self
@@ -107,7 +110,7 @@ impl LoopbackPeer {
             .expect("actual empty GET response");
     }
 
-    pub(super) async fn reply_get(
+    pub(in crate::native_discovery::runtime::owner) async fn reply_get(
         &self,
         source: SocketAddr,
         transaction: &[u8],
@@ -132,7 +135,10 @@ impl LoopbackPeer {
             .expect("actual GET response");
     }
 
-    pub(super) async fn serve_record(&mut self, item: &n0_mainline::MutableItem) {
+    pub(in crate::native_discovery::runtime::owner) async fn serve_record(
+        &mut self,
+        item: &n0_mainline::MutableItem,
+    ) {
         let target = n0_mainline::MutableItem::target_from_key(item.key(), None);
         loop {
             let (source, transaction) = self.capture_get(target).await;

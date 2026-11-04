@@ -6,70 +6,34 @@ use super::codec::{DecodedRecord, PolicyRecordParts};
 use iroh_base::EndpointId;
 use std::{collections::BTreeMap, net::SocketAddr};
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_KEYS: usize = 64;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_RECORD_BYTES: usize = 1104;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_BATCH_RECORDS: usize = 32;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_BATCH_BYTES: usize = 1104 * 32;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_ADDRESSES: usize = 4;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_METADATA_ENTRIES: usize = 1;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_USER_DATA_BYTES: usize = 245;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_AGE_US: i64 = 300_000_000;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_FUTURE_US: i64 = 30_000_000;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_CACHE_US: u64 = 30_000_000;
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ClockSample {
     pub(super) wall_us: i64,
     pub(super) monotonic_us: u64,
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RecordObservation {
     pub(super) sequence: i64,
@@ -117,20 +81,14 @@ impl From<DecodedRecord> for RecordObservation {
         }
     }
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum QuerySource {
     Network,
     CacheOnly,
     LocalActivePut,
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Debug)]
 pub(super) struct CompletedQuery {
     source: QuerySource,
@@ -138,10 +96,7 @@ pub(super) struct CompletedQuery {
     records: Vec<RecordObservation>,
 }
 impl CompletedQuery {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn new(
         source: QuerySource,
         completed_at: ClockSample,
@@ -154,10 +109,7 @@ impl CompletedQuery {
         }
     }
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RecordError {
     Unauthorized,
@@ -174,10 +126,7 @@ pub(super) enum RecordError {
     InvalidObservation,
     BatchTooLarge,
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Debug)]
 struct PeerState {
     winner: Option<RecordObservation>,
@@ -185,10 +134,7 @@ struct PeerState {
     cache_deadline: Option<u64>,
 }
 impl PeerState {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     fn new() -> Self {
         Self {
             winner: None,
@@ -197,10 +143,26 @@ impl PeerState {
         }
     }
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
+#[derive(Debug)]
+pub(super) enum PreparedQuery {
+    ExpiredCacheOnly,
+    Conflict(ConflictCommit),
+    Deliver(DeliverCommit),
+}
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
+#[derive(Debug)]
+pub(super) struct ConflictCommit {
+    key: EndpointId,
+    winner: Option<RecordObservation>,
+}
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
+#[derive(Debug)]
+pub(super) struct DeliverCommit {
+    key: EndpointId,
+    winner: Option<RecordObservation>,
+}
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Debug)]
 pub(super) struct PolicyOwner {
     peers: BTreeMap<EndpointId, PeerState>,
@@ -208,10 +170,7 @@ pub(super) struct PolicyOwner {
     clock_fault: bool,
 }
 impl PolicyOwner {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn new() -> Self {
         Self {
             peers: BTreeMap::new(),
@@ -219,10 +178,7 @@ impl PolicyOwner {
             clock_fault: false,
         }
     }
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn admit_expected_key(&mut self, key: EndpointId) -> Result<(), RecordError> {
         if self.clock_fault {
             return Err(RecordError::ClockFault);
@@ -236,29 +192,53 @@ impl PolicyOwner {
         self.peers.insert(key, PeerState::new());
         Ok(())
     }
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn complete_query(
         &mut self,
         key: EndpointId,
         query: CompletedQuery,
     ) -> Result<(), RecordError> {
-        self.complete_query_result(key, query).map(|_| ())
+        // Direct policy callers sample receipt and use together, so the
+        // completion sample doubles as the current-use sample.
+        let completed_at = query.completed_at;
+        match self.prepare_query(key, query)? {
+            PreparedQuery::ExpiredCacheOnly => Ok(()),
+            PreparedQuery::Conflict(outcome) => {
+                self.commit_query_conflict(outcome);
+                Err(RecordError::EqualSequenceConflict)
+            }
+            PreparedQuery::Deliver(outcome) => {
+                self.commit_query_deliver(
+                    outcome,
+                    completed_at.monotonic_us,
+                    completed_at.wall_us,
+                )?;
+                Ok(())
+            }
+        }
     }
-    fn complete_query_result(
+    /// Prepares a query completion. Winner and cache-deadline state are not
+    /// mutated here; the returned plan is applied only by the commit methods,
+    /// so a caller can run its final checks between preparation and commit.
+    /// Clock bookkeeping (`observe_clock`) intentionally runs first: a
+    /// backward sample faults the owner at once and clears usable cache
+    /// deadlines while replay watermarks are retained.
+    /// `query.completed_at` is the backend receipt sample and anchors the
+    /// cache receipt deadline; signed-age freshness is re-checked at the
+    /// commit point against the caller's current-use wall time.
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
+    pub(super) fn prepare_query(
         &mut self,
         key: EndpointId,
         mut query: CompletedQuery,
-    ) -> Result<Option<&[SocketAddr]>, RecordError> {
+    ) -> Result<PreparedQuery, RecordError> {
         self.observe_clock(query.completed_at)?;
         if !self.peers.contains_key(&key) {
             return Err(RecordError::Unauthorized);
         }
         if query.source != QuerySource::Network {
             self.lookup_cache(key, query.completed_at)?;
-            return Ok(None);
+            return Ok(PreparedQuery::ExpiredCacheOnly);
         }
         if query.records.is_empty() {
             return Err(RecordError::CacheMiss);
@@ -337,12 +317,8 @@ impl PolicyOwner {
         }
         let chosen = chosen.ok_or(RecordError::CacheMiss)?;
         if conflict {
-            if supersedes || peer.winner.is_none() {
-                peer.winner = Some(chosen.clone());
-            }
-            peer.conflict = true;
-            peer.cache_deadline = None;
-            return Err(RecordError::EqualSequenceConflict);
+            let winner = (supersedes || peer.winner.is_none()).then(|| chosen.clone());
+            return Ok(PreparedQuery::Conflict(ConflictCommit { key, winner }));
         }
         if peer.conflict
             && peer
@@ -356,41 +332,108 @@ impl PolicyOwner {
             .winner
             .as_ref()
             .is_none_or(|winner| chosen.sequence > winner.sequence);
-        let winner = if changed {
-            chosen
-        } else {
-            peer.winner.as_ref().ok_or(RecordError::CacheMiss)?
+        Ok(PreparedQuery::Deliver(DeliverCommit {
+            key,
+            winner: changed.then(|| chosen.clone()),
+        }))
+    }
+
+    /// Applies a prepared delivery commit and returns the winner addresses.
+    /// Must stay synchronous so a caller's pre-commit deadline check remains
+    /// the last observation before the mutation. `receipt_monotonic_us` is
+    /// the backend receipt monotonic `R` and `use_wall_us` is the
+    /// current-use wall time `W` sampled at the commit point: the signed age
+    /// is re-checked against the 300-second limit here, and the cache
+    /// deadline is `R + min(30s, max(0, 300s - max(0, W - signed)))`, so a
+    /// verification or scheduling delay can neither admit an age-expired
+    /// immediate result nor extend signed freshness.
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
+    pub(super) fn commit_query_deliver(
+        &mut self,
+        outcome: DeliverCommit,
+        receipt_monotonic_us: u64,
+        use_wall_us: i64,
+    ) -> Result<&[SocketAddr], RecordError> {
+        let signed_at_us = match outcome.winner.as_ref() {
+            Some(winner) => winner.signed_at_us,
+            None => {
+                let peer = self
+                    .peers
+                    .get(&outcome.key)
+                    .ok_or(RecordError::Unauthorized)?;
+                peer.winner
+                    .as_ref()
+                    .ok_or(RecordError::CacheMiss)?
+                    .signed_at_us
+            }
         };
-        let remaining = check_freshness(query.completed_at.wall_us, winner.signed_at_us)?;
-        let deadline = query
-            .completed_at
-            .monotonic_us
+        let remaining = check_freshness(use_wall_us, signed_at_us)?;
+        let cache_deadline = receipt_monotonic_us
             .checked_add(remaining.min(MAX_CACHE_US))
             .ok_or(RecordError::DeadlineOverflow)?;
-        if changed {
-            peer.winner = Some(chosen.clone());
+        let peer = self
+            .peers
+            .get_mut(&outcome.key)
+            .ok_or(RecordError::Unauthorized)?;
+        if let Some(winner) = outcome.winner {
+            peer.winner = Some(winner);
             peer.conflict = false;
         }
-        peer.cache_deadline = Some(deadline);
-        let winner = peer.winner.as_ref().ok_or(RecordError::CacheMiss)?;
-        Ok(Some(&winner.addresses))
+        peer.cache_deadline = Some(cache_deadline);
+        Ok(peer
+            .winner
+            .as_ref()
+            .ok_or(RecordError::CacheMiss)?
+            .addresses
+            .as_slice())
     }
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+
+    /// Applies a prepared equal-sequence conflict commit; the caller reports
+    /// `EqualSequenceConflict` afterwards.
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
+    pub(super) fn commit_query_conflict(&mut self, outcome: ConflictCommit) {
+        let Some(peer) = self.peers.get_mut(&outcome.key) else {
+            return;
+        };
+        if let Some(winner) = outcome.winner {
+            peer.winner = Some(winner);
+        }
+        peer.conflict = true;
+        peer.cache_deadline = None;
+    }
+
+    /// Terminal clock fault reported by the shared publisher sampling path:
+    /// usable cache deadlines are dropped immediately, while the replay state
+    /// (sequence watermarks and conflict flags) is retained for the owner
+    /// lifetime.
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
+    pub(super) fn note_terminal_clock_fault(&mut self) {
+        self.clock_fault = true;
+        for peer in self.peers.values_mut() {
+            peer.cache_deadline = None;
+        }
+    }
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn complete_query_addresses(
         &mut self,
         key: EndpointId,
         query: CompletedQuery,
     ) -> Result<&[SocketAddr], RecordError> {
-        self.complete_query_result(key, query)?
-            .ok_or(RecordError::CacheExpired)
+        // Direct policy callers sample receipt and use together, so the
+        // completion sample doubles as the current-use sample.
+        let completed_at = query.completed_at;
+        match self.prepare_query(key, query)? {
+            PreparedQuery::ExpiredCacheOnly => Err(RecordError::CacheExpired),
+            PreparedQuery::Conflict(outcome) => {
+                self.commit_query_conflict(outcome);
+                Err(RecordError::EqualSequenceConflict)
+            }
+            PreparedQuery::Deliver(outcome) => {
+                self.commit_query_deliver(outcome, completed_at.monotonic_us, completed_at.wall_us)
+            }
+        }
     }
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn lookup_cache(
         &mut self,
         key: EndpointId,
@@ -409,10 +452,7 @@ impl PolicyOwner {
         check_freshness(now.wall_us, winner.signed_at_us)?;
         Ok(())
     }
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn query_required(
         &mut self,
         key: EndpointId,
@@ -434,10 +474,7 @@ impl PolicyOwner {
         }
         Ok(check_freshness(now.wall_us, winner.signed_at_us).is_err())
     }
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn addresses(
         &mut self,
         key: EndpointId,
@@ -453,10 +490,7 @@ impl PolicyOwner {
             .ok_or(RecordError::CacheMiss)?
             .addresses)
     }
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn metadata(
         &mut self,
         key: EndpointId,
@@ -508,10 +542,7 @@ impl PolicyOwner {
             peer.cache_deadline = None;
         }
     }
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P09 actor boundary is not wired yet")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn observe_clock(&mut self, now: ClockSample) -> Result<(), RecordError> {
         if self.clock_fault {
             return Err(RecordError::ClockFault);
@@ -529,10 +560,7 @@ impl PolicyOwner {
         Ok(())
     }
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 pub(super) fn check_freshness(now_wall_us: i64, signed_at_us: i64) -> Result<u64, RecordError> {
     if signed_at_us < 0 {
         return Err(RecordError::TooOld);
@@ -548,17 +576,11 @@ pub(super) fn check_freshness(now_wall_us: i64, signed_at_us: i64) -> Result<u64
     }
     Ok(MAX_AGE_US.saturating_sub(delta.max(0)) as u64)
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 pub(super) fn sequence_from_unsigned(value: u64) -> Result<i64, RecordError> {
     i64::try_from(value).map_err(|_| RecordError::InvalidSequence)
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 pub(super) fn sequence_from_signed(value: i64) -> Result<i64, RecordError> {
     if value < 0 {
         Err(RecordError::InvalidSequence)
