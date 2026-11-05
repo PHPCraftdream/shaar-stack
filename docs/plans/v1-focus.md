@@ -168,6 +168,38 @@ outcomes, and startup errors name only the field. Not claimed: interoperability 
 Yggdrasil nodes, public-network behaviour, the product-graph connection (P10) and the open
 legal and notices items.
 
+### P10 leaves (recorded 2026-11-05, after the independent design consult)
+
+P10 advances scenario steps 3-6 and is split into six ordered leaves, each with one acceptance
+criterion tested in GitHub CI on Linux and Windows with owned loopback fixtures only:
+1. Deterministic path-policy contract (pure state machine, injected monotonic time).
+2. Reviewed product linkage: `shaar-ygg` depends on the isolated `shaar-ygg-core` by path (the
+   product lock, native-graph guard, license report and CI selection change in a reviewed way),
+   with an authenticated-probe readiness bridge and joined shutdown.
+3. Composition of discovery, native selection and signaling-only recovery.
+4. Explicit Yggdrasil `signal`/`standby` authorization: payload over Yggdrasil only in `standby`,
+   zero prohibited frames on signaling paths, zero target accepts for wrong or disallowed keys;
+   exact-key authentication is kept on every route.
+5. Product startup composition (Server/Client from the server key alone against owned discovery).
+6. Composed recovery and efficiency acceptance (#215): p95 first byte, failover and direct share
+   against the agreed criteria, measured with an in-process blockable native transport shim.
+Defaults chosen by the engineer, open for the user to override: only new streams must recover
+after a failover; an established TCP stream ends with its connection and is never replayed.
+Virtual time proves policy deadlines, real loopback timestamps measure end-to-end latency.
+
+#### Leaf 1 acceptance and non-goals (recorded 2026-11-05, before implementation)
+
+Advances scenario steps 3-5. Observable acceptance: in CI, a table-driven event-trace suite for
+the private module `crates/shaar/src/path/` yields exactly the expected decisions for both modes
+(`signal` never selects Yggdrasil for payload; `standby` may), covering the first attempt, the
+backoff schedule and its cap, attempt timeouts at the boundary millisecond, failover only after the
+loss grace, switch-back only after sustained native success, stale and reordered generation- or
+attempt-tagged events, duplicate evidence that must not restart a cycle, flapping inside the grace
+and inside the hold, budget exhaustion and its refill, the loss of both paths, shutdown, and
+rejection of invalid parameters. State is fixed-size and retries are bounded.
+Non-goals: any I/O, wiring into Session or the binaries, the Yggdrasil dependency, performance
+claims, schema or default changes, public network.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

@@ -72,6 +72,15 @@ class PolicyTests(unittest.TestCase):
         full = POLICY.select([], full=True)
         self.assertTrue(full["selection"]["publication"])
 
+    def test_path_policy_sources_select_only_owned_module_cases(self):
+        for filename in ("mod.rs", "model.rs", "policy.rs", "tests/mod.rs", "tests/traces.rs"):
+            with self.subTest(filename=filename):
+                result = POLICY.select(["crates/shaar/src/path/" + filename])
+                self.assertEqual(result["targets"], [POLICY.target("shaar", ("path::",))])
+                self.assertEqual(result["suites"], ["sdk-path"])
+                self.assertFalse(result["selection"]["full"])
+                self.assertFalse(any(result["selection"][key] for key in POLICY.DOMAINS))
+
     def test_native_discovery_sources_select_only_owned_module_cases(self):
         selector = "native_discovery::"
         for filename in ("address.rs", "codec.rs", "state.rs", "ordering_clock.rs", "unowned.rs"):
