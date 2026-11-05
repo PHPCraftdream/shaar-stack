@@ -18,6 +18,6 @@ mod smoke {
     /// The library root itself must keep forbidding unsafe code.
     #[test]
     fn crate_root_forbids_unsafe_code() {
-        assert!(include_str!("lib.rs").starts_with("#![forbid(unsafe_code)]\n"));
+        assert_eq!(include_str!("lib.rs").lines().next(), Some("#![forbid(unsafe_code)]"));
     }
 }
