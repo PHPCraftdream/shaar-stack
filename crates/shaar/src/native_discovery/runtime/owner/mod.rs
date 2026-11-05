@@ -379,14 +379,14 @@ fn bounded_replace(snapshot: Vec<TransportAddr>) -> Result<Vec<TransportAddr>, S
 #[path = "resolver_regressions.rs"]
 mod resolver_regressions;
 #[cfg(test)]
+#[path = "seam_tests/mod.rs"]
+mod seam_tests;
+#[cfg(test)]
 #[path = "../tests.rs"]
 mod tests;
 #[cfg(test)]
 #[path = "wiring_tests/mod.rs"]
 mod wiring_tests;
-#[cfg(test)]
-#[path = "seam_tests/mod.rs"]
-mod seam_tests;
 
 pub(super) fn to_mutable(packet: &SignedSnapshot) -> Result<MutableItem, RuntimeError> {
     let bytes = &packet.bytes;
