@@ -47,6 +47,13 @@ def product_paths(repository, metadata):
             if path.is_symlink():
                 raise ValueError("fixture source symlink is not supported")
             selected.add(path.relative_to(repository).as_posix())
+        # An excluded path package inherits from its own nested workspace root.
+        for parent in directory.parents:
+            if parent == repository or not parent.is_relative_to(repository):
+                break
+            manifest = parent / "Cargo.toml"
+            if manifest.is_file() and "[workspace" in manifest.read_text(encoding="utf-8"):
+                selected.add(manifest.relative_to(repository).as_posix())
     return sorted(selected)
 
 

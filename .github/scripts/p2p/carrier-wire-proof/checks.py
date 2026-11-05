@@ -281,6 +281,29 @@ class FixtureContracts(unittest.TestCase):
         self.assertEqual(path.read_text(), "no reviewed guard\n")
 
 
+class ProductPathContracts(unittest.TestCase):
+    def test_excluded_path_package_brings_only_its_workspace_root(self):
+        with tempfile.TemporaryDirectory() as raw:
+            repository = Path(raw).resolve()
+            adapter = repository / "target/native-graph/adapter"
+            package = adapter / "pkg"
+            plain = repository / "crates/plain"
+            for directory in (package, plain):
+                directory.mkdir(parents=True)
+                (directory / "Cargo.toml").write_text('[package]\nname = "x"\n', encoding="utf-8")
+            (adapter / "Cargo.toml").write_text('[workspace]\nmembers = ["pkg"]\n', encoding="utf-8")
+            (repository / "crates/Cargo.toml").write_text('[package]\nname = "group"\n', encoding="utf-8")
+            product = {"packages": [
+                {"name": "pkg", "source": None, "manifest_path": str(package / "Cargo.toml")},
+                {"name": "plain", "source": None, "manifest_path": str(plain / "Cargo.toml")}]}
+            with patch.object(graph, "tracked", return_value=["Cargo.toml"]):
+                paths = graph.product_paths(repository, product)
+        self.assertIn("target/native-graph/adapter/Cargo.toml", paths)
+        self.assertIn("target/native-graph/adapter/pkg/Cargo.toml", paths)
+        self.assertIn("crates/plain/Cargo.toml", paths)
+        self.assertNotIn("crates/Cargo.toml", paths)
+
+
 if __name__ == "__main__":
     if os.environ.get("CI", "").lower() != "true":
         raise ValueError("Carrier fixture contract checks execute in CI only")
