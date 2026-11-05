@@ -17,11 +17,11 @@ _SDK_TEST_SOURCE_TRANSITIONS = {
         "2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a",
     # Unwired private native runtime added to shaar/src since the control; no dependency edge changes.
     ("a9ce98ea03cbf9a6dfa63a0676d97dd63a8feb75493b8e7be97a04d763416f09",
-     "8c3cd0a033139ec38f1c4aedec83e6b3b7a9c136d87a05793e312a0dcad493e6"):
+     "6912edb8f67fa05a5454a028445c2d46f001e3fbc8ac1bca2267825eeb3e0cc4"):
         "cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88",
     # Same source delta on the Windows runner, whose control tree differs.
     ("bd0c1843a330d5b9b3255ae2abb5b89007363a49ee13c49b8a98e64c956b1971",
-     "6d787b40815b33bfef493ec76d11f864825fbd8d1b038292289cbea3caf56fd8"):
+     "4a02fedbd8867789fdaa5379bbf4f2588a3f47073b0c936fad001ca8dec535a9"):
         "2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a",
 }
 _ADDED = {("iroh-mainline-address-lookup", "0.6.1"), ("iroh-dns", "1.3.0"), ("n0-mainline", "0.7.0"), ("serde_bencode", "0.2.4"), ("n0-future", "0.3.2")}
