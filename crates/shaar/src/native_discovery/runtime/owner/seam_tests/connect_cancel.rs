@@ -64,7 +64,7 @@ async fn cancelled_connect_until_never_dials_late_and_the_cache_stays_uncommitte
     let (next_source, next_transaction) = tokio::time::timeout(Duration::from_secs(5), async {
         tokio::select! {
             held = peer.capture_get(target) => held,
-            _ = &mut retry => panic!("the late response committed a cache hit"),
+            result = &mut retry => panic!("the retry completed without a fresh GET: {result:?}"),
         }
     })
     .await
