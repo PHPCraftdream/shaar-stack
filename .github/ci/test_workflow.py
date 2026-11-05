@@ -57,7 +57,7 @@ def validate_native_graph_routing(text):
     if checks_if != "    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.native_graph_resolve) }}":
         raise AssertionError("ordinary checks must exclude manual resolver dispatch")
     prepare = re.search(r"^      - uses: \.\/.github/actions/prepare-sources\n(?P<body>.*?)(?=^      - |\Z)", checks, re.MULTILINE | re.DOTALL)
-    owners = ("product", "dns", "discovery", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license")
+    owners = ("product", "dns", "discovery", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license", "ygg")
     if not prepare:
         raise AssertionError("ordinary prepare-sources action is missing")
     body = prepare["body"]
@@ -231,7 +231,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("if-no-files-found: error", evidence)
         ordinary_checks = text.split("  checks:\n", 1)[1]
         prepare = next(step for step in ordinary_checks.split("      - ") if "./.github/actions/prepare-sources" in step)
-        for owner in ("product", "dns", "discovery", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license"):
+        for owner in ("product", "dns", "discovery", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license", "ygg"):
             self.assertIn("fromJSON(needs.plan.outputs.selection)." + owner, prepare)
         self.assertNotIn("selection).mainline", prepare)
         validate_native_graph_routing(text)

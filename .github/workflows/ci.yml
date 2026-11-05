@@ -507,6 +507,7 @@ jobs:
       # Full test runs are executed only in CI.
       - name: cargo fmt
         if: fromJSON(needs.plan.outputs.selection).rust
+        shell: bash
         run: |
           cargo fmt --all -- --check
           cargo fmt --manifest-path crates/shaar-ygg-core/Cargo.toml -- --check
