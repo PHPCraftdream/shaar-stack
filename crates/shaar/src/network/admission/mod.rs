@@ -19,6 +19,8 @@ mod tests;
 
 #[cfg(test)]
 mod native_path_tests;
+#[cfg(test)]
+mod negotiation_tests;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 

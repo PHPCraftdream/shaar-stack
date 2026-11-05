@@ -4,6 +4,7 @@
 //! times and expects exactly the listed decisions; `Time` steps fire every wakeup
 //! the policy asks for, the way an owner with a timer would.
 
+mod negotiation;
 mod owner;
 mod recovery;
 mod traces;

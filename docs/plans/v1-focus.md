@@ -318,6 +318,36 @@ Non-goals: signaling, Yggdrasil, address churn, binaries, public API, new depend
 network execution, efficiency-profile acceptance, and changes to the record or clock policies.
 All dirty files in this leaf's worktree are held by the primary executor until reviewed transfer.
 
+#### Leaf 3b accepted; leaf 3c acceptance (recorded 2026-11-05)
+
+Leaf 3b is accepted at `60b5e25`: CI `42117935856` executed 150 selected SDK cases on each
+operating system, including ten paused-time recovery contracts and the real same-address QUIC
+recovery scenario. Only new streams recover; transferred branches and worktree were removed.
+
+Leaf 3c advances scenario step 4 (signaling-only recovery). Observable acceptance: Linux and
+Windows CI show a caller-polled private owner recovering native payload after actual peer loss,
+with a real authenticated signaling negotiation in the down window and exact bytes forwarded on
+a new native stream; a live signaling-only control session delivers no application bytes in
+either direction. Healthy native paths never negotiate. Failed or hanging negotiations still
+allow the native phase of every uncancelled policy attempt, respecting the original absolute deadline,
+backoff and total attempt budget. Scripted paused-time tests pin phase ordering, deadlines,
+cancellation/resumption, exhaustion and joined close; socket fixtures pin exact peer keys and
+joined resource release. The same test-only negotiation composition is used by both fixtures.
+
+Engineer default: during the down window only, best-effort negotiation receives at most half
+the remaining attempt budget; success, error or timeout all proceed to native dialing under the
+original deadline. Failed/hanging signaling can therefore consume roughly 1.5 s of the default
+3 s attempt, leaving roughly 1.5 s for native; this is a bounded latency tradeoff, not a promise
+that every native dial fits. No new policy parameter is added. The control Session closes before
+the native dial; it never becomes payload. The signaling address remains a constructor hint.
+Only recovery after an observed session loss negotiates here; initial-establishment failures do
+not. The no-payload oracle uses permitted bidi streams, confirms local write admission, observes
+no inbound stream on live custom-only paths in either direction, and includes a native positive
+control on the same endpoints (uni streams are disabled and cannot prove this boundary).
+Non-goals: production startup wiring, discovery and signaling in one endpoint, policy/owner
+semantics changes, relay routing, Yggdrasil/standby, address churn, record/clock changes, public
+API, new dependencies, stream migration, public network and efficiency-profile acceptance.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

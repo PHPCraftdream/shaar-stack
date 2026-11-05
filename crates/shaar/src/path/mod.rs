@@ -15,7 +15,11 @@ mod owner;
 mod policy;
 
 #[cfg(test)]
+mod negotiation;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use negotiation::{Negotiating, Negotiation};
 
 #[cfg(test)]
 pub(crate) use owner::{DialError, Dialer, PathOwner};
