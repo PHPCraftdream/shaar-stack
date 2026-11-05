@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lifecycle_patch  # noqa: E402
 import prepare  # noqa: E402
 
 ARCHIVE = Path(sys.argv[1])
@@ -45,24 +47,72 @@ class YggPreparationChecks(unittest.TestCase):
         self.assertEqual(prefixes, {("crates", "ironwood"), ("crates", "yggdrasil")})
 
     def test_prepare_roundtrip_receipt_and_recorded_only_layout(self):
+        manifest = prepare.load_manifest()
+        files, recorded = prepare.archive_files(ARCHIVE)
+        prepare.verify_manifest(files, recorded, manifest)
+        prepare.validate_originals(files)
+        patched = lifecycle_patch.apply(files)
         with tempfile.TemporaryDirectory() as temporary:
             destination = Path(temporary) / "ygg"
-            root = prepare.prepare(ARCHIVE, destination)
-            self.assertEqual(root.name, prepare.ARCHIVE_TOP)
-            self.assertFalse((destination / "Cargo.toml").exists())
-            self.assertFalse((destination / "Cargo.lock").exists())
-            self.assertFalse((root / "Cargo.toml").exists())
+            root = destination / prepare.ARCHIVE_TOP
+            prepare.write_tree(root, patched)
+            (destination / (prepare.ARCHIVE_TOP + ".provenance.json")).write_text(
+                json.dumps(prepare.build_receipt(files, recorded, manifest, patched),
+                           sort_keys=True, indent=2) + "\n", encoding="utf-8")
             self.assertTrue((root / "LICENSE").is_file())
             self.assertTrue((root / "crates/yggdrasil/Cargo.toml").is_file())
             self.assertTrue((root / "crates/ironwood/Cargo.toml").is_file())
-            files = prepare.verify(root)
-            self.assertEqual(sorted(files),
-                             sorted(name for name in prepare.load_manifest()
-                                    if prepare.scope(name) == "extract"))
-            target = root / "crates/yggdrasil/src/core.rs"
-            target.write_bytes(target.read_bytes() + b"drift")
+            fault = lifecycle_patch.pin_fault(
+                {name: prepare.digest(patched[name]) for name in lifecycle_patch.changed_files()})
+            if fault:
+                with self.assertRaisesRegex(ValueError, "patched hashes"):
+                    prepare.verify(root)
+            else:
+                self.assertEqual(prepare.verify(root), prepare.hashes(patched))
+            license_path = root / "LICENSE"
+            license_path.write_bytes(license_path.read_bytes() + b"drift")
             with self.assertRaisesRegex(ValueError, "prepared source content hash"):
                 prepare.verify(root)
+            license_path.write_bytes(files["LICENSE"])
+            reverted = root / "crates/yggdrasil/src/core.rs"
+            reverted.write_bytes(files["crates/yggdrasil/src/core.rs"])
+            with self.assertRaisesRegex(ValueError, "differs from its receipt"):
+                prepare.verify(root)
+
+    def test_patch_hunk_old_text_missing_or_ambiguous_fails_closed(self):
+        manifest = prepare.load_manifest()
+        files, _ = prepare.archive_files(ARCHIVE)
+        name = "crates/yggdrasil/src/proto.rs"
+        (old, _new) = lifecycle_patch.hunks(name)[0]
+        missing = dict(files)
+        missing[name] = files[name].replace(old, b"")
+        with self.assertRaisesRegex(ValueError, "old text not found"):
+            lifecycle_patch.apply(missing)
+        ambiguous = dict(files)
+        ambiguous[name] = files[name] + old
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            lifecycle_patch.apply(ambiguous)
+
+    def test_patch_pins_match_manifest_and_receipt_records_changed_files(self):
+        manifest = prepare.load_manifest()
+        files, recorded = prepare.archive_files(ARCHIVE)
+        prepare.verify_manifest(files, recorded, manifest)
+        self.assertEqual(lifecycle_patch.original_pins(),
+                         {name: manifest[name] for name in lifecycle_patch.changed_files()})
+        for value in lifecycle_patch.patched_pins().values():
+            self.assertTrue(value == lifecycle_patch.UNPINNED or prepare.HEX.fullmatch(value), value)
+        patched = lifecycle_patch.apply(files)
+        receipt = prepare.build_receipt(files, recorded, manifest, patched)
+        self.assertTrue(receipt["patch_applied"])
+        self.assertEqual(receipt["changed_files"], sorted(lifecycle_patch.changed_files()))
+        self.assertEqual(receipt["original_files"], {name: manifest[name] for name in sorted(files)})
+        for name in lifecycle_patch.changed_files():
+            self.assertNotEqual(receipt["prepared_files"][name], manifest[name])
+        for name in sorted(set(files) - set(lifecycle_patch.changed_files())):
+            self.assertEqual(receipt["prepared_files"][name], manifest[name])
+        self.assertNotEqual(patched["crates/yggdrasil/src/core.rs"], files["crates/yggdrasil/src/core.rs"])
+        self.assertEqual(patched["LICENSE"], files["LICENSE"])
+        self.assertEqual(patched["crates/ironwood/src/core.rs"], files["crates/ironwood/src/core.rs"])
 
     def test_tampered_archive_is_rejected(self):
         data = ARCHIVE.read_bytes()

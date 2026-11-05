@@ -126,8 +126,8 @@ Status: authored; not yet executed in CI.
   prepared by `.github/probes/ygg/prepare.py` into `target/ygg/<pinned directory>/`.
   Authority is the per-file content manifest `ygg-manifest.json` (43 files, tree digest
   `b05902627173ccce95f88fc0a0e36f043646b7c129dc46e8e03d7512771ae2d0`); the archive hash is
-  recorded evidence. Only `LICENSE`, `crates/ironwood/` and `crates/yggdrasil/` are extracted. No
-  source patch is applied in this leaf; lifecycle repairs belong to leaf 53.2. The provenance
+  recorded evidence. Only `LICENSE`, `crates/ironwood/` and `crates/yggdrasil/` are extracted.
+  Leaf 53.1 applies no source patch; lifecycle repairs belong to leaf 53.2. The provenance
   receipt is uploaded with the source-preparation logs (`ygg.provenance.json`).
 - The core is consumed by the new standalone crate `crates/shaar-ygg-core` (own `[workspace]`,
   own `Cargo.lock`, `yggdrasil` with `default-features = false`, stock crates.io `salsa20`, no
@@ -148,3 +148,42 @@ read only the root workspace, so the nested closure's licenses (MPL-2.0 for `ygg
 crate's own unit test and by the later notices work (#72/#73); the `scope: full` clippy command
 (`--workspace`) does not include the nested crate; compilation of the prepared core with
 `default-features = false` is unverified until CI runs.
+
+## Lifecycle patch (leaf 53.2)
+
+Status: authored and statically reviewed; nothing compiled or executed locally.
+
+- `.github/probes/ygg/lifecycle_patch.py` plus `patches/{core,links,proto}.py` express the
+  reviewed lifecycle corrections as exact byte replacements ("old occurs exactly once"), pinned
+  to the manifest's original per-file hashes; each `PATCHED_SHA256` pins the patched bytes of
+  `crates/yggdrasil/src/{core,links,proto}.rs` (computed from the literal hunks over the pinned
+  data; every old text occurs exactly once); a mismatch fails preparation closed.
+- Hunks: core.rs gains a cancellation-token root and stored join handles for the proto sender,
+  inbound proto handler, proto cleanup handler and TLS renewal loop; each loop selects the
+  token; `close()` clears the path-notify slot, runs links close (which cancels and joins the
+  rate, listener and reconnect tasks, abort-then-joins tracked per-connection tasks and breaks
+  the Core->Links cycle by clearing the Links core field), cancels the root token, awaits the
+  stored handles, then closes the inner ironwood connection; a `close_started` flag makes close
+  idempotent. proto.rs cleanup loop exits on a child token (`ProtoHandler::with_shutdown`;
+  `new` is unchanged). links.rs rate task gains a cancel branch; TCP per-connection spawns are
+  tracked in a `JoinSet` reaped opportunistically.
+- Specified in `crates/shaar-ygg-core/tests/lifecycle.rs` (authored; executed results are
+  recorded only after CI): three create/listen/close cycles, concurrent and repeated close,
+  and a two-core loopback peering closed listener-first and dialer-first. Each close finishes
+  under a timeout, the caller holds the only strong reference after close, the runtime's
+  alive-task count (`RuntimeMetrics::num_alive_tasks`, stable; the test body runs under
+  `block_on` and is not counted) reaches zero within a bounded poll, `Weak<Core>` stops
+  upgrading after drop, and the same loopback port binds again.
+- Known gaps (independent review, recorded before execution): `ironwood` stays unpatched,
+  so its router actor and peer writer tasks are cancelled but not joined by `close()`; the
+  bounded alive-task poll observes that they exit on an idle core, but an in-flight 10-second
+  peer write can outlast the five-second poll. The encrypted reader awaits
+  `recv_tx.send(msg)` outside its cancellation select (`ironwood` `encrypted/mod.rs`), so a
+  full receive queue (the adapter not reading) can block `close()`; this needs a one-hunk
+  `ironwood` correction and a full-queue regression test, tracked as leaf 53.2b before the
+  adapter relies on `close()` under load. The QUIC listener branch is feature-gated off in
+  this crate and is not patched; `remove_peer` still aborts without joining (outside the
+  adapter path). A cancelled `close()` after its handles were drained leaves the core
+  half-closed; callers must not cancel it.
+- MPL-2.0 note: the modified `core.rs`, `links.rs` and `proto.rs` are file-level
+  MPL-protected; their publication mechanism remains an open legal item.

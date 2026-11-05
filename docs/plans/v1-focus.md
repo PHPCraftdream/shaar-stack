@@ -83,6 +83,22 @@ the upstream SIMD `salsa20` fork unless separately reviewed, version bumps beyon
 path policy and blockade failover (P10/P13), any libp2p application data, and claiming
 interoperability with deployed Yggdrasil nodes from owned fixtures.
 
+Leaf 53.1 (prepared pinned source, isolated `shaar-ygg-core` crate) is accepted at `76b8491`:
+Linux and Windows CI executed its two tests; the unpatched core links.
+
+#### Leaf 53.2 acceptance and non-goals (recorded 2026-11-05, before implementation)
+
+Advances scenario step 5 (Yggdrasil path from the same key). Observable acceptance: the
+preparation step applies a reviewed, hash-pinned lifecycle patch to the `yggdrasil` crate only
+(`ironwood` stays byte-exact), and the provenance receipt records original and patched hashes
+of every changed file. In GitHub CI on Linux and Windows, tests in `shaar-ygg-core` create a
+core, listen on a loopback port, then `close().await`; after it returns, the runtime's alive
+task count reaches its baseline within a bounded poll, a retained `Weak<Core>` no longer
+upgrades, and the same port can be bound again. The sequence repeats three times in one process.
+Non-goals: key-addressed exchange (53.3), negative controls and typed startup errors (53.4),
+an `ironwood` patch (the bounded poll covers its tasks; revisit only if the poll fails),
+the adapter API, `start()`/`set_path_notify`, public network, unsafe, version bumps.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

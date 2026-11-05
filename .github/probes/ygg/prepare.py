@@ -1,12 +1,13 @@
 # Copyright 2026 PHPCraftdream
 # SPDX-License-Identifier: MIT OR Apache-2.0
-"""Prepare and verify the pinned, unpatched Yggdrasil-ng core source tree.
+"""Prepare and verify the pinned, reviewed-patched Yggdrasil-ng core source tree.
 
 The pinned archive is untrusted data: its members are only read and hashed,
 never executed, and extraction is limited to the reviewed LICENSE and the two
 workspace crates. The per-file content manifest (ygg-manifest.json) is the
-authoritative pin; the archive digest is recorded evidence only. Leaf 53.1
-applies no source patch: prepared bytes are byte-exact upstream bytes.
+authoritative pin; the archive digest is recorded evidence only. Leaf 53.2
+applies the reviewed lifecycle hunks (lifecycle_patch.py) after manifest
+verification; ironwood, LICENSE and every unpatched file stay byte-exact.
 """
 from __future__ import annotations
 
@@ -22,6 +23,9 @@ import tomllib
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import lifecycle_patch  # noqa: E402
+
 REVISION = "c9a54f1587bb133a06072596484c972a336db0d2"
 ARCHIVE_URL = "https://codeload.github.com/Revertron/Yggdrasil-ng/tar.gz/" + REVISION
 ARCHIVE_SHA256 = "4d978c1a8714e0569fd0a3782adab2f6b81b9c9e54d733dbeaa023aaebae96c1"
@@ -43,6 +47,8 @@ MAX_DEPTH = 16
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 SOURCE = {"kind": "git-archive", "repository": "https://github.com/Revertron/Yggdrasil-ng",
           "revision": REVISION}
+RECIPE_FILES = ("prepare.py", "checks.py", MANIFEST_NAME, "lifecycle_patch.py",
+                "patches/core.py", "patches/links.py", "patches/proto.py")
 
 
 def digest(data: bytes) -> str:
@@ -54,8 +60,7 @@ def hashes(files: dict[str, bytes]) -> dict[str, str]:
 
 
 def recipe() -> dict[str, str]:
-    return {name: digest((HERE / name).read_bytes())
-            for name in ("prepare.py", "checks.py", MANIFEST_NAME)}
+    return {name: digest((HERE / name).read_bytes()) for name in RECIPE_FILES}
 
 
 def _manifest_key_fault(name: str) -> str | None:
@@ -219,15 +224,16 @@ def inventory(root: Path) -> dict[str, str]:
 
 
 def build_receipt(files: dict[str, bytes], recorded: dict[str, str],
-                  manifest: dict[str, str]) -> dict:
-    prepared = hashes(files)
+                  manifest: dict[str, str], patched: dict[str, bytes]) -> dict:
+    prepared = hashes(patched)
     return {"package": "yggdrasil", "version": "0.3.1",
             "source": SOURCE,
             "archive_url": ARCHIVE_URL, "archive_sha256": ARCHIVE_SHA256,
             "content_manifest": {"path": MANIFEST_RELATIVE, "files": len(manifest),
                                  "tree_digest": TREE_DIGEST,
                                  "authority": "content-manifest"},
-            "patch_applied": False, "changed_files": [], "recipe_files": recipe(),
+            "patch_applied": True, "changed_files": sorted(lifecycle_patch.changed_files()),
+            "recipe_files": recipe(),
             "recorded_only_files": dict(sorted(recorded.items())),
             "original_files": {name: manifest[name] for name in sorted(files)},
             "prepared_files": prepared}
@@ -238,14 +244,15 @@ def prepare(archive: Path, destination: Path) -> Path:
     files, recorded = archive_files(archive)
     verify_manifest(files, recorded, manifest)
     validate_originals(files)
+    patched = lifecycle_patch.apply(files)
     if destination.exists() or destination.is_symlink() or not destination.parent.is_dir():
         raise ValueError("output root must be new and its parent must exist")
     root = destination / ARCHIVE_TOP
     destination.mkdir()
     try:
-        write_tree(root, files)
+        write_tree(root, patched)
         (destination / (ARCHIVE_TOP + ".provenance.json")).write_text(
-            json.dumps(build_receipt(files, recorded, manifest), sort_keys=True,
+            json.dumps(build_receipt(files, recorded, manifest, patched), sort_keys=True,
                        indent=2) + "\n", encoding="utf-8")
         verify(root, manifest)
         return root
@@ -269,7 +276,8 @@ def verify(root: Path, manifest: dict[str, str] | None = None) -> dict[str, str]
     recorded_names = {name for name in manifest if scope(name) == "record"}
     expected_receipt = {"package": "yggdrasil", "version": "0.3.1", "source": SOURCE,
                         "archive_sha256": ARCHIVE_SHA256, "archive_url": ARCHIVE_URL,
-                        "patch_applied": False, "changed_files": [],
+                        "patch_applied": True,
+                        "changed_files": sorted(lifecycle_patch.changed_files()),
                         "content_manifest": {"path": MANIFEST_RELATIVE,
                                              "files": MANIFEST_COUNT,
                                              "tree_digest": TREE_DIGEST,
@@ -278,11 +286,11 @@ def verify(root: Path, manifest: dict[str, str] | None = None) -> dict[str, str]
                         "recorded_only_files": {name: manifest[name]
                                                 for name in sorted(recorded_names)},
                         "original_files": {name: manifest[name]
-                                           for name in sorted(extracted_names)},
-                        "prepared_files": {name: manifest[name]
                                            for name in sorted(extracted_names)}}
-    if receipt != expected_receipt:
+    if {key: receipt.get(key) for key in expected_receipt} != expected_receipt:
         raise ValueError("prepared receipt mismatch")
+    if set(receipt) != set(expected_receipt) | {"prepared_files"}:
+        raise ValueError("prepared receipt has unexpected fields")
     files: dict[str, str] = {}
     for name, checksum in inventory(root).items():
         if scope(name) != "extract":
@@ -290,10 +298,14 @@ def verify(root: Path, manifest: dict[str, str] | None = None) -> dict[str, str]
         files[name] = checksum
     if sorted(files) != sorted(extracted_names):
         raise ValueError("prepared tree file set differs from the pinned manifest")
-    if any(files[name] != manifest[name] for name in files):
+    changed = set(lifecycle_patch.changed_files())
+    if any(files[name] != manifest[name] for name in files if name not in changed):
         raise ValueError("prepared source content hash differs from the pinned manifest")
     if files != receipt.get("prepared_files"):
         raise ValueError("prepared tree differs from its receipt")
+    fault = lifecycle_patch.pin_fault({name: files[name] for name in sorted(changed)})
+    if fault:
+        raise ValueError(fault)
     return files
 
 

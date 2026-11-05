@@ -119,6 +119,11 @@ class PolicyTests(unittest.TestCase):
         lock = POLICY.select(["crates/shaar-ygg-core/Cargo.lock", "crates/shaar-ygg-core/Cargo.toml"])
         self.assertEqual(lock["targets"], [POLICY.target("shaar-ygg-core")])
         self.assertEqual(lock["suites"], ["package:shaar-ygg-core"])
+        lifecycle = POLICY.select(["crates/shaar-ygg-core/tests/lifecycle.rs"])
+        self.assertEqual(lifecycle["targets"],
+                         [POLICY.target("shaar-ygg-core", kind="test", name="lifecycle")])
+        self.assertEqual(lifecycle["suites"], ["integration:lifecycle"])
+        RUNNER.validate(lifecycle["targets"])
         with self.assertRaisesRegex(ValueError, "No test impact rule"):
             POLICY.select(["crates/shaar-p2p/Cargo.lock"])
         self.assertEqual(sorted(POLICY.NESTED), ["shaar-ygg-core"])
@@ -167,7 +172,6 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(module["targets"], [POLICY.target("shaar", ("", "native_discovery::"))])
         self.assertEqual(module["suites"], ["native-discovery", "package:shaar"])
         self.assertFalse(module["selection"]["full"])
-
         manifest = POLICY.select(["crates/shaar/Cargo.toml"])
         self.assertEqual(manifest["targets"], [POLICY.target("shaar")])
         self.assertTrue(manifest["selection"]["license"])
