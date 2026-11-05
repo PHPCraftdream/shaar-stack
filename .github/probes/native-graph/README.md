@@ -120,35 +120,27 @@ Prior or latest `.ll` DATA is not retroactive evidence of stdin. A new wrapper i
 
 One compiler invocation remains one unit and retains all direct outputs. Repeated, distinct `--crate-type` values are canonicalized solely as a complete sorted set, which must match both metadata and artifact types. Missing, duplicate, unknown, empty, malformed, or mismatched types are rejected; other unique flags, identity, context, and ownership remain unchanged. Direct products need no `extra-filename` when there is no alias; alias singleton restrictions remain in force. Regression tests are authored, not executed; parent CI owns acceptance.
 
-## Accepted SDK test-only source transition
+## Workspace sources and the Yggdrasil closure
 
-Historical BASE `516b023` and its independently transformed control remain unchanged.
-Delivered `70b55f4` changes only `crates/shaar/src/native_discovery/tests/codec.rs`,
-behind the existing `cfg(test)` module; its 43-case native SDK suite passed on both
-OS in feature CI `41772815878`. The normal source files and dependency manifests are
-unchanged by that vector commit.
+Workspace crates (`shaar`, `shaar-p2p`, `shaar-platform`, `shaar-ygg`, `shaar-ygg-core`) are
+identified by name and version only. Their archive and source-tree digests stay in the raw
+bindings and in `proof_sha256`, but they are not part of the stable package or unit identity:
+the guard compares the dependency graph, while the product tests exercise the source content.
+This replaces the earlier per-tree transition tuples, which needed fresh CI evidence on both
+operating systems after every edit of a workspace crate. Prepared and registry packages keep
+their exact archive, tree, recipe and checksum identities.
 
-Only the candidate `shaar` 0.1.0 workspace binding with baseline archive
-`183956ce9ae1b99245953ce3e65b76e44ea64bba5de113fc193af462ea8d4712` and exact new
-source tree `59987da7663e14b9d1c8441c051a8cdcbebd497327a021b1ea7f84fdf8fe1e41`
-uses historical tree `cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88`
-for dependency-feature/unit equivalence. The actual binding remains unmodified
-in the evidence and is included in the proof digest. This is not an arbitrary
-workspace-source exemption: unlisted trees, archives, roles, packages and versions
-retain the original strict comparison; prepared dependency identities are unchanged.
-Regressions cover this exact transition, raw-provenance digest changes and rejection
-of forged bindings. Their execution and combined-SHA acceptance remain pending CI.
-
-Windows DATA from CI `41775391999` proves the same accepted transition in exact
-CRLF bytes: archive `e2fe4d5ff2a65b45848bcc128af2ef474ad9c836374763353d532a9d15f042a5`,
-new tree `c0fbceaea9b9df00f45dffd55bd2057c9e549a14c1e6e5c956ef1b1c88aefde6`,
-historical tree `2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a`.
-The parent verified the actual archive hash, all 45 SDK source members against
-fixed Git BASE with exact LF-to-CRLF conversion, and both old/new tree digests.
-The second tuple is accepted as a whole, not as interchangeable archive/tree
-components. No runtime newline stripping or generic source normalization occurs;
-raw bindings still distinguish platform bytes. Regressions cover both tuples,
-cross-pair rejection, unlisted archives and wrong-role changes on every OS.
+`fixture/baseline/ygg_closure.py` declares the exact closure that the pinned Yggdrasil adapter
+adds to the approved route, read from the Linux and Windows evidence of CI run `42068466717`:
+the locked identities with their checksums (30 registry crates, the prepared `ironwood` and
+`yggdrasil` from one pinned archive and recipe, and the workspace `shaar-ygg-core`), the
+per-package feature growth, the shared-to-shared metadata and unit edges, the packages that
+first get compiler units, and the new units of existing packages. The closure is all or
+nothing. When it is present the control comparison requires that the candidate embeds every
+control package, unit and dependency, that feature growth stays inside the declared sets, and
+that every other addition belongs to the closure; metadata edges are checked the same way.
+Aux-probe `owner` digests cascade through feature changes and are ignored, because the owner
+units are compared directly. Without the closure the strict equality is unchanged.
 
 ## Reviewed multibase removal (authored, pending CI)
 

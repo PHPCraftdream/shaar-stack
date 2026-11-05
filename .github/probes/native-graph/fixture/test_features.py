@@ -439,12 +439,13 @@ class CompareProofsTests(unittest.TestCase):
             with self.assertRaises(AuditError):
                 _compare(proofs)
 
-    def test_wrong_workspace_source_binding_rejected(self):
+    def test_workspace_source_digests_stay_in_the_proof_not_in_the_identity(self):
         proofs = _proofs()
-        _compare(copy.deepcopy(proofs))
-        proofs[2]["source_bindings"]["path+file:///repo#shaar@0.1.0"]["tree_sha256"] = "b" * 64
-        with self.assertRaisesRegex(AuditError, "candidate package features differ"):
-            _compare(proofs)
+        before = _compare(copy.deepcopy(proofs))
+        binding = proofs[2]["source_bindings"]["path+file:///repo#shaar@0.1.0"]
+        binding.update(tree_sha256="b" * 64, archive_sha256="c" * 64)
+        after = _compare(proofs)
+        self.assertNotEqual(before["proof_sha256"]["candidate"], after["proof_sha256"]["candidate"])
 
     def test_context_test_util_role_and_metadata_cardinality_fail_closed(self):
         mutations = [
