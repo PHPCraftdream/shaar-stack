@@ -25,9 +25,9 @@ const PAYLOAD: &[u8] = b"composed native path";
 /// The native dialer of the path owner: resolve the server key's signed record, then dial
 /// the published addresses with the exact-key `Endpoint::connect` under one deadline.
 /// Product wiring of this adapter belongs to the startup leaf.
-struct DiscoveredDial {
-    endpoint: NativeDiscoveredEndpoint,
-    expected: PublicKey,
+pub(super) struct DiscoveredDial {
+    pub(super) endpoint: NativeDiscoveredEndpoint,
+    pub(super) expected: PublicKey,
 }
 
 impl Dialer for DiscoveredDial {
@@ -40,12 +40,16 @@ impl Dialer for DiscoveredDial {
             .map_err(|_: NativeEndpointError| DialError)
     }
 
+    async fn lost(&mut self, link: &Session) {
+        let _ = link.closed().await;
+    }
+
     async fn close(&mut self) -> Result<(), DialError> {
         self.endpoint.close().await.map_err(|_| DialError)
     }
 }
 
-async fn tcp_pair() -> (TcpStream, TcpStream) {
+pub(super) async fn tcp_pair() -> (TcpStream, TcpStream) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("pair listener binds");

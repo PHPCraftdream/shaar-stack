@@ -82,6 +82,10 @@ impl Dialer for FakeDial {
         }
     }
 
+    async fn lost(&mut self, _: &FakeLink) {
+        std::future::pending().await
+    }
+
     async fn close(&mut self) -> Result<(), DialError> {
         log(&self.shared).events.push("dialer closed");
         Ok(())

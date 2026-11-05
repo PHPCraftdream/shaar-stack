@@ -5,6 +5,7 @@
 //! the policy asks for, the way an owner with a timer would.
 
 mod owner;
+mod recovery;
 mod traces;
 
 use super::{ConfigError, Decision, Event, Millis, Mode, PathKind, PathPolicy, PolicyConfig};

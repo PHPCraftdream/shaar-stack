@@ -36,7 +36,12 @@ pub(crate) trait Dialer {
     /// `deadline`; a link completed after the deadline is closed, not returned.
     async fn dial(&mut self, deadline: Instant) -> Result<Self::Link, DialError>;
 
+    /// Observe loss of this exact link, including an already closed link.
+    /// cancel-safe: yes — the observer must be level-triggered and retain no event.
+    async fn lost(&mut self, link: &Self::Link);
+
     /// Release everything the dialer owns, joined. Must tolerate repeated calls.
+    /// cancel-safe: yes — an interrupted close must remain resumable by another call.
     async fn close(&mut self) -> Result<(), DialError>;
 }
 
@@ -91,17 +96,57 @@ impl<D: Dialer> PathOwner<D> {
         if self.payload().is_some() {
             return Ok(());
         }
-        let mut event = Event::Tick;
+        self.drive(Event::Tick).await
+    }
+
+    /// Wait for native loss, then restore a new payload using the remaining budget.
+    /// The caller cancels this operation before closing the owner; streams are not migrated.
+    /// cancel-safe: NO — a retry dial may be abandoned, but the loss and schedule persist.
+    pub(crate) async fn maintain(&mut self) -> Result<(), EstablishError> {
+        while let Some(link) = self.link.as_ref() {
+            let wake = self.policy.next_wakeup().map(|at| self.instant(at));
+            let lost = match wake {
+                Some(at) => {
+                    tokio::select! {
+                        biased;
+                        () = self.dialer.lost(link) => true,
+                        () = sleep_until(at) => false,
+                    }
+                }
+                None => {
+                    self.dialer.lost(link).await;
+                    true
+                }
+            };
+            if lost {
+                return self
+                    .drive(Event::NativeDown {
+                        generation: self.generation,
+                    })
+                    .await;
+            }
+            self.policy.step(self.millis(Instant::now()), Event::Tick);
+        }
+        self.drive(Event::Tick).await
+    }
+
+    async fn drive(&mut self, mut event: Event) -> Result<(), EstablishError> {
         loop {
             let now = self.millis(Instant::now());
             let decision = self.policy.step(now, event);
+            if matches!(event, Event::NativeDown { .. }) {
+                self.link = None;
+            }
             event = Event::Tick;
+            if self.payload().is_some() {
+                return Ok(());
+            }
             match decision {
                 Decision::Use(PathKind::Native) => return Ok(()),
                 Decision::AttemptNative { attempt, deadline } => {
                     let limit = self.instant(deadline);
-                    event = match timeout_at(limit, self.dialer.dial(limit)).await {
-                        Ok(Ok(link)) => {
+                    event = match self.attempt(limit).await {
+                        Ok(link) => {
                             self.generation += 1;
                             self.link = Some(link);
                             Event::NativeUp {
@@ -116,12 +161,38 @@ impl<D: Dialer> PathOwner<D> {
                     None => return Err(EstablishError::Exhausted),
                 },
                 Decision::Closed => return Err(EstablishError::Closed),
-                // `NoPath` follows a lost native path and `Use(Yggdrasil)` needs `standby`:
-                // neither can happen while establishing in `signal` mode.
-                Decision::NativeExhausted
-                | Decision::NoPath
-                | Decision::Use(PathKind::Yggdrasil) => {
+                Decision::NoPath => {}
+                Decision::NativeExhausted | Decision::Use(PathKind::Yggdrasil) => {
                     return Err(EstablishError::Exhausted);
+                }
+            }
+        }
+    }
+
+    async fn attempt(&mut self, limit: Instant) -> Result<D::Link, DialError> {
+        let started = self.started;
+        let dial = timeout_at(limit, self.dialer.dial(limit));
+        tokio::pin!(dial);
+        loop {
+            let wake = self
+                .policy
+                .next_wakeup()
+                .map_or(limit, |at| started + Duration::from_millis(at));
+            tokio::select! {
+                result = &mut dial => {
+                    return match result {
+                        Ok(Ok(link)) if Instant::now() < limit => Ok(link),
+                        _ => Err(DialError),
+                    };
+                }
+                () = sleep_until(wake) => {
+                    let now = Instant::now();
+                    if now >= limit {
+                        return Err(DialError);
+                    }
+                    let millis = u64::try_from(now.saturating_duration_since(started).as_millis())
+                        .unwrap_or(u64::MAX);
+                    self.policy.step(millis, Event::Tick);
                 }
             }
         }
@@ -129,14 +200,16 @@ impl<D: Dialer> PathOwner<D> {
 
     /// Shut down: the policy is told first, then the link is dropped and the dialer
     /// is closed and joined. Idempotent.
+    /// cancel-safe: yes — an interrupted backend close can be resumed.
     pub(crate) async fn close(&mut self) -> Result<(), DialError> {
         if self.closed {
             return Ok(());
         }
-        self.closed = true;
         let now = self.millis(Instant::now());
         self.policy.step(now, Event::Shutdown);
         self.link = None;
-        self.dialer.close().await
+        self.dialer.close().await?;
+        self.closed = true;
+        Ok(())
     }
 }

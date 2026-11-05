@@ -301,6 +301,23 @@ cause is unconfirmed; later green diagnostic runs are not claimed as a cause-lev
 Non-goals: loss monitoring, signaling, Yggdrasil, address churn, binaries, public API, new
 dependencies, `policy.py` changes, any change of the P09 production code.
 
+#### Leaf 3a accepted; leaf 3b acceptance (recorded 2026-11-05)
+
+Leaf 3a is accepted at `780d7b6`: CI `42111786584` executed 139 selected SDK cases on each
+operating system, including nine paused-time owner contracts, the resolve-to-forward composition
+and both controlled-clock oracle regressions. The exact tested revision is on `develop`.
+
+Leaf 3b advances scenario step 4 (native recovery only). Observable acceptance: in Linux and
+Windows CI, a caller-polled private owner observes closure of the active native session, removes
+its payload, observes the configured loss grace and bounded retry schedule, and restores a new
+native payload after a successful dial. Paused-time contracts cover the grace boundary, failed
+and hanging attempts, exhaustion, stale loss generations, cancellation/resumption and shutdown.
+A controlled loopback scenario closes the actual peer session, then reconnects by the same key
+and address and forwards exact bytes on a new stream. Existing streams are not migrated.
+Non-goals: signaling, Yggdrasil, address churn, binaries, public API, new dependencies, public
+network execution, efficiency-profile acceptance, and changes to the record or clock policies.
+All dirty files in this leaf's worktree are held by the primary executor until reviewed transfer.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address
