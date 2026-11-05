@@ -224,27 +224,37 @@ async fn connected_pair() -> (Arc<Core>, Arc<Core>, u16) {
     (listener, dialer, port)
 }
 
-/// Send datagrams to a destination that never reads until the sender stalls
-/// (backpressure reached it) or `FLOOD_MESSAGES` were accepted. Returns the
-/// number of accepted datagrams. The first write may wait for path discovery.
-async fn flood(sender: &Core, destination: &ironwood::Addr) -> usize {
-    let payload = [0xA5u8; 64];
-    let warmup_deadline = tokio::time::Instant::now() + CONNECT_BUDGET;
+/// Wait until a datagram from `sender` reaches `receiver`: path discovery
+/// between two fresh cores takes time and earlier writes are only accepted,
+/// not delivered. The probe is read (and discarded) by the receiver.
+async fn wait_for_path(sender: &Core, receiver: &Core) {
+    let destination = ironwood::Addr(*receiver.public_key());
+    let mut buffer = vec![0u8; 2048];
+    let deadline = tokio::time::Instant::now() + CONNECT_BUDGET;
     loop {
-        let first =
-            tokio::time::timeout(FLOOD_WARMUP, sender.write_to(&payload, destination)).await;
-        if matches!(first, Ok(Ok(_))) {
-            break;
+        let _ = tokio::time::timeout(FLOOD_WARMUP, sender.write_to(b"probe", &destination)).await;
+        let read = tokio::time::timeout(FLOOD_WARMUP, receiver.read_from(&mut buffer)).await;
+        if matches!(read, Ok(Ok(_))) {
+            return;
         }
         assert!(
-            tokio::time::Instant::now() < warmup_deadline,
-            "first datagram was not accepted within {CONNECT_BUDGET:?}: {first:?}"
+            tokio::time::Instant::now() < deadline,
+            "no datagram reached the receiver within {CONNECT_BUDGET:?}"
         );
-        tokio::time::sleep(POLL_STEP).await;
     }
-    let mut accepted = 1;
-    for _ in 1..FLOOD_MESSAGES {
-        let write = tokio::time::timeout(FLOOD_STALL, sender.write_to(&payload, destination)).await;
+}
+
+/// Send datagrams at a receiver that stops reading until the sender stalls
+/// (backpressure reached it) or `FLOOD_MESSAGES` were accepted. Returns the
+/// number of accepted datagrams.
+async fn flood(sender: &Core, receiver: &Core) -> usize {
+    wait_for_path(sender, receiver).await;
+    let destination = ironwood::Addr(*receiver.public_key());
+    let payload = [0xA5u8; 64];
+    let mut accepted = 0;
+    for _ in 0..FLOOD_MESSAGES {
+        let write =
+            tokio::time::timeout(FLOOD_STALL, sender.write_to(&payload, &destination)).await;
         match write {
             Ok(Ok(_)) => accepted += 1,
             _ => break,
@@ -259,8 +269,7 @@ async fn flood(sender: &Core, destination: &ironwood::Addr) -> usize {
 #[tokio::test]
 async fn flooding_a_silent_receiver_fills_its_receive_queue() {
     let (listener, dialer, _port) = connected_pair().await;
-    let destination = ironwood::Addr(*listener.public_key());
-    let accepted = flood(&dialer, &destination).await;
+    let accepted = flood(&dialer, &listener).await;
     tokio::time::sleep(FLOOD_SETTLE).await;
 
     let mut buffer = vec![0u8; 2048];
@@ -281,8 +290,7 @@ async fn flooding_a_silent_receiver_fills_its_receive_queue() {
 #[tokio::test]
 async fn close_returns_while_the_receive_queue_is_full() {
     let (listener, dialer, port) = connected_pair().await;
-    let destination = ironwood::Addr(*listener.public_key());
-    flood(&dialer, &destination).await;
+    flood(&dialer, &listener).await;
     tokio::time::sleep(FLOOD_SETTLE).await;
 
     close_within(&listener, "full-queue listener").await;
