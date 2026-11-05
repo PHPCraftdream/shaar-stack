@@ -1222,6 +1222,7 @@ name = "shaar-ygg-core"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "ironwood",
  "tokio",
  "yggdrasil",
 ]
