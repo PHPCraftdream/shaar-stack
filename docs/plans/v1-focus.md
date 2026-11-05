@@ -290,6 +290,14 @@ signed record for the server key from the owned Mainline fixture, dials the publ
 with exact-key QUIC through the owner, reports native as the payload path, forwards exact bytes
 both ways through the fixed target, and after the joined close leaves no task and frees both
 native ports.
+Bounded test-oracle repair: cancellation and invalid-record socket regressions use the existing
+controlled clock with records signed at that same fixed wall time. Their real Mainline and QUIC
+paths and rejection/positive controls remain intact; system wall-clock adjustments must not
+masquerade as cancellation or record-validation failures. Acceptance requires both regressions
+and the new owner cases to execute on both operating systems. Existing deliberate clock-fault
+regressions remain unchanged. The original Windows failure discarded the retry result, so its
+cause is unconfirmed; later green diagnostic runs are not claimed as a cause-level repair.
+
 Non-goals: loss monitoring, signaling, Yggdrasil, address churn, binaries, public API, new
 dependencies, `policy.py` changes, any change of the P09 production code.
 

@@ -32,7 +32,7 @@ pub(in crate::native_discovery::runtime::owner) fn signed_record(
 }
 
 /// The same record signed at an explicit wall time (for stale and future negatives).
-pub(super) fn signed_record_at(
+pub(in crate::native_discovery::runtime::owner) fn signed_record_at(
     identity: &Identity,
     address: SocketAddr,
     wall_us: i64,

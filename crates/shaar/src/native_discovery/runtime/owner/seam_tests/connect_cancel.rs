@@ -5,8 +5,10 @@
 use super::super::endpoint_key;
 use super::super::tests::fixture::LoopbackPeer;
 use crate::identity::Identity;
-use crate::native_discovery::runtime::owner::wiring_tests::connect::signed_record;
-use crate::native_discovery::runtime::owner::wiring_tests::{bind, free_port, options, peer_v4};
+use crate::native_discovery::runtime::owner::wiring_tests::connect::signed_record_at;
+use crate::native_discovery::runtime::owner::wiring_tests::{
+    RECORD_WALL_US, bind_controlled, free_port, options, peer_v4,
+};
 use crate::network::{Allowlist, Endpoint, Limits};
 use n0_mainline::MutableItem;
 use std::time::Duration;
@@ -15,7 +17,7 @@ use tokio::time::Instant;
 #[tokio::test]
 async fn cancelled_connect_until_never_dials_late_and_the_cache_stays_uncommitted() {
     let mut peer = LoopbackPeer::bind().await;
-    let mut client = bind(
+    let mut client = bind_controlled(
         free_port().await,
         options(free_port().await, peer_v4(&peer)),
     )
@@ -32,7 +34,7 @@ async fn cancelled_connect_until_never_dials_late_and_the_cache_stays_uncommitte
     )
     .await
     .expect("server endpoint binds");
-    let item = signed_record(&identity_b, server_b.local_addr());
+    let item = signed_record_at(&identity_b, server_b.local_addr(), RECORD_WALL_US);
 
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut connect = Box::pin(client.connect_until(key_b, deadline));

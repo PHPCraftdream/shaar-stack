@@ -5,8 +5,8 @@
 use super::super::endpoint::NativeEndpointError;
 use super::super::endpoint_key;
 use super::super::tests::fixture::LoopbackPeer;
-use super::connect::{now_us, signed_record, signed_record_at};
-use super::{bind, free_port, options, peer_v4};
+use super::connect::signed_record_at;
+use super::{RECORD_WALL_US, bind_controlled, free_port, options, peer_v4};
 use crate::identity::Identity;
 use iroh_base::{RelayUrl, TransportAddr};
 use iroh_dns::endpoint_info::{EndpointData, EndpointInfo};
@@ -49,7 +49,7 @@ async fn silent(socket: &UdpSocket) -> bool {
 #[tokio::test]
 async fn invalid_records_never_start_a_dial_and_a_valid_record_does() {
     let mut peer = LoopbackPeer::bind().await;
-    let mut client = bind(
+    let mut client = bind_controlled(
         free_port().await,
         options(free_port().await, peer_v4(&peer)),
     )
@@ -67,7 +67,7 @@ async fn invalid_records_never_start_a_dial_and_a_valid_record_does() {
             signed_record_at(
                 &Identity::from_seed([0x71; 32]),
                 address,
-                now_us() - 400_000_000,
+                RECORD_WALL_US - 400_000_000,
             ),
         ),
         (
@@ -76,7 +76,7 @@ async fn invalid_records_never_start_a_dial_and_a_valid_record_does() {
             signed_record_at(
                 &Identity::from_seed([0x72; 32]),
                 address,
-                now_us() + 60_000_000,
+                RECORD_WALL_US + 60_000_000,
             ),
         ),
         (
@@ -105,7 +105,7 @@ async fn invalid_records_never_start_a_dial_and_a_valid_record_does() {
     // Positive control: the same capture socket does observe the dial for a valid record.
     let valid = Identity::from_seed([0x74; 32]);
     let key = endpoint_key(&valid).expect("key");
-    let item = signed_record(&valid, address);
+    let item = signed_record_at(&valid, address, RECORD_WALL_US);
     let mut buffer = [0u8; 2048];
     let deadline = Instant::now() + Duration::from_secs(10);
     tokio::select! {

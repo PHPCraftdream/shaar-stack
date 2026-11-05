@@ -79,6 +79,40 @@ impl NativeDiscoveredEndpoint {
         })
     }
 
+    #[cfg(test)]
+    pub(super) async fn bind_with_discovery_controlled(
+        native: SocketAddr,
+        allowlist: Allowlist,
+        limits: Limits,
+        options: NativeDiscoveryOptions,
+        clock: super::super::clock::TestClock,
+    ) -> Result<Self, NativeEndpointError> {
+        endpoint_key(options.identity()).map_err(NativeEndpointError::Start)?;
+        let endpoint = Endpoint::bind(options.identity(), native, allowlist, limits)
+            .await
+            .map_err(NativeEndpointError::Network)?;
+        let runtime = match RuntimeOwner::start_controlled(
+            options.identity().clone(),
+            options.bind(),
+            options.bootstrap(),
+            clock,
+        ) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                endpoint.close().await;
+                return Err(NativeEndpointError::Start(error));
+            }
+        };
+        Ok(Self {
+            id: endpoint.id(),
+            address: endpoint.local_addr(),
+            endpoint: Some(endpoint),
+            endpoint_close: None,
+            runtime,
+            closing: false,
+        })
+    }
+
     pub(in crate::native_discovery) fn id(&self) -> PublicKey {
         self.id
     }
