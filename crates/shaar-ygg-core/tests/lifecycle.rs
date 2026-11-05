@@ -24,6 +24,9 @@ const CONNECT_BUDGET: Duration = Duration::from_secs(10);
 /// Datagrams sent at a receiver that never reads (queue capacity is 512).
 const FLOOD_MESSAGES: usize = 4096;
 const FLOOD_STALL: Duration = Duration::from_millis(100);
+const FLOOD_WARMUP: Duration = Duration::from_secs(1);
+/// Capacity of the decrypted receive queue inside the pinned `ironwood`.
+const RECV_QUEUE_CAPACITY: usize = 512;
 const FLOOD_SETTLE: Duration = Duration::from_millis(300);
 /// Fixed in-repo test seeds; never production keys.
 const CORE_SEED: [u8; 32] = [0x53; 32];
@@ -221,23 +224,65 @@ async fn connected_pair() -> (Arc<Core>, Arc<Core>, u16) {
     (listener, dialer, port)
 }
 
+/// Send datagrams to a destination that never reads until the sender stalls
+/// (backpressure reached it) or `FLOOD_MESSAGES` were accepted. Returns the
+/// number of accepted datagrams. The first write may wait for path discovery.
+async fn flood(sender: &Core, destination: &ironwood::Addr) -> usize {
+    let payload = [0xA5u8; 64];
+    let warmup_deadline = tokio::time::Instant::now() + CONNECT_BUDGET;
+    loop {
+        let first =
+            tokio::time::timeout(FLOOD_WARMUP, sender.write_to(&payload, destination)).await;
+        if matches!(first, Ok(Ok(_))) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < warmup_deadline,
+            "first datagram was not accepted within {CONNECT_BUDGET:?}: {first:?}"
+        );
+        tokio::time::sleep(POLL_STEP).await;
+    }
+    let mut accepted = 1;
+    for _ in 1..FLOOD_MESSAGES {
+        let write = tokio::time::timeout(FLOOD_STALL, sender.write_to(&payload, destination)).await;
+        match write {
+            Ok(Ok(_)) => accepted += 1,
+            _ => break,
+        }
+    }
+    accepted
+}
+
+/// Precondition of the regression below: the flood really fills the receive
+/// queue. A reader that drains afterwards must find at least the queue capacity
+/// (512) of delivered datagrams, so the blocked-delivery state is reachable.
+#[tokio::test]
+async fn flooding_a_silent_receiver_fills_its_receive_queue() {
+    let (listener, dialer, _port) = connected_pair().await;
+    let destination = ironwood::Addr(*listener.public_key());
+    let accepted = flood(&dialer, &destination).await;
+    tokio::time::sleep(FLOOD_SETTLE).await;
+
+    let mut buffer = vec![0u8; 2048];
+    let mut delivered = 0usize;
+    while let Ok(Ok(_)) = tokio::time::timeout(FLOOD_STALL, listener.read_from(&mut buffer)).await {
+        delivered += 1;
+    }
+    assert!(
+        delivered >= RECV_QUEUE_CAPACITY,
+        "only {delivered} of {accepted} accepted datagrams were delivered; the receive queue never filled"
+    );
+    close_within(&listener, "drained listener").await;
+    close_within(&dialer, "dialer").await;
+}
+
 /// A receiver that never reads must still close: the reader blocked delivering
 /// into a full receive queue is cancelled by `close()` (leaf 53.2b regression).
 #[tokio::test]
 async fn close_returns_while_the_receive_queue_is_full() {
     let (listener, dialer, port) = connected_pair().await;
     let destination = ironwood::Addr(*listener.public_key());
-    let payload = [0xA5u8; 64];
-
-    // Flood the listener, which never calls `read_from`; a write that stalls
-    // means backpressure reached the sender, so stop there. The queue holds 512.
-    for _ in 0..FLOOD_MESSAGES {
-        let write =
-            tokio::time::timeout(FLOOD_STALL, dialer.write_to(&payload, &destination)).await;
-        if write.is_err() {
-            break;
-        }
-    }
+    flood(&dialer, &destination).await;
     tokio::time::sleep(FLOOD_SETTLE).await;
 
     close_within(&listener, "full-queue listener").await;
