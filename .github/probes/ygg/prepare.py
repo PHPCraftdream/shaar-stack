@@ -41,6 +41,8 @@ MAX_MEMBER = 4 * 1024 * 1024
 MAX_TOTAL = 64 * 1024 * 1024
 MAX_DEPTH = 16
 HEX = re.compile(r"[0-9a-f]{64}\Z")
+SOURCE = {"kind": "git-archive", "repository": "https://github.com/Revertron/Yggdrasil-ng",
+          "revision": REVISION}
 
 
 def digest(data: bytes) -> str:
@@ -220,9 +222,7 @@ def build_receipt(files: dict[str, bytes], recorded: dict[str, str],
                   manifest: dict[str, str]) -> dict:
     prepared = hashes(files)
     return {"package": "yggdrasil", "version": "0.3.1",
-            "source": {"kind": "git-archive",
-                       "repository": "https://github.com/Revertron/Yggdrasil-ng",
-                       "revision": REVISION},
+            "source": SOURCE,
             "archive_url": ARCHIVE_URL, "archive_sha256": ARCHIVE_SHA256,
             "content_manifest": {"path": MANIFEST_RELATIVE, "files": len(manifest),
                                  "tree_digest": TREE_DIGEST,
@@ -267,7 +267,7 @@ def verify(root: Path, manifest: dict[str, str] | None = None) -> dict[str, str]
         raise ValueError("prepared receipt invalid") from exc
     extracted_names = {name for name in manifest if scope(name) == "extract"}
     recorded_names = {name for name in manifest if scope(name) == "record"}
-    expected_receipt = {"package": "yggdrasil", "version": "0.3.1",
+    expected_receipt = {"package": "yggdrasil", "version": "0.3.1", "source": SOURCE,
                         "archive_sha256": ARCHIVE_SHA256, "archive_url": ARCHIVE_URL,
                         "patch_applied": False, "changed_files": [],
                         "content_manifest": {"path": MANIFEST_RELATIVE,
