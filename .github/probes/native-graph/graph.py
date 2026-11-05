@@ -113,13 +113,17 @@ REQUIRED_NORMAL = {"iroh-mainline-address-lookup": "0.6.1", "n0-mainline": "0.7.
                    "multibase": "0.9.3"}
 
 
+# Standalone Yggdrasil core crate and its prepared source stay outside the product workspace.
+YGG_EXCLUDES = ["crates/shaar-ygg-core", "target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2"]
+
+
 def audit_product_workspace(manifest: dict) -> None:
-    """Require the adapter's exact exclusion from the product workspace."""
+    """Require the adapter's exact exclusion, alone (historical control) or with the Yggdrasil paths."""
     adapter_path = GENERATED_PATHS["iroh-mainline-address-lookup"]
-    expected = [adapter_path]
+    expected = ([adapter_path], [adapter_path, *YGG_EXCLUDES])
     workspace = manifest.get("workspace", {})
-    if workspace.get("exclude") != expected:
-        raise ValueError(f"workspace.exclude must be exactly {expected}")
+    if workspace.get("exclude") not in expected:
+        raise ValueError(f"workspace.exclude must be exactly one of {expected}")
     members = workspace.get("members", [])
     if not isinstance(members, list):
         raise ValueError("workspace.members must be a list")

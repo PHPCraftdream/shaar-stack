@@ -2,12 +2,15 @@
 
 import re
 
-DOMAINS = ("dns", "discovery", "mainline", "publication", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license", "native_graph")
+DOMAINS = ("dns", "discovery", "mainline", "publication", "carrier", "carrier_frames", "relay", "resolver", "kad", "backend", "sdk", "apps", "license", "native_graph", "ygg")
 PACKAGES = {
     "shaar-p2p": ("lib", "shaar_p2p"), "shaar": ("lib", "shaar"),
     "shaar-platform": ("lib", "shaar_platform"), "shaar-ygg": ("lib", "shaar_ygg"),
+    "shaar-ygg-core": ("lib", "shaar_ygg_core"),
     "shaar-server": ("bin", "shaar-server"), "shaar-client": ("bin", "shaar-client"),
 }
+# Packages outside the root workspace: own manifest and lock, run by manifest path.
+NESTED = {"shaar-ygg-core": "crates/shaar-ygg-core/Cargo.toml"}
 SUITES = {
     "protocols": ("shaar-p2p", ("carrier::driver::protocols::", "infrastructure::tests::identification::")),
     "carrier-core": ("shaar-p2p", ("carrier::driver::tests::", "carrier::driver::fault_tests::", "carrier::driver::boundary::tests::", "carrier::driver::events::request_owner::tests::")),
@@ -80,6 +83,7 @@ PROOFS = (
     (".github/probes/native-graph-proof/", "native_graph"),
     (".github/probes/native-graph-multibase/", "native_graph"),
     (".github/probes/native-graph/", "native_graph"),
+    (".github/probes/ygg/", "ygg"),
     (".github/probes/iroh-paths/carrier/", "carrier_frames"),
     (".github/probes/iroh-paths/gate/bridge/support/packet_identity.py", "carrier_frames"),
     (".github/scripts/p2p/carrier-wire-proof/", "carrier"),
@@ -189,7 +193,8 @@ def select(paths, *, full=False):
                     for package in PACKAGES:
                         binary_or_small = package not in {"shaar", "shaar-p2p"} and path.startswith(f"crates/{package}/src/")
                         shared_entry = path == f"crates/{package}/src/lib.rs"
-                        if binary_or_small or shared_entry or path == f"crates/{package}/Cargo.toml":
+                        nested_lock = package in NESTED and path == f"crates/{package}/Cargo.lock"
+                        if binary_or_small or shared_entry or nested_lock or path == f"crates/{package}/Cargo.toml":
                             add(target(package))
                             if path.endswith("Cargo.toml"):
                                 flags["license"] = True

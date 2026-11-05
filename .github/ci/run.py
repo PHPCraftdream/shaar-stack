@@ -68,6 +68,14 @@ def validate(targets):
             raise ValueError("unknown selected test filter")
 
 
+NESTED = POLICY.NESTED
+
+
+def package_arguments(spec):
+    manifest = NESTED.get(spec["package"])
+    return ["--manifest-path", manifest] if manifest else ["-p", spec["package"]]
+
+
 def cargo_target(spec):
     return ["--lib"] if spec["kind"] == "lib" else ["--" + spec["kind"] + "=" + spec["name"]]
 
@@ -132,7 +140,7 @@ def tests(targets):
     receipt = []
     for index, spec in enumerate(targets):
         prefix = directory / str(index)
-        arguments = ["cargo", "test", "--locked", "-p", spec["package"], *cargo_target(spec)]
+        arguments = ["cargo", "test", "--locked", *package_arguments(spec), *cargo_target(spec)]
         messages, status = capture(arguments + ["--no-run", "--message-format=json"],
                                    prefix.with_suffix(".build.jsonl"), stderr=prefix.with_suffix(".build.stderr"))
         if status:
@@ -213,7 +221,7 @@ def lint(targets):
     directory = ROOT / "target/ci-selected"
     directory.mkdir(parents=True, exist_ok=True)
     for index, spec in enumerate(targets):
-        arguments = ["cargo", "clippy", "--locked", "-p", spec["package"], *cargo_target(spec), "--", "-D", "warnings"]
+        arguments = ["cargo", "clippy", "--locked", *package_arguments(spec), *cargo_target(spec), "--", "-D", "warnings"]
         _, status = capture(arguments, directory / f"{index}.lint.log")
         if status:
             raise ValueError("selected target lint failed: " + str(status))

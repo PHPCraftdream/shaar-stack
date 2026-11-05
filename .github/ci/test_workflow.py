@@ -104,9 +104,10 @@ def validate_preparation_logs(action):
         "Prepare reviewed DNS expansion boundary": "dns",
         "Prepare reviewed resolver locking boundary": "resolver",
         "Prepare reviewed Kademlia referral retention": "kad",
+        "Prepare reviewed Yggdrasil-ng core sources": "ygg",
     }
     if set(steps) != set(expected):
-        raise AssertionError("preparation action must contain the seven logged source preparation steps")
+        raise AssertionError("preparation action must contain the eight logged source preparation steps")
     for name, stem in expected.items():
         block = steps[name]
         if ("set -euo pipefail" not in block or ".github/actions/prepare-sources/capture.sh " + stem not in block):

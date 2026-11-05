@@ -1,0 +1,14 @@
+# Isolated Yggdrasil-ng adapter over the pinned, prepared core (P07).
+# Standalone nested workspace with its own lock: the SDK normal graph and the
+# product lock stay unchanged until P10 connects it through `shaar-ygg`.
+[package]
+name = "shaar-ygg-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+yggdrasil = { path = "../../target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/yggdrasil", default-features = false }
+
+[workspace]

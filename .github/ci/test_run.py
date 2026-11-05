@@ -13,6 +13,21 @@ SPEC.loader.exec_module(RUN)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_nested_package_runs_by_manifest_path_and_workspace_members_by_name(self):
+        nested = RUN.POLICY.target("shaar-ygg-core")
+        self.assertEqual(RUN.package_arguments(nested), ["--manifest-path", "crates/shaar-ygg-core/Cargo.toml"])
+        self.assertEqual(RUN.package_arguments(RUN.POLICY.target("shaar-p2p")), ["-p", "shaar-p2p"])
+        with tempfile.TemporaryDirectory() as directory:
+            seen = []
+            def record(arguments, log):
+                seen.append(arguments)
+                log.write_text("ok\n", encoding="utf-8")
+                return "ok\n", 0
+            with patch.object(RUN, "ROOT", Path(directory)), patch.object(RUN, "capture", side_effect=record):
+                RUN.lint([nested])
+        self.assertEqual(seen, [["cargo", "clippy", "--locked", "--manifest-path",
+                                 "crates/shaar-ygg-core/Cargo.toml", "--lib", "--", "-D", "warnings"]])
+
     def test_failed_lint_retains_an_artifact_without_running_test_cases(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

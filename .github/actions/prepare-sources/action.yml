@@ -23,6 +23,20 @@ runs:
         curl --fail --location --max-time 120 --max-filesize 16777216 https://static.crates.io/crates/iroh-dns/iroh-dns-1.3.0.crate --output target/native-graph-archives/iroh-dns-1.3.0.crate
         curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/multibase/multibase-0.9.3.crate --output target/native-graph-archives/multibase-0.9.3.crate
         python -I .github/probes/native-graph/prepare.py --adapter-archive target/native-graph-archives/adapter-source.tar.gz --mainline-archive target/native-graph-archives/n0-mainline-0.7.0.crate --future-archive target/native-graph-archives/n0-future-0.3.2.crate --bencode-archive target/native-graph-archives/serde_bencode-0.2.4.crate --dns-archive target/native-graph-archives/iroh-dns-1.3.0.crate --multibase-archive target/native-graph-archives/multibase-0.9.3.crate --destination target/native-graph
+    - name: Prepare reviewed Yggdrasil-ng core sources
+      shell: bash
+      run: |
+        set -euo pipefail
+        source .github/actions/prepare-sources/capture.sh ygg
+        mkdir -p target/ygg-archives
+        curl --fail --location --max-time 120 --max-filesize 33554432 https://codeload.github.com/Revertron/Yggdrasil-ng/tar.gz/c9a54f1587bb133a06072596484c972a336db0d2 --output target/ygg-archives/yggdrasil-ng.tar.gz
+        python -I .github/probes/ygg/prepare.py prepare --archive target/ygg-archives/yggdrasil-ng.tar.gz --destination target/ygg
+        python -I .github/probes/ygg/checks.py target/ygg-archives/yggdrasil-ng.tar.gz
+        cp target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2.provenance.json target/native-graph-preparation-logs/ygg.provenance.json
+        if [[ "${{ inputs.resolve_only }}" == "true" ]]; then
+          cargo generate-lockfile --manifest-path crates/shaar-ygg-core/Cargo.toml
+          cp crates/shaar-ygg-core/Cargo.lock target/native-graph-preparation-logs/ygg-core.Cargo.lock.candidate
+        fi
     - name: Prepare reviewed production backend sources
       shell: bash
       run: |

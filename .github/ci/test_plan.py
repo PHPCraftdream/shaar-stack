@@ -103,6 +103,28 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "matched no runnable cases"):
             RUNNER.selected_cases("network::unrelated: test\n", "", [selector])
 
+    def test_ygg_preparation_and_nested_core_select_only_owned_checks(self):
+        probe = POLICY.select([".github/probes/ygg/prepare.py"])
+        self.assertEqual([key for key in POLICY.DOMAINS if probe["selection"][key]], ["ygg"])
+        self.assertEqual(probe["suites"], ["ygg"])
+        self.assertEqual(probe["targets"], [])
+        self.assertTrue(probe["selection"]["prepare"])
+        self.assertFalse(probe["selection"]["rust"])
+        self.assertFalse(probe["selection"]["full"])
+        source = POLICY.select(["crates/shaar-ygg-core/src/lib.rs"])
+        self.assertEqual(source["targets"], [POLICY.target("shaar-ygg-core")])
+        self.assertEqual(source["suites"], ["package:shaar-ygg-core"])
+        self.assertFalse(any(source["selection"][key] for key in POLICY.DOMAINS))
+        self.assertTrue(source["selection"]["product"])
+        lock = POLICY.select(["crates/shaar-ygg-core/Cargo.lock", "crates/shaar-ygg-core/Cargo.toml"])
+        self.assertEqual(lock["targets"], [POLICY.target("shaar-ygg-core")])
+        self.assertEqual(lock["suites"], ["package:shaar-ygg-core"])
+        with self.assertRaisesRegex(ValueError, "No test impact rule"):
+            POLICY.select(["crates/shaar-p2p/Cargo.lock"])
+        self.assertEqual(sorted(POLICY.NESTED), ["shaar-ygg-core"])
+        self.assertEqual(sorted(RUNNER.NESTED), sorted(POLICY.NESTED))
+        RUNNER.validate(source["targets"])
+
     def test_workspace_manifest_has_explicit_package_ownership_without_full_campaign(self):
         result = POLICY.select(["Cargo.toml"])
         self.assertEqual(result["targets"], sorted(

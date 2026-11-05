@@ -1,6 +1,6 @@
 # Sha'ar Stack Cargo workspace.
 [workspace]
-exclude = ["target/native-graph/adapter/iroh-mainline-address-lookup"]
+exclude = ["target/native-graph/adapter/iroh-mainline-address-lookup", "crates/shaar-ygg-core", "target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2"]
 resolver = "3"
 members = [
     "crates/shaar",

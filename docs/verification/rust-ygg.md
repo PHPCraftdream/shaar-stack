@@ -116,3 +116,35 @@ The tool rejected preparation of third-party backend integration as
 instead. No dependency, probe code, workflow, or lockfile was added. Permission
 for actual integration and CI execution remains unresolved; source review is
 not a replacement for that execution.
+
+## Prepared source and isolated crate (leaf 53.1)
+
+Status: authored; not yet executed in CI.
+
+- The pinned archive (`c9a54f1587bb133a06072596484c972a336db0d2`, tar.gz sha256
+  `4d978c1a8714e0569fd0a3782adab2f6b81b9c9e54d733dbeaa023aaebae96c1`) is fetched in CI and
+  prepared by `.github/probes/ygg/prepare.py` into `target/ygg/<pinned directory>/`.
+  Authority is the per-file content manifest `ygg-manifest.json` (43 files, tree digest
+  `b05902627173ccce95f88fc0a0e36f043646b7c129dc46e8e03d7512771ae2d0`); the archive hash is
+  recorded evidence. Only `LICENSE`, `crates/ironwood/` and `crates/yggdrasil/` are extracted. No
+  source patch is applied in this leaf; lifecycle repairs belong to leaf 53.2. The provenance
+  receipt is uploaded with the source-preparation logs (`ygg.provenance.json`).
+- The core is consumed by the new standalone crate `crates/shaar-ygg-core` (own `[workspace]`,
+  own `Cargo.lock`, `yggdrasil` with `default-features = false`, stock crates.io `salsa20`, no
+  tun/ckr/systemd/ctl/ws/quic). It is excluded from the root workspace together with the prepared
+  tree. The product `Cargo.lock`, `crates/shaar` and the accepted SDK normal graph are unchanged:
+  the existing `shaar -> shaar-ygg` scaffold edge would otherwise pull about 84 not yet reviewed
+  crates into the SDK graph guard. P10 connects `shaar-ygg` to this crate with its own graph review.
+- The nested lock is produced by CI, never by hand: Actions -> CI -> Run workflow with
+  `native_graph_resolve: true` runs `cargo generate-lockfile` for the crate and uploads
+  `ygg-core.Cargo.lock.candidate` in the `native-graph-preparation-diagnostics` artifact; the
+  coordinator adopts it as `crates/shaar-ygg-core/Cargo.lock` for `--locked` runs.
+- The selected-test runner runs the crate by `--manifest-path` (`.github/ci/policy.py` `NESTED`),
+  formatting covers it through `cargo fmt --manifest-path`.
+
+Known gaps, not claimed as covered: the root dependency-license report and the structure checker
+read only the root workspace, so the nested closure's licenses (MPL-2.0 for `yggdrasil` and
+`ironwood`) and the first-line `#![forbid(unsafe_code)]` of the nested crate are checked only by the
+crate's own unit test and by the later notices work (#72/#73); the `scope: full` clippy command
+(`--workspace`) does not include the nested crate; compilation of the prepared core with
+`default-features = false` is unverified until CI runs.
