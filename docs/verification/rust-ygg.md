@@ -195,7 +195,11 @@ locally).
   adapter path). A cancelled `close()` after its handles were drained leaves the core
   half-closed; callers must not cancel it.
 - MPL-2.0 note: the modified `core.rs`, `links.rs`, `proto.rs` and ironwood `encrypted/mod.rs` are file-level
-  MPL-protected; their publication mechanism remains an open legal item.
+  MPL-protected. Decision of 2026-11-05 (user): this repository is the way to obtain their source
+  (the patch hunks under `.github/probes/ygg/patches/` and the pinned upstream revision with its
+  file hashes), so no further publication step is required; upstream `LICENSE` is preserved in the
+  prepared tree. The license check allows MPL-2.0 narrowly, for the pinned `ironwood` and
+  `yggdrasil` packages only.
 
 ## Key-addressed transport (leaf 53.3)
 

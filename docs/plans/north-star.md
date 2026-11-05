@@ -101,3 +101,5 @@ An in-house Yggdrasil implementation is not permitted.
 | 2026-11-04 | Pinned Yggdrasil-ng integration is approved after P09 | "да" |
 | 2026-11-04 | Public smoke targets are chosen by the engineer; they must be legal and working, within agreed bounds | "нужно выбрать что-то - не важно, главное чтобы легально и чтобы работало" |
 | 2026-11-05 | P10 efficiency criteria: balanced profile (first byte 3 s known / 10 s cold, failover 10 s, direct share 95%) | "Сбалансированный (Recommended)" |
+| 2026-11-05 | MPL-2.0 is allowed narrowly, only for the pinned `ironwood` and `yggdrasil` packages, in the license check and report | "Узкое разрешение (Recommended)" |
+| 2026-11-05 | Source availability of the modified MPL-2.0 files is met by this repository (patch hunks plus the pinned upstream revision); no further publication step | "так наша репа и есть способ их получить - ничего дополнительного делать не нужно" |
