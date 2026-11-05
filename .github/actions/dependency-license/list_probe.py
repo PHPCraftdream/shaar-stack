@@ -19,6 +19,8 @@ PREPARED = {
     "libp2p-relay": ("0.22.0", "target/p2p/relay/libp2p-relay-0.22.0"),
     "libp2p-swarm": ("0.48.0", "target/p2p/swarm/libp2p-swarm-0.48.0"),
     "multibase": ("0.9.3", "target/native-graph/multibase-0.9.3"),
+    "ironwood": ("0.2.1", "target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/ironwood"),
+    "yggdrasil": ("0.3.1", "target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/yggdrasil"),
 }
 NAMES = (*PREPARED, "attohttpc")
 FORBIDDEN = ("base256emoji",)

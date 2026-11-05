@@ -22,6 +22,7 @@ RECEIPTS = (
     "target/backend/provenance.json", "target/p2p/relay/provenance.json",
     "target/p2p/swarm/provenance.json", "target/p2p/dns/provenance.json",
     "target/p2p/resolver/provenance.json", "target/p2p/kad/provenance.json",
+    "target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2.provenance.json",
 )
 
 

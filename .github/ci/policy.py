@@ -11,6 +11,9 @@ PACKAGES = {
 }
 # Packages outside the root workspace: own manifest and lock, run by manifest path.
 NESTED = {"shaar-ygg-core": "crates/shaar-ygg-core/Cargo.toml"}
+# Manifests and the lock that define the guarded normal SDK graph; changing one runs the graph proof.
+GRAPH_INPUTS = frozenset({"Cargo.toml", "Cargo.lock", "crates/shaar/Cargo.toml",
+                          "crates/shaar-ygg/Cargo.toml", "crates/shaar-ygg-core/Cargo.toml"})
 SUITES = {
     "protocols": ("shaar-p2p", ("carrier::driver::protocols::", "infrastructure::tests::identification::")),
     "carrier-core": ("shaar-p2p", ("carrier::driver::tests::", "carrier::driver::fault_tests::", "carrier::driver::boundary::tests::", "carrier::driver::events::request_owner::tests::")),
@@ -208,6 +211,9 @@ def select(paths, *, full=False):
             flags["identity_probe"] = True
         suites.update(owned)
         reasons.append({"path": path, "suites": owned})
+    if GRAPH_INPUTS & set(paths) and not full:
+        flags["native_graph"] = True
+        add(target("shaar", kind="test", name="native_graph_witness"))
     flags.update(full=full, rust=full or bool(targets), product=bool(targets))
     flags["prepare"] = full or bool(targets) or any(flags[name] for name in DOMAINS)
     return {"selection": flags, "targets": [targets[key] for key in sorted(targets)],

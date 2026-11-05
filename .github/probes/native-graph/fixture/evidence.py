@@ -125,6 +125,8 @@ def _binding(root, path, pkg, base_archive):
         receipt = root / "target" / "native-graph" / f'{name}-{version}.provenance.json'
     elif name in {'iroh','noq','noq-proto'}:
         receipt = root / "target" / "backend" / "provenance.json"
+    elif name in {'ironwood','yggdrasil'}:
+        receipt = root / "target" / "ygg" / "Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2.provenance.json"
     elif name in {'libp2p-relay','libp2p-swarm','simple-dns','libp2p-dns','hickory-resolver','libp2p-kad'}:
         receipt = path.parent / "provenance.json"
     else:
@@ -422,8 +424,6 @@ def run(repo, archives, prepare_module, graph_module, runner):
     except BaseException as error:
         provenance(error, locals().get("proofs"), locals().get("result"))
         raise
-
-
 
 
 def audit_units(proof, packages, nodes, stable_identity, baseline_test_util_validator):

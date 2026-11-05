@@ -20,6 +20,12 @@ allow = [
     "Unlicense",
     "CDLA-Permissive-2.0",
 ]
+# MPL-2.0 is allowed narrowly, only for the pinned, locally prepared Yggdrasil-ng
+# packages (user decision of 2026-11-05); it stays denied for every other crate.
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "ironwood@0.2.1" },
+    { allow = ["MPL-2.0"], crate = "yggdrasil@0.3.1" },
+]
 # A matching license allowlist uses SPDX expressions; do not treat an expression
 # as a plain string. Missing/unrecognized licenses should remain denied by the
 # tool's policy rather than being allowed via an exception.

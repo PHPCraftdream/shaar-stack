@@ -72,6 +72,18 @@ class PolicyTests(unittest.TestCase):
         full = POLICY.select([], full=True)
         self.assertTrue(full["selection"]["publication"])
 
+    def test_graph_defining_manifests_and_the_lock_select_the_graph_proof(self):
+        witness = POLICY.target("shaar", kind="test", name="native_graph_witness")
+        for path in ("Cargo.lock", "crates/shaar-ygg/Cargo.toml", "crates/shaar-ygg-core/Cargo.toml"):
+            with self.subTest(path=path):
+                paths = [path, "crates/shaar-ygg/Cargo.toml"] if path == "Cargo.lock" else [path]
+                result = POLICY.select(paths)
+                self.assertTrue(result["selection"]["native_graph"])
+                self.assertIn(witness, result["targets"])
+        unrelated = POLICY.select(["crates/shaar/src/path/mod.rs"])
+        self.assertFalse(unrelated["selection"]["native_graph"])
+        self.assertNotIn(witness, unrelated["targets"])
+
     def test_path_policy_sources_select_only_owned_module_cases(self):
         for filename in ("mod.rs", "model.rs", "policy.rs", "tests/mod.rs", "tests/traces.rs"):
             with self.subTest(filename=filename):

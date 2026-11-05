@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from unittest import mock
 
@@ -89,12 +90,14 @@ class DependencyLicenseTests(unittest.TestCase):
             "libp2p-relay 0.22.0 path+file:///work/target/p2p/relay/libp2p-relay-0.22.0",
             "libp2p-swarm 0.48.0 path+file:///work/target/p2p/swarm/libp2p-swarm-0.48.0",
             "multibase 0.9.3 path+file:///work/target/native-graph/multibase-0.9.3",
+            "ironwood 0.2.1 path+file:///work/target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/ironwood",
+            "yggdrasil 0.3.1 path+file:///work/target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/yggdrasil",
         ]
         data = {item: {"licenses": ["MIT"]} for item in prepared}
         data[atto] = {"licenses": ["MPL-2.0"]}
         raw = json.dumps(data).encode()
         summary = probe.summarize(raw)
-        self.assertEqual(summary["package_count"], 10)
+        self.assertEqual(summary["package_count"], 12)
         self.assertEqual(summary["selected"]["iroh"], [iroh])
         self.assertEqual(summary["selected"]["attohttpc"], [atto])
         with mock.patch.object(probe, "MAX_BYTES", 1):
@@ -130,6 +133,16 @@ class DependencyLicenseTests(unittest.TestCase):
         forbidden["base256emoji 1.0.2 registry+https://example.invalid/index"] = {"licenses": ["MIT"]}
         with self.assertRaisesRegex(ValueError, "removed package present"):
             probe.summarize(json.dumps(forbidden).encode())
+
+    def test_mpl_is_allowed_only_for_the_two_pinned_yggdrasil_packages(self):
+        policy = tomllib.loads((SCRIPT.parents[1] / "deny.toml").read_text(encoding="utf-8"))
+        licenses_table = policy["licenses"]
+        self.assertNotIn("MPL-2.0", licenses_table["allow"])
+        self.assertEqual(licenses_table["exceptions"], [
+            {"allow": ["MPL-2.0"], "crate": "ironwood@0.2.1"},
+            {"allow": ["MPL-2.0"], "crate": "yggdrasil@0.3.1"},
+        ])
+        self.assertIn("target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2.provenance.json", licenses.RECEIPTS)
 
     def test_list_probe_rejects_graph_policy_drift(self):
         policy = b'[graph]\nall-features = true\n[licenses]\ninclude-dev = true\ninclude-build = true\n'
