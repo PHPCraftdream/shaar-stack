@@ -519,3 +519,67 @@ async fn public_cancel_interrupts_held_owned_send() {
     let rebound = UdpSocket::bind(bind).expect("actor shutdown releases its socket");
     drop(rebound);
 }
+
+#[tokio::test]
+async fn stop_while_flush_held_retains_charges_and_transmits_nothing() {
+    let bootstrap = UdpSocket::bind(loopback()).expect("bind bootstrap");
+    bootstrap
+        .set_nonblocking(true)
+        .expect("set bootstrap nonblocking");
+    let mut actor = Actor::new_numeric(loopback(), vec![ipv4(&bootstrap)].into_boxed_slice())
+        .expect("create numeric actor");
+    actor
+        .enable_owned_resources()
+        .expect("enable owned resources");
+    let bind = actor.socket.local_addr();
+    let (send_entered, await_send_entered) = oneshot::channel();
+    let (release_send, await_send_release) = oneshot::channel();
+    actor
+        .socket
+        .hold_next_send_for_test(send_entered, await_send_release);
+    let (maintenance_reached, _await_maintenance) = oneshot::channel();
+    actor.owned_maintenance_after_operations = Some((8, maintenance_reached));
+    let store_budget =
+        std::sync::Arc::clone(&actor.owned_resources.as_ref().expect("owned actor").budget);
+
+    let mut owner = OwnedDht::from_actor(actor);
+    let handle = owner.handle();
+    handle.info().await.expect("actor info before request");
+
+    let mut request = Box::pin(handle.resolve_mutable(Id::from([0x93; 20])));
+    std::future::poll_fn(|cx| {
+        assert!(std::future::Future::poll(request.as_mut(), cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    await_send_entered.await.expect("actor entered held send");
+    let holders_before = store_budget.holder_count();
+    let visited_before = store_budget.visited_count();
+    assert!(holders_before > 0, "bootstrap holder charge retained while held");
+    assert!(visited_before > 0, "visited address charge retained while held");
+
+    owner.request_stop();
+    owner
+        .close()
+        .await
+        .expect("stopped actor joins despite held flush");
+
+    assert!(
+        release_send.send(()).is_err(),
+        "stop dropped the held send gate with the abandoned flush"
+    );
+    let mut bytes = [0_u8; 2048];
+    assert_eq!(
+        bootstrap.recv_from(&mut bytes).unwrap_err().kind(),
+        ErrorKind::WouldBlock,
+        "held datagram was never transmitted"
+    );
+    assert_eq!(store_budget.holder_count(), 0, "join released retained holders");
+    assert_eq!(store_budget.visited_count(), 0, "join released retained visited leases");
+    assert!(matches!(
+        handle.resolve_mutable(Id::random()).await,
+        Err(ResourceError::QueryCancelled)
+    ));
+    let rebound = UdpSocket::bind(bind).expect("joined actor released its socket");
+    drop(rebound);
+}

@@ -69,15 +69,34 @@ local-PUT provenance never renewing the cache, and P2 sixty-four signed winners 
 conflict and lower-seq replay are authored as real-seam regressions in
 `runtime/owner/seam_tests/` (loopback fixture plus the real RuntimeOwner,
 NativeDiscoveredEndpoint, resolver and PolicyOwner; paused Tokio time and controlled clocks only)
-and await CI; they have not been executed. P7 drives both newer-responder permutations (each
-responder holds the newer record in one of the two phases); datagram arrival order inside one
-batch is environment-controlled and the winner oracle is order-independent. P2 re-resolves all
-sixty-four winners after expiry, deep-dives conflict, lower-seq replay and recovery on one slot,
-and re-checks the sixty-fifth-key capacity bound before and after. Still outstanding and not
-covered by any executed test yet, at dependency level: P5 GET cancellation and deadline retain
-their charge until cleanup, P6 stop while the socket flush is held, P1 eight active plus sixteen
-queued distinct keys. This record does not establish P10 pathing, Server/Client integration or
-public-network acceptance.
+and are executed and green on both OS in SDK CI run `41959318451` at `be17cd7`. P7 still drives
+both newer-responder permutations (each responder holds the newer record in one of the two phases);
+datagram arrival order inside one batch is environment-controlled and the winner oracle is
+order-independent. P2 still re-resolves all sixty-four winners after expiry, deep-dives conflict,
+lower-seq replay and recovery on one slot, and re-checks the sixty-fifth-key capacity bound before
+and after. Dependency-level P1 (eight active plus sixteen queued distinct keys) is covered by the
+executed fixture tests `actor_admits_eight_distinct_operations_and_rejects_ninth_without_side_effects`,
+`queued_get_admission_wakes_only_when_a_real_resource_is_released`,
+`actual_actor_lazy_admission_bounds_queue_and_releases_cancelled_requests`,
+`public_admission_overflow_keeps_actor_and_live_requests`,
+`queued_deadlines_expire_without_work_and_promotion_keeps_original_deadline` and
+`promoted_admission_preserves_original_deadline_across_coalesced_waiters`. Dependency-level P5
+(caller-visible charges outlive the caller return until actor cleanup) is covered by the executed
+`delivered_error_receivers_retain_result_charges_until_dropped`,
+`held_send_gate_deadline_cleanup_is_deterministic_actor_cleanup_not_wall_clock_stall`,
+`owned_actor_deadline_interrupts_held_send_without_transmission`,
+`cancellation_at_real_send_gate_retains_rpc_and_datagram_charges` and
+`terminal_failure_keeps_delivered_error_receivers_charged`, plus the authored
+`cancelled_admission_keeps_request_and_result_charges_until_tick_cleanup` for the
+cancelled-GET window and request-lease retention. Dependency-level P6 (stop while the socket
+flush is held) is covered by the executed `owned_actor_keeps_socket_until_cleanup_completes`,
+`owned_actor_keeps_socket_until_receive_returns`, `close_joins_actor_and_releases_exact_bind`,
+`close_reports_aborted_actor_join_failure_and_retains_terminal_error` and the same
+`owned_actor_deadline_interrupts_held_send_without_transmission`, plus the authored
+`stop_while_flush_held_retains_charges_and_transmits_nothing` for charge accounting and the
+never-transmitted held datagram. The two new dependency-level tests are authored only and await
+CI; they have not been executed. This record does not establish P10 pathing, Server/Client
+integration or public-network acceptance.
 
 ## Remaining gaps / verification
 

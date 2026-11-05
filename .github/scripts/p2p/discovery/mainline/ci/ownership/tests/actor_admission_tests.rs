@@ -325,3 +325,73 @@ async fn terminal_failure_keeps_delivered_error_receivers_charged() {
     drop(permits);
     drop(released);
 }
+
+#[tokio::test]
+async fn cancelled_admission_keeps_request_and_result_charges_until_tick_cleanup() {
+    let (_peer, bootstrap) = captured_peer();
+    let mut actor = actor(bootstrap);
+    actor.owned_disable_maintenance_for_test = true;
+    let request_budget = actor.owned_request_budget();
+    let result_budget = actor.owned_result_budget();
+    let admitted_target = target(30);
+    let (sender, receiver) = oneshot::channel();
+    actor.owned_admission_until(
+        admitted_target,
+        sender,
+        tokio::time::Instant::now() + Duration::from_secs(30),
+        request_budget.acquire().expect("request permit"),
+    );
+    let crate::resource::RequestReply::Ready(admitted) =
+        receiver.await.expect("admission delivered")
+    else {
+        panic!("admission rejected");
+    };
+    let operation = actor.owned_resources.as_ref().unwrap().operations[&admitted_target];
+    assert_eq!(actor.socket.operation_rpc_len(operation), 1);
+
+    drop(admitted);
+    assert!(actor.core.iterative_queries.contains_key(&admitted_target));
+    assert!(
+        actor
+            .owned_resources
+            .as_ref()
+            .unwrap()
+            .operations
+            .contains_key(&admitted_target)
+    );
+    let mut held_requests = Vec::new();
+    while let Some(permit) = request_budget.acquire() {
+        held_requests.push(permit);
+    }
+    assert_eq!(held_requests.len(), 23, "cancelled caller request charge stays held");
+    let mut held_results = Vec::new();
+    while let Some(lease) = result_budget.acquire() {
+        held_results.push(lease);
+    }
+    assert_eq!(held_results.len(), 7, "cancelled caller result charge stays held");
+
+    actor.tick_owned();
+    assert!(!actor.core.iterative_queries.contains_key(&admitted_target));
+    assert!(
+        !actor
+            .owned_resources
+            .as_ref()
+            .unwrap()
+            .operations
+            .contains_key(&admitted_target)
+    );
+    assert_eq!(actor.socket.operation_rpc_len(operation), 0);
+
+    drop(held_requests);
+    drop(held_results);
+    let mut restored_requests = Vec::new();
+    while let Some(permit) = request_budget.acquire() {
+        restored_requests.push(permit);
+    }
+    assert_eq!(restored_requests.len(), 24, "request capacity restored at cleanup");
+    let mut restored_results = Vec::new();
+    while let Some(lease) = result_budget.acquire() {
+        restored_results.push(lease);
+    }
+    assert_eq!(restored_results.len(), 8, "result capacity restored at cleanup");
+}
