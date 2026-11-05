@@ -113,6 +113,10 @@ CI test on Linux and Windows in which a listener that never reads is flooded by 
 still closes within a timeout with the alive-task count back at zero and its port free.
 Non-goals: joining the other `ironwood` tasks, any other `ironwood` change, adapter API.
 
+Leaf 53.2b is accepted at `63bcec5`: Linux and Windows CI executed seven `lifecycle` tests; a
+throwaway control without the hunk failed the full-queue close test on both OS, the patched
+run passed.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

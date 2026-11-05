@@ -181,9 +181,15 @@ locally).
   the five-second poll. Leaf 53.2b corrects the one `ironwood` hunk the review proved
   necessary: the encrypted reader awaited `recv_tx.send(msg)` outside its cancellation select
   (`encrypted/mod.rs`), so a full receive queue (the adapter not reading) could block
-  `close()`; the hunk selects on the cancellation token and
-  `close_returns_while_the_receive_queue_is_full` is its regression test (the test cannot show
-  that the queue really filled; a stalled sender write is the only observable sign of it).
+  `close()`; the hunk selects on the cancellation token. Regression evidence (CI, Linux and
+  Windows): the test `flooding_a_silent_receiver_fills_its_receive_queue` proves the flood
+  delivers at least 512 datagrams to a silent receiver, and
+  `close_returns_while_the_receive_queue_is_full` closes that receiver in time. A throwaway
+  negative control without the hunk (run `42030065755`, deleted afterwards) failed exactly
+  that test with `close() did not finish within 10s` on both OS while the precondition passed;
+  the patched run `42030031014` is green. Path discovery between two fresh cores takes time:
+  writes are accepted before any datagram is delivered, so key-addressed exchange (53.3)
+  must wait for a delivered probe first.
   The QUIC listener branch is feature-gated off in
   this crate and is not patched; `remove_peer` still aborts without joining (outside the
   adapter path). A cancelled `close()` after its handles were drained leaves the core
