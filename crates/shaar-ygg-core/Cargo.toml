@@ -10,10 +10,10 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 yggdrasil = { path = "../../target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/yggdrasil", default-features = false }
-
-[dev-dependencies]
 ironwood = { path = "../../target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/ironwood" }
 ed25519-dalek = "2"
+
+[dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros", "time", "net"] }
 
 [workspace]

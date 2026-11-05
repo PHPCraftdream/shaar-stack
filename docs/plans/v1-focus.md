@@ -117,6 +117,22 @@ Leaf 53.2b is accepted at `63bcec5`: Linux and Windows CI executed seven `lifecy
 throwaway control without the hunk failed the full-queue close test on both OS, the patched
 run passed.
 
+#### Leaf 53.3 acceptance and non-goals (recorded 2026-11-05, before implementation)
+
+Advances scenario step 5. Observable acceptance: `shaar-ygg-core` exposes a safe `YggTransport`
+(start from a fixed 32-byte seed with listen/peer URIs and an optional allowlist, `send_to` and
+`recv` addressed by the 32-byte peer key, `mtu`, `close`) over the lifecycle-patched core. In
+GitHub CI on Linux and Windows two transports on loopback exchange datagrams in both directions
+by key, `recv` reports the sender's key, payloads of 1 byte, 1000 bytes and exactly `mtu` arrive
+intact, `mtu + 1` is rejected with a typed `Oversize` before anything is sent, a receive buffer
+below `mtu + 1` is rejected with a typed `BufferTooSmall`, concurrent senders deliver every
+datagram of a gentle paced load, and a dropped `recv` future loses no datagram. Both transports
+close with no task alive, no live core reference and a free port. Datagram semantics stay
+unreliable by contract; the test load is paced, not a loss-free guarantee.
+Non-goals: negative controls, the full typed startup errors, the per-key registry and
+allowlist enforcement tests (53.4), key-to-address vectors (53.4), public network, TUN,
+path policy, any queue added by the adapter, unsafe, version bumps.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

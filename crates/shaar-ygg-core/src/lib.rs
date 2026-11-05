@@ -1,9 +1,14 @@
 #![forbid(unsafe_code)]
 //! Key-addressed Yggdrasil datagrams without TUN over the pinned Yggdrasil-ng core.
 //!
-//! Leaf 53.1 only links the prepared core (`c9a54f1587bb133a06072596484c972a336db0d2`,
-//! byte-exact under `target/ygg/`). No transport, shutdown or lifecycle API exists
-//! yet; the source gate is `docs/verification/rust-ygg.md`.
+//! The prepared core (`c9a54f1587bb133a06072596484c972a336db0d2`, with the reviewed
+//! lifecycle patch) lives under `target/ygg/`; the source gate is
+//! `docs/verification/rust-ygg.md`. [`YggTransport`] sends and receives datagrams
+//! addressed by the 32-byte peer key; the adapter adds no queue of its own.
+
+mod transport;
+
+pub use transport::{YggConfig, YggError, YggTransport};
 
 #[cfg(test)]
 mod smoke {
