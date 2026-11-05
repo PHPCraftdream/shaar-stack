@@ -238,6 +238,22 @@ the evidence, and one obsolete test of the removed tuple policy that the first g
 missed. Open: the licenses of the new registry crates were accepted by the existing allow list;
 notices (#72/#73) remain.
 
+#### Leaf 2b acceptance and non-goals (recorded 2026-11-05, before implementation)
+
+Advances scenario step 5 (the Yggdrasil path must report real readiness before it is used).
+Observable acceptance: in CI on Linux and Windows, `YggBridge` in `crates/shaar-ygg` over a real
+loopback `YggTransport` (1) reports a peer ready only after an authenticated round trip: a probe
+with a fresh nonce is answered by a served peer with the same nonce from its own key, and the
+time until that reply is returned; (2) never reports ready for a key outside the served set, for a key
+nobody runs, or when the reply comes from another key even with the right nonce; (3) ignores and
+counts malformed frames and keeps serving; (4) bounds waiting probes (`MAX_PENDING_PROBES`) and
+removes a cancelled probe at once; (5) `close` joins the owner task, releases every waiting probe
+with `Closed`, is idempotent, leaves no task alive and frees the port. The frame codec and the
+pending table have pure unit tests with boundary and mutation cases.
+Non-goals: payload over Yggdrasil, `signal`/`standby` authorization, use from `shaar`, path policy
+wiring, public network, new crypto (authenticity comes from the Yggdrasil session key), version
+bumps. The only guard data change is the declared `shaar-ygg` -> `tokio` normal edge.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

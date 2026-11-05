@@ -107,7 +107,8 @@ def _parsed(edges, feats):
 
 
 _BASE_EDGES = [(("shaar", "0.1.0"), ("tokio", "1.54.1")), (("shaar", "0.1.0"), ("hex", "0.4.3")),
-               (("base256emoji", "1.0.2"), ("const-str", "0.4.3")), (("shaar", "0.1.0"), ("base256emoji", "1.0.2"))]
+               (("base256emoji", "1.0.2"), ("const-str", "0.4.3")), (("shaar", "0.1.0"), ("base256emoji", "1.0.2")),
+               (("shaar", "0.1.0"), ("shaar-ygg", "0.1.0"))]
 
 
 class CheckEdgesTests(unittest.TestCase):
@@ -118,7 +119,8 @@ class CheckEdgesTests(unittest.TestCase):
 
     def test_closure_declared_and_emoji_changes_are_admitted(self):
         self.check(added=[(("shaar", "0.1.0"), ("shaar-ygg-core", "0.1.0")),
-                          (("tokio", "1.54.1"), ("parking_lot", "0.12.5"))],
+                          (("tokio", "1.54.1"), ("parking_lot", "0.12.5")),
+                          (("shaar-ygg", "0.1.0"), ("tokio", "1.54.1"))],
                    removed=[(("base256emoji", "1.0.2"), ("const-str", "0.4.3"))])
 
     def test_undeclared_edge_between_existing_packages_is_rejected(self):
@@ -164,6 +166,13 @@ class CheckUnitsTests(unittest.TestCase):
         candidate.append(added)
         candidate.append(_form("winnow", "1.0.4"))
         y.check_units(self.control, candidate)
+
+    def test_declared_product_edge_to_tokio_passes(self):
+        product = _form("shaar-ygg", "0.1.0")
+        control = [product, self.tokio]
+        candidate = copy.deepcopy(control)
+        candidate[0]["dependencies"].append(_dep("tokio", self.tokio))
+        y.check_units(control, candidate)
 
     def test_undeclared_units_edges_and_features_are_rejected(self):
         extra = {

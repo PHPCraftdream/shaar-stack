@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 shaar-ygg-core = { path = "../shaar-ygg-core" }
+tokio = { version = "=1.54.1", features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]
 tokio = { version = "=1.54.1", features = ["rt", "macros", "time", "net"] }

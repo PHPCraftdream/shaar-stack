@@ -4,41 +4,10 @@
 use std::net::TcpListener;
 use std::time::Duration;
 
-use crate::{YggConfig, YggError, YggTransport};
+use crate::YggTransport;
+use crate::test_support::{BUDGET, close_within, poll_until, start_dialer, start_listener};
 
-const STEP: Duration = Duration::from_millis(20);
-const BUDGET: Duration = Duration::from_secs(10);
 const PROBE: &[u8] = b"probe";
-
-fn config(seed: u8, listen: Vec<String>, peers: Vec<String>) -> YggConfig {
-    YggConfig {
-        seed: [seed; 32],
-        listen,
-        peers,
-        allowed_public_keys: Vec::new(),
-        group_password: None,
-    }
-}
-
-fn reserve_port() -> u16 {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("reserve a loopback port");
-    let port = listener.local_addr().expect("local address").port();
-    drop(listener);
-    port
-}
-
-async fn start_listener(seed: u8) -> (YggTransport, u16) {
-    for _ in 0..50 {
-        let port = reserve_port();
-        let uri = format!("tcp://127.0.0.1:{port}");
-        match YggTransport::start(config(seed, vec![uri], vec![])).await {
-            Ok(transport) => return (transport, port),
-            Err(YggError::Start { .. }) => tokio::time::sleep(STEP).await,
-            Err(other) => panic!("listener start failed: {other}"),
-        }
-    }
-    panic!("no reserved loopback port could be bound");
-}
 
 /// Path discovery takes time: wait until a probe datagram is really delivered.
 async fn wait_for_path(sender: &YggTransport, receiver: &YggTransport) {
@@ -68,36 +37,10 @@ async fn recv_data(receiver: &YggTransport) -> (Vec<u8>, [u8; 32]) {
     }
 }
 
-async fn close_within(transport: &YggTransport, who: &str) {
-    let closed = tokio::time::timeout(BUDGET, transport.close()).await;
-    assert!(
-        closed.is_ok(),
-        "{who} close() did not finish within {BUDGET:?}"
-    );
-    assert!(
-        closed.expect("checked above").is_ok(),
-        "{who} close() failed"
-    );
-}
-
-async fn poll_until(observation: &str, mut made: impl FnMut() -> bool) {
-    let deadline = tokio::time::Instant::now() + BUDGET;
-    while tokio::time::Instant::now() < deadline {
-        if made() {
-            return;
-        }
-        tokio::time::sleep(STEP).await;
-    }
-    panic!("observation not reached within {BUDGET:?}: {observation}");
-}
-
 #[tokio::test]
 async fn product_exports_exchange_a_datagram_by_key_and_release_everything() {
     let (listener, port) = start_listener(0x91).await;
-    let peer_uri = format!("tcp://127.0.0.1:{port}");
-    let dialer = YggTransport::start(config(0x92, vec![], vec![peer_uri]))
-        .await
-        .expect("dialer starts");
+    let dialer = start_dialer(0x92, port).await;
     wait_for_path(&dialer, &listener).await;
     wait_for_path(&listener, &dialer).await;
 

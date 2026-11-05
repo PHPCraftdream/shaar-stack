@@ -78,6 +78,7 @@ METADATA_EDGES = frozenset({
     (('curve25519-dalek', '4.1.3'), ('digest', '0.10.7')),
     (('curve25519-dalek', '4.1.3'), ('zeroize', '1.9.1')),
     (('generic-array', '0.14.7'), ('zeroize', '1.9.1')),
+    (('shaar-ygg', '0.1.0'), ('tokio', '1.54.1')),
     (('time', '0.3.55'), ('libc', '0.2.191')),
     (('tokio', '1.54.1'), ('parking_lot', '0.12.5')),
     (('tracing-subscriber', '0.3.20'), ('time', '0.3.55')),
@@ -88,6 +89,7 @@ METADATA_EDGES = frozenset({
 UNIT_EDGES = frozenset({
     (('cipher', '0.4.4'), ('zeroize', '1.9.1')),
     (('generic-array', '0.14.7'), ('zeroize', '1.9.1')),
+    (('shaar-ygg', '0.1.0'), ('tokio', '1.54.1')),
     (('time', '0.3.55'), ('libc', '0.2.191')),
     (('tokio', '1.54.1'), ('parking_lot', '0.12.5')),
 })
