@@ -272,8 +272,14 @@ async fn no_application_bytes(sender: &Session, receiver: &Session) {
             .all(|path| matches!(path.remote_addr(), TransportAddr::Custom(_))),
         "the rejection oracle must have no native path"
     );
-    let send = timeout(Duration::from_secs(2), async {
-        let (mut stream, _response) = sender
+    enum Observation {
+        NoStream,
+        NoBytes(&'static str),
+        Delivered(u8),
+        Failed(String),
+    }
+    let response = timeout(Duration::from_secs(2), async {
+        let (mut stream, response) = sender
             .connection
             .open_bi()
             .await
@@ -283,14 +289,28 @@ async fn no_application_bytes(sender: &Session, receiver: &Session) {
             .await
             .expect("local bidi write accepted");
         stream.finish().expect("local bidi finish accepted");
-    });
-    send.await
-        .expect("the no-payload oracle must attempt an allowed bidi write");
-    let received = timeout(Duration::from_millis(300), receiver.connection.accept_bi()).await;
-    assert!(
-        received.is_err(),
-        "signaling delivered an application stream"
-    );
+        response
+    })
+    .await
+    .expect("the no-payload oracle must attempt an allowed bidi write");
+    let observation =
+        match timeout(Duration::from_millis(300), receiver.connection.accept_bi()).await {
+            Err(_) => Observation::NoStream,
+            Ok(Err(error)) => Observation::Failed(format!("accept: {error:?}")),
+            Ok(Ok((reply, mut incoming))) => {
+                let mut byte = [0u8; 1];
+                let observed =
+                    match timeout(Duration::from_millis(150), incoming.read(&mut byte)).await {
+                        Err(_) => Observation::NoBytes("read pending"),
+                        Ok(Ok(None)) => Observation::NoBytes("EOF"),
+                        Ok(Ok(Some(0))) => Observation::NoBytes("empty read"),
+                        Ok(Ok(Some(_))) => Observation::Delivered(byte[0]),
+                        Ok(Err(error)) => Observation::Failed(format!("read: {error:?}")),
+                    };
+                drop(reply);
+                observed
+            }
+        };
     assert!(
         timeout(Duration::from_millis(30), sender.closed())
             .await
@@ -303,6 +323,15 @@ async fn no_application_bytes(sender: &Session, receiver: &Session) {
             .is_err(),
         "receiver control remains open"
     );
+    drop(response);
+    match observation {
+        Observation::NoStream => eprintln!("signaling APP observation: no stream"),
+        Observation::NoBytes(reason) => {
+            eprintln!("signaling APP observation: stream without bytes ({reason})")
+        }
+        Observation::Delivered(byte) => panic!("signaling delivered an application byte: {byte}"),
+        Observation::Failed(error) => panic!("no-payload observation failed: {error}"),
+    }
 }
 
 #[tokio::test]

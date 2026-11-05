@@ -341,9 +341,14 @@ original deadline. Failed/hanging signaling can therefore consume roughly 1.5 s 
 that every native dial fits. No new policy parameter is added. The control Session closes before
 the native dial; it never becomes payload. The signaling address remains a constructor hint.
 Only recovery after an observed session loss negotiates here; initial-establishment failures do
-not. The no-payload oracle uses permitted bidi streams, confirms local write admission, observes
-no inbound stream on live custom-only paths in either direction, and includes a native positive
-control on the same endpoints (uni streams are disabled and cannot prove this boundary).
+not. The no-payload oracle uses permitted bidi streams, confirms local write admission, retains
+the response half during observation, and reads an actual byte if stream metadata appears on
+live custom-only paths. It rejects any delivered byte or unexpected accept/read error in either
+direction, and includes a native positive control on the same endpoints. Uni streams are disabled
+and cannot prove this boundary; stream-control metadata alone is not application data. The first
+CI (`42125979299`) exposed that incorrect metadata-forbidding oracle on both operating systems;
+it did not read or establish a payload leak. The precise accept outcome was discarded, so a
+STOP_SENDING explanation remains a supported mechanism rather than a captured result.
 Non-goals: production startup wiring, discovery and signaling in one endpoint, policy/owner
 semantics changes, relay routing, Yggdrasil/standby, address churn, record/clock changes, public
 API, new dependencies, stream migration, public network and efficiency-profile acceptance.
