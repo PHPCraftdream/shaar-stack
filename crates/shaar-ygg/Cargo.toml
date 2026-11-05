@@ -1,4 +1,5 @@
-# Yggdrasil transport adapter (future FFI crate).
+# Product-graph entry to the Yggdrasil adapter. The adapter itself lives in the
+# standalone nested crate `shaar-ygg-core` (pinned, lifecycle-patched core).
 [package]
 name = "shaar-ygg"
 version.workspace = true
@@ -7,3 +8,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+shaar-ygg-core = { path = "../shaar-ygg-core" }
+
+[dev-dependencies]
+tokio = { version = "=1.54.1", features = ["rt", "macros", "time", "net"] }
