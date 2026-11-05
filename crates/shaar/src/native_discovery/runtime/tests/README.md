@@ -19,8 +19,8 @@ Authored runtime tests are in `runtime/tests.rs` and its modules: `tests/fixture
 
 ## Parent integration status
 
-The dependency and development bindings at `149abfa` passed fork CI `41801292972`
-and upstream feature CI `41804945243` on both OS with independent DATA review.
+The dependency and development bindings at `149abfa` passed CI runs `41801292972`
+and `41804945243` on both OS with independent DATA review.
 That SHA did not contain this SDK runtime. The following original source-pass
 binding checklist describes the dependency capabilities already delivered; it is
 not runtime compilation or execution evidence:
