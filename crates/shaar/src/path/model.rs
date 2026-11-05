@@ -25,15 +25,17 @@ pub(crate) enum PathKind {
     Yggdrasil,
 }
 
-/// Observations reported by the owners of the real paths.
+/// Observations reported by the owners of the real paths. Reports of one
+/// generation are applied in arrival order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Event {
     /// The native connection of this generation became usable.
     NativeUp { generation: u64 },
     /// The native connection of this generation was lost.
     NativeDown { generation: u64 },
-    /// A requested native attempt ended without a connection.
-    AttemptFailed { attempt: u32 },
+    /// A requested native attempt ended without a connection. Attempt numbers are
+    /// unique for the lifetime of the policy, so a late report cannot cancel a newer attempt.
+    AttemptFailed { attempt: u64 },
     /// The Yggdrasil route of this generation proved ready (authenticated probe delivered).
     YggdrasilReady { generation: u64 },
     /// The Yggdrasil route of this generation was lost.
@@ -53,9 +55,9 @@ pub(crate) enum Decision {
     /// Carry payload on this path from now on.
     Use(PathKind),
     /// Start native attempt number `attempt`; it must report before `deadline`.
-    AttemptNative { attempt: u32, deadline: Millis },
+    AttemptNative { attempt: u64, deadline: Millis },
     /// The attempt budget is spent; no further native attempt is made until the
-    /// native path comes up by itself.
+    /// native path comes up by itself. Reported once per down episode.
     NativeExhausted,
     /// No path can carry payload right now.
     NoPath,

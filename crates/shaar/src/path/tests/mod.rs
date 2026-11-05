@@ -50,7 +50,12 @@ fn advance(policy: &mut PathPolicy, until: Millis) -> Vec<Decision> {
 
 /// Replay a trace from time zero with the default parameters.
 pub(super) fn run(mode: Mode, steps: &[Step]) {
-    let mut policy = PathPolicy::new(mode, PolicyConfig::default(), 0).expect("default parameters");
+    run_with(mode, PolicyConfig::default(), steps);
+}
+
+/// Replay a trace from time zero with the given parameters.
+pub(super) fn run_with(mode: Mode, config: PolicyConfig, steps: &[Step]) {
+    let mut policy = PathPolicy::new(mode, config, 0).expect("valid parameters");
     let mut expected_active = None;
     for (index, step) in steps.iter().enumerate() {
         let observed = match *step {

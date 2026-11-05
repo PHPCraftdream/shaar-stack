@@ -19,7 +19,7 @@ struct Link {
 /// The single native attempt that is currently running.
 #[derive(Clone, Copy, Debug)]
 struct InFlight {
-    attempt: u32,
+    attempt: u64,
     deadline: Millis,
 }
 
@@ -33,6 +33,7 @@ pub(crate) struct PathPolicy {
     yggdrasil: Link,
     active: Option<PathKind>,
     attempts_used: u32,
+    last_attempt: u64,
     in_flight: Option<InFlight>,
     next_attempt_at: Option<Millis>,
     exhausted_reported: bool,
@@ -56,6 +57,7 @@ impl PathPolicy {
             yggdrasil: down,
             active: None,
             attempts_used: 0,
+            last_attempt: 0,
             in_flight: None,
             next_attempt_at: Some(now),
             exhausted_reported: false,
@@ -119,7 +121,19 @@ impl PathPolicy {
         if self.native.up && self.attempts_used > 0 {
             note(self.native.since.saturating_add(self.config.stable_hold));
         }
+        if self.exhaustion_pending() {
+            note(self.clock);
+        }
         wake
+    }
+
+    /// The budget is spent, nothing is running or scheduled, and the owner was not told yet.
+    fn exhaustion_pending(&self) -> bool {
+        !self.native.up
+            && self.in_flight.is_none()
+            && self.next_attempt_at.is_none()
+            && self.attempts_used >= self.config.max_attempts
+            && !self.exhausted_reported
     }
 
     fn yggdrasil_usable(&self) -> bool {
@@ -161,7 +175,7 @@ impl PathPolicy {
         }
     }
 
-    fn attempt_failed(&mut self, now: Millis, attempt: u32) {
+    fn attempt_failed(&mut self, now: Millis, attempt: u64) {
         if self
             .in_flight
             .is_some_and(|flight| flight.attempt == attempt)
@@ -187,9 +201,8 @@ impl PathPolicy {
         if self.in_flight.is_some() {
             return;
         }
-        let next = self.attempts_used.saturating_add(1);
-        self.next_attempt_at =
-            (next <= self.config.max_attempts).then(|| now.saturating_add(self.delay_before(next)));
+        self.next_attempt_at = (self.attempts_used < self.config.max_attempts)
+            .then(|| now.saturating_add(self.delay_before(self.attempts_used + 1)));
     }
 
     fn decide(&mut self, now: Millis) -> Decision {
@@ -252,15 +265,20 @@ impl PathPolicy {
         }
         match self.next_attempt_at {
             Some(at) if now >= at => {
+                let Some(attempt) = self.last_attempt.checked_add(1) else {
+                    self.closed = true;
+                    self.next_attempt_at = None;
+                    return Some(Decision::Closed);
+                };
+                self.last_attempt = attempt;
                 self.attempts_used = self.attempts_used.saturating_add(1);
-                let attempt = self.attempts_used;
                 let deadline = now.saturating_add(self.config.attempt_timeout);
                 self.in_flight = Some(InFlight { attempt, deadline });
                 self.next_attempt_at = None;
                 Some(Decision::AttemptNative { attempt, deadline })
             }
             Some(_) => None,
-            None if self.attempts_used >= self.config.max_attempts && !self.exhausted_reported => {
+            None if self.exhaustion_pending() => {
                 self.exhausted_reported = true;
                 Some(Decision::NativeExhausted)
             }

@@ -4,8 +4,8 @@
 //! timeout 3000 ms, backoff 500 ms doubling up to 4000 ms, six attempts, stable
 //! hold 5000 ms.
 
-use super::super::{Decision, Event, Mode, PathKind};
-use super::{Step, run};
+use super::super::{Decision, Event, Mode, PathKind, PolicyConfig};
+use super::{Step, run, run_with};
 
 const NATIVE: PathKind = PathKind::Native;
 const YGG: PathKind = PathKind::Yggdrasil;
@@ -26,7 +26,7 @@ const fn ygg_down(generation: u64) -> Event {
     Event::YggdrasilDown { generation }
 }
 
-const fn failed(attempt: u32) -> Event {
+const fn failed(attempt: u64) -> Event {
     Event::AttemptFailed { attempt }
 }
 
@@ -125,14 +125,18 @@ fn backoff_doubles_to_its_cap_and_the_budget_ends_in_exhaustion() {
             Step::Event(1_000_001, up(1), &[Decision::Use(NATIVE)]),
             Step::Wakeup(Some(1_005_001)),
             Step::Time(1_005_001, &[]),
+            // Attempt numbers keep counting across a refill, so the old report below is stale.
             Step::Event(
                 1_006_000,
                 down(1),
                 &[Decision::AttemptNative {
-                    attempt: 1,
+                    attempt: 7,
                     deadline: 1_009_000,
                 }],
             ),
+            Step::Event(1_006_100, failed(1), &[]),
+            // The grace expires (1_008_000) before the attempt deadline (1_009_000).
+            Step::Wakeup(Some(1_008_000)),
         ],
     );
 }
@@ -481,6 +485,79 @@ fn shutdown_closes_the_policy_for_good() {
             Step::Event(600, up(1), &[Decision::Closed]),
             Step::Time(10_000, &[]),
             Step::Wakeup(None),
+        ],
+    );
+}
+
+#[test]
+fn a_late_owner_still_learns_that_the_budget_is_spent() {
+    // Two attempts only; the owner sleeps through the grace and the last deadline, so one
+    // late step both fails over and discovers the exhaustion.
+    let config = PolicyConfig {
+        max_attempts: 2,
+        ..PolicyConfig::default()
+    };
+    run_with(
+        Mode::Standby,
+        config,
+        &[
+            Step::Time(
+                0,
+                &[Decision::AttemptNative {
+                    attempt: 1,
+                    deadline: 3000,
+                }],
+            ),
+            Step::Event(100, up(1), &[Decision::Use(NATIVE)]),
+            Step::Event(200, ygg_ready(1), &[]),
+            Step::Event(1000, down(1), &[]),
+            Step::Time(
+                1500,
+                &[Decision::AttemptNative {
+                    attempt: 2,
+                    deadline: 4500,
+                }],
+            ),
+            Step::Event(
+                5000,
+                Event::Tick,
+                &[Decision::Use(YGG), Decision::NativeExhausted],
+            ),
+            Step::Wakeup(None),
+        ],
+    );
+}
+
+#[test]
+fn a_stale_attempt_report_across_a_refill_cannot_cancel_the_new_attempt() {
+    let config = PolicyConfig {
+        max_attempts: 2,
+        ..PolicyConfig::default()
+    };
+    run_with(
+        Mode::Standby,
+        config,
+        &[
+            Step::Time(
+                0,
+                &[Decision::AttemptNative {
+                    attempt: 1,
+                    deadline: 3000,
+                }],
+            ),
+            Step::Event(100, up(1), &[Decision::Use(NATIVE)]),
+            Step::Time(5100, &[]),
+            Step::Event(
+                6000,
+                down(1),
+                &[Decision::AttemptNative {
+                    attempt: 2,
+                    deadline: 9000,
+                }],
+            ),
+            Step::Event(6100, failed(1), &[]),
+            // The grace expires (8000) before the attempt deadline (9000).
+            Step::Wakeup(Some(8000)),
         ],
     );
 }
