@@ -1,6 +1,6 @@
 # V1 delivery focus and standing reminders
 
-**Distance to v1:** P01–P06 and D1 are accepted; P08 is bootstrap-only; P09 is accepted at `b076458` (record below); P07's adapter is technically accepted in the isolated `shaar-ygg-core` crate at `efa5c62` (leaves 53.1-53.4, record below); the user decided on 2026-11-05 that MPL-2.0 is allowed narrowly for the pinned `ironwood`/`yggdrasil` packages and that this repository is the source-availability mechanism for the modified files, so P07 stays gated only for notices (#72/#73) and any public-peer contact; P10–P16 are not accepted as complete stages. Next: P10 #214/#215 (connects the adapter to the product graph) and the full native/Yggdrasil matrix. Blockers include exact public-peer approval and public-network evidence, notices and separately gated public smoke.
+**Distance to v1:** P01–P06 and D1 are accepted; P08 is bootstrap-only; P09 is accepted at `b076458` (record below); P07's adapter is technically accepted in the isolated `shaar-ygg-core` crate at `efa5c62` (leaves 53.1-53.4, record below); the user decided on 2026-11-05 that MPL-2.0 is allowed narrowly for the pinned `ironwood`/`yggdrasil` packages and that this repository is the source-availability mechanism for the modified files, so P07 stays gated only for notices (#72/#73) and any public-peer contact; P10–P16 are not accepted as complete stages. P10 leaves 1 (path policy) and 2a (product linkage, `14680c2`) are accepted. Next: P10 leaves 2b-6 (readiness bridge, composition, `signal`/`standby` authorization, startup, efficiency acceptance #214/#215) and the full native/Yggdrasil matrix. Blockers include exact public-peer approval and public-network evidence, notices and separately gated public smoke.
 
 **Decision history — 2026-11-04:** the user superseded the 2026-10-31 decision
 that deferred P07 beyond v1. Restore the original one-Ed25519-key architecture:
@@ -208,6 +208,35 @@ for the lifetime of the policy (a refill no longer lets a stale report cancel a 
 late owner still learns that the budget is spent. Open: the source-bound native-graph transition
 entries for the changed `crates/shaar/src` tree are refreshed only by a run that selects the graph
 proof; this targeted run did not select it.
+
+#### Leaf 2a acceptance and non-goals (recorded 2026-11-05)
+
+Advances scenario step 5 (the product graph must contain the Yggdrasil path). Observable acceptance:
+in CI on Linux and Windows the product workspace builds with the new locked closure, every
+existing guard (native-graph proof, dependency license report and deny, structure, CI selection)
+is green with reviewed changes only, and a test in `crates/shaar-ygg` starts two `YggTransport`s
+through the product crate on loopback, exchanges a datagram by key and closes with no task left.
+Non-goals: bridge readiness semantics, any use from `shaar`, payload paths, public network, new
+crypto, version bumps beyond what the lock resolution forces.
+
+P10 leaf 2a is accepted at `14680c2`: Linux and Windows CI (run `42079853285`) executed the
+product test `product_link_tests::product_exports_exchange_a_datagram_by_key_and_release_everything`
+and both `native_graph_witness` cases, and the native-graph proof accepted the candidate. The
+change set: `shaar-ygg` depends on the nested `shaar-ygg-core` by path; the product lock is the
+CI-resolved candidate (+33 packages, no removals); `deny.toml` allows MPL-2.0 only for
+`ironwood@0.2.1` and `yggdrasil@0.3.1` (user decision 2026-11-05) and the license receipts list
+the Yggdrasil provenance; the graph proof is selected when the two linking manifests change; the
+format step covers workspace members only because `cargo fmt --all` also formats path
+dependencies. Guard change (reviewed by the independent design consult): workspace crates are
+identified by name and version, so per-tree transition tuples are no longer needed after every
+source edit (raw bindings stay in the proof digest), and `fixture/baseline/ygg_closure.py`
+declares the exact closure read from the evidence of both operating systems; the control
+comparison requires the candidate to embed every control package, unit and dependency and rejects
+anything outside the declaration. The path to acceptance took five failed runs: three mechanical
+(selection tests, format scope, an unowned workflow file), the expected guard stop that produced
+the evidence, and one obsolete test of the removed tuple policy that the first guard commit
+missed. Open: the licenses of the new registry crates were accepted by the existing allow list;
+notices (#72/#73) remain.
 
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
