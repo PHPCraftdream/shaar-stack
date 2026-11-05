@@ -21,6 +21,7 @@ const CLOSE_BUDGET: Duration = Duration::from_secs(10);
 const QUIET: Duration = Duration::from_millis(300);
 const PACE: Duration = Duration::from_millis(2);
 const PER_SENDER: usize = 25;
+const RACE_ROUNDS: u8 = 20;
 
 fn config(seed: [u8; 32], listen: Vec<String>, peers: Vec<String>) -> YggConfig {
     YggConfig {
@@ -307,6 +308,37 @@ async fn a_dropped_recv_future_loses_no_datagram() {
         .await
         .expect("a datagram sent after a cancelled recv is delivered");
     assert_eq!(payload, b"after-cancel");
+    finish(pair).await;
+}
+
+#[tokio::test]
+async fn cancelling_receives_with_datagrams_in_flight_loses_none() {
+    let pair = start_pair().await;
+    let listener_key = pair.listener.public_key();
+    while recv_data_within(&pair.listener, QUIET).await.is_some() {}
+
+    let mut received = HashSet::new();
+    for index in 0..RACE_ROUNDS {
+        pair.dialer
+            .send_to(&listener_key, &[index])
+            .await
+            .expect("send");
+        // Race a receive against an immediate cancellation while the datagram travels.
+        tokio::select! {
+            biased;
+            (payload, _) = recv_data(&pair.listener) => {
+                received.insert(payload[0]);
+            }
+            _ = tokio::task::yield_now() => {}
+        }
+    }
+    while received.len() < usize::from(RACE_ROUNDS) {
+        let (payload, _) = recv_data_within(&pair.listener, RECV_BUDGET)
+            .await
+            .expect("an in-flight datagram was lost by a cancelled receive");
+        received.insert(payload[0]);
+    }
+    assert_eq!(received, (0..RACE_ROUNDS).collect::<HashSet<u8>>());
     finish(pair).await;
 }
 

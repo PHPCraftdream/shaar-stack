@@ -52,8 +52,9 @@ pub enum YggError {
     Oversize { len: usize, mtu: usize },
     /// The receive buffer cannot hold an MTU-sized payload.
     BufferTooSmall { len: usize, needed: usize },
-    /// Starting failed at the named stage; the partly started core was closed.
-    Start { stage: &'static str, reason: String },
+    /// Starting failed at the named stage and the partly started core was closed.
+    /// The upstream text is dropped on purpose: it can echo peer URIs with secrets.
+    Start { stage: &'static str },
     /// Any other failure reported by the core.
     Io(String),
 }
@@ -69,7 +70,7 @@ impl fmt::Display for YggError {
                     "receive buffer of {len} bytes is below the required {needed}"
                 )
             }
-            Self::Start { stage, reason } => write!(f, "start failed at {stage}: {reason}"),
+            Self::Start { stage } => write!(f, "start failed at {stage}"),
             Self::Io(reason) => write!(f, "core error: {reason}"),
         }
     }
@@ -96,6 +97,7 @@ pub struct YggTransport {
 
 impl YggTransport {
     /// Start the core, listen on every listen URI and dial every peer URI.
+    /// Await it to completion: dropping the future early can leave the core running.
     pub async fn start(config: YggConfig) -> Result<Self, YggError> {
         let core_config = Config {
             allowed_public_keys: config.allowed_public_keys.iter().map(hex_key).collect(),
@@ -108,21 +110,15 @@ impl YggTransport {
         core.init_links().await;
         let transport = Self { core };
         for uri in &config.listen {
-            if let Err(reason) = transport.core.listen(uri).await {
+            if transport.core.listen(uri).await.is_err() {
                 let _ = transport.core.close().await;
-                return Err(YggError::Start {
-                    stage: "listen",
-                    reason,
-                });
+                return Err(YggError::Start { stage: "listen" });
             }
         }
         for uri in &config.peers {
-            if let Err(reason) = transport.core.add_peer(uri).await {
+            if transport.core.add_peer(uri).await.is_err() {
                 let _ = transport.core.close().await;
-                return Err(YggError::Start {
-                    stage: "peer",
-                    reason,
-                });
+                return Err(YggError::Start { stage: "peer" });
             }
         }
         Ok(transport)
@@ -175,3 +171,6 @@ impl YggTransport {
         self.core.close().await.map_err(map_core_error)
     }
 }
+
+#[cfg(test)]
+mod tests;
