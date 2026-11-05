@@ -1,6 +1,6 @@
 # V1 delivery focus and standing reminders
 
-**Distance to v1:** P01–P06 and D1 are accepted; P08 is bootstrap-only; P09 is accepted at `b076458` (record below); P07's adapter is technically accepted in the isolated `shaar-ygg-core` crate at `efa5c62` (leaves 53.1-53.4, record below); the user decided on 2026-11-05 that MPL-2.0 is allowed narrowly for the pinned `ironwood`/`yggdrasil` packages and that this repository is the source-availability mechanism for the modified files, so P07 stays gated only for notices (#72/#73) and any public-peer contact; P10–P16 are not accepted as complete stages. P10 leaves 1 (path policy) and 2a (product linkage, `14680c2`) are accepted. Next: P10 leaves 2b-6 (readiness bridge, composition, `signal`/`standby` authorization, startup, efficiency acceptance #214/#215) and the full native/Yggdrasil matrix. Blockers include exact public-peer approval and public-network evidence, notices and separately gated public smoke.
+**Distance to v1:** P01–P06 and D1 are accepted; P08 is bootstrap-only; P09 is accepted at `b076458` (record below); P07's adapter is technically accepted in the isolated `shaar-ygg-core` crate at `efa5c62` (leaves 53.1-53.4, record below); the user decided on 2026-11-05 that MPL-2.0 is allowed narrowly for the pinned `ironwood`/`yggdrasil` packages and that this repository is the source-availability mechanism for the modified files, so P07 stays gated only for notices (#72/#73) and any public-peer contact; P10–P16 are not accepted as complete stages. P10 leaves 1 (path policy), 2a (product linkage, `14680c2`) and 2b (readiness bridge, `3248a6a`) are accepted. Next: P10 leaves 3-6 (composition, `signal`/`standby` authorization, startup, efficiency acceptance #214/#215) and the full native/Yggdrasil matrix. Blockers include exact public-peer approval and public-network evidence, notices and separately gated public smoke.
 
 **Decision history — 2026-11-04:** the user superseded the 2026-10-31 decision
 that deferred P07 beyond v1. Restore the original one-Ed25519-key architecture:
@@ -253,6 +253,16 @@ pending table have pure unit tests with boundary and mutation cases.
 Non-goals: payload over Yggdrasil, `signal`/`standby` authorization, use from `shaar`, path policy
 wiring, public network, new crypto (authenticity comes from the Yggdrasil session key), version
 bumps. The only guard data change is the declared `shaar-ygg` -> `tokio` normal edge.
+
+P10 leaf 2b is accepted at `3248a6a`: Linux and Windows CI (run `42088053558`) executed 16
+`shaar-ygg` lib cases each (8 bridge integration tests on real loopback transports, 4 frame and
+3 pending-table unit tests, and the product link test) and both `native_graph_witness` cases;
+nothing was ignored. It passed on the first run. An independent pre-flight review before the run
+led to a fix of the repeated `close` path, a per-kind oracle for the garbage test, a longer hold
+in the capacity test and a let-chain for clippy. The only guard change was the declared
+`shaar-ygg` -> `tokio` normal edge (the lock already listed `tokio`). Not claimed: payload over
+Yggdrasil, interoperability with deployed nodes, behaviour of a second core `close` (the bridge
+no longer calls it twice), and any path-policy use of the bridge.
 
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
