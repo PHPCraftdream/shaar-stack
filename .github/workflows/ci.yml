@@ -509,7 +509,8 @@ jobs:
         if: fromJSON(needs.plan.outputs.selection).rust
         shell: bash
         run: |
-          cargo fmt --all -- --check
+          # Members only: --all would also format the prepared upstream path dependencies.
+          cargo fmt -p shaar -p shaar-ygg -p shaar-p2p -p shaar-server -p shaar-client -p shaar-platform -- --check
           cargo fmt --manifest-path crates/shaar-ygg-core/Cargo.toml -- --check
       - name: cargo clippy
         if: fromJSON(needs.plan.outputs.selection).rust
