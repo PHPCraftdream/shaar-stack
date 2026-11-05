@@ -107,7 +107,7 @@ jobs:
           curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-kad/libp2p-kad-0.49.0.crate --output target/p2p/kad-archive/kad.crate
           python -I .github/scripts/p2p/discovery/kad/kad.py prepare --archive target/p2p/kad-archive/kad.crate --destination target/p2p/kad
       - name: cargo fmt
-        run: cargo fmt -p shaar -p shaar-ygg -p shaar-p2p -p shaar-server -p shaar-client -p shaar-platform -- --check
+        run: cargo fmt --all -- --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Focused real-process D1 loopback forwarding
