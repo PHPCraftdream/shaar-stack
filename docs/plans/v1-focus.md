@@ -138,6 +138,23 @@ Leaf 53.3 is accepted at `3396840`: Linux and Windows CI executed seven `exchang
 run `42033089403`). Open for 53.4: negative controls, full typed startup errors, per-key registry,
 allowlist enforcement, key-to-address vectors.
 
+#### Leaf 53.4 acceptance and non-goals (recorded 2026-11-05, before implementation)
+
+Advances scenario steps 5 and 6 (the allowlist). Observable acceptance, in GitHub CI on Linux and
+Windows: `YggTransport::start` validates its settings before creating a core and returns
+`InvalidConfig { field }` naming only the offending field (`listen`, `peers` or
+`group_password`) for blank, scheme-less, unsupported-scheme or whitespace-bearing URIs and an
+empty group password, never echoing values; a second live transport with the same key returns
+`KeyInUse`, the key is free again after `close()` or a failed start, and a repeated `close()`
+cannot release a key another transport now holds; `send_to` and `recv` after `close()` return
+`Closed`; with an allowlist on the receiver, a datagram from an allowed key is delivered while a
+datagram from a non-allowed key that dials the same listener is not delivered within a bounded
+window (observed non-delivery, not the enforcement mechanism); `address_for_key` returns the
+yggdrasil-go v0.5.14 golden address for its published key and the documented edge cases of the
+pinned core.
+Non-goals: public network, path policy, a registry across processes, protocol fuzzing, extra
+queues, unsafe, version bumps.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

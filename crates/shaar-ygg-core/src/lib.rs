@@ -6,8 +6,12 @@
 //! `docs/verification/rust-ygg.md`. [`YggTransport`] sends and receives datagrams
 //! addressed by the 32-byte peer key; the adapter adds no queue of its own.
 
+mod address;
+mod registry;
 mod transport;
+mod validate;
 
+pub use address::address_for_key;
 pub use transport::{YggConfig, YggError, YggTransport};
 
 #[cfg(test)]

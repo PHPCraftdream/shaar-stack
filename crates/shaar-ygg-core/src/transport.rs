@@ -11,6 +11,9 @@ use ironwood::Addr;
 use yggdrasil::config::Config;
 use yggdrasil::core::Core;
 
+use crate::registry::KeyClaim;
+use crate::validate::validate;
+
 /// Settings for one transport. The seed and group password are secrets and are
 /// never printed or echoed in errors.
 #[derive(Clone)]
@@ -31,8 +34,8 @@ impl fmt::Debug for YggConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("YggConfig")
             .field("seed", &"<redacted>")
-            .field("listen", &self.listen)
-            .field("peers", &self.peers)
+            .field("listen", &self.listen.len())
+            .field("peers", &self.peers.len())
             .field("allowed_public_keys", &self.allowed_public_keys.len())
             .field(
                 "group_password",
@@ -48,6 +51,10 @@ impl fmt::Debug for YggConfig {
 pub enum YggError {
     /// The transport was closed.
     Closed,
+    /// A setting is invalid; only the field is named, never its value.
+    InvalidConfig { field: &'static str },
+    /// Another live transport in this process already uses this key.
+    KeyInUse,
     /// The payload exceeds the transport MTU; nothing was sent.
     Oversize { len: usize, mtu: usize },
     /// The receive buffer cannot hold an MTU-sized payload.
@@ -70,6 +77,8 @@ impl fmt::Display for YggError {
                     "receive buffer of {len} bytes is below the required {needed}"
                 )
             }
+            Self::InvalidConfig { field } => write!(f, "invalid configuration: {field}"),
+            Self::KeyInUse => write!(f, "key already in use by a live transport"),
             Self::Start { stage } => write!(f, "start failed at {stage}"),
             Self::Io(reason) => write!(f, "core error: {reason}"),
         }
@@ -93,12 +102,17 @@ fn hex_key(key: &[u8; 32]) -> String {
 /// stop the core's tasks.
 pub struct YggTransport {
     core: Arc<Core>,
+    claim: KeyClaim,
 }
 
 impl YggTransport {
     /// Start the core, listen on every listen URI and dial every peer URI.
     /// Await it to completion: dropping the future early can leave the core running.
     pub async fn start(config: YggConfig) -> Result<Self, YggError> {
+        validate(&config)?;
+        let signing_key = SigningKey::from_bytes(&config.seed);
+        let claim =
+            KeyClaim::acquire(signing_key.verifying_key().to_bytes()).ok_or(YggError::KeyInUse)?;
         let core_config = Config {
             allowed_public_keys: config.allowed_public_keys.iter().map(hex_key).collect(),
             group_password: config.group_password.clone().unwrap_or_default(),
@@ -106,18 +120,18 @@ impl YggTransport {
             if_name: "none".to_string(),
             ..Config::default()
         };
-        let core = Core::new(SigningKey::from_bytes(&config.seed), core_config);
+        let core = Core::new(signing_key, core_config);
         core.init_links().await;
-        let transport = Self { core };
+        let transport = Self { core, claim };
         for uri in &config.listen {
             if transport.core.listen(uri).await.is_err() {
-                let _ = transport.core.close().await;
+                let _ = transport.close().await;
                 return Err(YggError::Start { stage: "listen" });
             }
         }
         for uri in &config.peers {
             if transport.core.add_peer(uri).await.is_err() {
-                let _ = transport.core.close().await;
+                let _ = transport.close().await;
                 return Err(YggError::Start { stage: "peer" });
             }
         }
@@ -167,8 +181,11 @@ impl YggTransport {
     }
 
     /// Stop every task of the core and release its sockets. Idempotent.
+    /// The key is released for reuse once the core has stopped.
     pub async fn close(&self) -> Result<(), YggError> {
-        self.core.close().await.map_err(map_core_error)
+        let result = self.core.close().await.map_err(map_core_error);
+        self.claim.release();
+        result
     }
 }
 

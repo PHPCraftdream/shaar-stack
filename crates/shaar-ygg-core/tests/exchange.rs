@@ -7,12 +7,17 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
 
-use shaar_ygg_core::{YggConfig, YggError, YggTransport};
+use ed25519_dalek::SigningKey;
+use shaar_ygg_core::{YggConfig, YggError, YggTransport, address_for_key};
 
 const POLL_STEP: Duration = Duration::from_millis(20);
 const POLL_BUDGET: Duration = Duration::from_secs(5);
-const SEED_LISTENER: [u8; 32] = [0x61; 32];
-const SEED_DIALER: [u8; 32] = [0x62; 32];
+
+/// Each test uses its own key pair: the process-wide key registry refuses two
+/// live transports on one key and the tests run in parallel threads.
+fn seed(role: u8, tag: u8) -> [u8; 32] {
+    [(role << 4) | tag; 32]
+}
 const PROBE: &[u8] = b"probe";
 const PATH_BUDGET: Duration = Duration::from_secs(10);
 const RECV_BUDGET: Duration = Duration::from_secs(5);
@@ -22,6 +27,7 @@ const QUIET: Duration = Duration::from_millis(300);
 const PACE: Duration = Duration::from_millis(2);
 const PER_SENDER: usize = 25;
 const RACE_ROUNDS: u8 = 20;
+const INTRUDER_WINDOW: Duration = Duration::from_secs(3);
 
 fn config(seed: [u8; 32], listen: Vec<String>, peers: Vec<String>) -> YggConfig {
     YggConfig {
@@ -42,12 +48,25 @@ struct Pair {
 /// Start a listening and a dialing transport and wait until a datagram flows
 /// in both directions (path discovery takes time; early writes are accepted
 /// but not delivered).
-async fn start_pair() -> Pair {
+async fn start_pair(tag: u8) -> Pair {
+    start_pair_with(tag, false).await
+}
+
+fn public_key_of(seed: [u8; 32]) -> [u8; 32] {
+    SigningKey::from_bytes(&seed).verifying_key().to_bytes()
+}
+
+/// With `restrict`, the listener only accepts the dialer's key.
+async fn start_pair_with(tag: u8, restrict: bool) -> Pair {
     let mut started = None;
     for _ in 0..50 {
         let port = reserve_port();
         let uri = format!("tcp://127.0.0.1:{port}");
-        match YggTransport::start(config(SEED_LISTENER, vec![uri], vec![])).await {
+        let mut listener_config = config(seed(1, tag), vec![uri], vec![]);
+        if restrict {
+            listener_config.allowed_public_keys = vec![public_key_of(seed(2, tag))];
+        }
+        match YggTransport::start(listener_config).await {
             Ok(listener) => {
                 started = Some((listener, port));
                 break;
@@ -58,7 +77,7 @@ async fn start_pair() -> Pair {
     }
     let (listener, port) = started.expect("listener bound a reserved port");
     let peer_uri = format!("tcp://127.0.0.1:{port}");
-    let dialer = YggTransport::start(config(SEED_DIALER, vec![], vec![peer_uri]))
+    let dialer = YggTransport::start(config(seed(2, tag), vec![], vec![peer_uri]))
         .await
         .expect("dialer starts");
     let pair = Pair {
@@ -142,7 +161,7 @@ async fn finish(pair: Pair) {
 
 #[tokio::test]
 async fn datagrams_flow_both_ways_addressed_by_key() {
-    let pair = start_pair().await;
+    let pair = start_pair(1).await;
     let (listener_key, dialer_key) = (pair.listener.public_key(), pair.dialer.public_key());
     assert_ne!(
         listener_key, dialer_key,
@@ -173,7 +192,7 @@ async fn datagrams_flow_both_ways_addressed_by_key() {
 
 #[tokio::test]
 async fn payloads_up_to_the_mtu_arrive_intact() {
-    let pair = start_pair().await;
+    let pair = start_pair(2).await;
     let listener_key = pair.listener.public_key();
     let mtu = pair.dialer.mtu();
     assert!(mtu >= 1000, "mtu {mtu} must fit the 1000-byte case");
@@ -193,7 +212,7 @@ async fn payloads_up_to_the_mtu_arrive_intact() {
 
 #[tokio::test]
 async fn payload_above_the_mtu_is_rejected_before_sending() {
-    let pair = start_pair().await;
+    let pair = start_pair(3).await;
     let listener_key = pair.listener.public_key();
     let mtu = pair.dialer.mtu();
     let oversize = vec![0x5au8; mtu + 1];
@@ -208,7 +227,7 @@ async fn payload_above_the_mtu_is_rejected_before_sending() {
 
 #[tokio::test]
 async fn receive_buffer_below_mtu_plus_one_is_rejected() {
-    let pair = start_pair().await;
+    let pair = start_pair(4).await;
     let mtu = pair.listener.mtu();
     let mut small = vec![0u8; mtu];
     let outcome = pair.listener.recv(&mut small).await;
@@ -250,7 +269,7 @@ fn expected_set(senders: u8) -> HashSet<(u8, u8)> {
 
 #[tokio::test]
 async fn concurrent_senders_and_receivers_deliver_every_paced_datagram() {
-    let pair = start_pair().await;
+    let pair = start_pair(5).await;
     let (listener_key, dialer_key) = (pair.listener.public_key(), pair.dialer.public_key());
     let mut senders = Vec::new();
     for tag in 0..4u8 {
@@ -288,7 +307,7 @@ async fn concurrent_senders_and_receivers_deliver_every_paced_datagram() {
 
 #[tokio::test]
 async fn a_dropped_recv_future_loses_no_datagram() {
-    let pair = start_pair().await;
+    let pair = start_pair(6).await;
     let listener_key = pair.listener.public_key();
     while recv_data_within(&pair.listener, QUIET).await.is_some() {}
 
@@ -313,7 +332,7 @@ async fn a_dropped_recv_future_loses_no_datagram() {
 
 #[tokio::test]
 async fn cancelling_receives_with_datagrams_in_flight_loses_none() {
-    let pair = start_pair().await;
+    let pair = start_pair(7).await;
     let listener_key = pair.listener.public_key();
     while recv_data_within(&pair.listener, QUIET).await.is_some() {}
 
@@ -390,4 +409,138 @@ async fn assert_port_rebinds(port: u16) {
         tokio::time::sleep(POLL_STEP).await;
     }
     panic!("loopback port {port} did not bind again within the poll budget: {last:?}");
+}
+
+#[tokio::test]
+async fn start_rejects_invalid_settings_naming_only_the_field() {
+    let mut bad_listen = config(seed(3, 1), vec!["http://127.0.0.1:1".to_string()], vec![]);
+    assert_eq!(
+        YggTransport::start(bad_listen.clone()).await.err(),
+        Some(YggError::InvalidConfig { field: "listen" })
+    );
+    bad_listen.listen.clear();
+    bad_listen.peers = vec!["tcp://secret host:1?password=hunter2".to_string()];
+    let error = YggTransport::start(bad_listen.clone())
+        .await
+        .err()
+        .expect("a peer URI with whitespace is rejected");
+    assert_eq!(error, YggError::InvalidConfig { field: "peers" });
+    let text = format!("{error} {error:?} {bad_listen:?}");
+    assert!(!text.contains("hunter2"), "a secret leaked: {text}");
+
+    let mut open = config(seed(3, 1), vec![], vec![]);
+    open.group_password = Some(String::new());
+    assert_eq!(
+        YggTransport::start(open).await.err(),
+        Some(YggError::InvalidConfig {
+            field: "group_password"
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_live_key_cannot_be_started_twice_and_is_free_after_close() {
+    let settings = config(seed(3, 2), vec![], vec![]);
+    let first = YggTransport::start(settings.clone())
+        .await
+        .expect("first start");
+    assert_eq!(
+        YggTransport::start(settings.clone()).await.err(),
+        Some(YggError::KeyInUse)
+    );
+    first.close().await.expect("close");
+    let second = YggTransport::start(settings.clone())
+        .await
+        .expect("the key is free after close");
+    first.close().await.expect("a repeated close is harmless");
+    assert_eq!(
+        YggTransport::start(settings).await.err(),
+        Some(YggError::KeyInUse),
+        "a repeated close of the old handle must not free the new owner's key"
+    );
+    second.close().await.expect("close");
+}
+
+#[tokio::test]
+async fn a_failed_start_releases_its_key() {
+    let occupied = TcpListener::bind(("127.0.0.1", 0)).expect("occupy a port");
+    let port = occupied.local_addr().expect("local addr").port();
+    let taken = config(seed(3, 3), vec![format!("tcp://127.0.0.1:{port}")], vec![]);
+    assert_eq!(
+        YggTransport::start(taken).await.err(),
+        Some(YggError::Start { stage: "listen" })
+    );
+    let retry = YggTransport::start(config(seed(3, 3), vec![], vec![]))
+        .await
+        .expect("the key was released by the failed start");
+    retry.close().await.expect("close");
+    drop(occupied);
+}
+
+#[tokio::test]
+async fn operations_after_close_report_closed() {
+    let transport = YggTransport::start(config(seed(3, 4), vec![], vec![]))
+        .await
+        .expect("start");
+    transport.close().await.expect("close");
+    let key = transport.public_key();
+    assert_eq!(
+        transport.send_to(&key, b"late").await,
+        Err(YggError::Closed)
+    );
+    let mut buffer = vec![0u8; transport.mtu() + 1];
+    assert_eq!(transport.recv(&mut buffer).await, Err(YggError::Closed));
+    transport.close().await.expect("close stays idempotent");
+}
+
+/// The receiver allowlists the dialer only. A third node that dials the same
+/// listener must not get a datagram through, while the allowed key still does.
+/// The test observes non-delivery within a bounded window, not the mechanism.
+#[tokio::test]
+async fn a_key_outside_the_allowlist_gets_no_datagram_through() {
+    let pair = start_pair_with(3, true).await;
+    let listener_key = pair.listener.public_key();
+    let intruder_seed = seed(4, 3);
+    let intruder_key = public_key_of(intruder_seed);
+    let peer_uri = format!("tcp://127.0.0.1:{}", pair.port);
+    let intruder = YggTransport::start(config(intruder_seed, vec![], vec![peer_uri]))
+        .await
+        .expect("intruder starts");
+
+    let deadline = tokio::time::Instant::now() + INTRUDER_WINDOW;
+    while tokio::time::Instant::now() < deadline {
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            intruder.send_to(&listener_key, b"intruder"),
+        )
+        .await;
+        if let Some((payload, from)) = recv_data_within(&pair.listener, POLL_STEP * 5).await {
+            assert_ne!(
+                from, intruder_key,
+                "a datagram of the intruder was delivered"
+            );
+            assert_ne!(payload, b"intruder", "intruder payload was delivered");
+        }
+    }
+
+    pair.dialer
+        .send_to(&listener_key, b"legit")
+        .await
+        .expect("allowed key sends");
+    let (payload, from) = recv_data_within(&pair.listener, RECV_BUDGET)
+        .await
+        .expect("the allowed key is still delivered");
+    assert_eq!(payload, b"legit");
+    assert_eq!(from, pair.dialer.public_key());
+    intruder.close().await.expect("intruder closes");
+    finish(pair).await;
+}
+
+#[test]
+fn transport_keys_map_to_distinct_stable_addresses() {
+    let a = address_for_key(&public_key_of(seed(1, 1)));
+    let b = address_for_key(&public_key_of(seed(2, 1)));
+    assert_ne!(a, b);
+    assert_eq!(a, address_for_key(&public_key_of(seed(1, 1))));
+    assert_eq!(a[0], 0x02, "addresses carry the Yggdrasil prefix");
 }
