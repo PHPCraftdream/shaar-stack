@@ -61,16 +61,23 @@ contradicts the paired-clock rollback policy. Ported here: negative records (sta
 and relay-claiming) never start a dial while a valid record does
 (`owner/wiring_tests/records.rs`).
 
-Outstanding real-seam obligations, not covered by any executed test yet and owned by P09
-acceptance (task 51): P7 checked network ordering and equal-sequence conflict recovery
-through the real GET fixture with multiple responders; P10 cancelling `connect_until` before
-the GET response must leave no late dial or cache commit; P3 the sample-command wait and the
-GET share one deadline; P4 a dropped unpolled resolve future changes no state; P8 replay
-and local-PUT provenance never renew the cache; P2 sixty-four signed winners survive expiry,
-conflict and lower replay; at dependency level: P5 GET cancellation and deadline retain
-their charge until cleanup, P6 stop while the socket flush is held, P1 eight active plus
-sixteen queued distinct keys. This record does not establish P10 pathing, Server/Client
-integration or public-network acceptance.
+Outstanding real-seam obligations owned by P09 acceptance (task 51): P7 checked network ordering
+and equal-sequence conflict recovery through the real GET fixture with multiple responders, P10
+cancelling `connect_until` before the GET response, P3 the sample-command wait and the GET sharing
+one caller deadline, P4 a dropped unpolled resolve future changing no state, P8 replay and
+local-PUT provenance never renewing the cache, and P2 sixty-four signed winners surviving expiry,
+conflict and lower-seq replay are authored as real-seam regressions in
+`runtime/owner/seam_tests/` (loopback fixture plus the real RuntimeOwner,
+NativeDiscoveredEndpoint, resolver and PolicyOwner; paused Tokio time and controlled clocks only)
+and await CI; they have not been executed. P7 drives both newer-responder permutations (each
+responder holds the newer record in one of the two phases); datagram arrival order inside one
+batch is environment-controlled and the winner oracle is order-independent. P2 re-resolves all
+sixty-four winners after expiry, deep-dives conflict, lower-seq replay and recovery on one slot,
+and re-checks the sixty-fifth-key capacity bound before and after. Still outstanding and not
+covered by any executed test yet, at dependency level: P5 GET cancellation and deadline retain
+their charge until cleanup, P6 stop while the socket flush is held, P1 eight active plus sixteen
+queued distinct keys. This record does not establish P10 pathing, Server/Client integration or
+public-network acceptance.
 
 ## Remaining gaps / verification
 

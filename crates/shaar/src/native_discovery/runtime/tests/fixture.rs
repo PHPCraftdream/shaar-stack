@@ -285,9 +285,9 @@ impl LoopbackPeer {
 
 pub(in crate::native_discovery::runtime::owner) struct CapturedPut {
     pub(in crate::native_discovery::runtime::owner) key: Vec<u8>,
-    pub(super) signature: Vec<u8>,
-    pub(super) value: Vec<u8>,
-    pub(super) sequence: i64,
+    pub(in crate::native_discovery::runtime::owner) signature: Vec<u8>,
+    pub(in crate::native_discovery::runtime::owner) value: Vec<u8>,
+    pub(in crate::native_discovery::runtime::owner) sequence: i64,
 }
 
 enum ReplyKind {

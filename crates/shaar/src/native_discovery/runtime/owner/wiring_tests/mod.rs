@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
-mod connect;
+pub(in crate::native_discovery::runtime::owner) mod connect;
 mod lifecycle;
 mod records;
 
@@ -22,7 +22,7 @@ fn identity() -> Identity {
     Identity::from_seed([0x61; 32])
 }
 
-fn peer_v4(peer: &LoopbackPeer) -> SocketAddrV4 {
+pub(in crate::native_discovery::runtime::owner) fn peer_v4(peer: &LoopbackPeer) -> SocketAddrV4 {
     match peer.address {
         SocketAddr::V4(address) => address,
         SocketAddr::V6(_) => panic!("loopback peer must bind IPv4"),
@@ -30,19 +30,22 @@ fn peer_v4(peer: &LoopbackPeer) -> SocketAddrV4 {
 }
 
 /// A currently free loopback UDP port: bound, read and released again.
-async fn free_port() -> u16 {
+pub(in crate::native_discovery::runtime::owner) async fn free_port() -> u16 {
     let socket = UdpSocket::bind("127.0.0.1:0")
         .await
         .expect("probe socket binds");
     socket.local_addr().expect("probe address").port()
 }
 
-fn options(dht_port: u16, bootstrap: SocketAddrV4) -> NativeDiscoveryOptions {
+pub(in crate::native_discovery::runtime::owner) fn options(
+    dht_port: u16,
+    bootstrap: SocketAddrV4,
+) -> NativeDiscoveryOptions {
     NativeDiscoveryOptions::new(identity(), loopback_v4(dht_port), &[bootstrap])
         .expect("valid discovery options")
 }
 
-async fn bind(
+pub(in crate::native_discovery::runtime::owner) async fn bind(
     native_port: u16,
     options: NativeDiscoveryOptions,
 ) -> Result<NativeDiscoveredEndpoint, NativeEndpointError> {

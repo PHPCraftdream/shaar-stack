@@ -24,7 +24,10 @@ pub(super) fn now_us() -> i64 {
 }
 
 /// A record signed by `identity` advertising `address`, fresh against the system clock.
-pub(super) fn signed_record(identity: &Identity, address: SocketAddr) -> MutableItem {
+pub(in crate::native_discovery::runtime::owner) fn signed_record(
+    identity: &Identity,
+    address: SocketAddr,
+) -> MutableItem {
     signed_record_at(identity, address, now_us())
 }
 
