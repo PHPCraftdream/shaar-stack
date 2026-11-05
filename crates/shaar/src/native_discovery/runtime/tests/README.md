@@ -86,16 +86,17 @@ executed fixture tests `actor_admits_eight_distinct_operations_and_rejects_ninth
 `held_send_gate_deadline_cleanup_is_deterministic_actor_cleanup_not_wall_clock_stall`,
 `owned_actor_deadline_interrupts_held_send_without_transmission`,
 `cancellation_at_real_send_gate_retains_rpc_and_datagram_charges` and
-`terminal_failure_keeps_delivered_error_receivers_charged`, plus the authored
+`terminal_failure_keeps_delivered_error_receivers_charged`, plus the new
 `cancelled_admission_keeps_request_and_result_charges_until_tick_cleanup` for the
 cancelled-GET window and request-lease retention. Dependency-level P6 (stop while the socket
 flush is held) is covered by the executed `owned_actor_keeps_socket_until_cleanup_completes`,
 `owned_actor_keeps_socket_until_receive_returns`, `close_joins_actor_and_releases_exact_bind`,
 `close_reports_aborted_actor_join_failure_and_retains_terminal_error` and the same
-`owned_actor_deadline_interrupts_held_send_without_transmission`, plus the authored
+`owned_actor_deadline_interrupts_held_send_without_transmission`, plus the new
 `stop_while_flush_held_retains_charges_and_transmits_nothing` for charge accounting and the
-never-transmitted held datagram. The two new dependency-level tests are authored only and await
-CI; they have not been executed. This record does not establish P10 pathing, Server/Client
+never-transmitted held datagram. Both new dependency-level tests were executed and passed on both OS in CI run
+`41964477329` at `e2dc10b` (128 selected mainline cases per OS); the final P09 acceptance run
+`41975114042` at `b076458` is recorded in `docs/plans/v1-focus.md`. This record does not establish P10 pathing, Server/Client
 integration or public-network acceptance.
 
 ## Remaining gaps / verification

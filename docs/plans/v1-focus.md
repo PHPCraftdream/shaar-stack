@@ -1,6 +1,6 @@
 # V1 delivery focus and standing reminders
 
-**Distance to v1:** P01–P06 and D1 are accepted; P08 is bootstrap-only; P09 is active (#253, final combined graph, #212/#213); P07 is restored to v1 but unaccepted and permission-gated; P10–P16 are not accepted as complete stages. Next: finish P09, then gated P07 (#224/#33/#34), then P10 #214/#215 and the full native/Yggdrasil matrix. Blockers include P09 integration, P07 source/lifecycle evidence, exact public-peer approval and public-network evidence, legal/notices and separately gated public smoke.
+**Distance to v1:** P01–P06 and D1 are accepted; P08 is bootstrap-only; P09 is accepted at `b076458` (record below); P07 is restored to v1 but unaccepted and permission-gated; P10–P16 are not accepted as complete stages. Next: gated P07 (#224/#33/#34), then P10 #214/#215 and the full native/Yggdrasil matrix. Blockers include P07 source/lifecycle evidence, exact public-peer approval and public-network evidence, legal/notices and separately gated public smoke.
 
 **Decision history — 2026-11-04:** the user superseded the 2026-10-31 decision
 that deferred P07 beyond v1. Restore the original one-Ed25519-key architecture:
@@ -41,6 +41,30 @@ Each row is the one-line acceptance/non-goals record for the existing leaf.
 | #252 — Publisher | The actual SDK publisher passes the existing generation, refresh, withdrawal, cancellation, original-deadline and joined-cleanup contract cases on Linux and Windows and is delivered; excludes custom DHT/crypto, new public signer/configuration APIs, new transport features and dependency-only acceptance. |
 | #261/#263 — Independent reference | A permitted authentic external fixed record with provenance supports the existing signed-record regressions; excludes self-roundtrip as interoperability, expanded retrieval/contact scope without permission, or invented reference bytes. |
 | #253 — P09 integration | The accepted graph, publisher and required reference are composed through the existing SDK path and original runtime obligations, with reviewed delivery and cleanup; excludes treating one targeted dependency pass as complete P09 or v1 acceptance. |
+
+### P09 acceptance record (2026-11-05)
+
+Accepted source: `b076458` on `develop`. Evidence: targeted CI run `41975114042` over the whole
+sprint diff (base `7810e1d`), green on Linux and Windows, with the locked normal SDK graph
+(base58 multibase, no `base256emoji`) verified on both OS, 173 selected `shaar` library cases
+executed per OS (selected equals executed; the only non-executed case is the privileged-uid
+Ubuntu probe), the 2 graph witness cases and 6 base58 cases, and the mainline dependency
+fixtures including the P5/P6 additions (CI run `41964477329`, 128 cases per OS). The seam
+regressions P7, P10, P3, P4, P8 and P2 (`runtime/owner/seam_tests/`) and the dependency-level
+P1, P5 and P6 coverage are listed in `crates/shaar/src/native_discovery/runtime/tests/README.md`.
+
+Not established by this record: P10 path policy, Server/Client integration, Yggdrasil, public-network
+behavior. Known limit: P7 covers both responder permutations, not a controlled datagram arrival
+order; P2 deep-dives conflict and replay on one of the sixty-four slots. Shaar source-tree
+transitions in `.github/probes/native-graph/fixture/features.py` are tied to the exact `shaar`
+tree: any later change under `crates/shaar` needs fresh transition entries from the verification
+evidence of both OS.
+
+Observation outside P09: the explicit full campaign (`scope: full`) contains legacy segments
+pinned to an older lock (for example the owned-DNS foundation baseline hash) and fails there
+independently of P09. Two real defects found on the way are fixed (nested workspace root of the
+prepared adapter in the carrier fixture copy; prepared path packages in the observation lock).
+Repairing the remaining legacy segments is not scheduled; a full run is not part of this acceptance.
 
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
