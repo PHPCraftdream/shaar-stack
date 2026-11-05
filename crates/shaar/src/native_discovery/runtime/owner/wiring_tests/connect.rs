@@ -49,7 +49,7 @@ pub(super) fn signed_record_at(
     to_mutable(&signed.expect("signed snapshot")).expect("typed item")
 }
 
-async fn server(seed: u8, allowed: PublicKey) -> Endpoint {
+pub(super) async fn server(seed: u8, allowed: PublicKey) -> Endpoint {
     Endpoint::bind(
         &Identity::from_seed([seed; 32]),
         "127.0.0.1:0".parse().expect("loopback address"),

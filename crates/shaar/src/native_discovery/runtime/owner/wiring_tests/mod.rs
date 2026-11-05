@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
+mod composition;
 pub(in crate::native_discovery::runtime::owner) mod connect;
 mod lifecycle;
 mod records;

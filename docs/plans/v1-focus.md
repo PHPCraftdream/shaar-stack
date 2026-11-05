@@ -264,6 +264,35 @@ in the capacity test and a let-chain for clippy. The only guard change was the d
 Yggdrasil, interoperability with deployed nodes, behaviour of a second core `close` (the bridge
 no longer calls it twice), and any path-policy use of the bridge.
 
+#### Leaf 3 plan and leaf 3a acceptance (recorded 2026-11-05, after the independent design consult)
+
+Leaf 3 composes discovery, native selection and signaling-only recovery as a crate-private
+coordinator, `path/owner.rs`, that the caller polls (one owner, no detached task). It is split in
+three: 3a resolve and direct dial under the policy (scenario step 3), 3b native loss, grace,
+bounded retries and recovery on the same address (step 4, native half), 3c signaling-only
+negotiation during the down window (step 4, recovery half). Engineer defaults, open for the user
+to override: the whole of leaf 3 stays crate-private (binaries define the public surface in leaf 5);
+the signaling address of the server comes from a constructor hint, not from the published record
+(the record profile accepted in P09 is not changed); a failed resolve counts as a failed attempt;
+`Mode::Signal` only (`standby` and Yggdrasil payload are leaf 4); the production adapter for
+`NativeDiscoveredEndpoint` is written in the startup leaf, 3a uses a test-only adapter so no P09
+item changes its dead-code status.
+
+Leaf 3a observable acceptance: in CI on Linux and Windows (1) table tests with a scripted dialer
+under paused time show that the owner dials at the instants the policy schedules (first at once,
+then after 500, 1000 and 2000 ms), gives every dial the policy's attempt deadline, maps failure
+and hang to a failed attempt, stops after exactly `max_attempts`, resumes after a cancelled call
+without a duplicate attempt, tells the policy about shutdown before dropping the link and joining
+the dialer, rejects invalid parameters before any dial, and returns immediately without another
+dial when native payload is already available (both before and after the stable-hold horizon);
+(2) one loopback test resolves a
+signed record for the server key from the owned Mainline fixture, dials the published address
+with exact-key QUIC through the owner, reports native as the payload path, forwards exact bytes
+both ways through the fixed target, and after the joined close leaves no task and frees both
+native ports.
+Non-goals: loss monitoring, signaling, Yggdrasil, address churn, binaries, public API, new
+dependencies, `policy.py` changes, any change of the P09 production code.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address
