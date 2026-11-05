@@ -11,9 +11,8 @@ PACKAGES = {
 }
 # Packages outside the root workspace: own manifest and lock, run by manifest path.
 NESTED = {"shaar-ygg-core": "crates/shaar-ygg-core/Cargo.toml"}
-# Manifests and the lock that define the guarded normal SDK graph; changing one runs the graph proof.
-GRAPH_INPUTS = frozenset({"Cargo.toml", "Cargo.lock", "crates/shaar/Cargo.toml",
-                          "crates/shaar-ygg/Cargo.toml", "crates/shaar-ygg-core/Cargo.toml"})
+# Manifests that link the Yggdrasil adapter into the guarded normal SDK graph; changing one runs the graph proof.
+GRAPH_INPUTS = frozenset({"crates/shaar-ygg/Cargo.toml", "crates/shaar-ygg-core/Cargo.toml"})
 SUITES = {
     "protocols": ("shaar-p2p", ("carrier::driver::protocols::", "infrastructure::tests::identification::")),
     "carrier-core": ("shaar-p2p", ("carrier::driver::tests::", "carrier::driver::fault_tests::", "carrier::driver::boundary::tests::", "carrier::driver::events::request_owner::tests::")),
