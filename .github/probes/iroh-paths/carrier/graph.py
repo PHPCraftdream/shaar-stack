@@ -10,6 +10,8 @@ import tomllib
 
 ROOTS = {"shaar", "shaar-p2p", "iroh", "noq", "noq-proto", "libp2p", "libp2p-relay", "tokio"}
 PATCHED = {"iroh", "noq", "noq-proto"}
+# Registry identities the product replaces with its reviewed prepared path packages.
+PATH_PREPARED = {("iroh-dns", "1.3.0"), ("n0-future", "0.3.2"), ("simple-dns", "0.12.0")}
 PROBE_LOCK_SHA = "122e16a01b4b2d76a4ace23b2a25caba8856b2996fe901b1300e4c686a706b16"
 OBSERVATION_ROOTS = {
     ("n0-qlog", "0.2.0", "registry+https://github.com/rust-lang/crates.io-index"),
@@ -103,6 +105,10 @@ def derive_lock(product_text, reviewed_text):
             return overrides[key[0]]
         if key in selected:
             return key
+        if key[:2] in PATH_PREPARED:
+            prepared = [other for other in product if other[:2] == key[:2] and other[2] is None]
+            if len(prepared) == 1:
+                return prepared[0]
         package, block = reviewed[key]
         if key[2] != "registry+https://github.com/rust-lang/crates.io-index":
             raise ValueError("observation graph cannot add a non-crates.io identity")

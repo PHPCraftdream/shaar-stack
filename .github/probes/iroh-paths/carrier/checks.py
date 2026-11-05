@@ -126,6 +126,35 @@ class FrameContracts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 graph.derive_lock(product, changed)
 
+    def prepared_locks(self, name, version):
+        product = "version = 4\n\n" + ''.join([
+            entry("shaar", "0.1.0", ("iroh",)),
+            entry("iroh", "1.3.0", ("noq", "core", name)),
+            entry("noq", "1.3.0", ("noq-proto",)),
+            entry("noq-proto", "1.3.0", ("core",)),
+            entry("core", "1.0.0", checksum="a" * 64),
+            entry(name, version),
+        ])
+        _, reviewed = locks()
+        blocks = reviewed.split("[[package]]")
+        index = next(i for i, block in enumerate(blocks) if 'name = "iroh"' in block)
+        blocks[index] = blocks[index].replace('"n0-qlog",', '"n0-qlog",\n "' + name + '",', 1)
+        return product, "[[package]]".join(blocks) + entry(name, version, checksum="7" * 64)
+
+    def test_lock_derivation_maps_reviewed_registry_identities_to_prepared_product_paths(self):
+        for name, version in sorted(graph.PATH_PREPARED):
+            product, reviewed = self.prepared_locks(name, version)
+            derived, receipt = graph.derive_lock(product, reviewed)
+            _, after = graph.lock_blocks(derived)
+            self.assertIn((name, version, None), after)
+            self.assertNotIn((name, version, REGISTRY), after)
+            self.assertNotIn(name, {item[0] for item in receipt["added_registry_identities"]})
+
+    def test_lock_derivation_does_not_remap_unreviewed_prepared_paths(self):
+        product, reviewed = self.prepared_locks("unreviewed-lib", "1.0.0")
+        with self.assertRaisesRegex(ValueError, "reviewed root closure"):
+            graph.derive_lock(product, reviewed)
+
     def test_lock_derivation_rejects_disagreeing_registry_checksum(self):
         product, reviewed = locks()
         reviewed = reviewed.replace('checksum = "' + "a" * 64 + '"', 'checksum = "' + "9" * 64 + '"')
