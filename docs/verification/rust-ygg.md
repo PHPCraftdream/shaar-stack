@@ -196,3 +196,29 @@ locally).
   half-closed; callers must not cancel it.
 - MPL-2.0 note: the modified `core.rs`, `links.rs`, `proto.rs` and ironwood `encrypted/mod.rs` are file-level
   MPL-protected; their publication mechanism remains an open legal item.
+
+## Key-addressed transport (leaf 53.3)
+
+Status: accepted at `3396840` (CI run `42033089403`, Linux and Windows green; nothing was run
+locally).
+
+- `crates/shaar-ygg-core/src/transport.rs` exposes `YggTransport` (`start`, `send_to`, `recv`,
+  `mtu`, `public_key`, `close`), `YggConfig` (seed, listen and peer URIs, allowlist keys, group
+  password; `Debug` redacts secrets) and `YggError` (`Closed`, `Oversize`, `BufferTooSmall`,
+  `Start { stage }`, `Io`). The adapter owns no queue: bounds and backpressure are the core's.
+  `recv` needs a buffer of `mtu() + 1` bytes because the core reads in place; the payload is
+  moved to the start of the buffer.
+- `Start` carries only the failed stage: upstream error text can echo peer URIs that contain
+  secrets, so it is dropped.
+- Executed: `tests/exchange.rs` (two transports on loopback exchange datagrams both ways by key,
+  `recv` reports the sender key, payloads of 1, 1000 and `mtu` bytes arrive intact, `mtu + 1`
+  is rejected with `Oversize` and nothing arrives, a small buffer is rejected with
+  `BufferTooSmall`, six paced concurrent senders deliver all 150 datagrams, cancelled receives
+  lose nothing including a race with datagrams in flight, both transports close with no task
+  alive and a free port) and the unit test that both cores are released after close.
+- Path discovery: writes are accepted before any datagram is delivered, so every test first
+  exchanges probe datagrams in both directions. P10 must treat a fresh path the same way.
+- Not covered (53.4): negative controls, full typed startup errors (field naming), the per-key
+  registry, allowlist enforcement, key-to-address vectors, behaviour after `close()` beyond the
+  idempotent call. Datagrams are unreliable by contract; the load test is paced and does not
+  prove loss-free delivery, and a scheduling stall on a loaded runner could drop datagrams.

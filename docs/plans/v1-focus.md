@@ -133,6 +133,11 @@ Non-goals: negative controls, the full typed startup errors, the per-key registr
 allowlist enforcement tests (53.4), key-to-address vectors (53.4), public network, TUN,
 path policy, any queue added by the adapter, unsafe, version bumps.
 
+Leaf 53.3 is accepted at `3396840`: Linux and Windows CI executed seven `exchange` tests and the
+`closing_a_connected_pair_releases_both_cores` unit test next to the two smoke tests (receipts of
+run `42033089403`). Open for 53.4: negative controls, full typed startup errors, per-key registry,
+allowlist enforcement, key-to-address vectors.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address
