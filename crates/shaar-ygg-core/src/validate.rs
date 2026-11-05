@@ -10,12 +10,16 @@ fn uri_is_valid(uri: &str) -> bool {
     let Some((scheme, rest)) = uri.split_once("://") else {
         return false;
     };
-    SCHEMES.contains(&scheme)
+    SCHEMES
+        .iter()
+        .any(|known| scheme.eq_ignore_ascii_case(known))
         && !rest.is_empty()
         && !rest.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
-/// Check every setting that can be judged without touching the network.
+/// Check every setting that can be judged without touching the network. This is a
+/// lexical pre-check, not a full URI parse: the core can still reject a value at
+/// start, which `start` reports as `Start { stage }`.
 pub(crate) fn validate(config: &YggConfig) -> Result<(), YggError> {
     if !config.listen.iter().all(|uri| uri_is_valid(uri)) {
         return Err(YggError::InvalidConfig { field: "listen" });
@@ -74,6 +78,13 @@ mod tests {
                 "listen URI {bad:?}"
             );
         }
+    }
+
+    #[test]
+    fn schemes_match_case_insensitively_like_url_parsing() {
+        let mut settings = config();
+        settings.listen = vec!["TCP://127.0.0.1:9".to_string(), "Tls://[::1]:9".to_string()];
+        assert_eq!(validate(&settings), Ok(()));
     }
 
     #[test]

@@ -490,6 +490,13 @@ async fn operations_after_close_report_closed() {
     );
     let mut buffer = vec![0u8; transport.mtu() + 1];
     assert_eq!(transport.recv(&mut buffer).await, Err(YggError::Closed));
+    // Closed wins over argument errors: an oversize payload and an empty buffer too.
+    let oversize = vec![0u8; transport.mtu() + 1];
+    assert_eq!(
+        transport.send_to(&key, &oversize).await,
+        Err(YggError::Closed)
+    );
+    assert_eq!(transport.recv(&mut []).await, Err(YggError::Closed));
     transport.close().await.expect("close stays idempotent");
 }
 
@@ -498,7 +505,7 @@ async fn operations_after_close_report_closed() {
 /// The test observes non-delivery within a bounded window, not the mechanism.
 #[tokio::test]
 async fn a_key_outside_the_allowlist_gets_no_datagram_through() {
-    let pair = start_pair_with(3, true).await;
+    let pair = start_pair_with(8, true).await;
     let listener_key = pair.listener.public_key();
     let intruder_seed = seed(4, 3);
     let intruder_key = public_key_of(intruder_seed);

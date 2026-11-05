@@ -5,6 +5,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ed25519_dalek::SigningKey;
 use ironwood::Addr;
@@ -26,7 +27,8 @@ pub struct YggConfig {
     pub peers: Vec<String>,
     /// When non-empty, only these public keys may peer.
     pub allowed_public_keys: Vec<[u8; 32]>,
-    /// Closed-network group password; `None` for an open network.
+    /// Closed-network group password; `None` for an open network. `Some("")` is
+    /// rejected: the core treats an empty password as open, so say `None` instead.
     pub group_password: Option<String>,
 }
 
@@ -45,7 +47,8 @@ impl fmt::Debug for YggConfig {
     }
 }
 
-/// Transport failures. Messages never contain secrets.
+/// Transport failures. The adapter's own messages never contain secrets; the core's
+/// tracing output is outside this guarantee and can mention peer URIs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum YggError {
@@ -103,6 +106,7 @@ fn hex_key(key: &[u8; 32]) -> String {
 pub struct YggTransport {
     core: Arc<Core>,
     claim: KeyClaim,
+    closed: AtomicBool,
 }
 
 impl YggTransport {
@@ -122,7 +126,11 @@ impl YggTransport {
         };
         let core = Core::new(signing_key, core_config);
         core.init_links().await;
-        let transport = Self { core, claim };
+        let transport = Self {
+            core,
+            claim,
+            closed: AtomicBool::new(false),
+        };
         for uri in &config.listen {
             if transport.core.listen(uri).await.is_err() {
                 let _ = transport.close().await;
@@ -150,6 +158,9 @@ impl YggTransport {
 
     /// Send one datagram to the node with the given public key.
     pub async fn send_to(&self, peer: &[u8; 32], payload: &[u8]) -> Result<(), YggError> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(YggError::Closed);
+        }
         let mtu = self.mtu();
         if payload.len() > mtu {
             return Err(YggError::Oversize {
@@ -167,6 +178,9 @@ impl YggTransport {
     /// Receive one datagram into `buf` and return its length and the sender's key.
     /// `buf` must hold `mtu() + 1` bytes. Cancel-safe: a dropped future loses no datagram.
     pub async fn recv(&self, buf: &mut [u8]) -> Result<(usize, [u8; 32]), YggError> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(YggError::Closed);
+        }
         let needed = self.mtu() + 1;
         if buf.len() < needed {
             return Err(YggError::BufferTooSmall {
@@ -182,7 +196,9 @@ impl YggTransport {
 
     /// Stop every task of the core and release its sockets. Idempotent.
     /// The key is released for reuse once the core has stopped.
+    /// After it starts, every `send_to` and `recv` reports `Closed`, whatever the arguments.
     pub async fn close(&self) -> Result<(), YggError> {
+        self.closed.store(true, Ordering::SeqCst);
         let result = self.core.close().await.map_err(map_core_error);
         self.claim.release();
         result
