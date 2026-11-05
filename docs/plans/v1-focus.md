@@ -66,6 +66,23 @@ independently of P09. Two real defects found on the way are fixed (nested worksp
 prepared adapter in the carrier fixture copy; prepared path packages in the observation lock).
 Repairing the remaining legacy segments is not scheduled; a full run is not part of this acceptance.
 
+### P07 acceptance and non-goals (recorded 2026-11-05, before implementation)
+
+Observable acceptance: in GitHub CI on Linux and Windows, `shaar-ygg` wraps the pinned
+Yggdrasil-ng core (`c9a54f1587bb133a06072596484c972a336db0d2`, with only reviewed lifecycle
+corrections) behind a safe Rust API; two instances with fixed test keys exchange authenticated
+datagrams addressed by the 32-byte peer key over an owned loopback topology; start, stop and
+repeated create/close leave no running task, no live strong reference to the core and no bound
+socket (checked by observation, not by `close()` alone); queues are bounded with backpressure;
+cancellation, concurrent sends/receives and malformed or oversize input have tested outcomes;
+startup failures report a typed error naming the offending field without secrets.
+
+Non-goals: public-network contact or exact public peers (still awaiting the user), TUN, root,
+routes, services or the `tun`/`ckr`/`systemd` features, unsafe code, Go or FFI, custom crypto,
+the upstream SIMD `salsa20` fork unless separately reviewed, version bumps beyond the pin,
+path policy and blockade failover (P10/P13), any libp2p application data, and claiming
+interoperability with deployed Yggdrasil nodes from owned fixtures.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address
