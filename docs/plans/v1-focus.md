@@ -200,6 +200,15 @@ rejection of invalid parameters. State is fixed-size and retries are bounded.
 Non-goals: any I/O, wiring into Session or the binaries, the Yggdrasil dependency, performance
 claims, schema or default changes, public network.
 
+P10 leaf 1 is accepted at `6fa54f4`: Linux and Windows CI executed all 19 `path::` cases (16 event
+traces with their hand-derived oracles and 3 parameter checks) inside the 192 `shaar` lib cases of
+run `42046622007`. The first run failed on rustfmt layout only. An independent trace replay found
+two defects before acceptance and both are fixed with regressions: attempt numbers are now unique
+for the lifetime of the policy (a refill no longer lets a stale report cancel a new attempt), and a
+late owner still learns that the budget is spent. Open: the source-bound native-graph transition
+entries for the changed `crates/shaar/src` tree are refreshed only by a run that selects the graph
+proof; this targeted run did not select it.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address
