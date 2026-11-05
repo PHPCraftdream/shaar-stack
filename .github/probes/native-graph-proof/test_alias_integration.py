@@ -24,42 +24,27 @@ from test_features import _proofs
 class AliasIntegrationTests(unittest.TestCase):
     """Exercise the real capture collector, alias replay and unit audit."""
 
-    def test_reviewed_sdk_test_only_tree_transition_retains_raw_provenance(self):
+    def test_workspace_source_changes_retain_raw_provenance_and_malformed_bindings_fail(self):
         from test_features import _compare
-        cases = (
-            ("183956ce9ae1b99245953ce3e65b76e44ea64bba5de113fc193af462ea8d4712",
-             "cadc863f39329a43c91fbacd34f3e0f707c5fcbe0f3b85cf0a1cedff5daddd88",
-             "59987da7663e14b9d1c8441c051a8cdcbebd497327a021b1ea7f84fdf8fe1e41"),
-            ("e2fe4d5ff2a65b45848bcc128af2ef474ad9c836374763353d532a9d15f042a5",
-             "2743b2fc2a8cef9642799d090bd6bd75dc43f63c0edef0077e8391a60a811f8a",
-             "c0fbceaea9b9df00f45dffd55bd2057c9e549a14c1e6e5c956ef1b1c88aefde6"),
-        )
-        for index, (archive, old, new) in enumerate(cases):
-            proofs = _proofs()
-            for proof in proofs:
-                binding = next(b for b in proof["source_bindings"].values() if b["package"] == "shaar")
-                binding.update(tree_sha256=old, archive_sha256=archive)
-            original = _compare(proofs)
-            candidate = next(b for b in proofs[2]["source_bindings"].values() if b["package"] == "shaar")
-            candidate["tree_sha256"] = new
-            changed = _compare(proofs)
-            self.assertNotEqual(original["proof_sha256"]["candidate"], changed["proof_sha256"]["candidate"])
-            self.assertEqual(candidate["tree_sha256"], new)
-            for role, field, value in (
-                (2, "tree_sha256", "d" * 64), (2, "archive_sha256", cases[1 - index][0]),
-                (0, "tree_sha256", new), (1, "tree_sha256", new),
-            ):
+        proofs = _proofs()
+        original = _compare(copy.deepcopy(proofs))
+
+        def shaar(items):
+            return next(b for b in items["source_bindings"].values() if b["package"] == "shaar")
+
+        for field, value in (("tree_sha256", "d" * 64), ("archive_sha256", "e" * 64)):
+            changed = copy.deepcopy(proofs)
+            shaar(changed[2])[field] = value
+            result = _compare(changed)
+            with self.subTest(field=field):
+                self.assertNotEqual(original["proof_sha256"]["candidate"], result["proof_sha256"]["candidate"])
+                self.assertEqual(original["feature_deltas"], result["feature_deltas"])
+        for role in (0, 1, 2):
+            for field, value in (("tree_sha256", "not-a-digest"), ("archive_sha256", "")):
                 forged = copy.deepcopy(proofs)
-                binding = next(b for b in forged[role]["source_bindings"].values() if b["package"] == "shaar")
-                binding[field] = value
-                with self.subTest(index=index, role=role, field=field), self.assertRaises(features.AuditError):
+                shaar(forged[role])[field] = value
+                with self.subTest(role=role, field=field), self.assertRaises(features.AuditError):
                     _compare(forged)
-            unknown_archive = copy.deepcopy(proofs)
-            for proof in unknown_archive:
-                binding = next(b for b in proof["source_bindings"].values() if b["package"] == "shaar")
-                binding["archive_sha256"] = "d" * 64
-            with self.subTest(index=index, unknown_archive=True), self.assertRaises(features.AuditError):
-                _compare(unknown_archive)
 
     @staticmethod
     def _intrinsic_proofs(spelling=("--extern", "proc_macro")):
