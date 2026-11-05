@@ -151,7 +151,8 @@ crate's own unit test and by the later notices work (#72/#73); the `scope: full`
 
 ## Lifecycle patch (leaf 53.2)
 
-Status: authored and statically reviewed; nothing compiled or executed locally.
+Status: accepted at `630b264` (CI run `42026035312`, Linux and Windows green; nothing was run
+locally).
 
 - `.github/probes/ygg/lifecycle_patch.py` plus `patches/{core,links,proto}.py` express the
   reviewed lifecycle corrections as exact byte replacements ("old occurs exactly once"), pinned
@@ -167,8 +168,8 @@ Status: authored and statically reviewed; nothing compiled or executed locally.
   idempotent. proto.rs cleanup loop exits on a child token (`ProtoHandler::with_shutdown`;
   `new` is unchanged). links.rs rate task gains a cancel branch; TCP per-connection spawns are
   tracked in a `JoinSet` reaped opportunistically.
-- Specified in `crates/shaar-ygg-core/tests/lifecycle.rs` (authored; executed results are
-  recorded only after CI): three create/listen/close cycles, concurrent and repeated close,
+- Executed in CI on Linux and Windows (receipts list the five `lifecycle` tests next to the two
+  smoke tests): `crates/shaar-ygg-core/tests/lifecycle.rs` runs three create/listen/close cycles, concurrent and repeated close,
   and a two-core loopback peering closed listener-first and dialer-first. Each close finishes
   under a timeout, the caller holds the only strong reference after close, the runtime's
   alive-task count (`RuntimeMetrics::num_alive_tasks`, stable; the test body runs under

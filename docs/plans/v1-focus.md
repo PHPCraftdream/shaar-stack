@@ -99,6 +99,12 @@ Non-goals: key-addressed exchange (53.3), negative controls and typed startup er
 an `ironwood` patch (the bounded poll covers its tasks; revisit only if the poll fails),
 the adapter API, `start()`/`set_path_notify`, public network, unsafe, version bumps.
 
+Leaf 53.2 is accepted at `630b264`: Linux and Windows CI executed the five `lifecycle` tests
+(three create/listen/close cycles with alive-task, `Weak<Core>` and port-rebind observations,
+concurrent and repeated close, two cores closed in both orders) and the pinned patched hashes
+verified during preparation. Open: leaf 53.2b (an `ironwood` reader can block `close()` on a
+full receive queue, found by independent review) precedes 53.3.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address
