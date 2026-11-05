@@ -1,6 +1,6 @@
 # V1 delivery focus and standing reminders
 
-**Distance to v1:** P01–P06 and D1 are accepted; P08 is bootstrap-only; P09 is accepted at `b076458` (record below); P07 is restored to v1 but unaccepted and permission-gated; P10–P16 are not accepted as complete stages. Next: gated P07 (#224/#33/#34), then P10 #214/#215 and the full native/Yggdrasil matrix. Blockers include P07 source/lifecycle evidence, exact public-peer approval and public-network evidence, legal/notices and separately gated public smoke.
+**Distance to v1:** P01–P06 and D1 are accepted; P08 is bootstrap-only; P09 is accepted at `b076458` (record below); P07's adapter is technically accepted in the isolated `shaar-ygg-core` crate at `efa5c62` (leaves 53.1-53.4, record below); P07 stays permission-gated for legal publication of the modified MPL-2.0 files, notices and any public-peer contact; P10–P16 are not accepted as complete stages. Next: P10 #214/#215 (connects the adapter to the product graph) and the full native/Yggdrasil matrix. Blockers include exact public-peer approval and public-network evidence, legal/notices and separately gated public smoke.
 
 **Decision history — 2026-11-04:** the user superseded the 2026-10-31 decision
 that deferred P07 beyond v1. Restore the original one-Ed25519-key architecture:
@@ -154,6 +154,19 @@ yggdrasil-go v0.5.14 golden address for its published key and the documented edg
 pinned core.
 Non-goals: public network, path policy, a registry across processes, protocol fuzzing, extra
 queues, unsafe, version bumps.
+
+Leaf 53.4 is accepted at `efa5c62`: Linux and Windows CI executed 16 `lib` tests (validation,
+key registry, address vectors, core release) and 13 `exchange` tests (run `42035672563`). The
+first run (`42035009917`) failed because two tests shared one key pair, which the process-wide
+key registry refuses; every test now has its own keys.
+
+With 53.1-53.4 accepted, P07's technical acceptance is met for the isolated crate: the
+adapter wraps the pinned, lifecycle-patched core behind a safe API (no unsafe), two instances
+exchange datagrams by key on loopback, start and repeated close leave no task, core reference
+or socket, queues are the core's own bounded ones, cancellation and concurrent use have tested
+outcomes, and startup errors name only the field. Not claimed: interoperability with deployed
+Yggdrasil nodes, public-network behaviour, the product-graph connection (P10) and the open
+legal and notices items.
 
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by

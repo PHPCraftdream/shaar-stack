@@ -222,3 +222,27 @@ locally).
   registry, allowlist enforcement, key-to-address vectors, behaviour after `close()` beyond the
   idempotent call. Datagrams are unreliable by contract; the load test is paced and does not
   prove loss-free delivery, and a scheduling stall on a loaded runner could drop datagrams.
+
+## Negative controls and key vectors (leaf 53.4)
+
+Status: accepted at `efa5c62` (CI run `42035672563`, Linux and Windows green; nothing was run
+locally). The first run failed on a test-key collision, not on product code.
+
+- `start` validates before creating a core: `InvalidConfig { field }` for `listen`, `peers` and
+  `group_password`. The check is lexical (scheme `tcp` or `tls`, case-insensitive, no
+  whitespace or control characters); the core can still reject a value at start, reported as
+  `Start { stage }`. `Some("")` is rejected as an adapter policy because the core treats an
+  empty password as an open network.
+- A process-wide registry makes a second live transport on one key fail with `KeyInUse`. The key
+  is released by `close()` or a failed start; a repeated `close()` cannot free a key a newer
+  transport holds. A transport dropped without `close()` keeps its key claimed because its core
+  keeps running.
+- After `close()` has started, `send_to` and `recv` return `Closed` before any argument check.
+- Allowlist: with the receiver's `allowed_public_keys` set to the dialer, the dialer's datagram
+  is delivered and a third node that dials the same listener gets nothing through in a 3-second
+  window. This observes non-delivery, not the enforcement mechanism.
+- `address_for_key` reproduces the yggdrasil-go v0.5.14 golden address and the 255-ones edge.
+  For the all-zero key the pinned core clamps the leading-ones count to 255 while the SDK
+  implementation in `shaar` wraps it to 0 like Go; the key is not a usable identity and the
+  divergence is recorded, not endorsed.
+- Guarantees are for the adapter's own messages: the core's tracing output can mention peer URIs.
