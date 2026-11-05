@@ -39,11 +39,15 @@ Every task must name the step it advances. A task that advances none is out of s
 Each network covers another's weakness. The synergy is realized by path policy (P10):
 find, negotiate, choose the fastest available path, fail over under blocking.
 
-## Efficiency criteria (proposed; to be agreed with the user before P10)
+## Efficiency criteria (agreed with the user on 2026-11-05, balanced profile)
 
-- Time from "client knows the key" to the first forwarded byte.
-- Failover time to Yggdrasil under controlled blocking of direct paths.
-- Share of connections that end on the direct path when it is available.
+Measured in a controlled CI fixture, never on the public network; 95th percentile
+unless stated.
+
+- Time from "client knows the key" to the first forwarded byte on a direct path:
+  at most 3 s with a known address, at most 10 s with a cold DHT lookup.
+- Failover time to Yggdrasil under controlled blocking of direct paths: at most 10 s.
+- Share of connections that end on the direct path when it is available: at least 95%.
 - Bounded resource use per connection and per resolver (see the native Mainline
   contract).
 
@@ -96,3 +100,4 @@ An in-house Yggdrasil implementation is not permitted.
 | 2026-11-04 | Authentic upstream license texts may be collected as isolated DATA for notices | "да" |
 | 2026-11-04 | Pinned Yggdrasil-ng integration is approved after P09 | "да" |
 | 2026-11-04 | Public smoke targets are chosen by the engineer; they must be legal and working, within agreed bounds | "нужно выбрать что-то - не важно, главное чтобы легально и чтобы работало" |
+| 2026-11-05 | P10 efficiency criteria: balanced profile (first byte 3 s known / 10 s cold, failover 10 s, direct share 95%) | "Сбалансированный (Recommended)" |
