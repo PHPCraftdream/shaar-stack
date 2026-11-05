@@ -21,6 +21,10 @@ const POLL_STEP: Duration = Duration::from_millis(20);
 const POLL_BUDGET: Duration = Duration::from_secs(5);
 const CLOSE_BUDGET: Duration = Duration::from_secs(10);
 const CONNECT_BUDGET: Duration = Duration::from_secs(10);
+/// Datagrams sent at a receiver that never reads (queue capacity is 512).
+const FLOOD_MESSAGES: usize = 4096;
+const FLOOD_STALL: Duration = Duration::from_millis(100);
+const FLOOD_SETTLE: Duration = Duration::from_millis(300);
 /// Fixed in-repo test seeds; never production keys.
 const CORE_SEED: [u8; 32] = [0x53; 32];
 const PEER_SEED: [u8; 32] = [0x54; 32];
@@ -186,17 +190,14 @@ async fn close_within(core: &Core, who: &str) {
     assert!(outcome.is_ok(), "{who} close() failed: {:?}", outcome.err());
 }
 
-/// Join two cores over loopback, close them in the requested order and require
-/// that both are released, no task survives and the listening port binds again.
-async fn two_cores_release_after_both_close(listener_first: bool) {
+/// Start a listening core and a dialing core and wait until they are connected.
+async fn connected_pair() -> (Arc<Core>, Arc<Core>, u16) {
     let listener = test_core(&CORE_SEED);
     listener.init_links().await;
     let port = listen_on_reserved_port(&listener).await;
 
     let dialer = test_core(&PEER_SEED);
     dialer.init_links().await;
-    let weak_listener: Weak<Core> = Arc::downgrade(&listener);
-    let weak_dialer: Weak<Core> = Arc::downgrade(&dialer);
 
     // Subscribe before dialing so the Connected event cannot be missed.
     let mut events = listener.subscribe_peer_events();
@@ -217,6 +218,42 @@ async fn two_cores_release_after_both_close(listener_first: bool) {
         connected.is_ok(),
         "loopback peering did not connect within {CONNECT_BUDGET:?}"
     );
+    (listener, dialer, port)
+}
+
+/// A receiver that never reads must still close: the reader blocked delivering
+/// into a full receive queue is cancelled by `close()` (leaf 53.2b regression).
+#[tokio::test]
+async fn close_returns_while_the_receive_queue_is_full() {
+    let (listener, dialer, port) = connected_pair().await;
+    let destination = ironwood::Addr(*listener.public_key());
+    let payload = [0xA5u8; 64];
+
+    // Flood the listener, which never calls `read_from`; a write that stalls
+    // means backpressure reached the sender, so stop there. The queue holds 512.
+    for _ in 0..FLOOD_MESSAGES {
+        let write =
+            tokio::time::timeout(FLOOD_STALL, dialer.write_to(&payload, &destination)).await;
+        if write.is_err() {
+            break;
+        }
+    }
+    tokio::time::sleep(FLOOD_SETTLE).await;
+
+    close_within(&listener, "full-queue listener").await;
+    close_within(&dialer, "dialer").await;
+    drop(listener);
+    drop(dialer);
+    assert_no_alive_tasks("full queue").await;
+    assert_port_rebinds(port).await;
+}
+
+/// Join two cores over loopback, close them in the requested order and require
+/// that both are released, no task survives and the listening port binds again.
+async fn two_cores_release_after_both_close(listener_first: bool) {
+    let (listener, dialer, port) = connected_pair().await;
+    let weak_listener: Weak<Core> = Arc::downgrade(&listener);
+    let weak_dialer: Weak<Core> = Arc::downgrade(&dialer);
 
     if listener_first {
         close_within(&listener, "listener").await;

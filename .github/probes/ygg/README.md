@@ -32,15 +32,16 @@ preparation run fails closed.
 
 ## Lifecycle patch (leaf 53.2)
 
-`lifecycle_patch.py` and `patches/{core,links,proto}.py` apply the reviewed
-lifecycle corrections to `crates/yggdrasil/src/{core,links,proto}.rs` as exact
+`lifecycle_patch.py` and `patches/{core,links,proto,ironwood_encrypted}.py` apply
+the reviewed lifecycle corrections to `crates/yggdrasil/src/{core,links,proto}.rs`
+and (leaf 53.2b) `crates/ironwood/src/encrypted/mod.rs` as exact
 byte replacements ("old occurs exactly once") after the content manifest has
 verified the original bytes. Per-file `ORIGINAL_SHA256` pins come from
 `ygg-manifest.json`, which stays unchanged; `PATCHED_SHA256` pins the
 patched bytes (computed from the literal hunks over the pinned data and
 rechecked by `prepare`); a mismatch fails closed, and a placeholder value
-`UNPINNED` prints the computed hash. `ironwood`, `LICENSE` and every
-unpatched file stay byte-exact. The 53.1 non-goals below described that leaf
+`UNPINNED` prints the computed hash. `LICENSE`, the other `ironwood` files and
+every unpatched file stay byte-exact. The 53.1 non-goals below described that leaf
 only.
 
 ## Non-goals (leaf 53.1)

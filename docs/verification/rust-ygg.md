@@ -175,16 +175,18 @@ locally).
   alive-task count (`RuntimeMetrics::num_alive_tasks`, stable; the test body runs under
   `block_on` and is not counted) reaches zero within a bounded poll, `Weak<Core>` stops
   upgrading after drop, and the same loopback port binds again.
-- Known gaps (independent review, recorded before execution): `ironwood` stays unpatched,
-  so its router actor and peer writer tasks are cancelled but not joined by `close()`; the
-  bounded alive-task poll observes that they exit on an idle core, but an in-flight 10-second
-  peer write can outlast the five-second poll. The encrypted reader awaits
-  `recv_tx.send(msg)` outside its cancellation select (`ironwood` `encrypted/mod.rs`), so a
-  full receive queue (the adapter not reading) can block `close()`; this needs a one-hunk
-  `ironwood` correction and a full-queue regression test, tracked as leaf 53.2b before the
-  adapter relies on `close()` under load. The QUIC listener branch is feature-gated off in
+- Known gaps (independent review, recorded before execution): the `ironwood` router actor and
+  peer writer tasks are cancelled but not joined by `close()`; the bounded alive-task poll
+  observes that they exit on an idle core, but an in-flight 10-second peer write can outlast
+  the five-second poll. Leaf 53.2b corrects the one `ironwood` hunk the review proved
+  necessary: the encrypted reader awaited `recv_tx.send(msg)` outside its cancellation select
+  (`encrypted/mod.rs`), so a full receive queue (the adapter not reading) could block
+  `close()`; the hunk selects on the cancellation token and
+  `close_returns_while_the_receive_queue_is_full` is its regression test (the test cannot show
+  that the queue really filled; a stalled sender write is the only observable sign of it).
+  The QUIC listener branch is feature-gated off in
   this crate and is not patched; `remove_peer` still aborts without joining (outside the
   adapter path). A cancelled `close()` after its handles were drained leaves the core
   half-closed; callers must not cancel it.
-- MPL-2.0 note: the modified `core.rs`, `links.rs` and `proto.rs` are file-level
+- MPL-2.0 note: the modified `core.rs`, `links.rs`, `proto.rs` and ironwood `encrypted/mod.rs` are file-level
   MPL-protected; their publication mechanism remains an open legal item.

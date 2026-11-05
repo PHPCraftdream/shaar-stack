@@ -7,7 +7,7 @@ never executed, and extraction is limited to the reviewed LICENSE and the two
 workspace crates. The per-file content manifest (ygg-manifest.json) is the
 authoritative pin; the archive digest is recorded evidence only. Leaf 53.2
 applies the reviewed lifecycle hunks (lifecycle_patch.py) after manifest
-verification; ironwood, LICENSE and every unpatched file stay byte-exact.
+verification; LICENSE and every unpatched file stay byte-exact.
 """
 from __future__ import annotations
 

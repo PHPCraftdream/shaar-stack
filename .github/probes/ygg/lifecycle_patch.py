@@ -22,6 +22,7 @@ PATCH_MODULES = (
     ("crates/yggdrasil/src/core.rs", "core"),
     ("crates/yggdrasil/src/links.rs", "links"),
     ("crates/yggdrasil/src/proto.rs", "proto"),
+    ("crates/ironwood/src/encrypted/mod.rs", "ironwood_encrypted"),
 )
 
 

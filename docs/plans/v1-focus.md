@@ -102,8 +102,16 @@ the adapter API, `start()`/`set_path_notify`, public network, unsafe, version bu
 Leaf 53.2 is accepted at `630b264`: Linux and Windows CI executed the five `lifecycle` tests
 (three create/listen/close cycles with alive-task, `Weak<Core>` and port-rebind observations,
 concurrent and repeated close, two cores closed in both orders) and the pinned patched hashes
-verified during preparation. Open: leaf 53.2b (an `ironwood` reader can block `close()` on a
-full receive queue, found by independent review) precedes 53.3.
+verified during preparation.
+
+#### Leaf 53.2b acceptance and non-goals (recorded 2026-11-05, before implementation)
+
+Independent review of 53.2 found that the `ironwood` encrypted reader can block `close()` while
+it delivers into a full receive queue. Observable acceptance: one hunk-pinned correction of
+`crates/ironwood/src/encrypted/mod.rs` (the delivery selects on the cancellation token), and a
+CI test on Linux and Windows in which a listener that never reads is flooded by its peer and
+still closes within a timeout with the alive-task count back at zero and its port free.
+Non-goals: joining the other `ironwood` tasks, any other `ironwood` change, adapter API.
 
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
