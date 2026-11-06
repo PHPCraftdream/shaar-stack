@@ -95,7 +95,7 @@ impl Shared {
             sender.status().map_err(datagram_error)?;
         }
         let instance = INSTANCE
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |id| id.checked_add(1))
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |id| id.checked_add(1))
             .map_err(|_| error(io::ErrorKind::Other))?;
         let bindings = bindings
             .into_iter()
