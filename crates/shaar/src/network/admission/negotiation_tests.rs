@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use iroh_base::{PublicKey, TransportAddr};
+use iroh_base::PublicKey;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::oneshot;
@@ -19,37 +19,7 @@ use crate::network::signaling::SignaledEndpoint;
 use crate::network::{ForwardStats, Limits, NetworkError, Session};
 use crate::path::{DialError, Dialer, Negotiating, Negotiation, PathKind, PathOwner, PolicyConfig};
 
-std::thread_local! {
-    static FILTER_TRACE: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
-}
-
-pub(super) fn trace_application_filter(path: &impl std::fmt::Debug, allowed: bool) {
-    FILTER_TRACE.with(|trace| {
-        if let Some(count) = trace.get() {
-            if count < 32 {
-                eprintln!("APP filter tuple={path:?} allowed={allowed}");
-            }
-            trace.set(Some(count.saturating_add(1)));
-        }
-    });
-}
-
-struct FilterTrace;
-
-impl FilterTrace {
-    fn start() -> Self {
-        FILTER_TRACE.with(|trace| trace.set(Some(0)));
-        Self
-    }
-}
-
-impl Drop for FilterTrace {
-    fn drop(&mut self) {
-        FILTER_TRACE.with(|trace| {
-            eprintln!("APP filter observed callbacks={:?}", trace.replace(None));
-        });
-    }
-}
+use super::negotiation_frames::{Frames, observe, require_native_delivery};
 
 fn loopback() -> SocketAddr {
     "127.0.0.1:0".parse().expect("loopback")
@@ -287,45 +257,40 @@ async fn failed_signaling_hint_cannot_prevent_native_recovery() {
     recovery(false).await;
 }
 
-async fn no_application_bytes(sender: &Session, receiver: &Session) {
-    assert!(
-        sender
-            .connection
-            .paths()
-            .iter()
-            .any(|path| matches!(path.remote_addr(), TransportAddr::Custom(_))),
-        "the control session must have a signaling path"
-    );
-    assert!(
-        sender
-            .connection
-            .paths()
-            .iter()
-            .all(|path| matches!(path.remote_addr(), TransportAddr::Custom(_))),
-        "the rejection oracle must have no native path"
-    );
+async fn application_frames_stay_native(
+    sender: &Session,
+    receiver: &Session,
+    a: &mut Frames,
+    b: &mut Frames,
+) {
     enum Observation {
         NoStream,
         NoBytes(&'static str),
         Delivered(u8),
         Failed(String),
     }
-    let response = timeout(Duration::from_secs(2), async {
-        let (mut stream, response) = sender
-            .connection
-            .open_bi()
-            .await
-            .expect("bidi credit exists");
-        stream
-            .write_all(b"not allowed on signaling")
-            .await
-            .expect("local bidi write accepted");
-        stream.finish().expect("local bidi finish accepted");
-        response
-    })
+    let response = observe(
+        a,
+        b,
+        sender,
+        receiver,
+        timeout(Duration::from_secs(2), async {
+            let (mut stream, response) = sender
+                .connection
+                .open_bi()
+                .await
+                .expect("bidi credit exists");
+            stream
+                .write_all(b"not allowed on signaling")
+                .await
+                .expect("local bidi write accepted");
+            stream.finish().expect("local bidi finish accepted");
+            response
+        }),
+    )
     .await
-    .expect("the no-payload oracle must attempt an allowed bidi write");
-    let observation =
+    .expect("the path oracle must attempt an allowed bidi write");
+    let observation = observe(a, b, sender, receiver, async {
         match timeout(Duration::from_millis(300), receiver.connection.accept_bi()).await {
             Err(_) => Observation::NoStream,
             Ok(Err(error)) => Observation::Failed(format!("accept: {error:?}")),
@@ -342,33 +307,51 @@ async fn no_application_bytes(sender: &Session, receiver: &Session) {
                 drop(reply);
                 observed
             }
-        };
+        }
+    })
+    .await;
     assert!(
-        timeout(Duration::from_millis(30), sender.closed())
-            .await
-            .is_err(),
+        observe(
+            a,
+            b,
+            sender,
+            receiver,
+            timeout(Duration::from_millis(30), sender.closed())
+        )
+        .await
+        .is_err(),
         "sender control remains open"
     );
     assert!(
-        timeout(Duration::from_millis(30), receiver.closed())
-            .await
-            .is_err(),
+        observe(
+            a,
+            b,
+            sender,
+            receiver,
+            timeout(Duration::from_millis(30), receiver.closed())
+        )
+        .await
+        .is_err(),
         "receiver control remains open"
     );
-    drop(response);
     match observation {
         Observation::NoStream => eprintln!("signaling APP observation: no stream"),
         Observation::NoBytes(reason) => {
             eprintln!("signaling APP observation: stream without bytes ({reason})")
         }
-        Observation::Delivered(byte) => panic!("signaling delivered an application byte: {byte}"),
-        Observation::Failed(error) => panic!("no-payload observation failed: {error}"),
+        Observation::Delivered(byte) => {
+            require_native_delivery(a, b, sender, receiver).await;
+            eprintln!("delivered byte {byte} attributed to native STREAM counters");
+        }
+        Observation::Failed(error) => panic!("application-path observation failed: {error}"),
     }
+    drop(response);
+    a.checkpoint(sender);
+    b.checkpoint(receiver);
 }
 
 #[tokio::test]
-async fn live_signaling_control_delivers_zero_application_bytes_both_ways() {
-    let _trace = FilterTrace::start();
+async fn signaling_paths_carry_zero_application_frames_during_native_promotion() {
     timeout(Duration::from_secs(30), async {
         let (client, mut server) = endpoints().await;
         let native = [client.local_addr(), server.local_addr()];
@@ -381,23 +364,46 @@ async fn live_signaling_control_delivers_zero_application_bytes_both_ways() {
         let accepted = accepted.expect("authenticated inbound control");
         assert_eq!(control.peer_id(), server.id());
         assert_eq!(accepted.peer_id(), client.id());
-        no_application_bytes(&control, &accepted).await;
-        no_application_bytes(&accepted, &control).await;
-        let (direct, direct_accepted) =
-            tokio::join!(client.connect(server.id(), native[1]), server.accept(),);
-        let direct = direct.expect("native positive control connects");
-        let mut direct_accepted = direct_accepted.expect("native positive control accepted");
-        exchange(
-            &direct,
-            &mut direct_accepted,
-            b"same endpoints: native bidi works",
+        let mut client_frames = Frames::new(&control);
+        let mut server_frames = Frames::new(&accepted);
+        application_frames_stay_native(&control, &accepted, &mut client_frames, &mut server_frames)
+            .await;
+        application_frames_stay_native(&accepted, &control, &mut server_frames, &mut client_frames)
+            .await;
+        let (direct, direct_accepted) = observe(
+            &mut client_frames,
+            &mut server_frames,
+            &control,
+            &accepted,
+            async { tokio::join!(client.connect(server.id(), native[1]), server.accept()) },
         )
         .await;
+        let direct = direct.expect("native positive control connects");
+        let mut direct_accepted = direct_accepted.expect("native positive control accepted");
+        observe(
+            &mut client_frames,
+            &mut server_frames,
+            &control,
+            &accepted,
+            exchange(
+                &direct,
+                &mut direct_accepted,
+                b"same endpoints: native bidi works",
+            ),
+        )
+        .await;
+        client_frames.checkpoint(&control);
+        server_frames.checkpoint(&accepted);
         direct.close();
         direct_accepted.close();
         control.close();
         accepted.close();
-        let (a, b) = tokio::join!(client.close(), server.close());
+        let (a, b, (), ()) = tokio::join!(
+            client.close(),
+            server.close(),
+            client_frames.finish(),
+            server_frames.finish(),
+        );
         a.expect("client joined");
         b.expect("server joined");
         ports_released(native, signaling).await;

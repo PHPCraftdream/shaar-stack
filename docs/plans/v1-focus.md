@@ -327,9 +327,11 @@ recovery scenario. Only new streams recover; transferred branches and worktree w
 Leaf 3c advances scenario step 4 (signaling-only recovery). Observable acceptance: Linux and
 Windows CI show a caller-polled private owner recovering native payload after actual peer loss,
 with a real authenticated signaling negotiation in the down window and exact bytes forwarded on
-a new native stream; a live signaling-only control session delivers no application bytes in
-either direction. Healthy native paths never negotiate. Failed or hanging negotiations still
-allow the native phase of every uncancelled policy attempt, respecting the original absolute deadline,
+a new native stream. Custom/relay paths carry zero application STREAM and DATAGRAM frames in
+both directions, including when the same authenticated connection gains a native path. A delivered
+byte requires native STREAM transmit and receive counters, not merely the presence of an IP path.
+Healthy native paths never negotiate. Failed or hanging negotiations still allow the native phase
+of every uncancelled policy attempt, respecting the original absolute deadline,
 backoff and total attempt budget. Scripted paused-time tests pin phase ordering, deadlines,
 cancellation/resumption, exhaustion and joined close; socket fixtures pin exact peer keys and
 joined resource release. The same test-only negotiation composition is used by both fixtures.
@@ -341,25 +343,26 @@ original deadline. Failed/hanging signaling can therefore consume roughly 1.5 s 
 that every native dial fits. No new policy parameter is added. The control Session closes before
 the native dial; it never becomes payload. The signaling address remains a constructor hint.
 Only recovery after an observed session loss negotiates here; initial-establishment failures do
-not. The no-payload oracle uses permitted bidi streams, confirms local write admission, retains
-the response half during observation, and reads an actual byte if stream metadata appears on
-live custom-only paths. It rejects any delivered byte or unexpected accept/read error in either
-direction, and includes a native positive control on the same endpoints. Uni streams are disabled
-and cannot prove this boundary; stream-control metadata alone is not application data. The first
-CI (`42125979299`) exposed that incorrect metadata-forbidding oracle on both operating systems;
-it did not read or establish a payload leak. The precise accept outcome was discarded, so a
-STOP_SENDING explanation remains a supported mechanism rather than a captured result.
+not. The frame oracle uses permitted bidi streams, confirms local write admission, retains the
+response half during observation, and checks exact per-path counters on both sessions. It
+subscribes to lifecycle events before the initial snapshot, checks open-path samples and final
+`Closed` statistics, and fails on lost events. Checks continue through the native positive control
+and joined shutdown. Uni streams are disabled and cannot prove this boundary; stream-control
+metadata alone is not application data. Unexpected accept/read errors still fail.
 
-Correctness blocker recorded 2026-11-06: CI `42128744822` read payload byte `110` on both
-operating systems after custom-only path and live-control checks. Acceptance is blocked; the
-byte-level regression must remain unchanged. Checksum-verified upstream source DATA refutes
-both prefix misclassification and a missing runtime wrapper; iroh also replaces the bridge's
-default receive address with the mapped custom address. No speculative endpoint split or
-predicate weakening is authorized by this leaf. A bounded test-only trace (32 tuple/result
-observations in this test thread, plus callback count) is the next diagnostic, not a repair.
-The production predicate result is unchanged. A third failure invokes the consolidated-review
-stop rule before any further candidate; the precise production correction must be separately
-bounded and reviewed against this concrete failing case before implementation.
+Consolidated repair after three CI failures (2026-11-06): `42125979299` rejected stream metadata
+without reading bytes; `42128744822` read byte `110` on a connection initially custom-only;
+`42135358768` reproduced that byte while the first 32 predicate samples denied mapped tuples
+(570/578 callbacks in total). These observations did not attribute the byte to its egress path.
+Pinned source DATA and independent review established that default QNT/multipath can promote
+the connection to native after the initial snapshot. Prefix, config-wrapper and default-receive-
+address hypotheses were refuted by the pinned source; no product predicate change is justified.
+The three-failure stop was applied before this single reviewed test-oracle repair. It requires
+zero custom/relay APP counters, accounts for closed paths without event loss, and permits a byte
+only with native tx/rx STREAM evidence. Temporary tuple diagnostics are removed. Actual native
+promotion and zero signaling APP counters remain next-CI obligations, not claims from source
+reading. The production filter, networking policy, dependency transforms and CI selectors remain
+unchanged; no sampled-IP-existence shortcut or endpoint split is used.
 
 Non-goals: production startup wiring, discovery and signaling in one endpoint, policy/owner
 semantics changes, relay routing, Yggdrasil/standby, address churn, record/clock changes, public
