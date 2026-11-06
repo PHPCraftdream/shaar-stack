@@ -7,12 +7,14 @@
 //! so every deadline and interleaving is checked by event traces. In `signal` mode
 //! payload stays on the native path; in `standby` mode Yggdrasil may carry it while
 //! the native path is unavailable. libp2p never carries application data and is not
-//! a payload path here. The owner drives the policy with real time and a native dialer;
-//! signaling and Yggdrasil are wired by later leaves.
+//! a payload path here. The owner drives the policy with real time, a native dialer
+//! and, in standby, a fallback (Yggdrasil) dialer behind the same `Dialer` seam.
+//! Startup and discovery composition and the efficiency acceptance are later leaves.
 
 mod model;
 mod owner;
 mod policy;
+mod standby;
 
 #[cfg(test)]
 mod negotiation;
@@ -22,7 +24,10 @@ mod tests;
 pub(crate) use negotiation::{Negotiating, Negotiation};
 
 #[cfg(test)]
-pub(crate) use owner::{DialError, Dialer, PathOwner};
+pub(crate) use owner::PathOwner;
+pub(crate) use owner::{DialError, Dialer};
+#[cfg(test)]
+pub(crate) use standby::{Route, StandbyError, StandbyOwner};
 
 #[cfg(test)]
 pub(crate) use model::{ConfigError, Decision, Event, Millis, Mode, PathKind, PolicyConfig};

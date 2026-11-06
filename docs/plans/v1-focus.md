@@ -475,6 +475,66 @@ new packages or versions, new probe/CI families or selection entries, record or
 clock changes, configuration/schema knobs, public peers, TUN/root and release.
 Full leaf 4 remains open until 4c.
 
+### P10 leaf 4c: standby forwarding (acceptance recorded 2026-11-06)
+
+Advances scenario steps 5 and 6. Leaf 4b is accepted at `53ce7b7`: CI
+`42204370310` selected, executed and passed the same 69 cases on each operating
+system (25 SDK admission, 2 graph witnesses, 42 Ygg). Both native-graph checks
+passed. This is targeted leaf acceptance, not full P10 or efficiency acceptance.
+
+Observable acceptance: controlled Linux and Windows CI first forwards exact TCP
+bytes in both directions through the native SDK Session, then makes the real
+native endpoint unavailable while retaining the independent Ygg core/carrier.
+The runtime owner observes actual native loss and, after the existing loss grace,
+selects an authenticated Ygg Session in `standby`; a new local TCP connection then
+reaches the same fixed loopback target through existing Session forward/serve.
+Per-path STREAM evidence positively attributes that transfer to the owned Ygg
+carrier, with no application frames on libp2p and no native promotion masking the
+fallback. Restoring the native endpoint permits bounded recovery attempts while
+Ygg remains usable; new TCP forwards return to native only after the existing
+stable hold. Both transports use the same Ed25519 identity. A forbidden client
+never receives a serving Session and causes zero new target TCP connections.
+The corresponding `signal` case may negotiate/probe through Ygg but never grants
+Ygg payload or forwards application bytes through it. Every owned forward/server
+worker, endpoint, pump and bridge is stopped and joined in dependency order, with
+key claims, admission charges and listener ports demonstrably released.
+
+The existing pure PathPolicy owns selection, generations, grace, hold and retry
+budgets; do not create a second switching algorithm. The current runtime owner
+only owns one native link and hardcodes Signal, so a pure-policy trace or a manually
+chosen Ygg Session alone cannot satisfy this leaf. Wire actual readiness/loss and
+policy decisions to held SDK Sessions. Pending native retries must not hide an
+already usable Ygg payload or be recreated on every timer observation. Announcing
+a route change must not itself cancel an otherwise valid pending native attempt.
+A healthy Ygg TCP forward must not monopolize the owner: recovery and selection
+for a new native forward must progress while that Ygg forward remains open.
+This clarifies the required usable-fallback-during-recovery boundary, not stream
+migration. Preserve accepted native-only and signaling behavior. In-flight TCP streams are not
+transparently migrated or replayed; this criterion checks selection for new TCP
+connections and promises no seamless survival of an already failed stream.
+
+Minimum verification: real native/Ygg/native TCP transfer with explicit target
+accepts and exact bytes; signal-mode denial; denied-client zero-target evidence
+with a positive target control; native recovery inside grace, stable-hold boundary,
+Ygg loss/recovery, both paths unavailable and exhausted native budget; stale and
+simultaneous loss/readiness observations; cancellation during dial, forwarding and
+close; capacity/backpressure and idempotent joined shutdown. Timer/interleaving
+contracts may use paused-time fixtures; real transport cases must use actual
+owned loopback endpoints and event-driven observations, not merely a boolean
+fake dial failure. Controlled native endpoint shutdown proves unavailability;
+it must not be described as a public-network or packet-filter blockade test.
+Keep loss, exhausted native retries and total payload unavailability distinct.
+
+Bounds/non-goals: retain existing policy defaults, Session/stream/admission and
+carrier limits; no unbounded retry task, waiter, queue or retired-session growth.
+No public SDK API, new ALPN, configuration/schema knobs, new package/version,
+new protocol/probe/CI family, DHT/record/clock redesign, public peers, TUN/root or
+release. The existing CI impact map may gain only the narrow ownership needed by
+new component tests; do not replace targeted selection with a full workspace run.
+A responsibility-based module split is allowed where the seven-item or 700-line
+limits require it. Binary startup/discovery composition remains leaf 5; p95 and
+full P10 acceptance remain leaf 6. Do not claim those from this functional case.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

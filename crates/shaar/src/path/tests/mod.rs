@@ -7,6 +7,7 @@
 mod negotiation;
 mod owner;
 mod recovery;
+mod standby;
 mod traces;
 
 use super::{ConfigError, Decision, Event, Millis, Mode, PathKind, PathPolicy, PolicyConfig};
