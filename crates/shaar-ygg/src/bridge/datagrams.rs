@@ -69,6 +69,15 @@ impl DatagramSender {
         codec::max_len(self.shared.transport.mtu())
     }
 
+    pub(crate) fn status(&self) -> Result<(), DatagramError> {
+        check(&self.shared, &self.live)
+    }
+
+    pub(crate) fn revoke(&self) {
+        self.live.store(false, Ordering::Release);
+        self.shared.datagram_changed.notify_one();
+    }
+
     /// Send one unreliable carrier datagram. Registration revocation refuses new admissions;
     /// already admitted or transmitted datagrams cannot be recalled.
     /// cancel-safe: NO — the core may complete an admitted send after cancellation.
@@ -130,6 +139,25 @@ impl PeerDatagrams {
         let bytes = self.receiver.recv().await.ok_or(DatagramError::Closed)?;
         check(&self.sender.shared, &self.sender.live)?;
         Ok(bytes)
+    }
+
+    pub(crate) fn poll_recv(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<Vec<u8>, DatagramError>> {
+        if let Err(error) = check(&self.sender.shared, &self.sender.live) {
+            return std::task::Poll::Ready(Err(error));
+        }
+        match self.receiver.poll_recv(cx) {
+            std::task::Poll::Pending => std::task::Poll::Pending,
+            std::task::Poll::Ready(Some(bytes)) => {
+                match check(&self.sender.shared, &self.sender.live) {
+                    Ok(()) => std::task::Poll::Ready(Ok(bytes)),
+                    Err(error) => std::task::Poll::Ready(Err(error)),
+                }
+            }
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(Err(DatagramError::Closed)),
+        }
     }
 
     /// Revoke this local registration. Previously returned or transmitted data is not recalled.

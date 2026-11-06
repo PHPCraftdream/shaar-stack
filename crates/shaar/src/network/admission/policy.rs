@@ -27,6 +27,10 @@ impl Allowlist {
     pub(crate) fn contains(&self, key: &PublicKey) -> bool {
         self.keys.binary_search(key).is_ok()
     }
+
+    pub(super) fn keys(&self) -> impl Iterator<Item = PublicKey> + '_ {
+        self.keys.iter().copied()
+    }
 }
 
 /// Cap shared by pending outbound handshakes, accepted handshakes and live handles.

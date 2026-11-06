@@ -18,10 +18,16 @@ use crate::frame::{Frame, Kind, NonceSource};
 use crate::pending::{Pending, Waiter};
 use crate::{YggError, YggTransport};
 
+mod carrier;
+mod carrier_pump;
+mod carrier_state;
 mod codec;
 #[cfg(test)]
 mod datagram_tests;
 mod datagrams;
+
+pub use carrier::YggCarrier;
+pub use carrier_pump::YggPump;
 
 pub use datagrams::{
     DATAGRAM_QUEUE_CAPACITY, DatagramError, DatagramSender, MAX_DATAGRAM_PEERS, PeerDatagrams,

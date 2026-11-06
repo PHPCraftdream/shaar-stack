@@ -417,6 +417,64 @@ Non-goals of 4a: reliability or TCP forwarding, QUIC/iroh integration, APP autho
 standby policy, the `shaar` crate, new dependencies, configuration/schema or version changes,
 public peers, TUN/root, release and efficiency acceptance. Full leaf 4 remains open until 4c.
 
+### P10 leaf 4b: reliable Ygg carrier (acceptance recorded 2026-11-06)
+
+Advances scenario step 5. Leaf 4a is accepted at `89ae91b`: CI `42155387218`
+selected and executed 32 cases on each operating system (16 existing, 16 new).
+Its datagram capability is not reliable-stream or fallback acceptance.
+
+Observable acceptance: controlled Linux and Windows CI uses two real loopback
+Ygg cores, with the same Ed25519 seed for each core and its TLS endpoint, to
+transfer and echo an exact multi-packet payload through the existing SDK Session
+and ALPN. Each endpoint has only its locally owned Ygg custom factory attached,
+no native IP transports and no bound UDP sockets. Current registration source
+attestation must match the authenticated TLS peer, and the SDK allowlist must
+permit that peer before a Session is granted. Per-path STREAM transmit/receive
+statistics must positively attribute the payload to Ygg; every other path carries
+zero application frames. The oracle includes closed-path final statistics and
+fails on lost lifecycle events. Shutdown drains QUIC while the carrier is live,
+then revokes registrations, stops and joins its writer, and finally closes the
+caller-owned bridge, releasing its key claim and loopback ports.
+
+Ownership boundary: `shaar-ygg` supplies the factory and a caller-driven pump;
+the private SDK endpoint reuses Session admission, permits and stream handling.
+Factory attachment borrows the existing bridge: runtime local-key mismatch fails
+before registration and never consumes an unclosed core. Internal polling/status
+helpers must preserve the existing capability's closed/revoked checks. Neither a
+custom-address TYPE nor a mapped IP prefix grants authority. A mapped-custom-only
+APP predicate is merely a fail-closed egress guard on this exclusively owned
+endpoint; existing native/libp2p admission remains unchanged.
+
+Bounds and trade-offs: retain the 16-registration capability limit, with a clear
+error rather than silently truncating a larger configured peer set. The general
+SDK allowlist remains bounded at 256; this leaf does not reduce its contract.
+TX admission has 32 packet slots and 64 distinct waiter slots, with wakeups on
+drain and close, no lock across await and no hidden detached writer. Each queued
+packet owns a copy because the QUIC callback lends its buffer only for that call;
+the existing datagram API then frames it separately. A fixed binding vector keeps
+storage small: address-index attestation is O(1), key lookup scans at most 16
+bindings, and receive polling visits at most 16 receivers per call. RX never
+exposes the raw private capability receiver. Default GSO is one segment; invalid source,
+oversize and unsupported segmentation fail explicitly, and empty RX metadata
+must not have a zero stride. Additional normal dependency edges are limited to
+already locked `iroh` 1.3.0, `iroh-base` 1.3.0, `n0-watcher` 1.0.0 and `noq-udp`
+1.3.0. Update only the corresponding lockfile root edges and exact existing
+native-graph metadata/unit edge declarations; no blanket graph allowance.
+
+Minimum verification covers the real reliable-stream scenario, runtime own-key
+and source/TLS mismatches, allowlist denial, foreign/unknown/revoked addresses,
+capacity and constructor cancellation, TX backpressure and distinct waiters,
+RX boundaries and revocation, writer failure, and cancellation-resumable joined
+close. Written tests are not executed evidence. Compare actual CI selection and
+execution receipts; unchanged 3c tests run only when selected or during full P10
+acceptance, never by assumption.
+
+Non-goals: 4c standby policy/fixed-TCP failover, binary startup (leaf 5), efficiency
+acceptance (leaf 6), new public SDK API or ALPN, dynamic peer-management features,
+new packages or versions, new probe/CI families or selection entries, record or
+clock changes, configuration/schema knobs, public peers, TUN/root and release.
+Full leaf 4 remains open until 4c.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

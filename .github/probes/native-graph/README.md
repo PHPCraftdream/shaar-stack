@@ -130,17 +130,16 @@ This replaces the earlier per-tree transition tuples, which needed fresh CI evid
 operating systems after every edit of a workspace crate. Prepared and registry packages keep
 their exact archive, tree, recipe and checksum identities.
 
-`fixture/baseline/ygg_closure.py` declares the exact closure that the pinned Yggdrasil adapter
-adds to the approved route, read from the Linux and Windows evidence of CI run `42068466717`:
-the locked identities with their checksums (30 registry crates, the prepared `ironwood` and
-`yggdrasil` from one pinned archive and recipe, and the workspace `shaar-ygg-core`), the
-per-package feature growth, the shared-to-shared metadata and unit edges, the packages that
-first get compiler units, and the new units of existing packages. The closure is all or
-nothing. When it is present the control comparison requires that the candidate embeds every
-control package, unit and dependency, that feature growth stays inside the declared sets, and
-that every other addition belongs to the closure; metadata edges are checked the same way.
-Aux-probe `owner` digests cascade through feature changes and are ignored, because the owner
-units are compared directly. Without the closure the strict equality is unchanged.
+`fixture/baseline/ygg_closure.py` records the exact identities from Linux and Windows graph
+CI run `42068466717`: locked checksums (30 registry crates, prepared `ironwood` and `yggdrasil`
+from one pinned archive/recipe, and workspace `shaar-ygg-core`), feature growth, shared metadata
+and unit edges, first compiler units, and new units of existing packages. It also records four
+reviewed direct declarations from `shaar-ygg` to `iroh`, `iroh-base`, `n0-watcher`, and `noq-udp`
+at their pinned versions; these additions await CI evidence and are not attributed to that
+historical run. The closure remains all or nothing: comparisons require all control packages,
+units, and dependencies, constrain feature growth, and admit only declared additions.
+Aux-probe `owner` digests cascade through feature changes and are ignored because owner units
+are compared directly. Without the closure strict equality is unchanged.
 
 ## Reviewed multibase removal (authored, pending CI)
 

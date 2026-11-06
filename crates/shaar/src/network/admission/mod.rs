@@ -12,6 +12,11 @@ use super::{ALPN, NetworkError, STREAM_LIMIT, Session, session::ACCESS_DENIED};
 
 mod policy;
 pub use policy::{Allowlist, Limits};
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P10 4c path-owner wiring is pending")
+)]
+mod ygg;
 
 #[cfg(test)]
 #[path = "tests.rs"]

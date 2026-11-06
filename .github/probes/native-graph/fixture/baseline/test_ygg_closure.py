@@ -127,6 +127,19 @@ class CheckEdgesTests(unittest.TestCase):
         with self.assertRaisesRegex(AuditError, "unapproved dependency edge: hex"):
             self.check(added=[(("hex", "0.4.3"), ("tokio", "1.54.1"))])
 
+    def test_only_declared_shaar_ygg_direct_edges_are_admitted(self):
+        declared = [(("shaar-ygg", "0.1.0"), (name, version)) for name, version in (
+            ("iroh", "1.3.0"),
+            ("iroh-base", "1.3.0"),
+            ("n0-watcher", "1.0.0"),
+            ("noq-udp", "1.3.0"),
+        )]
+        for edge in declared:
+            with self.subTest(edge=edge):
+                self.check(added=[edge])
+        with self.assertRaisesRegex(AuditError, "unapproved dependency edge: shaar-ygg"):
+            self.check(added=[(("shaar-ygg", "0.1.0"), ("evil", "1.0.0"))])
+
     def test_removal_outside_the_emoji_chain_is_rejected(self):
         with self.assertRaisesRegex(AuditError, "edge removal"):
             self.check(removed=[(("shaar", "0.1.0"), ("hex", "0.4.3"))])

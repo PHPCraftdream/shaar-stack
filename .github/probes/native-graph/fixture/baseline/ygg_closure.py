@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 """Exact Yggdrasil closure that P10 leaf 2a adds to the approved route.
 
-Every literal was read from the evidence of the Linux and Windows graph jobs
-(CI run 42068466717) and is re-checked against live proofs. The closure is all
-or nothing: without it the guard keeps its strict equality with the control.
+Historical identities and edges were read from the Linux and Windows graph
+jobs (CI run 42068466717). The four direct shaar-ygg declarations are reviewed
+additions awaiting CI evidence. The closure is all or nothing.
 """
 import json
 
@@ -78,6 +78,10 @@ METADATA_EDGES = frozenset({
     (('curve25519-dalek', '4.1.3'), ('digest', '0.10.7')),
     (('curve25519-dalek', '4.1.3'), ('zeroize', '1.9.1')),
     (('generic-array', '0.14.7'), ('zeroize', '1.9.1')),
+    (('shaar-ygg', '0.1.0'), ('iroh', '1.3.0')),
+    (('shaar-ygg', '0.1.0'), ('iroh-base', '1.3.0')),
+    (('shaar-ygg', '0.1.0'), ('n0-watcher', '1.0.0')),
+    (('shaar-ygg', '0.1.0'), ('noq-udp', '1.3.0')),
     (('shaar-ygg', '0.1.0'), ('tokio', '1.54.1')),
     (('time', '0.3.55'), ('libc', '0.2.191')),
     (('tokio', '1.54.1'), ('parking_lot', '0.12.5')),
@@ -89,6 +93,10 @@ METADATA_EDGES = frozenset({
 UNIT_EDGES = frozenset({
     (('cipher', '0.4.4'), ('zeroize', '1.9.1')),
     (('generic-array', '0.14.7'), ('zeroize', '1.9.1')),
+    (('shaar-ygg', '0.1.0'), ('iroh', '1.3.0')),
+    (('shaar-ygg', '0.1.0'), ('iroh-base', '1.3.0')),
+    (('shaar-ygg', '0.1.0'), ('n0-watcher', '1.0.0')),
+    (('shaar-ygg', '0.1.0'), ('noq-udp', '1.3.0')),
     (('shaar-ygg', '0.1.0'), ('tokio', '1.54.1')),
     (('time', '0.3.55'), ('libc', '0.2.191')),
     (('tokio', '1.54.1'), ('parking_lot', '0.12.5')),

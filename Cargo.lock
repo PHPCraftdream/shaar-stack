@@ -4308,6 +4308,10 @@ dependencies = [
 name = "shaar-ygg"
 version = "0.1.0"
 dependencies = [
+ "iroh",
+ "iroh-base",
+ "n0-watcher",
+ "noq-udp",
  "shaar-ygg-core",
  "tokio",
 ]

@@ -16,7 +16,7 @@ mod pending;
 
 pub use bridge::{
     DATAGRAM_QUEUE_CAPACITY, DatagramError, DatagramSender, MAX_DATAGRAM_PEERS, PeerDatagrams,
-    ProbeError, YggBridge,
+    ProbeError, YggBridge, YggCarrier, YggPump,
 };
 pub use pending::MAX_PENDING_PROBES;
 pub use shaar_ygg_core::{YggConfig, YggError, YggTransport, address_for_key};
