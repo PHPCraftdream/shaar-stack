@@ -365,12 +365,12 @@ mod tests {
                     send.write_all(&payload).await.unwrap();
                     send.finish().unwrap();
                     let echoed = receive.read_to_end(128 * 1024).await.unwrap();
-                    assert_eq!(echoed.as_ref(), payload.as_slice());
+                    assert_eq!(echoed.as_slice(), payload.as_slice());
                 };
                 let server_exchange = async {
                     let (mut echo_send, mut echo_receive) = accepted.connection.accept_bi().await.unwrap();
                     let incoming = echo_receive.read_to_end(128 * 1024).await.unwrap();
-                    assert_eq!(incoming.as_ref(), payload.as_slice());
+                    assert_eq!(incoming.as_slice(), payload.as_slice());
                     echo_send.write_all(&incoming).await.unwrap();
                     echo_send.finish().unwrap();
                 };
