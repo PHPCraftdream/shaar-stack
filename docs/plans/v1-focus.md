@@ -349,6 +349,18 @@ and cannot prove this boundary; stream-control metadata alone is not application
 CI (`42125979299`) exposed that incorrect metadata-forbidding oracle on both operating systems;
 it did not read or establish a payload leak. The precise accept outcome was discarded, so a
 STOP_SENDING explanation remains a supported mechanism rather than a captured result.
+
+Correctness blocker recorded 2026-11-06: CI `42128744822` read payload byte `110` on both
+operating systems after custom-only path and live-control checks. Acceptance is blocked; the
+byte-level regression must remain unchanged. Checksum-verified upstream source DATA refutes
+both prefix misclassification and a missing runtime wrapper; iroh also replaces the bridge's
+default receive address with the mapped custom address. No speculative endpoint split or
+predicate weakening is authorized by this leaf. A bounded test-only trace (32 tuple/result
+observations in this test thread, plus callback count) is the next diagnostic, not a repair.
+The production predicate result is unchanged. A third failure invokes the consolidated-review
+stop rule before any further candidate; the precise production correction must be separately
+bounded and reviewed against this concrete failing case before implementation.
+
 Non-goals: production startup wiring, discovery and signaling in one endpoint, policy/owner
 semantics changes, relay routing, Yggdrasil/standby, address churn, record/clock changes, public
 API, new dependencies, stream migration, public network and efficiency-profile acceptance.

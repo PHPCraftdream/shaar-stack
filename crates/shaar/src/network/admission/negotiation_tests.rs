@@ -19,6 +19,38 @@ use crate::network::signaling::SignaledEndpoint;
 use crate::network::{ForwardStats, Limits, NetworkError, Session};
 use crate::path::{DialError, Dialer, Negotiating, Negotiation, PathKind, PathOwner, PolicyConfig};
 
+std::thread_local! {
+    static FILTER_TRACE: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
+
+pub(super) fn trace_application_filter(path: &impl std::fmt::Debug, allowed: bool) {
+    FILTER_TRACE.with(|trace| {
+        if let Some(count) = trace.get() {
+            if count < 32 {
+                eprintln!("APP filter tuple={path:?} allowed={allowed}");
+            }
+            trace.set(Some(count.saturating_add(1)));
+        }
+    });
+}
+
+struct FilterTrace;
+
+impl FilterTrace {
+    fn start() -> Self {
+        FILTER_TRACE.with(|trace| trace.set(Some(0)));
+        Self
+    }
+}
+
+impl Drop for FilterTrace {
+    fn drop(&mut self) {
+        FILTER_TRACE.with(|trace| {
+            eprintln!("APP filter observed callbacks={:?}", trace.replace(None));
+        });
+    }
+}
+
 fn loopback() -> SocketAddr {
     "127.0.0.1:0".parse().expect("loopback")
 }
@@ -336,6 +368,7 @@ async fn no_application_bytes(sender: &Session, receiver: &Session) {
 
 #[tokio::test]
 async fn live_signaling_control_delivers_zero_application_bytes_both_ways() {
+    let _trace = FilterTrace::start();
     timeout(Duration::from_secs(30), async {
         let (client, mut server) = endpoints().await;
         let native = [client.local_addr(), server.local_addr()];

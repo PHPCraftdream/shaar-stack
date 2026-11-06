@@ -63,7 +63,12 @@ impl Endpoint {
     ) -> Result<Self, NetworkError> {
         Self::validate_bind(address)?;
         let transport = QuicTransportConfig::builder()
-            .application_data_filter(|path| policy::native_ip(path.remote().ip()))
+            .application_data_filter(|path| {
+                let allowed = policy::native_ip(path.remote().ip());
+                #[cfg(test)]
+                negotiation_tests::trace_application_filter(&path, allowed);
+                allowed
+            })
             .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_LIMIT)))
             .max_concurrent_uni_streams(VarInt::from_u32(0))
             .stream_receive_window(VarInt::from_u32(256 * 1024))
