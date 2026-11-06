@@ -368,6 +368,55 @@ Non-goals: production startup wiring, discovery and signaling in one endpoint, p
 semantics changes, relay routing, Yggdrasil/standby, address churn, record/clock changes, public
 API, new dependencies, stream migration, public network and efficiency-profile acceptance.
 
+#### Leaf 3c accepted; leaf 4 plan and 4a acceptance (recorded 2026-11-06)
+
+Leaf 3c is accepted at `ff5e609`: CI `42141894144` selected and executed the same 65 cases on
+each operating system, including eight paused-time negotiation contracts and three real socket
+scenarios. Exact custom/relay zero-APP frame invariants passed through joined shutdown. Prior
+byte observations did not identify their carrier; the per-path oracle corrects that distinction.
+
+Leaf 4 advances scenario steps 5–6 in three ordered pieces: 4a binary-transparent datagram demux
+in the single bridge reader; 4b an existing reliable stream transport over Ygg with ownership-bound
+APP admission; 4c standby policy failover and exact forwarding to the fixed TCP target. A raw
+unreliable datagram exchange is not acceptance of reliable service forwarding. The current
+`fn(FourTuple) -> bool` callback has no carrier identity: 4b must resolve that authorization boundary
+before implementation, without inferring authority from opaque custom addresses or their prefix.
+
+Leaf 4a observable acceptance: Linux and Windows CI use real controlled loopback cores to show
+that peer-registered capabilities deliver exact enveloped bytes, including empty, binary and
+probe-shaped payloads, independently of readiness probes; unknown/unregistered peers and malformed
+frames never reach a capability. A full bounded receiver drops and counts carrier datagrams
+without blocking probe replies. Dropping a capability revokes its cloned senders and queued receive
+state; re-registering the same peer creates a fresh queue, while unrelated peer capabilities remain
+usable. Registration cancellation, deadline, duplicate and capacity boundaries are exercised;
+close revokes capabilities, wakes receivers, joins the one reader and transport, releases the key
+claim and socket, and can resume after cancellation. All accepted readiness tests remain selected.
+
+The bridge does not decide APP modes: these datagrams may carry QUIC control as well as data.
+Only the caller can register a peer, and incoming identity comes from the authenticated Ygg session,
+never from envelope bytes. Bounds: 16 live peer registrations, 16 queued datagrams per peer,
+16 admitted registration requests, and 16 simultaneous framed sends per bridge. Admission is
+non-queued and precedes send-buffer allocation. Probes do not consume the carrier-send budget.
+The owner task alone maintains the registry; normal operation and shutdown use the existing
+reader task only. If that reader fails,
+close may replace it once with a retained cleanup task (never a concurrent reader); cancellation
+retains the join, and a failed cleanup returns an error instead of spawning again. A delivered
+datagram owns one buffer copy from the shared receive scratch buffer; allocation happens only
+after authorization and queue admission.
+
+Carrier envelope: `shaar-qg` (8 bytes), version 1, kind 1, unsigned 16-bit little-endian payload
+length, then exactly that many bytes; overhead is 12 bytes. Payload size is bounded by both the
+length field and `mtu() - 12`. Unknown versions/kinds, truncation and trailing bytes fail closed.
+Existing `shaar-yg` Ping/Pong frames stay byte-identical. Fresh registration isolates local queued
+state, not already-transmitted datagrams; later QUIC connection identity rejects stale packets.
+Minimal inter-crate methods/types are justified by the sole-reader boundary (`publish = false`),
+not a new public SDK mode. Replace `bridge.rs` with a responsibility-scoped `bridge/` module to
+keep the seven-item root limit; existing module names and probe tests remain intact.
+
+Non-goals of 4a: reliability or TCP forwarding, QUIC/iroh integration, APP authorization, signal/
+standby policy, the `shaar` crate, new dependencies, configuration/schema or version changes,
+public peers, TUN/root, release and efficiency acceptance. Full leaf 4 remains open until 4c.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address
