@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use super::error::{ConfigError, ValidationKind};
+use super::network::NetworkSettings;
 use super::raw::{
     Fallback, merge, parse_fallback, parse_socket_addr, require_loopback, require_nonempty_path,
 };
@@ -30,6 +31,8 @@ pub(crate) struct ServerFile {
     /// CLI override has had its chance to replace it (`parse_fallback`).
     #[serde(default)]
     fallback: Option<String>,
+    #[serde(default)]
+    network: Option<super::network::NetworkFile>,
 }
 
 /// Explicit server CLI overrides; supplied values win over file values
@@ -61,6 +64,7 @@ pub struct ServerConfig {
     key_file: PathBuf,
     allowlist_path: PathBuf,
     fallback: Fallback,
+    network: Option<NetworkSettings>,
 }
 
 impl ServerConfig {
@@ -87,6 +91,12 @@ impl ServerConfig {
     /// Fallback transport selection.
     pub fn fallback(&self) -> Fallback {
         self.fallback
+    }
+
+    /// Optional shared network settings; absence keeps the legacy
+    /// direct-only contract.
+    pub fn network(&self) -> Option<&NetworkSettings> {
+        self.network.as_ref()
     }
 
     /// Merge file values (already deserialized from `text`) with
@@ -138,12 +148,15 @@ impl ServerConfig {
         let allowlist_path = allow_raw.unwrap_or_else(|| PathBuf::from(DEFAULT_ALLOWLIST_PATH));
         require_nonempty_path("allowlist_path", &allowlist_path)?;
 
+        let network = super::network::parse(file.network)?;
+
         Ok(ServerConfig {
             target,
             bind,
             key_file,
             allowlist_path,
             fallback,
+            network,
         })
     }
 }

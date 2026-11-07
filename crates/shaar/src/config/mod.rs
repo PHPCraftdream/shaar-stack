@@ -15,6 +15,7 @@
 mod client;
 mod error;
 mod load;
+mod network;
 mod raw;
 mod server;
 
@@ -24,6 +25,7 @@ pub use load::{
     load_client, load_client_with_endpoint_overrides, load_server,
     load_server_with_endpoint_overrides,
 };
+pub use network::{MainlineNetwork, NetworkSettings, SignalingNetwork, YggNetwork};
 pub use raw::Fallback;
 pub use server::{ServerConfig, ServerEndpointOverrides, ServerOverrides};
 

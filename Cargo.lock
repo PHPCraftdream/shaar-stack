@@ -4257,6 +4257,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "url",
  "zeroize",
 ]
 
@@ -4323,6 +4324,7 @@ dependencies = [
  "ed25519-dalek 2.2.0",
  "ironwood",
  "yggdrasil",
+ "zeroize",
 ]
 
 [[package]]

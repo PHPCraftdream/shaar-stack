@@ -7,7 +7,7 @@ mod admission;
 mod error;
 mod forwarding;
 mod session;
-mod signaling;
+pub(crate) mod signaling;
 
 pub use admission::{Allowlist, Endpoint, Limits};
 pub use error::NetworkError;

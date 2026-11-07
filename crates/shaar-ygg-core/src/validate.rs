@@ -6,7 +6,10 @@ use crate::transport::{YggConfig, YggError};
 /// Schemes the core supports with its optional transports compiled out.
 const SCHEMES: [&str; 2] = ["tcp", "tls"];
 
-fn uri_is_valid(uri: &str) -> bool {
+/// The single lexical grammar check shared by the adapter's validate and external
+/// configuration layers. A lexical pre-check only, not a URI parser and not a
+/// connection attempt; it does not echo or retain the inspected value.
+pub fn uri_supported(uri: &str) -> bool {
     let Some((scheme, rest)) = uri.split_once("://") else {
         return false;
     };
@@ -21,10 +24,10 @@ fn uri_is_valid(uri: &str) -> bool {
 /// lexical pre-check, not a full URI parse: the core can still reject a value at
 /// start, which `start` reports as `Start { stage }`.
 pub(crate) fn validate(config: &YggConfig) -> Result<(), YggError> {
-    if !config.listen.iter().all(|uri| uri_is_valid(uri)) {
+    if !config.listen.iter().all(|uri| uri_supported(uri)) {
         return Err(YggError::InvalidConfig { field: "listen" });
     }
-    if !config.peers.iter().all(|uri| uri_is_valid(uri)) {
+    if !config.peers.iter().all(|uri| uri_supported(uri)) {
         return Err(YggError::InvalidConfig { field: "peers" });
     }
     if config.group_password.as_deref() == Some("") {
@@ -57,6 +60,12 @@ mod tests {
         open.peers.clear();
         open.group_password = None;
         assert_eq!(validate(&open), Ok(()));
+    }
+
+    #[test]
+    fn uri_supported_accepts_ipv6_tls_and_rejects_unknown_schemes() {
+        assert!(uri_supported("tls://[2001:db8::1]:443"));
+        assert!(!uri_supported("quic://host:1"));
     }
 
     #[test]

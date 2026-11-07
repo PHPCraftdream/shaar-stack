@@ -68,7 +68,8 @@ fn check_peers(peers: &[PublicKey]) -> Result<(), NetworkError> {
     Ok(())
 }
 
-pub(super) fn peer_id(key: &PublicKey) -> io::Result<PeerId> {
+/// Shared with the startup preflight for identity-role conflict checks.
+pub(crate) fn peer_id(key: &PublicKey) -> io::Result<PeerId> {
     let key = ed25519::PublicKey::try_from_bytes(key.as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid signaling peer key"))?;
     Ok(SignalingKey::from(key).to_peer_id())

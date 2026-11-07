@@ -535,6 +535,136 @@ A responsibility-based module split is allowed where the seven-item or 700-line
 limits require it. Binary startup/discovery composition remains leaf 5; p95 and
 full P10 acceptance remain leaf 6. Do not claim those from this functional case.
 
+### P10 leaf 5: shared startup (boundary recorded 2026-11-07)
+
+Advances scenario steps 1–6. Functional leaf 4c is accepted at `056a52d`: CI
+`42223907072` selected, executed and passed the same 97 cases on Linux and Windows,
+including 20 standby-owner cases, five standby fixture cases, constructor-refusal
+cleanup and the existing signaling-only contracts. This is not full P10 or
+performance acceptance. Current application entry points still bind direct-only
+endpoints; the Client requires the otherwise optional `server_address`, and the
+Server rejects standby. Component acceptance does not close this startup gap.
+
+Bounded delivery follows three sequential parts, each with its own verification:
+5a settings/preflight and identity-safe Ygg start; 5b shared resource composition;
+5c role loops used by both binaries and combined key-only acceptance. No part alone
+is completed leaf 5. The split isolates configuration/secret handling, resource
+ownership and application integration rather than creating unrelated product work.
+
+Combined observable acceptance: both binaries and controlled CI enter the same
+shared production startup path. A client configured with the server key and only
+independent infrastructure destinations, with no `server_address`, reaches the
+fixed loopback TCP target with exact bidirectional bytes. Healthy discovery proves
+real signed Mainline publication and lookup; known-relay key-directed signaling
+proves native APP delivery and zero APP on relay/custom signaling paths. Standby
+also works when Mainline is unavailable, through a separately owned third Ygg
+transit core; the client must not receive the service server's native or Ygg TCP
+address disguised as bootstrap configuration. Signal permits authenticated Ygg
+control readiness but no Ygg payload. Forbidden keys cause no target connections.
+Shutdown finishes workers and retained backend operations before releasing owners.
+
+Composition owns one native SignaledEndpoint, one separate Mainline RuntimeOwner,
+and the separate same-key Ygg bridge/custom-only endpoint/pump when applicable.
+Do not bind NativeDiscoveredEndpoint beside SignaledEndpoint or invent a second
+switching algorithm. Both role loops reuse Session forwarding/admission and the
+accepted path policy; the non-Send controller stays inline, and bounded workers
+receive owned route leases. No public raw endpoint or seed accessor is needed.
+
+Wildcard binds remain valid. Reuse the real endpoint's existing addr/watch_addr
+machinery through a narrow internal snapshot/watcher seam, not new interface,
+STUN or public-address probing. Only native IP candidates pass unchanged P09
+validation, with at most four addresses. Subscribe before the initial read;
+coalesce updates instead of queuing them unboundedly. Empty, invalid or over-cap
+snapshots must not silently leave obsolete publication active. Explicitly stop
+this work at shutdown: closing an endpoint need not disconnect its watcher.
+An observed local address is not proof of public reachability.
+
+Operational backend outages and invalid startup configuration are different.
+Do not make successful Mainline publication or reachability of every network a
+prerequisite for serving through an available alternative. Readiness must say
+whether publication succeeded, is pending or is unavailable; never claim a signed
+publication that did not complete. Mainline failure must not globally kill a usable
+Ygg/relay path. Operations, retries and status storage remain bounded. Fatal
+configuration/identity/startup errors roll back acquired owners, and cleanup of
+other backends is attempted even when one close fails.
+
+#### 5a acceptance: settings and identity-safe startup
+
+Before network I/O, pure parsing/preflight accepts valid shared infrastructure
+settings and rejects missing, malformed, oversized or conflicting settings with a
+field-specific diagnostic that does not echo secrets. Legacy configuration text
+without a network object remains parseable, but composed startup requires its
+infrastructure fields rather than silently using the old direct-only path. Add
+one optional shared network object to the existing ktav 0.8 schemas, retaining
+unknown-field rejection and the optional direct-address hint.
+
+The necessary settings are Mainline IPv4 bind (default wildcard/ephemeral) and
+1–4 numeric IPv4 bootstrap destinations; signaling TCP bind (default wildcard/
+ephemeral), one pinned relay identity and numeric destination; and 1–4 bounded Ygg
+infrastructure peer URIs. Service nodes initiate Ygg peering; no service-listener,
+group-password, DNS-resolver, policy-timing or raw-seed knob is needed. Validate
+supported URI syntax before networking, not by trying connections. Composed
+startup admits at most 16 raw application-peer entries, matching signaling;
+reject overflow before binding without deduplication/truncation to evade the cap.
+Generic SDK Allowlist retains its separate 256-entry contract. Infrastructure
+identities do not become application peers.
+
+An internal Identity-to-Ygg-start operation uses the same Ed25519 seed without
+exposing it publicly, with zeroizing staging and best-effort erasure of temporary
+seed-bearing configuration on success, error and cancellation. Audit the actual
+callee's ownership, not just a caller-side clone. Controlled CI checks identity
+equality, redacted diagnostics, invalid-input paths, retained startup/cleanup and
+same-key/port reuse. No claim is made about erasing copies inside reviewed external
+cryptographic dependencies. Only an essential edge to an already locked package
+(such as zeroize) may be added with a recorded reason and narrow graph review;
+there is no package/version bump or general graph-policy exception.
+
+5a non-goals: networking role loops, publication/address watching, relay reservation,
+three-core transit forwarding, binary behavior changes, native-budget rearming,
+new Session/protocol/ALPN, full P11/P12 or P10 acceptance. Those composition cases
+belong to 5b/5c. All parts forbid local builds/tests/Cargo/project Python/dependency
+preparation/smoke/benchmarks and public-network execution; actual verification is
+GitHub CI. No TUN/root, router changes, n0 infrastructure or release. Keep normal
+CI ownership narrow for new modules; add no proof/CI family or full-workspace
+fallback. Public-peer execution still needs its separate exact-target/budget gate.
+
+### P10 acceptance order correction (approved 2026-11-07)
+
+The user approved synchronizing the task list and plan with accepted evidence and
+making late native recovery a prerequisite of P10 acceptance. The north-star goal,
+balanced efficiency thresholds and existing public-network permission gates do
+not change. Work already underway on 5a keeps its recorded boundary.
+
+Remaining order: 5a settings/identity -> 5b shared resource ownership -> 5c actual
+binary role loops and key-only startup -> native recovery after retry exhaustion
+-> transition evidence gap check for #215 -> balanced metrics and full P10
+acceptance -> complete P11/P12 acceptance -> P13 through P16.
+
+The late-recovery case must use the normal retry budget: native is unavailable
+long enough to exhaust it while Ygg continues forwarding; native then returns,
+is rediscovered with bounded resource use, and carries new connections after the
+stable hold without restarting the application. A healthy old Ygg forward remains
+independent; no migration or replay is introduced. Specify the renewed-attempt
+contract before changing it, preserving bounded active work, backoff, shutdown
+and protection against a retry flood. Increasing the fixture budget, shortening
+the outage to retain attempts, or omitting the case from direct-share measurements
+does not satisfy acceptance. The currently accepted finite-budget implementation
+is not evidence that this recovery behavior already exists.
+
+The former broad native/signaling/Ygg task for #215 becomes a finite evidence gap
+check before metrics, not another implementation project after P10. Map its
+contracts to existing case identities, selected/executed receipts and the new
+startup/recovery evidence. Add tests or repair code only for a concrete uncovered
+case; stop when the required evidence is sufficient. Do not add a proof framework,
+CI family or full-workspace fallback to repeat already accepted component work.
+
+Keep proof levels separate: targeted component acceptance; actual binary key-only
+startup through the shared production path; agreed efficiency plus full P10 on
+its current tested SHA; the expanded P13 fault/NAT/packet-filter matrix; and
+separately gated public interoperability. None substitutes for the next. Missing
+proof remains explicit, and an observed failing case is repaired in its owning
+work rather than hidden behind an unrelated green run.
+
 Do not expand a leaf beyond its recorded criterion. Pause and identify the actual
 scope/dependency boundary before any split. No new product leaf is authorized by
 this document while P09 remains open. Once native P09 and its applicable address

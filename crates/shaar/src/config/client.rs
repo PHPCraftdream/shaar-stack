@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use super::error::{ConfigError, ValidationKind};
+use super::network::NetworkSettings;
 use super::raw::{
     Fallback, merge, parse_fallback, parse_socket_addr, require_dial_destination, require_loopback,
     require_nonempty_path,
@@ -27,6 +28,8 @@ pub(crate) struct ClientFile {
     /// CLI override has had its chance to replace it (`parse_fallback`).
     #[serde(default)]
     fallback: Option<String>,
+    #[serde(default)]
+    network: Option<super::network::NetworkFile>,
 }
 
 /// Explicit client CLI overrides; supplied values win over file values
@@ -63,6 +66,7 @@ pub struct ClientConfig {
     server_address: Option<SocketAddr>,
     key_file: PathBuf,
     fallback: Fallback,
+    network: Option<NetworkSettings>,
 }
 
 impl ClientConfig {
@@ -89,6 +93,12 @@ impl ClientConfig {
     /// Fallback transport selection.
     pub fn fallback(&self) -> Fallback {
         self.fallback
+    }
+
+    /// Optional shared network settings; absence keeps the legacy
+    /// direct-only contract.
+    pub fn network(&self) -> Option<&NetworkSettings> {
+        self.network.as_ref()
     }
 
     /// Merge file values with legacy and endpoint overrides before validation.
@@ -142,12 +152,15 @@ impl ClientConfig {
         let key_file = key_raw.unwrap_or_else(|| PathBuf::from(DEFAULT_KEY_FILE));
         require_nonempty_path("key_file", &key_file)?;
 
+        let network = super::network::parse(file.network)?;
+
         Ok(ClientConfig {
             server_key: *key.as_bytes(),
             listen,
             server_address,
             key_file,
             fallback,
+            network,
         })
     }
 }

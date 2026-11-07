@@ -47,6 +47,18 @@ impl fmt::Debug for YggConfig {
     }
 }
 
+/// Best-effort in-memory erasure of the seed when the temporary configuration is
+/// dropped, covering the copy held by [`YggTransport::start`] for the whole of
+/// startup. Zeroize is best-effort, not an OS/swap/compiler-proof guarantee; copies
+/// inside external cryptographic dependencies (for example ed25519-dalek signing-key
+/// internals) are out of scope and no erasure is claimed for them.
+impl Drop for YggConfig {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.seed.zeroize();
+    }
+}
+
 /// Transport failures. The adapter's own messages never contain secrets; the core's
 /// tracing output is outside this guarantee and can mention peer URIs.
 #[derive(Debug, Clone, PartialEq, Eq)]

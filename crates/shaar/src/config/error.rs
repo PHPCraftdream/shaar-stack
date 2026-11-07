@@ -57,6 +57,12 @@ pub enum ValidationKind {
     InvalidEnum,
     /// A path value was present but empty.
     EmptyPath,
+    /// The value is not a lexically supported peer URI.
+    InvalidUri,
+    /// A bounded list exceeds its maximum length.
+    TooMany,
+    /// A bounded list is empty where at least one entry is required.
+    TooFew,
 }
 
 /// Configuration error: loading, parsing, or validation.

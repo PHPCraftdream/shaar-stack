@@ -38,6 +38,7 @@ SUITES = {
     "sdk-forwarding": ("shaar", ("network::forwarding::",)),
     "native-discovery": ("shaar", ("native_discovery::",)),
     "sdk-path": ("shaar", ("path::",)),
+    "sdk-startup": ("shaar", ("startup::",)),
 }
 
 # First matching owner wins. Shared wiring gets small contract suites, not SDK/dependency campaigns.
@@ -77,6 +78,7 @@ RULES = (
     (".github/scripts/p2p/discovery/simple_dns/", ("native-discovery",)),
     ("crates/shaar/src/native_discovery/", ("native-discovery",)),
     ("crates/shaar/src/path/", ("sdk-path",)),
+    ("crates/shaar/src/startup/", ("sdk-startup",)),
     ("crates/shaar/src/identity/", ("sdk-identity",)),
     ("crates/shaar/src/config/", ("sdk-config",)),
     ("crates/shaar/src/network/signaling/", ("sdk-signaling",)),

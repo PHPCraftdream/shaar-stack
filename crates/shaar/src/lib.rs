@@ -10,3 +10,8 @@ pub mod network;
     expect(dead_code, reason = "P10 path policy wiring is pending")
 )]
 mod path;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P10 leaf 5b/5c composition pending")
+)]
+mod startup;
