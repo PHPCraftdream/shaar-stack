@@ -108,6 +108,8 @@ PROOFS = (
     (".github/actions/dependency-license/", "license"),
     (".github/scripts/dependency_licenses.py", "license"),
     (".github/deny.toml", "license"),
+    # Preserved third-party legal material; owned by the license domain like root LICENSE-*.
+    ("docs/legal/notices-material/", "license"),
     (".github/ci/", "ci_policy"),
     (".github/workflows/ci.yml", "ci_policy"),
     (".github/actions/prepare-sources/", "ci_policy"),

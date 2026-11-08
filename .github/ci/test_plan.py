@@ -353,6 +353,20 @@ class PolicyTests(unittest.TestCase):
             self.assertFalse(result["selection"]["rust"])
         self.assertTrue(POLICY.select([".github/ci/policy.py"])["selection"]["ci_policy"])
 
+    def test_legal_material_selects_license_domain_and_unknown_paths_fail_closed(self):
+        material = POLICY.select(["docs/legal/notices-material/ygg-pinned-revision-c9a54f1-LICENSE"])
+        self.assertEqual([key for key in POLICY.DOMAINS if material["selection"][key]], ["license"])
+        self.assertFalse(material["selection"]["full"])
+        self.assertFalse(material["selection"]["rust"])
+        self.assertFalse(material["selection"]["sdk"])
+        self.assertEqual(material["targets"], [])
+        self.assertEqual(material["suites"], ["license"])
+        self.assertEqual(material["reasons"],
+                         [{"path": "docs/legal/notices-material/ygg-pinned-revision-c9a54f1-LICENSE",
+                           "suites": ["license"]}])
+        with self.assertRaisesRegex(ValueError, "No test impact rule for docs/legal/unowned-material"):
+            POLICY.select(["docs/legal/unowned-material"])
+
     def test_unknown_paths_empty_comparison_and_shared_lock_fail_not_expand(self):
         for paths in ([], ["new-component/code.rs"], ["Cargo.lock"],
                       ["crates/shaar-p2p/src/new-unknown/module.rs"]):
