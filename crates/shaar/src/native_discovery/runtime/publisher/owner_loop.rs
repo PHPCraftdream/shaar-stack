@@ -13,8 +13,8 @@ use super::super::owner::{Command, RuntimeError};
 use super::super::publisher::CleanupReceipt;
 use super::super::publisher::{PublicationStatus, PublisherState};
 use super::flight::{
-    Flight, Queued, Work, addresses_are_ready, expired, fail_queued, finish_completed,
-    make_refresh, make_replacement, replace_queued, revoke, send_deadline,
+    Flight, PublicationServices, Queued, Work, addresses_are_ready, expired, fail_queued,
+    finish_completed, make_refresh, make_replacement, replace_queued, revoke, send_deadline,
 };
 use crate::identity::Identity;
 use iroh_base::EndpointId;
@@ -94,10 +94,12 @@ pub(super) async fn publisher_loop(
                         &identity,
                         &handle,
                         (snapshot, deadline, reply),
-                        &mut timer,
-                        &mut terminal,
-                        &clock,
-                        &publication,
+                        PublicationServices {
+                            timer: &mut timer,
+                            terminal: &mut terminal,
+                            clock: &clock,
+                            publication: &publication,
+                        },
                     );
                 }
                 continue;
@@ -298,10 +300,12 @@ pub(super) async fn publisher_loop(
                                 &identity,
                                 &handle,
                                 (snapshot, deadline, reply),
-                                &mut timer,
-                                &mut terminal,
-                                &clock,
-                                &publication,
+                                PublicationServices {
+                                    timer: &mut timer,
+                                    terminal: &mut terminal,
+                                    clock: &clock,
+                                    publication: &publication,
+                                },
                             );
                         }
                     }
@@ -338,10 +342,12 @@ pub(super) async fn publisher_loop(
                 &identity,
                 &handle,
                 (snapshot, deadline, reply),
-                &mut timer,
-                &mut terminal,
-                &clock,
-                &publication,
+                PublicationServices {
+                    timer: &mut timer,
+                    terminal: &mut terminal,
+                    clock: &clock,
+                    publication: &publication,
+                },
             );
             continue;
         }
@@ -405,7 +411,17 @@ pub(super) async fn publisher_loop(
             },
             _ = timer.tick(), if state.has_active() && !terminal => {
                 refresh_count = refresh_count.saturating_add(1);
-                flight = make_refresh(&mut state, &identity, &handle, &mut timer, &mut terminal, &clock, &publication);
+                flight = make_refresh(
+                    &mut state,
+                    &identity,
+                    &handle,
+                    PublicationServices {
+                        timer: &mut timer,
+                        terminal: &mut terminal,
+                        clock: &clock,
+                        publication: &publication,
+                    },
+                );
                 if flight.is_none() {
                     let generation = state.generation();
                     publication.send_replace(PublicationStatus::unavailable(generation));

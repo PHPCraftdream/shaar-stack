@@ -28,13 +28,8 @@ mod maintain;
 mod start;
 
 pub(crate) use maintain::Maintenance;
-#[cfg_attr(
-    not(test),
-    expect(
-        unused_imports,
-        reason = "5c composed role loops become the first production consumers"
-    )
-)]
+// The startup facade re-export consumes this path in non-test builds, so
+// the former unused-imports expectation is retired, not replaced.
 pub(crate) use start::SharedResourcesStart;
 #[cfg(test)]
 pub(crate) use start::StageControls;

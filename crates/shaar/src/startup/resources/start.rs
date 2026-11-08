@@ -26,6 +26,16 @@ use super::{
 
 type OwnerCommands = mpsc::Sender<OwnerRequest>;
 
+/// Plan-derived startup inputs, owned so the spawned owner task can take
+/// them by value after `start_seamed` resolves the borrowed plan.
+struct StartupSettings {
+    signaling_bind: Option<SocketAddr>,
+    mainline: Option<(std::net::SocketAddrV4, Vec<std::net::SocketAddrV4>)>,
+    ygg_peers: Option<Vec<String>>,
+    app_peers: Vec<PublicKey>,
+    mode: Fallback,
+}
+
 #[cfg(test)]
 pub(crate) struct StageControls {
     pub(crate) after_bridge: Option<(oneshot::Receiver<()>, oneshot::Sender<()>)>,
@@ -158,6 +168,13 @@ impl SharedResourcesStart {
         let ygg_peers = network.ygg().map(|settings| settings.peers().to_vec());
         let app_peers = plan.app_peers().to_vec();
         let mode = plan.fallback();
+        let settings = StartupSettings {
+            signaling_bind,
+            mainline,
+            ygg_peers,
+            app_peers,
+            mode,
+        };
         let (status_tx, status_rx) = watch::channel(Status::Pending);
         let (completion_tx, _) = watch::channel(None);
         let (owner_commands, mut owner_requests) = mpsc::channel(1);
@@ -190,39 +207,15 @@ impl SharedResourcesStart {
         });
         let owner_shared = Arc::clone(&shared);
         let identity = identity.clone();
-        #[cfg(test)]
-        let (after_bridge, after_native_close) = controls.map_or((None, None), |controls| {
-            (controls.after_bridge, controls.after_native_close)
-        });
-        #[cfg(test)]
-        let (after_bridge_entered, after_bridge_release) = after_bridge
-            .map_or((None, None), |(entered, release)| {
-                (Some(entered), Some(release))
-            });
-        #[cfg(test)]
-        let (after_native_close_entered, after_native_close_release) = after_native_close
-            .map_or((None, None), |(entered, release)| {
-                (Some(entered), Some(release))
-            });
         let task = tokio::spawn(async move {
             run_startup(
                 &owner_shared,
                 &identity,
-                signaling_bind,
-                mainline,
-                ygg_peers,
-                app_peers,
-                mode,
+                settings,
                 limits,
                 &mut owner_requests,
                 #[cfg(test)]
-                after_bridge_entered,
-                #[cfg(test)]
-                after_bridge_release,
-                #[cfg(test)]
-                after_native_close_entered,
-                #[cfg(test)]
-                after_native_close_release,
+                controls,
             )
             .await
         });
@@ -280,10 +273,7 @@ impl SharedResourcesStart {
             None => false,
         };
         let complete = if sent {
-            match response.await {
-                Ok(complete) => complete,
-                Err(_) => true,
-            }
+            response.await.unwrap_or(true)
         } else {
             // The request receiver closed. Join below by borrowing the
             // retained task so a canceled previous waiter cannot race its
@@ -315,18 +305,32 @@ impl SharedResourcesStart {
 async fn run_startup(
     shared: &Arc<SharedState>,
     identity: &Identity,
-    signaling_bind: Option<SocketAddr>,
-    mainline: Option<(std::net::SocketAddrV4, Vec<std::net::SocketAddrV4>)>,
-    ygg_peers: Option<Vec<String>>,
-    app_peers: Vec<PublicKey>,
-    mode: Fallback,
+    settings: StartupSettings,
     limits: Limits,
     owner_requests: &mut mpsc::Receiver<OwnerRequest>,
-    #[cfg(test)] mut after_bridge_entered: Option<oneshot::Sender<()>>,
-    #[cfg(test)] mut after_bridge_release: Option<oneshot::Receiver<()>>,
-    #[cfg(test)] after_native_close_entered: Option<oneshot::Sender<()>>,
-    #[cfg(test)] after_native_close_release: Option<oneshot::Receiver<()>>,
+    #[cfg(test)] controls: Option<StageGates>,
 ) -> Result<(), StartupError> {
+    let StartupSettings {
+        signaling_bind,
+        mainline,
+        ygg_peers,
+        app_peers,
+        mode,
+    } = settings;
+    #[cfg(test)]
+    let (after_bridge, after_native_close) = controls.map_or((None, None), |gates| {
+        (gates.after_bridge, gates.after_native_close)
+    });
+    #[cfg(test)]
+    let (mut after_bridge_entered, mut after_bridge_release) = after_bridge
+        .map_or((None, None), |(entered, release)| {
+            (Some(entered), Some(release))
+        });
+    #[cfg(test)]
+    let (after_native_close_entered, after_native_close_release) = after_native_close
+        .map_or((None, None), |(entered, release)| {
+            (Some(entered), Some(release))
+        });
     let (signaling_bind, (mainline_bind, mainline_bootstrap), ygg_peers) =
         match (signaling_bind, mainline, ygg_peers) {
             (Some(signaling), Some(mainline), Some(ygg)) => (signaling, mainline, ygg),

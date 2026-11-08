@@ -16,7 +16,7 @@ use crate::native_discovery::runtime::owner::{LoopbackPeer, RuntimeOwner};
 #[cfg(test)]
 use crate::network::{Limits, SignaledEndpoint};
 
-use super::maintain::MaintenanceJoin;
+use super::maintain::{MaintenanceExit, MaintenanceJoin};
 use super::{ClosingClaims, SharedState, StartupResources, readiness_view, slot_lock};
 use crate::native_discovery::runtime::owner::RuntimeError;
 use crate::startup::error::StartupError;
@@ -56,7 +56,8 @@ pub(crate) async fn quiesce_native(shared: &Arc<SharedState>) -> bool {
             if watcher_stopped {
                 match tokio::time::timeout(MAINTENANCE_BOUND, maintenance.join_task()).await {
                     Ok(Some(MaintenanceJoin::Exit(exit))) => {
-                        if exit.faulted {
+                        let MaintenanceExit { owner, faulted } = *exit;
+                        if faulted {
                             // The loop faulted; the wrapper recovered the
                             // owner, so the real joins stay owned here for
                             // the joined close below.
@@ -64,7 +65,7 @@ pub(crate) async fn quiesce_native(shared: &Arc<SharedState>) -> bool {
                                 stage: "address-maintenance",
                             });
                         }
-                        resources.owner = Some(exit.owner);
+                        resources.owner = Some(owner);
                         resources.maintenance = None;
                     }
                     // A JoinError means the whole task was aborted: the owner
@@ -82,49 +83,47 @@ pub(crate) async fn quiesce_native(shared: &Arc<SharedState>) -> bool {
                 });
             }
         }
-        if resources.maintenance.is_none() {
-            if let Some(owner) = resources.owner.as_mut() {
-                if resources.withdrawal_done {
-                    complete = true;
-                } else {
-                    match tokio::time::timeout(MAINTENANCE_BOUND, owner.withdraw()).await {
-                        Ok(Ok(())) => {
-                            resources.withdrawal_done = true;
-                            complete = true;
-                        }
-                        Ok(Err(RuntimeError::Closed)) => {
-                            // A terminal publisher answers withdrawal with
-                            // Closed (revoked generation or dead command
-                            // channel). Drive Mainline shutdown and retain its
-                            // close error, but a finished join is terminal
-                            // cleanup proof: a terminal error is not pending
-                            // cleanup, so transfer proceeds.
-                            match tokio::time::timeout(MAINTENANCE_BOUND, owner.close()).await {
-                                Ok(result) => {
-                                    if result.is_err() {
-                                        shared.record_error(StartupError::Close {
-                                            stage: "mainline",
-                                        });
-                                    }
-                                    if !owner.has_pending_cleanup() {
-                                        resources.withdrawal_done = true;
-                                        resources.owner = None;
-                                        complete = true;
-                                    } else {
-                                        shared.record_error(StartupError::Close {
-                                            stage: "publication-withdraw",
-                                        });
-                                    }
+        if resources.maintenance.is_none()
+            && let Some(owner) = resources.owner.as_mut()
+        {
+            if resources.withdrawal_done {
+                complete = true;
+            } else {
+                match tokio::time::timeout(MAINTENANCE_BOUND, owner.withdraw()).await {
+                    Ok(Ok(())) => {
+                        resources.withdrawal_done = true;
+                        complete = true;
+                    }
+                    Ok(Err(RuntimeError::Closed)) => {
+                        // A terminal publisher answers withdrawal with
+                        // Closed (revoked generation or dead command
+                        // channel). Drive Mainline shutdown and retain its
+                        // close error, but a finished join is terminal
+                        // cleanup proof: a terminal error is not pending
+                        // cleanup, so transfer proceeds.
+                        match tokio::time::timeout(MAINTENANCE_BOUND, owner.close()).await {
+                            Ok(result) => {
+                                if result.is_err() {
+                                    shared.record_error(StartupError::Close { stage: "mainline" });
                                 }
-                                Err(_) => {
-                                    shared.record_error(StartupError::Close { stage: "mainline" })
+                                if !owner.has_pending_cleanup() {
+                                    resources.withdrawal_done = true;
+                                    resources.owner = None;
+                                    complete = true;
+                                } else {
+                                    shared.record_error(StartupError::Close {
+                                        stage: "publication-withdraw",
+                                    });
                                 }
                             }
+                            Err(_) => {
+                                shared.record_error(StartupError::Close { stage: "mainline" })
+                            }
                         }
-                        Ok(Err(_)) | Err(_) => shared.record_error(StartupError::Close {
-                            stage: "publication-withdraw",
-                        }),
                     }
+                    Ok(Err(_)) | Err(_) => shared.record_error(StartupError::Close {
+                        stage: "publication-withdraw",
+                    }),
                 }
             }
         }
@@ -168,11 +167,9 @@ pub(crate) async fn run_ordered_close(
     if let Some(maintenance) = resources.maintenance.as_mut() {
         maintenance.signal_stop();
         watcher_stopped =
-            match tokio::time::timeout(MAINTENANCE_BOUND, maintenance.wait_watcher_stopped()).await
-            {
-                Ok(stopped) => stopped,
-                Err(_) => false,
-            };
+            tokio::time::timeout(MAINTENANCE_BOUND, maintenance.wait_watcher_stopped())
+                .await
+                .unwrap_or_default();
         if !watcher_stopped {
             shared.record_error(StartupError::Close {
                 stage: "address-maintenance",
@@ -180,7 +177,8 @@ pub(crate) async fn run_ordered_close(
         } else {
             match tokio::time::timeout(MAINTENANCE_BOUND, maintenance.join_task()).await {
                 Ok(Some(MaintenanceJoin::Exit(exit))) => {
-                    if exit.faulted {
+                    let MaintenanceExit { owner, faulted } = *exit;
+                    if faulted {
                         // The loop faulted; the wrapper recovered the owner,
                         // so the real joins stay owned here for the joined
                         // close below.
@@ -188,7 +186,7 @@ pub(crate) async fn run_ordered_close(
                             stage: "address-maintenance",
                         });
                     }
-                    resources.owner = Some(exit.owner);
+                    resources.owner = Some(owner);
                     resources.maintenance = None;
                 }
                 // A JoinError means the whole task was aborted: the owner is
@@ -285,12 +283,12 @@ pub(crate) async fn run_ordered_close(
     }
 
     if let Some(ygg) = resources.ygg.as_mut() {
-        if let Some((endpoint, pump)) = ygg.payload.as_mut() {
-            if endpoint.close(pump).await.is_err() {
-                shared.record_error(StartupError::Close {
-                    stage: "ygg-payload",
-                });
-            }
+        if let Some((endpoint, pump)) = ygg.payload.as_mut()
+            && endpoint.close(pump).await.is_err()
+        {
+            shared.record_error(StartupError::Close {
+                stage: "ygg-payload",
+            });
         }
         ygg.payload = None;
         if let Some(bridge) = ygg.bridge.as_ref() {
