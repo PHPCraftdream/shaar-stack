@@ -37,12 +37,14 @@ fn closing_claims(shared: &Arc<SharedState>, resources: &StartupResources) -> Cl
 
 /// Stops address watching before native close and retains owners when a stage is incomplete.
 pub(crate) async fn quiesce_native(shared: &Arc<SharedState>) -> bool {
-    let mut slot = slot_lock(&shared.slot);
-    let Some(mut resources) = slot.resources.take() else {
-        return false;
+    let mut resources = {
+        let mut slot = slot_lock(&shared.slot);
+        let Some(resources) = slot.resources.take() else {
+            return false;
+        };
+        slot.closing = Some(closing_claims(shared, &resources));
+        resources
     };
-    slot.closing = Some(closing_claims(shared, &resources));
-    drop(slot);
     let mut complete = resources.endpoint.is_none() || resources.native_quiesced;
     if !complete {
         if let Some(maintenance) = resources.maintenance.as_mut() {
@@ -435,7 +437,10 @@ mod tests {
             .expect("slot installed")
             .owner = Some(owner);
 
-        let complete = quiesce_native(&shared).await;
+        let quiescence = quiesce_native(&shared);
+        fn assert_send<T: Send>(_: &T) {}
+        assert_send(&quiescence);
+        let complete = quiescence.await;
         assert!(complete, "a joined closed owner proves publication stopped");
         let slot = slot_lock(&shared.slot);
         let resources = slot.resources.as_ref().expect("slot retained");
