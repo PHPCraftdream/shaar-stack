@@ -111,7 +111,7 @@ impl CompletedQuery {
 }
 #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RecordError {
+pub(crate) enum RecordError {
     Unauthorized,
     Capacity,
     InvalidSequence,

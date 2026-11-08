@@ -16,7 +16,7 @@ const MAX_ADDRESSES: usize = 4;
     expect(dead_code, reason = "P09 actor boundary is not wired yet")
 )]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SnapshotError {
+pub(crate) enum SnapshotError {
     TooManyAddresses,
     InvalidAddress,
     UnsupportedTransport,

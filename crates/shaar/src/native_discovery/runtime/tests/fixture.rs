@@ -47,14 +47,18 @@ fn encode(value: &Value) -> Vec<u8> {
     packet
 }
 
-pub(in crate::native_discovery::runtime::owner) struct LoopbackPeer {
+// Widened to `pub(crate)` ONLY for the cfg(test)-only startup regression
+// suite (this module itself is compiled under #[cfg(test)]); the runtime
+// owner re-exports it for that suite. `capture_get` is widened for the same
+// suite (GET-admission observation in the startup resolver regression).
+pub(crate) struct LoopbackPeer {
     socket: UdpSocket,
-    pub(in crate::native_discovery::runtime::owner) address: SocketAddr,
+    pub(crate) address: SocketAddr,
     pending_puts: Vec<(SocketAddr, Vec<u8>)>,
 }
 
 impl LoopbackPeer {
-    pub(in crate::native_discovery::runtime::owner) async fn bind() -> Self {
+    pub(crate) async fn bind() -> Self {
         let socket = UdpSocket::bind("127.0.0.1:0")
             .await
             .expect("bind owned loopback peer");
@@ -66,10 +70,7 @@ impl LoopbackPeer {
         }
     }
 
-    pub(in crate::native_discovery::runtime::owner) async fn capture_get(
-        &mut self,
-        target: n0_mainline::Id,
-    ) -> (SocketAddr, Vec<u8>) {
+    pub(crate) async fn capture_get(&mut self, target: n0_mainline::Id) -> (SocketAddr, Vec<u8>) {
         loop {
             let mut packet = [0; MAX_PACKET];
             let (length, source) = self
@@ -135,10 +136,7 @@ impl LoopbackPeer {
             .expect("actual GET response");
     }
 
-    pub(in crate::native_discovery::runtime::owner) async fn serve_record(
-        &mut self,
-        item: &n0_mainline::MutableItem,
-    ) {
+    pub(crate) async fn serve_record(&mut self, item: &n0_mainline::MutableItem) {
         let target = n0_mainline::MutableItem::target_from_key(item.key(), None);
         loop {
             let (source, transaction) = self.capture_get(target).await;
@@ -152,9 +150,56 @@ impl LoopbackPeer {
         captured.into_iter().next().expect("one captured PUT")
     }
 
-    pub(in crate::native_discovery::runtime::owner) async fn capture_put(
+    pub(crate) async fn capture_put_record(
         &mut self,
-    ) -> (SocketAddr, Vec<u8>, CapturedPut) {
+    ) -> (
+        SocketAddr,
+        Vec<u8>,
+        iroh_dns::pkarr::SignedPacket,
+        n0_mainline::MutableItem,
+    ) {
+        let (source, transaction, captured) = self.capture_put().await;
+        (
+            source,
+            transaction,
+            captured.signed_packet(),
+            captured.to_mutable_item(),
+        )
+    }
+
+    pub(crate) async fn assert_no_put_for(&mut self, duration: std::time::Duration) {
+        let deadline = tokio::time::Instant::now() + duration;
+        loop {
+            let mut packet = [0; MAX_PACKET];
+            match tokio::time::timeout_at(deadline, self.socket.recv_from(&mut packet)).await {
+                Err(_) => return,
+                Ok(Err(error)) => panic!("loopback no-PUT observation failed: {error}"),
+                Ok(Ok((length, source))) => {
+                    let parsed: Value = serde_bencode::from_bytes(&packet[..length])
+                        .expect("bounded KRPC during no-PUT observation");
+                    assert_eq!(bytes_field(&parsed, b"y"), Some(b"q".as_slice()));
+                    let transaction = bytes_field(&parsed, b"t").expect("transaction id");
+                    let query = bytes_field(&parsed, b"q").expect("KRPC method");
+                    assert_ne!(
+                        query, b"put",
+                        "readiness observation caused an extra real PUT"
+                    );
+                    let kind = match query {
+                        b"get" => ReplyKind::Get,
+                        b"find_node" => ReplyKind::FindNode,
+                        b"ping" => ReplyKind::Ping,
+                        other => panic!("unexpected KRPC query in bounded observation: {other:?}"),
+                    };
+                    self.socket
+                        .send_to(&response(transaction, kind), source)
+                        .await
+                        .expect("bootstrap response during bounded negative observation");
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn capture_put(&mut self) -> (SocketAddr, Vec<u8>, CapturedPut) {
         let captured = self.serve_puts(1).await;
         let (source, transaction) = self
             .pending_puts
@@ -168,11 +213,7 @@ impl LoopbackPeer {
         )
     }
 
-    pub(in crate::native_discovery::runtime::owner) async fn acknowledge(
-        &mut self,
-        source: SocketAddr,
-        transaction: &[u8],
-    ) {
+    pub(crate) async fn acknowledge(&mut self, source: SocketAddr, transaction: &[u8]) {
         self.pending_puts
             .retain(|(pending_source, pending_transaction)| {
                 *pending_source != source || pending_transaction.as_slice() != transaction
@@ -184,7 +225,7 @@ impl LoopbackPeer {
             .expect("reply to held PUT");
     }
 
-    pub(super) async fn reject(&mut self, source: SocketAddr, transaction: &[u8]) {
+    pub(crate) async fn reject(&mut self, source: SocketAddr, transaction: &[u8]) {
         self.pending_puts
             .retain(|(pending_source, pending_transaction)| {
                 *pending_source != source || pending_transaction.as_slice() != transaction
@@ -283,11 +324,37 @@ impl LoopbackPeer {
     }
 }
 
-pub(in crate::native_discovery::runtime::owner) struct CapturedPut {
+pub(crate) struct CapturedPut {
     pub(in crate::native_discovery::runtime::owner) key: Vec<u8>,
     pub(in crate::native_discovery::runtime::owner) signature: Vec<u8>,
     pub(in crate::native_discovery::runtime::owner) value: Vec<u8>,
     pub(in crate::native_discovery::runtime::owner) sequence: i64,
+}
+
+impl CapturedPut {
+    fn signed_envelope(&self) -> Vec<u8> {
+        let mut envelope = Vec::with_capacity(104 + self.value.len());
+        envelope.extend_from_slice(&self.key);
+        envelope.extend_from_slice(&self.signature);
+        envelope.extend_from_slice(&self.sequence.to_be_bytes());
+        envelope.extend_from_slice(&self.value);
+        envelope
+    }
+
+    pub(crate) fn signed_packet(&self) -> iroh_dns::pkarr::SignedPacket {
+        iroh_dns::pkarr::SignedPacket::from_bytes(&self.signed_envelope())
+            .expect("captured signature verifies")
+    }
+
+    pub(crate) fn to_mutable_item(&self) -> n0_mainline::MutableItem {
+        super::super::to_mutable(
+            &crate::native_discovery::runtime::publisher::SignedSnapshot {
+                timestamp_us: self.sequence,
+                bytes: self.signed_envelope(),
+            },
+        )
+        .expect("captured signed packet converts through production helper")
+    }
 }
 
 enum ReplyKind {

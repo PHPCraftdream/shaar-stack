@@ -109,7 +109,7 @@ pub(super) struct PolicyRecordParts {
     expect(dead_code, reason = "P09 actor boundary is not wired yet")
 )]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum DecodeError {
+pub(crate) enum DecodeError {
     InvalidPacket,
     WrongKey,
     MalformedAddress,

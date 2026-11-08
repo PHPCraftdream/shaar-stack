@@ -18,8 +18,11 @@ mod discovery_tests;
 #[path = "owned_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use tests::relay_fixture::RelayFixture;
+
 /// Native QUIC endpoint with one retained signaling coordinator and shared identity.
-/// Explicit close joins both backends. Drop/cancel is abort-only, not a joined shutdown promise.
+/// Explicit close joins both backends. Drop/cancel is abort-only.
 pub struct SignaledEndpoint {
     endpoint: Endpoint,
     signaling: Owned,
@@ -32,10 +35,39 @@ impl fmt::Debug for SignaledEndpoint {
     }
 }
 
+/// Cloneable signaling command capability that owns no sockets.
+#[derive(Clone)]
+pub(crate) struct RelayOperations {
+    handle: super::CarrierHandle,
+}
+
+impl RelayOperations {
+    pub(crate) async fn reserve(&self, relay: RelayAddr) -> Result<RelayLease, NetworkError> {
+        self.handle
+            .reserve(relay)
+            .await
+            .map_err(NetworkError::SignalingOperation)
+    }
+
+    pub(crate) fn has_reservation(&self, relay: RelayAddr) -> bool {
+        self.handle
+            .relay_leases()
+            .borrow()
+            .iter()
+            .any(|lease| lease.relay() == relay)
+    }
+
+    pub(crate) async fn release(&self, relay: RelayAddr) -> Result<(), NetworkError> {
+        self.handle
+            .release_relay(relay.peer_id())
+            .await
+            .map_err(NetworkError::SignalingOperation)
+    }
+}
+
 impl SignaledEndpoint {
-    /// Binds native UDP plus signaling TCP, with at most 16 configured peer keys before deduplication.
-    /// One coordinator task is retained and joined, never hidden behind submission handles.
-    /// cancel-safe: NO — dropping startup aborts ownership but does not await native destruction.
+    /// Binds native UDP plus signaling TCP and retains their joined owner.
+    /// cancel-safe: NO — cancellation does not prove joined destruction.
     pub async fn bind(
         identity: &Identity,
         native: SocketAddr,
@@ -46,9 +78,8 @@ impl SignaledEndpoint {
         Self::bind_configured(identity, native, signaling, peers, limits, None).await
     }
 
-    /// Starts the same joined owner with validated discovery inputs; bootstrap remains explicit.
-    /// Does not load OS configuration or grant infrastructure peers APP authority.
-    /// cancel-safe: NO — cancelled startup aborts owners but cannot join their destruction.
+    /// Starts with validated in-memory discovery settings.
+    /// cancel-safe: NO — cancellation does not prove joined destruction.
     pub async fn bind_with_discovery(
         identity: &Identity,
         native: SocketAddr,
@@ -60,7 +91,7 @@ impl SignaledEndpoint {
         Self::bind_configured(identity, native, signaling, peers, limits, Some(discovery)).await
     }
 
-    /// cancel-safe: NO — cancelled startup drops owners; only close proves joined destruction.
+    /// cancel-safe: NO — cancellation does not prove completed backend startup.
     async fn bind_configured(
         identity: &Identity,
         native: SocketAddr,
@@ -102,8 +133,6 @@ impl SignaledEndpoint {
         })
     }
 
-    /// Explicit bounded discovery; returned claims are not reservations or APP authority.
-    /// cancel-safe: NO — the carrier reconciles admitted work after observing cancellation.
     pub async fn discover_relays(&self) -> Result<Vec<DiscoveredRelay>, NetworkError> {
         self.signaling
             .handle
@@ -112,8 +141,6 @@ impl SignaledEndpoint {
             .map_err(NetworkError::SignalingOperation)
     }
 
-    /// Consumes a candidate; the carrier revalidates its exact current control before reservation.
-    /// cancel-safe: NO — admitted reservation work remains owned until cancellation cleanup.
     pub async fn reserve_discovered_relay(
         &self,
         candidate: DiscoveredRelay,
@@ -128,14 +155,27 @@ impl SignaledEndpoint {
     pub fn id(&self) -> PublicKey {
         self.endpoint.id()
     }
+
     pub fn local_addr(&self) -> SocketAddr {
         self.endpoint.local_addr()
     }
+
+    pub(crate) fn native_addr_watcher(
+        &self,
+    ) -> impl iroh::Watcher<Value = iroh::EndpointAddr> + use<> {
+        self.endpoint.native_addr_watcher()
+    }
+
+    pub(crate) fn relay_operations(&self) -> RelayOperations {
+        RelayOperations {
+            handle: self.signaling.handle.clone(),
+        }
+    }
+
     pub fn signaling_addr(&self) -> SocketAddr {
         self.signaling_address
     }
 
-    /// cancel-safe: NO — abandoned handshakes release SDK slots, not protocol drain metadata.
     pub async fn connect(
         &self,
         peer: PublicKey,
@@ -144,8 +184,8 @@ impl SignaledEndpoint {
         self.endpoint.connect(peer, native).await
     }
 
-    /// Negotiates through a pinned direct signaling peer; APP still requires a native QUIC path.
-    /// cancel-safe: NO — carrier and QUIC handshakes may complete after waiter cancellation.
+    /// Negotiates through direct signaling; payload remains native QUIC.
+    /// cancel-safe: NO — handshakes may complete after waiter cancellation.
     pub async fn connect_signaling(
         &self,
         peer: PublicKey,
@@ -165,8 +205,8 @@ impl SignaledEndpoint {
         self.endpoint.connect_custom(peer, address).await
     }
 
-    /// Negotiates via the pinned relay; this never grants application-data fallback on a circuit.
-    /// cancel-safe: NO — admitted circuit/QUIC work is not undone by dropping the waiter.
+    /// Negotiates via the pinned relay without enabling circuit payload fallback.
+    /// cancel-safe: NO — admitted circuit work may continue after cancellation.
     pub async fn connect_via(
         &self,
         peer: PublicKey,
@@ -186,7 +226,7 @@ impl SignaledEndpoint {
         self.endpoint.connect_custom(peer, address).await
     }
 
-    /// cancel-safe: NO — an admitted reservation may briefly exist before cancellation cleanup.
+    /// cancel-safe: NO — admitted reservation is reconciled by the carrier.
     pub async fn reserve_relay(&self, relay: RelayAddr) -> Result<RelayLease, NetworkError> {
         self.signaling
             .handle
@@ -199,7 +239,7 @@ impl SignaledEndpoint {
         self.signaling.handle.relay_leases()
     }
 
-    /// cancel-safe: NO — cancellation cannot undo an admitted release.
+    /// cancel-safe: NO — cancellation does not undo an admitted release.
     pub async fn release_relay(&self, relay: RelayAddr) -> Result<(), NetworkError> {
         self.signaling
             .handle
@@ -208,15 +248,12 @@ impl SignaledEndpoint {
             .map_err(NetworkError::SignalingOperation)
     }
 
-    /// Checks allowlist and authenticated custom-source/TLS-key correspondence before Session creation.
-    /// cancel-safe: NO — a consumed incoming handshake is not replayed.
     pub async fn accept(&mut self) -> Result<Session, NetworkError> {
         self.endpoint.accept().await
     }
 
-    /// Keeps signaling available during QUIC drain, then stops and joins carrier plus pump.
-    /// Retained Session/factory/sender handles do not own the native sockets.
-    /// cancel-safe: NO — only successful return proves both joined shutdown barriers.
+    /// Keeps signaling alive during QUIC drain, then joins carrier and pump.
+    /// cancel-safe: NO — only successful return proves both shutdown barriers.
     pub async fn close(self) -> Result<(), NetworkError> {
         let Self {
             endpoint,

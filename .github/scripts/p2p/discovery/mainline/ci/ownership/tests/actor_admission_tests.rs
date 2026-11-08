@@ -359,6 +359,11 @@ async fn cancelled_admission_keeps_request_and_result_charges_until_tick_cleanup
             .operations
             .contains_key(&admitted_target)
     );
+    let observer = actor.owned_publication_observer();
+    assert!(
+        !observer.has_retired_query(admitted_target),
+        "target receipt must not precede the actual query/lease teardown"
+    );
     let mut held_requests = Vec::new();
     while let Some(permit) = request_budget.acquire() {
         held_requests.push(permit);
@@ -381,6 +386,10 @@ async fn cancelled_admission_keeps_request_and_result_charges_until_tick_cleanup
             .contains_key(&admitted_target)
     );
     assert_eq!(actor.socket.operation_rpc_len(operation), 0);
+    assert!(
+        observer.has_retired_query(admitted_target),
+        "target receipt recorded only after transaction/query/lease teardown"
+    );
 
     drop(held_requests);
     drop(held_results);

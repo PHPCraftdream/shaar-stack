@@ -628,6 +628,66 @@ GitHub CI. No TUN/root, router changes, n0 infrastructure or release. Keep norma
 CI ownership narrow for new modules; add no proof/CI family or full-workspace
 fallback. Public-peer execution still needs its separate exact-target/budget gate.
 
+5a accepted at `a7c241c09d80cf0661ef1fba333a841d6978c7e8`: targeted CI
+`42406735980` passed on Linux and Windows. Inventories and run logs matched
+355 executed and passed cases per OS: SDK 294, graph witnesses 2, Ygg adapter 42,
+core 17. This includes 38 new SDK cases and the added core case. Linux also lists
+one pre-existing ignored privileged identity-reader test; it was not executed or
+counted in 355. The exact green revision was delivered upstream and its task
+worktree and branches were removed. This closes only settings/preflight and the
+retained same-key start, not shared resource composition or binary readiness.
+
+#### 5b acceptance: shared resource ownership (recorded 2026-11-07)
+
+Advances scenario steps 1 and 3–5. The same production constructor, usable by
+both later role loops, acquires one native SignaledEndpoint, a separate Mainline
+runtime, and applicable same-key Ygg resources from the accepted settings and
+preflight. It must not acquire a second native listener. Controlled CI observes
+that the server's signed publication uses validated IP candidates from that actual
+endpoint, including wildcard binds; an independently owned resolver obtains the
+published snapshot. Infrastructure destinations must not conceal a service-node
+address. Relay and third-core Ygg infrastructure remain independently owned.
+
+Address maintenance subscribes before its initial read, bounds candidates by the
+unchanged P09 limit of four, coalesces to the latest snapshot, and explicitly stops
+before endpoint close. Empty, invalid or over-cap updates cannot silently remain
+reported as current published addresses. Specify the actual P09 publication and
+expiry semantics from source before implementing withdrawal; stopping local
+refresh is not proof that previously distributed DHT data vanished immediately.
+Readiness distinguishes pending, successful publication and unavailable discovery.
+Operational Mainline failure must leave an otherwise usable alternate transport
+owned and available, not fail the whole composition.
+
+Written lifecycle cases must exercise the production owner: fatal-start rollback,
+cancellation during admitted startup and shutdown, retained joins, repeated close,
+cleanup after one backend failure, and reuse of identities and listening ports.
+All resources and maintenance work are bounded, errors are redacted, and cleanup
+attempts the remaining owners even after an earlier error. Use the accepted 5a
+retained-start ownership operation rather than moving a raw running transport
+through a cancellable asynchronous handoff.
+
+Source consultation confirmed that P09 withdrawal revokes the local generation,
+cancels superseded PUT work and stops refresh; empty replacement signs no packet.
+The existing refresh interval is 60 seconds, signed DNS TTL/cache cap 30 seconds,
+and accepted signed age up to 300 seconds. Preserve those contracts: a remote
+lookup may still accept an older record after local withdrawal. Generation-aware
+current-publication readiness therefore needs a bounded observation seam for
+actual initial PUT and refresh outcomes in the existing publisher; one old
+acknowledgement is not an indefinitely current readiness receipt. A later stale
+completion must not restore the current-generation claim. No tombstone or new
+wire format is introduced. An empty application-peer set must not be padded with
+a fake peer to satisfy the carrier: keep applicable Ygg control ownership and
+defer payload endpoint acquisition until a nonempty authorized set is available.
+
+5b non-goals: application role loops, binary changes, combined key-only TCP
+acceptance (5c), native retry-budget rearming, performance or full P10 acceptance,
+Amino application-peer lookup, new probing/proof frameworks, public reachability
+or public-peer execution. No local builds, tests, Cargo, project Python,
+preparation, smoke or benchmarks; verification is GitHub CI. Source-grounded
+interface consultation precedes implementation where ownership or publication
+semantics are not established; name a concrete blocker rather than weaken this
+boundary or invent backend APIs.
+
 ### P10 acceptance order correction (approved 2026-11-07)
 
 The user approved synchronizing the task list and plan with accepted evidence and

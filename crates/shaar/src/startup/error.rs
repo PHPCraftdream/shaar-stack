@@ -20,6 +20,17 @@ pub(crate) enum StartupError {
     IdentityConflict { role: &'static str },
     /// Adapter startup failure, redacted on rendering.
     Ygg(YggError),
+    /// Native endpoint/signaling bind failure. Names the stage only;
+    /// upstream bind text is withheld (it can echo addresses).
+    NativeBind,
+    /// Mainline DHT runtime start failure. Names the stage only.
+    MainlineStart,
+    /// Yggdrasil payload endpoint or allowlist construction failure.
+    /// Names the stage only.
+    YggPayload,
+    /// A retained shutdown stage reported an error. The stage is named;
+    /// upstream text is withheld.
+    Close { stage: &'static str },
 }
 
 impl fmt::Display for StartupError {
@@ -39,6 +50,10 @@ impl fmt::Display for StartupError {
                 "identity role conflict: {role} identity collides with a distinct required role"
             ),
             Self::Ygg(e) => write!(f, "Yggdrasil start failed: {}", redact_ygg(e)),
+            Self::NativeBind => write!(f, "native endpoint/signaling bind failed"),
+            Self::MainlineStart => write!(f, "Mainline discovery runtime start failed"),
+            Self::YggPayload => write!(f, "Yggdrasil payload endpoint construction failed"),
+            Self::Close { stage } => write!(f, "shutdown failed at the {stage} stage"),
         }
     }
 }

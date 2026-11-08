@@ -20,7 +20,7 @@ use crate::native_discovery::policy::{
 const DELIVERY_RESULTS: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::native_discovery) enum ResolveError {
+pub(crate) enum ResolveError {
     Policy(RecordError),
     Decode(DecodeError),
     NoNetworkCompletion,
@@ -29,7 +29,7 @@ pub(in crate::native_discovery) enum ResolveError {
 }
 
 #[derive(Debug)]
-pub(in crate::native_discovery) struct ResolvedAddresses {
+pub(crate) struct ResolvedAddresses {
     addresses: Vec<SocketAddr>,
     // Retain the actual backend result charge through delivery and caller use.
     _completion: Option<OwnedQueryCompletion>,
@@ -38,7 +38,7 @@ pub(in crate::native_discovery) struct ResolvedAddresses {
 }
 
 impl ResolvedAddresses {
-    pub(in crate::native_discovery) fn addresses(&self) -> &[SocketAddr] {
+    pub(crate) fn addresses(&self) -> &[SocketAddr] {
         &self.addresses
     }
 }

@@ -8,14 +8,17 @@ use crate::identity::Identity;
 use iroh_base::{EndpointId, TransportAddr};
 use iroh_dns::endpoint_info::{EndpointData, EndpointInfo};
 use std::net::SocketAddr;
+use std::time::Duration;
 
 const TTL_SECONDS: u32 = 30;
+const SIGNED_AGE_SECONDS: u64 = 300;
+const PUBLICATION_TTL: Duration = Duration::from_secs(SIGNED_AGE_SECONDS);
 const MAX_DNS_BYTES: usize = 1000;
 const MAX_SIGNED_BYTES: usize = 1104;
 const MAX_FUTURE_US: i64 = 30_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::native_discovery) enum PublishError {
+pub(crate) enum PublishError {
     Snapshot(SnapshotError),
     WrongIdentity,
     ClockFault,
@@ -23,6 +26,59 @@ pub(in crate::native_discovery) enum PublishError {
     TimestampFuture,
     Oversize,
     GenerationOverflow,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PublicationStatus {
+    Pending {
+        generation: u64,
+    },
+    Published {
+        generation: u64,
+        expires_at: tokio::time::Instant,
+    },
+    Unavailable {
+        generation: u64,
+    },
+}
+
+impl PublicationStatus {
+    pub(crate) fn generation(self) -> u64 {
+        match self {
+            Self::Pending { generation }
+            | Self::Unavailable { generation }
+            | Self::Published { generation, .. } => generation,
+        }
+    }
+
+    pub(crate) fn pending(generation: u64) -> Self {
+        Self::Pending { generation }
+    }
+
+    pub(crate) fn published(generation: u64, signed_at: tokio::time::Instant) -> Self {
+        Self::Published {
+            generation,
+            expires_at: signed_at + PUBLICATION_TTL,
+        }
+    }
+
+    pub(crate) fn unavailable(generation: u64) -> Self {
+        Self::Unavailable { generation }
+    }
+
+    pub(crate) fn publication_ttl_seconds() -> u64 {
+        SIGNED_AGE_SECONDS
+    }
+
+    pub(crate) fn current(self, now: tokio::time::Instant) -> Self {
+        match self {
+            Self::Published {
+                generation,
+                expires_at,
+            } if now >= expires_at => Self::Unavailable { generation },
+            status => status,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,6 +103,7 @@ pub(super) struct PublisherState {
     last_monotonic_after_us: Option<u64>,
     clock_fault: bool,
     generation: u64,
+    last_signed_at: tokio::time::Instant,
     active: Option<Vec<SocketAddr>>,
 }
 
@@ -60,6 +117,7 @@ impl PublisherState {
             last_monotonic_after_us: None,
             clock_fault: false,
             generation: 0,
+            last_signed_at: tokio::time::Instant::now(),
             active: None,
         }
     }
@@ -112,6 +170,7 @@ impl PublisherState {
             self.key,
             EndpointData::new(addresses.iter().copied().map(TransportAddr::Ip).collect()),
         );
+        let signed_at = tokio::time::Instant::now();
         let packet = info
             .to_pkarr_signed_packet_at(&identity.transport_key(), TTL_SECONDS, timestamp)
             .map_err(|_| PublishError::Oversize)?;
@@ -122,6 +181,7 @@ impl PublisherState {
         }
         let timestamp_us = i64::try_from(timestamp).map_err(|_| PublishError::TimestampOverflow)?;
         self.last_timestamp_us = Some(timestamp_us);
+        self.last_signed_at = signed_at;
         Ok(SignedSnapshot {
             timestamp_us,
             bytes,
@@ -136,6 +196,14 @@ impl PublisherState {
         })?;
         self.active = None;
         Ok(self.generation)
+    }
+
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub(super) fn signed_at(&self) -> tokio::time::Instant {
+        self.last_signed_at
     }
 
     pub(super) fn has_active(&self) -> bool {

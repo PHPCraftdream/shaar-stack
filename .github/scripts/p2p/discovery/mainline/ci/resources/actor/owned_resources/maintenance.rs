@@ -53,6 +53,7 @@ impl Actor {
                         owner.response_operations.remove(&operation);
                     }
                     self.core.iterative_queries.remove(target);
+                    owner.publication_observer.note_query_retired(*target);
                     false
                 } else {
                     true

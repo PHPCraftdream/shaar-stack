@@ -3,5 +3,5 @@
 #![forbid(unsafe_code)]
 
 mod clock;
-mod owner;
-mod publisher;
+pub(crate) mod owner;
+pub(crate) mod publisher;

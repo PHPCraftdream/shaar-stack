@@ -1,5 +1,5 @@
 #[path = "relay_fixture.rs"]
-mod relay_fixture;
+pub(super) mod relay_fixture;
 
 use super::*;
 use crate::network::{ALPN, Session};

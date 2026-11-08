@@ -16,7 +16,7 @@ pub use policy::{Allowlist, Limits};
     not(test),
     expect(dead_code, reason = "P10 4c path-owner wiring is pending")
 )]
-mod ygg;
+pub(crate) mod ygg;
 
 #[cfg(test)]
 #[path = "tests.rs"]
@@ -120,6 +120,10 @@ impl Endpoint {
 
     pub fn local_addr(&self) -> SocketAddr {
         self.address
+    }
+
+    pub(crate) fn native_addr_watcher(&self) -> impl iroh::Watcher<Value = EndpointAddr> + use<> {
+        self.inner.watch_addr()
     }
 
     fn admit(&self) -> Result<OwnedSemaphorePermit, NetworkError> {

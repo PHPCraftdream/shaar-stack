@@ -10,6 +10,9 @@ mod session;
 pub(crate) mod signaling;
 
 pub use admission::{Allowlist, Endpoint, Limits};
+// Narrow crate-private re-export: the composed startup builds the custom-only
+// payload endpoint from the admitted bridge (a production consumer exists).
+pub(crate) use admission::ygg::YggEndpoint;
 pub use error::NetworkError;
 pub use forwarding::{ForwardError, ForwardStats, ServeReport};
 pub use session::Session;
@@ -22,3 +25,8 @@ pub use signaling::{
 pub const ALPN: &[u8] = b"shaar/tcp/1";
 
 const STREAM_LIMIT: u8 = 16;
+
+// Re-exported only for the cfg(test)-only startup resources regression suite
+// (chunk 2b).
+#[cfg(test)]
+pub(crate) use signaling::RelayFixture;

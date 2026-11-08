@@ -12,6 +12,7 @@ use tokio::sync::Notify;
 
 use crate::resource::ResourceError;
 
+const RETIRED_QUERY_CAPACITY: usize = 32;
 const RECEIPT_CAPACITY: usize = 128;
 
 /// Cloneable observer for processed transaction receipts and bounded cleanup observation.
@@ -27,6 +28,8 @@ struct Inner {
     cleanup: Mutex<CleanupState>,
     cleanup_changed: Notify,
     actor_wake: Mutex<Option<Arc<Notify>>>,
+    retired_queries: Mutex<VecDeque<crate::Id>>,
+    retired_queries_changed: Notify,
 }
 
 #[derive(Debug, Default)]
@@ -111,6 +114,50 @@ impl Observer {
             let entered = self.inner.cleanup.lock()
                 .expect("publication observer cleanup poisoned").entered;
             if entered { return; }
+            notified.await;
+        }
+    }
+
+    /// Record the completed backend retirement of one owned GET query target.
+    /// Emitted only after the cancelled waiter's leases were dropped, the
+    /// operation was cancelled with its transactions retired, and the
+    /// iterative query was removed.
+    pub(crate) fn note_query_retired(&self, target: crate::Id) {
+        {
+            let mut retired = self
+                .inner
+                .retired_queries
+                .lock()
+                .expect("publication observer retired queries poisoned");
+            if retired.back() != Some(&target) {
+                retired.push_back(target);
+                if retired.len() > RETIRED_QUERY_CAPACITY {
+                    retired.pop_front();
+                }
+            }
+        }
+        self.inner.retired_queries_changed.notify_waiters();
+    }
+
+    /// Whether `target` has a recorded owned-query retirement.
+    pub fn has_retired_query(&self, target: crate::Id) -> bool {
+        self.inner
+            .retired_queries
+            .lock()
+            .expect("publication observer retired queries poisoned")
+            .contains(&target)
+    }
+
+    /// Wait until `target` has a recorded owned-query retirement. One
+    /// registered condition wait; no polling and no timeout-based completion.
+    pub async fn wait_query_retired(&self, target: crate::Id) {
+        loop {
+            let notified = self.inner.retired_queries_changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.has_retired_query(target) {
+                return;
+            }
             notified.await;
         }
     }
@@ -228,7 +275,8 @@ mod tests {
     use super::*;
     use crate::Id;
     use std::future::Future;
-    use std::task::Poll;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll, Waker};
 
     #[tokio::test]
     async fn receipt_cursor_matching_and_bounded_eviction() {
@@ -299,5 +347,118 @@ mod tests {
         observer.inner.state.lock().expect("observer state").processed = u64::MAX;
         assert_eq!(observer.processed(5), Err(ResourceError::ResultLimit));
         assert_eq!(observer.cursor(), u64::MAX);
+    }
+
+    /// Counts wakings delivered through a registered waker; the std `Wake`
+    /// trait builds it without unsafe and without an async runtime.
+    #[derive(Default)]
+    struct WakeCounter {
+        wakes: AtomicUsize,
+    }
+
+    impl std::task::Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.wakes.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// The retirement note wakes the registered waiter even when the recorded
+    /// target does not match; only the poll after the matching note recognizes
+    /// the condition. Notification and condition recognition stay distinct, so
+    /// removing `notify_waiters` from `note_query_retired` fails the wake
+    /// counters below instead of hanging a waiter.
+    #[test]
+    fn query_retirement_note_wakes_the_registered_waker_before_target_recognition() {
+        let observer = Observer::default();
+        let retired_target = Id::from([0xD1; 20]);
+        let other_target = Id::from([0xD2; 20]);
+        let counter = Arc::new(WakeCounter::default());
+        let mut pending = std::pin::pin!(observer.wait_query_retired(retired_target));
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut context = Context::from_waker(&waker);
+        let wakes = || counter.wakes.load(Ordering::SeqCst);
+
+        assert!(matches!(
+            Future::poll(pending.as_mut(), &mut context),
+            Poll::Pending
+        ));
+        assert_eq!(wakes(), 0, "no note, no wake");
+
+        observer.note_query_retired(other_target);
+        assert_eq!(wakes(), 1, "non-matching note wakes the registered waker");
+        assert!(matches!(
+            Future::poll(pending.as_mut(), &mut context),
+            Poll::Pending
+        ));
+        assert_eq!(wakes(), 1, "the recognition poll itself wakes nothing");
+
+        observer.note_query_retired(retired_target);
+        assert_eq!(wakes(), 2, "matching note wakes the registered waker");
+        assert!(matches!(
+            Future::poll(pending.as_mut(), &mut context),
+            Poll::Ready(())
+        ));
+    }
+
+    /// A retirement noted before the wait makes the very first poll ready.
+    #[test]
+    fn prior_query_retirement_note_makes_the_first_poll_ready() {
+        let observer = Observer::default();
+        let target = Id::from([0xD3; 20]);
+        observer.note_query_retired(target);
+        assert!(observer.has_retired_query(target));
+        let counter = Arc::new(WakeCounter::default());
+        let mut pending = std::pin::pin!(observer.wait_query_retired(target));
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut context = Context::from_waker(&waker);
+        assert!(matches!(
+            Future::poll(pending.as_mut(), &mut context),
+            Poll::Ready(())
+        ));
+        assert_eq!(
+            counter.wakes.load(Ordering::SeqCst),
+            0,
+            "ready needs no wake"
+        );
+    }
+
+    #[test]
+    fn query_retirement_history_is_bounded_coalesced_and_evicts_oldest() {
+        let observer = Observer::default();
+        let first = Id::from([0xD4; 20]);
+        let second = Id::from([0xD5; 20]);
+        observer.note_query_retired(first);
+        observer.note_query_retired(first);
+        {
+            let retired = observer
+                .inner
+                .retired_queries
+                .lock()
+                .expect("publication observer retired queries poisoned");
+            assert_eq!(retired.len(), 1, "consecutive duplicates coalesce");
+        }
+        observer.note_query_retired(second);
+        observer.note_query_retired(first);
+        {
+            let retired = observer
+                .inner
+                .retired_queries
+                .lock()
+                .expect("publication observer retired queries poisoned");
+            assert_eq!(retired.len(), 3, "non-consecutive targets stay recorded");
+        }
+        for index in 0..=RETIRED_QUERY_CAPACITY {
+            let mut bytes = [0_u8; 20];
+            bytes[0] = index as u8;
+            observer.note_query_retired(Id::from(bytes));
+        }
+        let retired = observer
+            .inner
+            .retired_queries
+            .lock()
+            .expect("publication observer retired queries poisoned");
+        assert_eq!(retired.len(), RETIRED_QUERY_CAPACITY, "history stays bounded");
+        assert!(!retired.contains(&first), "oldest entries are evicted");
+        assert!(!retired.contains(&second), "oldest entries are evicted");
     }
 }

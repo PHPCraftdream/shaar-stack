@@ -13,14 +13,16 @@ use libp2p::{
 use shaar_p2p::{OwnedExecutor, RelayAddr};
 use tokio::{sync::oneshot, task::JoinSet};
 
-pub(super) struct RelayFixture {
-    pub(super) address: RelayAddr,
+// Widened to `pub(crate)` ONLY for the cfg(test)-only startup resources
+// regression suite (this module itself is #[cfg(test)]-only).
+pub(crate) struct RelayFixture {
+    pub(crate) address: RelayAddr,
     stop: Option<oneshot::Sender<()>>,
     tasks: JoinSet<io::Result<()>>,
 }
 impl RelayFixture {
     /// cancel-safe: NO — fixture Drop aborts, while successful close joins its retained root.
-    pub(super) async fn start() -> Self {
+    pub(crate) async fn start() -> Self {
         let key = Keypair::generate_ed25519();
         let peer = key.public().to_peer_id();
         let (ready, address) = oneshot::channel();
@@ -35,7 +37,7 @@ impl RelayFixture {
         }
     }
     /// cancel-safe: NO — only successful return proves the relay root and I/O were joined.
-    pub(super) async fn close(mut self) {
+    pub(crate) async fn close(mut self) {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }

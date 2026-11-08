@@ -7,6 +7,7 @@ pub(in crate::native_discovery::runtime::owner) mod connect;
 mod lifecycle;
 mod records;
 mod recovery;
+mod status;
 
 use super::endpoint::{NativeDiscoveredEndpoint, NativeEndpointError};
 use super::options::NativeDiscoveryOptions;

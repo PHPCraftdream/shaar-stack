@@ -11,7 +11,7 @@
 use iroh_base::PublicKey;
 use libp2p_identity::PeerId;
 
-use crate::config::{ClientConfig, NetworkSettings, ServerConfig};
+use crate::config::{ClientConfig, Fallback, NetworkSettings, ServerConfig};
 use crate::identity::Identity;
 
 use super::StartupError;
@@ -24,6 +24,10 @@ pub(crate) const MAX_STARTUP_APP_PEERS: usize = 16;
 pub(crate) struct ComposedStartupPlan<'a> {
     network: &'a NetworkSettings,
     app_peers: &'a [PublicKey],
+    /// Configured fallback transport selection, captured verbatim from the
+    /// role config; decides whether the Yggdrasil payload endpoint is built
+    /// (`Standby`) or the bridge stays control-only (`Signal`).
+    mode: Fallback,
 }
 
 impl ComposedStartupPlan<'_> {
@@ -36,6 +40,11 @@ impl ComposedStartupPlan<'_> {
     pub(crate) fn app_peers(&self) -> &[PublicKey] {
         self.app_peers
     }
+
+    /// The configured fallback transport selection.
+    pub(crate) fn fallback(&self) -> Fallback {
+        self.mode
+    }
 }
 
 /// Preflight for the composed server role (no configured remote service key).
@@ -44,7 +53,13 @@ pub(crate) fn preflight_server<'a>(
     identity: &Identity,
     app_peers: &'a [PublicKey],
 ) -> Result<ComposedStartupPlan<'a>, StartupError> {
-    preflight_shared(config.network(), &[], identity, app_peers)
+    preflight_shared(
+        config.network(),
+        &[],
+        config.fallback(),
+        identity,
+        app_peers,
+    )
 }
 
 /// Preflight for the composed client role; the pinned server key is a
@@ -58,12 +73,19 @@ pub(crate) fn preflight_client<'a>(
     // parse (client.rs FromStr path), so this rebuild cannot fail.
     let service_key = PublicKey::from_bytes(config.server_key_bytes())
         .expect("configured service key is a valid Ed25519 public key");
-    preflight_shared(config.network(), &[service_key], identity, app_peers)
+    preflight_shared(
+        config.network(),
+        &[service_key],
+        config.fallback(),
+        identity,
+        app_peers,
+    )
 }
 
 fn preflight_shared<'a>(
     network: Option<&'a NetworkSettings>,
     service_keys: &[PublicKey],
+    mode: Fallback,
     identity: &Identity,
     app_peers: &'a [PublicKey],
 ) -> Result<ComposedStartupPlan<'a>, StartupError> {
@@ -104,7 +126,11 @@ fn preflight_shared<'a>(
             });
         }
     }
-    Ok(ComposedStartupPlan { network, app_peers })
+    Ok(ComposedStartupPlan {
+        network,
+        app_peers,
+        mode,
+    })
 }
 
 /// The helper only fails on non-Ed25519 keys, which the typed

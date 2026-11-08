@@ -14,6 +14,30 @@ fn sample(wall_us: i64, monotonic_us: u64) -> ClockSample {
 }
 
 #[test]
+fn publication_status_uses_signed_freshness_horizon() {
+    use super::PublicationStatus;
+    use std::time::Duration;
+
+    let signed_at = tokio::time::Instant::now();
+    let acknowledged_at = signed_at + Duration::from_secs(5);
+    let published = PublicationStatus::published(7, signed_at);
+    assert!(matches!(
+        published.current(signed_at + Duration::from_secs(299)),
+        PublicationStatus::Published { generation: 7, .. }
+    ));
+    assert_eq!(PublicationStatus::publication_ttl_seconds(), 300);
+    assert_eq!(
+        published.current(signed_at + Duration::from_secs(300)),
+        PublicationStatus::Unavailable { generation: 7 }
+    );
+    assert_eq!(
+        published.current(acknowledged_at + Duration::from_secs(295)),
+        PublicationStatus::Unavailable { generation: 7 },
+        "a five-second PUT delay does not start another 300-second freshness window"
+    );
+}
+
+#[test]
 fn rejects_empty_and_invalid_snapshots_after_revoking_generation() {
     let identity = test_identity();
     let mut state = PublisherState::new(test_key(&identity));

@@ -252,3 +252,56 @@ async fn actual_actor_retains_completed_result_leases_until_last_clone_drops() {
     drop(admitted);
     actor.tick_owned();
 }
+
+// Isolation scope only: owned_mutable carries no request lease, so charge and
+// transaction-retirement coverage lives in actor_admission_tests.
+#[tokio::test]
+async fn cancelled_get_receipt_is_target_scoped_and_spares_live_query() {
+    let (_peer, bootstrap_address) = capture();
+    let mut actor = bounded_actor(bootstrap_address);
+    let cancelled_target = Id::from([0xD8; 20]);
+    let live_target = Id::from([0xD9; 20]);
+    assert_ne!(cancelled_target, *actor.core.routing_table.id());
+    assert_ne!(live_target, *actor.core.routing_table.id());
+    let observer = actor.owned_publication_observer();
+    assert!(!observer.has_retired_query(cancelled_target));
+    assert!(!observer.has_retired_query(live_target));
+
+    let (cancelled_sender, cancelled_reply) = oneshot::channel();
+    actor
+        .owned_mutable(cancelled_target, cancelled_sender)
+        .expect("admit cancelled GET");
+    let (live_sender, _live_reply) = oneshot::channel();
+    actor
+        .owned_mutable(live_target, live_sender)
+        .expect("admit live GET");
+
+    drop(cancelled_reply);
+    actor.tick_owned();
+    assert!(
+        observer.has_retired_query(cancelled_target),
+        "target-specific retirement receipt recorded"
+    );
+    assert!(!actor.core.iterative_queries.contains_key(&cancelled_target));
+    assert!(
+        !actor
+            .owned_resources
+            .as_ref()
+            .unwrap()
+            .operations
+            .contains_key(&cancelled_target)
+    );
+    assert!(
+        !observer.has_retired_query(live_target),
+        "live query is not retired with the cancelled one"
+    );
+    assert!(actor.core.iterative_queries.contains_key(&live_target));
+    assert!(
+        actor
+            .owned_resources
+            .as_ref()
+            .unwrap()
+            .operations
+            .contains_key(&live_target)
+    );
+}

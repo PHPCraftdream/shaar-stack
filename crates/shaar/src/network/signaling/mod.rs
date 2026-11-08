@@ -77,3 +77,8 @@ pub(crate) fn peer_id(key: &PublicKey) -> io::Result<PeerId> {
 
 #[cfg(test)]
 mod tests;
+
+// Re-exported only for the cfg(test)-only startup resources regression suite
+// (chunk 2b); the fixture is #[cfg(test)]-only and invisible otherwise.
+#[cfg(test)]
+pub(crate) use endpoint::RelayFixture;

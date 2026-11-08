@@ -4,41 +4,22 @@
 
 use std::time::Duration;
 
-use n0_mainline::{
-    OwnedDhtHandle, OwnedPutAdmission, OwnedPutAdmissionError, OwnedPutCleanup, OwnedPutError,
-    OwnedPutOperation,
-};
-use tokio::sync::{mpsc, oneshot};
+use n0_mainline::{OwnedDhtHandle, OwnedPutAdmissionError, OwnedPutCleanup, OwnedPutError};
+use tokio::sync::{mpsc, oneshot, watch};
 
-use super::super::super::address::SnapshotError;
 use super::super::clock::Clock;
-use super::super::owner::{Command, RuntimeError, to_mutable};
+use super::super::owner::{Command, RuntimeError};
 #[cfg(test)]
 use super::super::publisher::CleanupReceipt;
-use super::super::publisher::{PublishError, PublisherState, SignedSnapshot};
+use super::super::publisher::{PublicationStatus, PublisherState};
+use super::flight::{
+    Flight, Queued, Work, addresses_are_ready, expired, fail_queued, finish_completed,
+    make_refresh, make_replacement, replace_queued, revoke, send_deadline,
+};
 use crate::identity::Identity;
-use iroh_base::{EndpointId, TransportAddr};
+use iroh_base::EndpointId;
 
 const REFRESH: Duration = Duration::from_secs(60);
-type Queued = (
-    Result<Vec<TransportAddr>, SnapshotError>,
-    tokio::time::Instant,
-    oneshot::Sender<Result<(), RuntimeError>>,
-);
-
-enum Work {
-    Admission(OwnedPutAdmission),
-    Operation(OwnedPutOperation),
-}
-
-struct Flight {
-    generation: u64,
-    work: Work,
-    reply: Option<oneshot::Sender<Result<(), RuntimeError>>>,
-    initial: bool,
-    revoked: bool,
-    deadline: tokio::time::Instant,
-}
 
 enum Event {
     Command(Option<Command>),
@@ -56,8 +37,10 @@ pub(super) async fn publisher_loop(
     mut commands: mpsc::Receiver<Command>,
     mut stop: oneshot::Receiver<()>,
     clock: Clock,
+    publication: watch::Sender<PublicationStatus>,
 ) {
     let mut state = PublisherState::new(key);
+    let publication_view = publication.subscribe();
     let mut timer = tokio::time::interval(REFRESH);
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     timer.tick().await;
@@ -114,6 +97,7 @@ pub(super) async fn publisher_loop(
                         &mut timer,
                         &mut terminal,
                         &clock,
+                        &publication,
                     );
                 }
                 continue;
@@ -129,18 +113,40 @@ pub(super) async fn publisher_loop(
                 event = work_event(&mut current.work) => event,
             };
             match event {
-                Event::Command(Some(Command::Replace(snapshot, deadline, reply))) => {
+                Event::Command(Some(Command::Replace(snapshot, deadline, reply, admitted))) => {
                     revoke(&mut state, &mut terminal);
+                    let generation = state.generation();
+                    let replacement_status = if addresses_are_ready(&snapshot) {
+                        PublicationStatus::pending(generation)
+                    } else {
+                        PublicationStatus::unavailable(generation)
+                    };
+                    publication.send_replace(replacement_status);
                     current.revoked = true;
                     replace_queued(&mut queued, snapshot, deadline, reply);
+                    if let Some(admitted) = admitted {
+                        let _ = admitted.send(());
+                    }
+                }
+                Event::Command(Some(Command::PublicationStatus(reply))) => {
+                    let status = publication_view
+                        .borrow()
+                        .current(tokio::time::Instant::now());
+                    let _ = reply.send(status);
                 }
                 Event::Command(Some(Command::Sample(deadline, reply))) => {
-                    let result = sample_clock(&mut state, &clock, &mut terminal, deadline);
-                    current.revoked |= terminal;
+                    let result =
+                        sample_clock(&mut state, &clock, &mut terminal, deadline, &publication);
+                    if terminal {
+                        current.revoked = true;
+                        publication
+                            .send_replace(PublicationStatus::unavailable(state.generation()));
+                    }
                     let _ = reply.send(result);
                 }
                 Event::Command(Some(Command::Withdraw(reply))) => {
                     revoke(&mut state, &mut terminal);
+                    publication.send_replace(PublicationStatus::unavailable(state.generation()));
                     current.revoked = true;
                     if let Some(old) = withdrawal.replace(reply) {
                         let _ = old.send(Err(RuntimeError::Closed));
@@ -158,11 +164,13 @@ pub(super) async fn publisher_loop(
                 }
                 Event::Command(None) => {
                     revoke(&mut state, &mut terminal);
+                    publication.send_replace(PublicationStatus::unavailable(state.generation()));
                     current.revoked = true;
                     commands_closed = true;
                 }
                 Event::Stop => {
                     revoke(&mut state, &mut terminal);
+                    publication.send_replace(PublicationStatus::unavailable(state.generation()));
                     current.revoked = true;
                     stopping = true;
                     fail_queued(&mut queued);
@@ -171,6 +179,8 @@ pub(super) async fn publisher_loop(
                     if current.initial {
                         revoke(&mut state, &mut terminal);
                     }
+                    let generation = state.generation();
+                    publication.send_replace(PublicationStatus::unavailable(generation));
                     current.revoked = true;
                     if let Some(reply) = current.reply.take() {
                         let _ = reply.send(Err(RuntimeError::DeadlineExceeded));
@@ -179,6 +189,8 @@ pub(super) async fn publisher_loop(
                 }
                 Event::ReplyCancelled => {
                     revoke(&mut state, &mut terminal);
+                    let generation = state.generation();
+                    publication.send_replace(PublicationStatus::unavailable(generation));
                     current.revoked = true;
                     fail_queued(&mut queued);
                 }
@@ -213,6 +225,11 @@ pub(super) async fn publisher_loop(
                     }
                     if current.initial || !clean {
                         revoke(&mut state, &mut terminal);
+                    }
+                    let current_generation = current.generation;
+                    if !clean || current.initial || state.generation_is_active(current_generation) {
+                        let generation = state.generation();
+                        publication.send_replace(PublicationStatus::unavailable(generation));
                     }
                     if let Some(reply) = current.reply.take() {
                         let result = if error.error == n0_mainline::ResourceError::DeadlineExceeded
@@ -257,6 +274,7 @@ pub(super) async fn publisher_loop(
                         before_deadline,
                         &mut terminal,
                         &mut timer,
+                        &publication,
                     );
                     if let Some(reply) = withdrawal.take() {
                         let result = if clean && !terminal {
@@ -283,6 +301,7 @@ pub(super) async fn publisher_loop(
                                 &mut timer,
                                 &mut terminal,
                                 &clock,
+                                &publication,
                             );
                         }
                     }
@@ -306,6 +325,8 @@ pub(super) async fn publisher_loop(
             return;
         }
         if terminal {
+            let generation = state.generation();
+            publication.send_replace(PublicationStatus::unavailable(generation));
             fail_queued(&mut queued);
         } else if let Some((snapshot, deadline, reply)) = queued.take() {
             if expired(deadline) {
@@ -320,6 +341,7 @@ pub(super) async fn publisher_loop(
                 &mut timer,
                 &mut terminal,
                 &clock,
+                &publication,
             );
             continue;
         }
@@ -328,18 +350,42 @@ pub(super) async fn publisher_loop(
             biased;
             _ = &mut stop => {
                 revoke(&mut state, &mut terminal);
+                publication.send_replace(PublicationStatus::unavailable(state.generation()));
                 stopping = true;
             }
             command = commands.recv(), if !commands_closed => match command {
-                Some(Command::Replace(snapshot, deadline, reply)) => {
+                Some(Command::Replace(snapshot, deadline, reply, admitted)) => {
                     revoke(&mut state, &mut terminal);
+                    let generation = state.generation();
+                    let replacement_status = if addresses_are_ready(&snapshot) {
+                        PublicationStatus::pending(generation)
+                    } else {
+                        PublicationStatus::unavailable(generation)
+                    };
+                    publication.send_replace(replacement_status);
                     replace_queued(&mut queued, snapshot, deadline, reply);
+                    if let Some(admitted) = admitted {
+                        let _ = admitted.send(());
+                    }
+                }
+                Some(Command::PublicationStatus(reply)) => {
+                    let status = publication_view
+                        .borrow()
+                        .current(tokio::time::Instant::now());
+                    let _ = reply.send(status);
                 }
                 Some(Command::Sample(deadline, reply)) => {
-                    let _ = reply.send(sample_clock(&mut state, &clock, &mut terminal, deadline));
+                    let result = sample_clock(&mut state, &clock, &mut terminal, deadline, &publication);
+                    if terminal {
+                        let generation = state.generation();
+                        publication.send_replace(PublicationStatus::unavailable(generation));
+                    }
+                    let _ = reply.send(result);
                 }
                 Some(Command::Withdraw(reply)) => {
                     revoke(&mut state, &mut terminal);
+                    let generation = state.generation();
+                    publication.send_replace(PublicationStatus::unavailable(generation));
                     let _ = reply.send(if terminal { Err(RuntimeError::Closed) } else { Ok(()) });
                 }
                 #[cfg(test)]
@@ -352,12 +398,18 @@ pub(super) async fn publisher_loop(
                 }
                 None => {
                     revoke(&mut state, &mut terminal);
+                    let generation = state.generation();
+                    publication.send_replace(PublicationStatus::unavailable(generation));
                     commands_closed = true;
                 }
             },
             _ = timer.tick(), if state.has_active() && !terminal => {
                 refresh_count = refresh_count.saturating_add(1);
-                flight = make_refresh(&mut state, &identity, &handle, &mut timer, &mut terminal, &clock);
+                flight = make_refresh(&mut state, &identity, &handle, &mut timer, &mut terminal, &clock, &publication);
+                if flight.is_none() {
+                    let generation = state.generation();
+                    publication.send_replace(PublicationStatus::unavailable(generation));
+                }
             }
         }
     }
@@ -368,6 +420,7 @@ fn sample_clock(
     clock: &Clock,
     terminal: &mut bool,
     deadline: tokio::time::Instant,
+    publication: &watch::Sender<PublicationStatus>,
 ) -> Result<super::super::clock::ClockSample, RuntimeError> {
     if expired(deadline) {
         return Err(RuntimeError::DeadlineExceeded);
@@ -382,6 +435,8 @@ fn sample_clock(
     if result.is_err() {
         revoke(state, terminal);
         *terminal = true;
+        let generation = state.generation();
+        publication.send_replace(PublicationStatus::unavailable(generation));
     }
     result
 }
@@ -435,244 +490,4 @@ async fn reply_closed(reply: &mut Option<oneshot::Sender<Result<(), RuntimeError
     } else {
         std::future::pending::<()>().await;
     }
-}
-
-fn finish_completed(
-    state: &mut PublisherState,
-    flight: &mut Flight,
-    outcome: Result<(), RuntimeError>,
-    before_deadline: bool,
-    terminal: &mut bool,
-    timer: &mut tokio::time::Interval,
-) {
-    let active = !flight.revoked && state.generation_is_active(flight.generation);
-    if !active {
-        if let Some(reply) = flight.reply.take() {
-            let _ = reply.send(Err(RuntimeError::Closed));
-        }
-        return;
-    }
-    if !before_deadline {
-        if let Some(reply) = flight.reply.take() {
-            let _ = reply.send(Err(RuntimeError::DeadlineExceeded));
-        }
-        if flight.initial {
-            revoke(state, terminal);
-        }
-        timer.reset();
-        return;
-    }
-
-    let successful = outcome.is_ok();
-    if flight.initial {
-        if let Some(reply) = flight.reply.take() {
-            if reply.send(outcome).is_err() || !successful {
-                revoke(state, terminal);
-            } else {
-                timer.reset();
-            }
-        }
-    } else if !successful {
-        timer.reset();
-    }
-}
-
-fn replace_queued(
-    queued: &mut Option<Queued>,
-    snapshot: Result<Vec<TransportAddr>, SnapshotError>,
-    deadline: tokio::time::Instant,
-    reply: oneshot::Sender<Result<(), RuntimeError>>,
-) {
-    if let Some((_, _, old)) = queued.replace((snapshot, deadline, reply)) {
-        let _ = old.send(Err(RuntimeError::Closed));
-    }
-}
-
-fn fail_queued(queued: &mut Option<Queued>) {
-    if let Some((_, _, reply)) = queued.take() {
-        let _ = reply.send(Err(RuntimeError::Closed));
-    }
-}
-
-fn expired(deadline: tokio::time::Instant) -> bool {
-    tokio::time::Instant::now() >= deadline
-}
-
-fn send_deadline(reply: oneshot::Sender<Result<(), RuntimeError>>) {
-    let _ = reply.send(Err(RuntimeError::DeadlineExceeded));
-}
-
-fn revoke(state: &mut PublisherState, terminal: &mut bool) {
-    if state.revoke().is_err() {
-        *terminal = true;
-    }
-}
-
-fn make_replacement(
-    state: &mut PublisherState,
-    identity: &Identity,
-    handle: &OwnedDhtHandle,
-    request: Queued,
-    timer: &mut tokio::time::Interval,
-    terminal: &mut bool,
-    clock: &Clock,
-) -> Option<Flight> {
-    let (snapshot, deadline, reply) = request;
-    if reply.is_closed() {
-        revoke(state, terminal);
-        return None;
-    }
-    if *terminal {
-        let _ = reply.send(Err(RuntimeError::Closed));
-        return None;
-    }
-    if expired(deadline) {
-        send_deadline(reply);
-        return None;
-    }
-    let snapshot = match snapshot {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            let _ = reply.send(Err(RuntimeError::Publish(PublishError::Snapshot(error))));
-            return None;
-        }
-    };
-    let sample = match clock.sample() {
-        Ok(sample) => sample,
-        Err(error) => {
-            *terminal = true;
-            revoke(state, terminal);
-            let _ = reply.send(Err(error));
-            return None;
-        }
-    };
-    let (generation, packet) = match state.replace(identity, &snapshot, sample) {
-        Ok(value) => value,
-        Err(error) => {
-            if matches!(
-                error,
-                PublishError::ClockFault | PublishError::GenerationOverflow
-            ) {
-                *terminal = true;
-                revoke(state, terminal);
-            }
-            let _ = reply.send(Err(RuntimeError::Publish(error)));
-            return None;
-        }
-    };
-    let Some(packet) = packet else {
-        let _ = reply.send(Ok(()));
-        timer.reset();
-        return None;
-    };
-    let flight = make_flight(
-        handle,
-        generation,
-        packet,
-        Some(reply),
-        true,
-        deadline,
-        terminal,
-    );
-    if flight.is_none() {
-        revoke(state, terminal);
-    }
-    flight
-}
-
-fn make_refresh(
-    state: &mut PublisherState,
-    identity: &Identity,
-    handle: &OwnedDhtHandle,
-    timer: &mut tokio::time::Interval,
-    terminal: &mut bool,
-    clock: &Clock,
-) -> Option<Flight> {
-    let sample = match clock.sample() {
-        Ok(sample) => sample,
-        Err(_) => {
-            *terminal = true;
-            revoke(state, terminal);
-            return None;
-        }
-    };
-    let (generation, packet) = match state.refresh(identity, sample) {
-        Ok(value) => value,
-        Err(error) => {
-            if matches!(
-                error,
-                PublishError::ClockFault | PublishError::GenerationOverflow
-            ) {
-                *terminal = true;
-                revoke(state, terminal);
-            }
-            timer.reset();
-            return None;
-        }
-    };
-    timer.reset();
-    let packet = packet?;
-    let flight = make_flight(
-        handle,
-        generation,
-        packet,
-        None,
-        false,
-        tokio::time::Instant::now() + Duration::from_secs(10),
-        terminal,
-    );
-    if flight.is_none() && *terminal {
-        revoke(state, terminal);
-    }
-    flight
-}
-
-fn make_flight(
-    handle: &OwnedDhtHandle,
-    generation: u64,
-    packet: SignedSnapshot,
-    reply: Option<oneshot::Sender<Result<(), RuntimeError>>>,
-    initial: bool,
-    deadline: tokio::time::Instant,
-    terminal: &mut bool,
-) -> Option<Flight> {
-    let item = match to_mutable(&packet) {
-        Ok(item) => item,
-        Err(error) => {
-            if let Some(reply) = reply {
-                let _ = reply.send(Err(error));
-            }
-            return None;
-        }
-    };
-    if expired(deadline) {
-        if let Some(reply) = reply {
-            let _ = reply.send(Err(RuntimeError::DeadlineExceeded));
-        }
-        return None;
-    }
-    let admission = match handle.put_mutable_until(item, deadline) {
-        Ok(admission) => admission,
-        Err(error) => {
-            if error.cleanup == OwnedPutCleanup::Unknown {
-                *terminal = true;
-            }
-            if let Some(reply) = reply {
-                if error.error == n0_mainline::ResourceError::DeadlineExceeded {
-                    let _ = reply.send(Err(RuntimeError::DeadlineExceeded));
-                } else {
-                    let _ = reply.send(Err(RuntimeError::PutAdmission(error)));
-                }
-            }
-            return None;
-        }
-    };
-    Some(Flight {
-        generation,
-        work: Work::Admission(admission),
-        reply,
-        initial,
-        revoked: false,
-        deadline,
-    })
 }
