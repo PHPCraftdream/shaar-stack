@@ -72,7 +72,10 @@ pub(crate) enum MaintenanceJoinFailure {
 }
 
 pub(crate) enum MaintenanceJoin {
-    Exit(MaintenanceExit),
+    /// Boxed: the exit payload carries the whole retained RuntimeOwner, and
+    /// a join is a one-shot lifecycle event — one bounded allocation instead
+    /// of moving a ~300-byte enum through every close-path observation.
+    Exit(Box<MaintenanceExit>),
     Failed(MaintenanceJoinFailure),
 }
 
@@ -217,7 +220,7 @@ impl Maintenance {
         let result = task.await;
         self.task = None;
         match result {
-            Ok(exit) => Some(MaintenanceJoin::Exit(exit)),
+            Ok(exit) => Some(MaintenanceJoin::Exit(Box::new(exit))),
             Err(error) => {
                 let failure = if error.is_cancelled() {
                     MaintenanceJoinFailure::Cancelled
@@ -269,25 +272,26 @@ async fn maintain(
         None;
 
     loop {
-        if publish.is_none() && retry_at.is_none() {
-            if let Some(next) = latest.take() {
-                current = Some(next.clone());
-                #[cfg(test)]
-                {
-                    active_reply = waiting_reply.take();
-                }
-                let replace_publisher = publisher.clone();
-                let query_publisher = publisher.clone();
-                let (admitted, admission) = oneshot::channel();
-                publish_admission = Some(admission);
-                publish = Some(Box::pin(async move {
-                    replace_publisher
-                        .replace_with_admission(next, admitted)
-                        .await
-                }));
-                if status_reply.is_some() {
-                    status_query = status_future(query_publisher, publish_admission.take());
-                }
+        if publish.is_none()
+            && retry_at.is_none()
+            && let Some(next) = latest.take()
+        {
+            current = Some(next.clone());
+            #[cfg(test)]
+            {
+                active_reply = waiting_reply.take();
+            }
+            let replace_publisher = publisher.clone();
+            let query_publisher = publisher.clone();
+            let (admitted, admission) = oneshot::channel();
+            publish_admission = Some(admission);
+            publish = Some(Box::pin(async move {
+                replace_publisher
+                    .replace_with_admission(next, admitted)
+                    .await
+            }));
+            if status_reply.is_some() {
+                status_query = status_future(query_publisher, publish_admission.take());
             }
         }
 
@@ -549,15 +553,12 @@ fn status_future(
         publisher.query_publication_status().await
     }))
 }
-async fn resolve_owned<'a>(
-    owner: &'a mut RuntimeOwner,
+async fn resolve_owned(
+    owner: &mut RuntimeOwner,
     key: EndpointId,
     deadline: tokio::time::Instant,
     mut canceled: oneshot::Receiver<()>,
-) -> (
-    &'a mut RuntimeOwner,
-    Result<ResolvedAddresses, RuntimeError>,
-) {
+) -> (&mut RuntimeOwner, Result<ResolvedAddresses, RuntimeError>) {
     let mut operation = Box::pin(owner.resolve_until(key, deadline));
     let result = tokio::select! {
         biased;

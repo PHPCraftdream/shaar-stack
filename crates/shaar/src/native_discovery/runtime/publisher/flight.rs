@@ -25,12 +25,31 @@ pub(super) enum Work {
     Operation(OwnedPutOperation),
 }
 
+/// Ambient publication services the flight constructors share with the
+/// owner loop; one stack bundle instead of parallel argument lists.
+pub(super) struct PublicationServices<'a> {
+    pub(super) timer: &'a mut tokio::time::Interval,
+    pub(super) terminal: &'a mut bool,
+    pub(super) clock: &'a Clock,
+    pub(super) publication: &'a watch::Sender<PublicationStatus>,
+}
+
 pub(super) struct Flight {
     pub(super) generation: u64,
     pub(super) work: Work,
     pub(super) reply: Option<oneshot::Sender<Result<(), RuntimeError>>>,
     pub(super) initial: bool,
     pub(super) revoked: bool,
+    pub(super) deadline: tokio::time::Instant,
+    pub(super) signed_at: tokio::time::Instant,
+}
+
+/// Pre-admission flight record: exactly the fields a constructed Flight
+/// carries before the Mainline admission is attached.
+pub(super) struct FlightDraft {
+    pub(super) generation: u64,
+    pub(super) reply: Option<oneshot::Sender<Result<(), RuntimeError>>>,
+    pub(super) initial: bool,
     pub(super) deadline: tokio::time::Instant,
     pub(super) signed_at: tokio::time::Instant,
 }
@@ -149,11 +168,14 @@ pub(super) fn make_replacement(
     identity: &Identity,
     handle: &OwnedDhtHandle,
     request: Queued,
-    timer: &mut tokio::time::Interval,
-    terminal: &mut bool,
-    clock: &Clock,
-    publication: &watch::Sender<PublicationStatus>,
+    services: PublicationServices<'_>,
 ) -> Option<Flight> {
+    let PublicationServices {
+        timer,
+        terminal,
+        clock,
+        publication,
+    } = services;
     let (snapshot, deadline, reply) = request;
     if reply.is_closed() {
         revoke(state, terminal);
@@ -218,12 +240,14 @@ pub(super) fn make_replacement(
     };
     let flight = make_flight(
         handle,
-        generation,
         packet,
-        Some(reply),
-        true,
-        deadline,
-        state.signed_at(),
+        FlightDraft {
+            generation,
+            reply: Some(reply),
+            initial: true,
+            deadline,
+            signed_at: state.signed_at(),
+        },
         terminal,
     );
     if flight.is_none() {
@@ -237,11 +261,14 @@ pub(super) fn make_refresh(
     state: &mut PublisherState,
     identity: &Identity,
     handle: &OwnedDhtHandle,
-    timer: &mut tokio::time::Interval,
-    terminal: &mut bool,
-    clock: &Clock,
-    publication: &watch::Sender<PublicationStatus>,
+    services: PublicationServices<'_>,
 ) -> Option<Flight> {
+    let PublicationServices {
+        timer,
+        terminal,
+        clock,
+        publication,
+    } = services;
     let sample = match clock.sample() {
         Ok(sample) => sample,
         Err(_) => {
@@ -275,12 +302,14 @@ pub(super) fn make_refresh(
     timer.reset();
     let flight = make_flight(
         handle,
-        generation,
         packet,
-        None,
-        false,
-        tokio::time::Instant::now() + Duration::from_secs(10),
-        state.signed_at(),
+        FlightDraft {
+            generation,
+            reply: None,
+            initial: false,
+            deadline: tokio::time::Instant::now() + Duration::from_secs(10),
+            signed_at: state.signed_at(),
+        },
         terminal,
     );
     if flight.is_none() {
@@ -294,14 +323,17 @@ pub(super) fn make_refresh(
 
 fn make_flight(
     handle: &OwnedDhtHandle,
-    generation: u64,
     packet: SignedSnapshot,
-    reply: Option<oneshot::Sender<Result<(), RuntimeError>>>,
-    initial: bool,
-    deadline: tokio::time::Instant,
-    signed_at: tokio::time::Instant,
+    draft: FlightDraft,
     terminal: &mut bool,
 ) -> Option<Flight> {
+    let FlightDraft {
+        generation,
+        reply,
+        initial,
+        deadline,
+        signed_at,
+    } = draft;
     let item = match to_mutable(&packet) {
         Ok(item) => item,
         Err(error) => {
