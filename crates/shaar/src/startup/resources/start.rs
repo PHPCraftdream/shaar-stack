@@ -372,7 +372,7 @@ async fn run_startup(
     }
     #[cfg(test)]
     {
-        let actor_id = owner
+        let actor_id: n0_mainline::Id = *owner
             .dht_handle()
             .expect("owned mainline DHT handle")
             .info()
