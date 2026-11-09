@@ -84,7 +84,7 @@ pub(super) async fn shutdown_client_while_starting<S>(
         tokio::select! {
             result = &mut *outer_server => panic!(
                 "outer server stopped while rollback client PUT is acknowledged: {result:?}"),
-            result = peer.acknowledge(source, &transaction) => {},
+            _ = peer.acknowledge(source, &transaction) => {},
         }
     })
     .await

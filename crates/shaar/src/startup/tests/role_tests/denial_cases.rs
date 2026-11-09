@@ -48,7 +48,7 @@ async fn disallowed_key_causes_zero_target_connections_and_allowed_key_succeeds(
         let server_identity = identity(CASE_FIVE_SERVICE);
         let denied_identity = identity(CASE_FIVE_DENIED);
         let allowed_identity = identity(CASE_FIVE_ALLOWED);
-        let allowed_key = PublicKey::from_bytes(allowed_identity.public_key_bytes())
+        let allowed_key = PublicKey::from_bytes(&allowed_identity.public_key_bytes())
             .expect("allowed fixture key");
         let server_key_hex = pub_key_hex(&server_identity);
         let server_config: ServerConfig = server_role_config(

@@ -48,7 +48,7 @@ async fn cross_path_capacity_refuses_while_one_shared_slot_is_held() {
         let identity_c: &'static Identity = Box::leak(Box::new(identity(ADMIT_CLIENT_C)));
         let server_key_hex = pub_key_hex(server_identity);
         let key = |identity: &'static Identity| {
-            PublicKey::from_bytes(identity.public_key_bytes()).expect("fixture client key")
+            PublicKey::from_bytes(&identity.public_key_bytes()).expect("fixture client key")
         };
         let server_config: &'static ServerConfig = Box::leak(Box::new(server_role_config(
             echo_address,

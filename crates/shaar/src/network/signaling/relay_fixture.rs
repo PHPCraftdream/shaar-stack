@@ -66,7 +66,7 @@ async fn run(
     let mut executor = OwnedExecutor::new();
     let peer = key.public().to_peer_id();
     let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
-        .map(move |(peer, io), _| (peer, CountingIo::new(io, counter)))
+        .map(move |io, _| CountingIo::new(io, counter))
         .upgrade(upgrade::Version::V1Lazy)
         .authenticate(noise::Config::new(&key).map_err(io::Error::other)?)
         .multiplex(yamux::Config::default())

@@ -339,10 +339,14 @@ impl RoleHistory {
     }
 }
 
-fn role_observer(session: &Session) -> impl Future<Output = ()> + Send + 'static {
+fn role_observer(session: &Session) -> impl Future<Output = ()> + Send + 'static + use<> {
     // Subscribe and register while the real session is alive, before it can forward APP.
     let mut events = session.connection.path_events();
-    let closed = session.connection.weak_handle().closed();
+    let weak = session.connection.weak_handle();
+    // Register now and erase any edition-2024 opaque capture of the local weak handle.
+    let closed: std::pin::Pin<
+        Box<dyn Future<Output = Option<iroh::endpoint::Closed>> + Send + 'static>,
+    > = Box::pin(weak.closed());
     let mut history = RoleHistory {
         paths: Vec::new(),
         custom: false,

@@ -50,7 +50,7 @@ async fn retained_roles_cancel_and_resume_borrowed_waiters() {
         )));
         let rollback_identity: &'static Identity = Box::leak(Box::new(identity(ROLLBACK_SERVER)));
         let client_key =
-            PublicKey::from_bytes(client_identity.public_key_bytes()).expect("fixture client key");
+            PublicKey::from_bytes(&client_identity.public_key_bytes()).expect("fixture client key");
         let server_config: &'static ServerConfig = Box::leak(Box::new(server_role_config(
             echo_address,
             bootstrap_v4(&service_peer),
@@ -532,7 +532,7 @@ async fn shutdown_server_while_starting<S>(
         tokio::select! {
             result = &mut *outer_server => panic!(
                 "outer server stopped while rollback PUT is acknowledged: {result:?}"),
-            result = peer.acknowledge(source, &transaction) => {},
+            _ = peer.acknowledge(source, &transaction) => {},
         }
     })
     .await

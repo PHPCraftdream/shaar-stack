@@ -52,7 +52,7 @@ async fn signal_mode_negotiates_but_ygg_never_carries_application_payload() {
         // Owned configs and local identities; no leaked statics.
         let server_identity = identity(CASE_S_SERVICE);
         let client_identity = identity(CASE_S_CLIENT);
-        let client_key = PublicKey::from_bytes(client_identity.public_key_bytes())
+        let client_key = PublicKey::from_bytes(&client_identity.public_key_bytes())
             .expect("fixture client key");
         let server_config = server_role_config(
             echo_address,

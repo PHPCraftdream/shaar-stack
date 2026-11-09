@@ -23,10 +23,10 @@ use crate::startup::role::{
 };
 
 use super::fixtures::{
-    ROLE_BUDGET, RoleFuture, admit_and_capture, arm_client_on_peer, bootstrap_v4,
-    client_role_config, dead_relay_address, echo_on_held_stream, echo_target, forward_and_echo,
-    hold_echoing_stream, identity, pin_role, probe_claim_free, pub_key_hex, role_logs,
-    server_role_config, shutdown_roles, silent_udp, start_listener, tuned_policy, wait_role_event,
+    RoleFuture, admit_and_capture, arm_client_on_peer, bootstrap_v4, client_role_config,
+    dead_relay_address, echo_on_held_stream, echo_target, forward_and_echo, hold_echoing_stream,
+    identity, pin_role, probe_claim_free, pub_key_hex, role_logs, server_role_config,
+    shutdown_roles, silent_udp, start_listener, tuned_policy, wait_role_event,
 };
 
 // Unique seeds (see the fixtures.rs discipline comment): standby case uses
@@ -45,7 +45,7 @@ const RESTORE_TRANSIT: u8 = 0x68;
 /// 15s `attempt_timeout`, plus the 20ms backoff between them, before the
 /// standby Ygg dial — so ~10s of resolve timeouts alone, then the fallback
 /// dial, the payload round trip and two joined shutdowns. The shared 30s
-/// [`ROLE_BUDGET`] would be tight; 60s holds the whole sequence with
+/// role budget would be tight; 60s holds the whole sequence with
 /// headroom and only fails loudly instead of hanging CI.
 const STANDBY_BUDGET: Duration = Duration::from_secs(60);
 
@@ -110,7 +110,7 @@ async fn mainline_outage_leaves_the_alternate_transport_owned_and_standby_carrie
         let server_identity: &'static Identity = Box::leak(Box::new(identity(CASE_A_SERVICE)));
         let client_identity: &'static Identity = Box::leak(Box::new(identity(CASE_A_CLIENT)));
         let client_key =
-            PublicKey::from_bytes(client_identity.public_key_bytes()).expect("fixture client key");
+            PublicKey::from_bytes(&client_identity.public_key_bytes()).expect("fixture client key");
         let server_bootstrap: SocketAddrV4 = match silent_server.address {
             SocketAddr::V4(address) => address,
             SocketAddr::V6(_) => panic!("silent bootstrap must bind IPv4"),
@@ -164,7 +164,7 @@ async fn mainline_outage_leaves_the_alternate_transport_owned_and_standby_carrie
         let admitted = |event: &RoleEvent| matches!(event, RoleEvent::Admitted);
         let admitted_event = tokio::time::timeout(STANDBY_BUDGET, async {
             tokio::select! {
-                result = &mut *server => panic!("server role ended early: {result:?}"),
+                result = &mut server => panic!("server role ended early: {result:?}"),
                 event = server_log.wait(&admitted) => event,
             }
         })
@@ -190,8 +190,8 @@ async fn mainline_outage_leaves_the_alternate_transport_owned_and_standby_carrie
         let listener_ready = |event: &RoleEvent| matches!(event, RoleEvent::ListenerReady(_));
         let listener_address = tokio::time::timeout(STANDBY_BUDGET, async {
             tokio::select! {
-                result = &mut *client => panic!("client role ended early: {result:?}"),
-                result = &mut *server => panic!("server ended during client arming: {result:?}"),
+                result = &mut client => panic!("client role ended early: {result:?}"),
+                result = &mut server => panic!("server ended during client arming: {result:?}"),
                 event = client_log.wait(&listener_ready) => match event {
                     RoleEvent::ListenerReady(address) => address,
                     other => panic!(
@@ -332,7 +332,7 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
         let server_identity: &'static Identity = Box::leak(Box::new(identity(RESTORE_SERVER)));
         let client_identity: &'static Identity = Box::leak(Box::new(identity(RESTORE_CLIENT)));
         let client_key =
-            PublicKey::from_bytes(client_identity.public_key_bytes()).expect("fixture client key");
+            PublicKey::from_bytes(&client_identity.public_key_bytes()).expect("fixture client key");
         let server_config: &'static ServerConfig = Box::leak(Box::new(server_role_config(
             echo_address,
             bootstrap_v4(&service_peer),
@@ -420,8 +420,8 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
             |event: &RoleEvent| matches!(event, RoleEvent::RouteActive(PathKind::Native));
         tokio::time::timeout(RESTORE_BUDGET, async {
             tokio::select! {
-                result = &mut *server => panic!("server role ended early: {result:?}"),
-                result = &mut *client => panic!("client role ended early: {result:?}"),
+                result = &mut server => panic!("server role ended early: {result:?}"),
+                result = &mut client => panic!("client role ended early: {result:?}"),
                 _ = &mut record => {
                     panic!("client bootstrap record server terminated during the restore")
                 }

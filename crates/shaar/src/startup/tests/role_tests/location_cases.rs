@@ -60,7 +60,7 @@ async fn key_only_client_resolves_the_signed_publication_and_forwards_a_byte() {
         let server_identity: &'static Identity = Box::leak(Box::new(identity(CASE_ONE_SERVICE)));
         let client_identity: &'static Identity = Box::leak(Box::new(identity(CASE_ONE_CLIENT)));
         let client_key =
-            PublicKey::from_bytes(client_identity.public_key_bytes()).expect("fixture client key");
+            PublicKey::from_bytes(&client_identity.public_key_bytes()).expect("fixture client key");
         let server_config: &'static ServerConfig = Box::leak(Box::new(server_role_config(
             echo_address,
             bootstrap_v4(&service_peer),
@@ -246,7 +246,7 @@ async fn pinned_relay_negotiation_carries_native_payload_with_zero_relay_payload
         let server_identity: &'static Identity = Box::leak(Box::new(identity(CASE_TWO_SERVICE)));
         let client_identity: &'static Identity = Box::leak(Box::new(identity(CASE_TWO_CLIENT)));
         let client_key =
-            PublicKey::from_bytes(client_identity.public_key_bytes()).expect("fixture client key");
+            PublicKey::from_bytes(&client_identity.public_key_bytes()).expect("fixture client key");
         let server_config: &'static ServerConfig = Box::leak(Box::new(server_role_config(
             echo_address,
             bootstrap_v4(&service_peer),
