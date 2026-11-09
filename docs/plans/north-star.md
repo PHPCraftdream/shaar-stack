@@ -103,3 +103,5 @@ An in-house Yggdrasil implementation is not permitted.
 | 2026-11-05 | P10 efficiency criteria: balanced profile (first byte 3 s known / 10 s cold, failover 10 s, direct share 95%) | "Сбалансированный (Recommended)" |
 | 2026-11-05 | MPL-2.0 is allowed narrowly, only for the pinned `ironwood` and `yggdrasil` packages, in the license check and report | "Узкое разрешение (Recommended)" |
 | 2026-11-05 | Source availability of the modified MPL-2.0 files is met by this repository (patch hunks plus the pinned upstream revision); no further publication step | "так наша репа и есть способ их получить - ничего дополнительного делать не нужно" |
+| 2026-11-09 | Group related work into bounded delivery passes following the audit; preserve acceptance order and failure history | "скорректируй план под аудит, сгруппируй смежные задачи, что их удобно было решать за один проход" |
+| 2026-11-09 | Live-network smoke testing is authorized in principle; exact lawful targets/peers and enforceable budgets remain a pre-execution gate, without authorizing load testing or release | "смок тесты на живой сети разрешаю проводить" |

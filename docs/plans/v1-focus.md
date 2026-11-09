@@ -732,6 +732,69 @@ integration dependencies are accepted, proceed to existing permission-gated P07,
 then start #214 after #33/#34 acceptance rather than another research or proof
 campaign. P10, P13 and P16 must retain their P07 dependencies.
 
+## Audit-adjusted delivery passes (approved 2026-11-09)
+
+The user requested: “скорректируй план под аудит, сгруппируй смежные задачи,
+что их удобно было решать за один проход”. Groups below organize shared reading,
+ownership and verification; they are not new umbrella tasks or permission to
+implement all stages in one unreviewed batch. Task numbers in this section are
+session TaskList IDs, not GitHub issue numbers.
+
+### Ordered passes and observable exits
+
+| Pass | Existing tasks and scenario | Work kept together | Exit and boundary |
+| --- | --- | --- | --- |
+| A — Finish shared startup | #31, internal repair #38; steps 1–6 | Shared production roles, both binary call sites, continuously driven discovery/forwarding fixtures, cancellation/cleanup, shared capacity, Signal/denial/relay oracles | Exact candidate passes relevant Linux/Windows CI; inspect selected/executed/passed receipts, personally deliver exact green and clean transferred worktrees. This is not full P10 or complete P11/P12. |
+| B — Close P10 using one transition context | #32 → #33 → #25; steps 3–5; #1 is the acceptance parent | Late native recovery after normal retry exhaustion; immediately map transition evidence; then measure the agreed profile and run explicit full P10 on the final candidate | Sequential checkpoints remain mandatory: accept recovery before gap-check and gap-check before metrics. Fix only concrete uncovered cases. Preserve 3 s known / 10 s cold first byte, 10 s failover, 95% direct share and bounded resources. No public-network substitute. |
+| C — Finish the two product entrypoints | #6 and #7; steps 1–6 | Review Server and Client against the same accepted startup/configuration/error/shutdown contracts; share the integration fixture and avoid implementing SDK startup twice | Each binary retains its own acceptance result. Independent file scopes may run in parallel after P10; shared files have one writer. Reuse 5c evidence, add only missing product obligations. |
+| D — Integration and interoperability | #8, then #12; steps 1–6 | Controlled P13 path/fault/NAT matrix, followed by separately bounded live interoperability smoke using verified CI binaries | Controlled acceptance and live smoke are distinct receipts. Public smoke is authorized in principle by the user; exact lawful targets/peers and enforceable budgets must be agreed before execution. No TUN/root/router changes, scanning or load testing. |
+| E — Resource closure and operational handoff | #9 and #10; steps 1–6 | Resource/complexity review and documentation of the accepted behavior, limits, configuration and recovery | After #8, independent measurement/review and documentation scopes may run in parallel; finalize documentation against the measured final behavior. Do not repeat full P10 merely to produce more evidence. |
+| N — Independent notices lane | #13 → #14; distribution prerequisite for steps 1–6 | Exact corpus/provenance inventory and authentic material, then deterministic assembly/checks over accepted inputs | Keep legal files separate from networking. Full package terms, embedded component notices and missing provenance are different classifications. New acquisition requires its own exact-source/request budget. Partial corpus does not unblock #14. |
+| F — V1 readiness | #11 after #9, #10 and #14 | Final evidence, remaining gates and clean repository/artifact handoff | Readiness is not release publication. Missing proof and any unexecuted smoke remain explicit. |
+
+### Task consolidation and short feedback loop
+
+- Fold the duplicate startup parent #24 and internal fixture/oracle tracking
+  #35/#37 into #31. Their acceptance obligations are retained below, not marked
+  complete by deletion. Keep #38 as the bounded current repair until verified.
+  #36 is a historical source milestone, not runtime acceptance. Do not restore
+  previously deleted completed tasks.
+- The combined #31 still requires real signed key-only discovery, genuine native
+  payload after signaling, lifetime zero application payload on libp2p/Signal,
+  independent Ygg standby, denied zero-target plus allowed positive control,
+  shared cross-path capacity, retained waiter cancellation and joined cleanup.
+  Preserve actual GET/PUT barriers and completion guards. CLOSE is not RX drain.
+- Delegate one coherent contract with an observable exit, non-goals, explicit
+  protected scopes and an oracle counterfactual. A contract may span files;
+  an arbitrary one-file split is not an acceptance boundary. Review before CI.
+- Commit each reviewed, independently meaningful unit in its task worktree and
+  send it to targeted CI without unrelated polish. If a new leaf has not reached
+  its first CI within two days, reassess its boundary before more implementation.
+  This is an escalation threshold, not a deadline that weakens correctness.
+- Do not retroactively split the existing 5c candidate to hide failing fixtures,
+  erase cumulative selection obligations or reset its failure streak. All
+  available failure causes remain part of the consolidated repair review.
+- One active writer worktree per executable unit; readonly custody trees are
+  not executors. Remove them after verified preservation/integration. Primary
+  stays on main; feature work, commits and CI stay in in-repository worktrees.
+- Report accepted scenarios and time to verified delivery, not commit-count
+  velocity or unsupported percentage-complete estimates. Written, compiled,
+  executed, accepted and delivered are separate states. Use background CI watch
+  immediately after pushes; the heartbeat is recovery, not execution pacing.
+- No local builds/tests/Cargo/project Python/preparation/benchmarks/fake load.
+  No new CI family, dependency/version change or release permission is created.
+
+### Custody at this correction
+
+The original startup tree `p10-role-startup-1108` is clean readonly custody at
+`8bbb640`; the active repair tree `p10-5c-ci-repair-1109` preserves candidate
+`21a4f51`. The independent notices tree owns its unaccepted corpus delta and
+bounded reviewer correction. These are not three overlapping startup writers.
+All must be preserved until their reviewed transfer or explicit supersession.
+The isolated planning tree edits only this plan and the north-star decision log.
+A plan correction does not certify any product candidate or authorize pushing
+local checkpoint history upstream.
+
 ## CI recovery rule
 
 The #267 repair streak already exceeds three failures. The previously authorized
