@@ -92,7 +92,7 @@ impl Shared {
     }
 
     fn record_carrier_submission(&self) {
-        let _ = self.carrier_submitted_datagrams.fetch_update(
+        let _ = self.carrier_submitted_datagrams.try_update(
             Ordering::Relaxed,
             Ordering::Relaxed,
             |count| Some(count.saturating_add(1)),
