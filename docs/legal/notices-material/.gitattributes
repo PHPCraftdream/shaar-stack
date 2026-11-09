@@ -1,0 +1,2 @@
+# Preserve legal DATA byte-for-byte, including original line endings.
+* -text
