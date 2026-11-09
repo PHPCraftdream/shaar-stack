@@ -25,7 +25,7 @@ mod tests;
 #[cfg(test)]
 mod native_path_tests;
 #[cfg(test)]
-mod negotiation_frames;
+pub(crate) mod negotiation_frames;
 #[cfg(test)]
 mod negotiation_tests;
 
@@ -68,6 +68,31 @@ impl Endpoint {
         limits: Limits,
         custom: Option<Arc<SignalingTransport>>,
     ) -> Result<Self, NetworkError> {
+        // Fresh per-endpoint admission pool; a shared pool opts in explicitly.
+        Self::bind_custom_shared(
+            identity,
+            address,
+            allowlist,
+            limits,
+            custom,
+            Arc::new(Semaphore::new(limits.sessions)),
+        )
+        .await
+    }
+
+    /// Binds over a caller-provided admission pool. The shared pool bounds LIVE
+    /// admission (pending outbound handshakes, accepted handshakes, live handles)
+    /// across every endpoint built over it; the numeric iroh incoming/connection
+    /// limits stay per endpoint as transport-level guards.
+    /// cancel-safe: NO — cancellation does not prove completed backend startup or drain.
+    pub(in crate::network) async fn bind_custom_shared(
+        identity: &Identity,
+        address: SocketAddr,
+        allowlist: Allowlist,
+        limits: Limits,
+        custom: Option<Arc<SignalingTransport>>,
+        slots: Arc<Semaphore>,
+    ) -> Result<Self, NetworkError> {
         Self::validate_bind(address)?;
         let transport = QuicTransportConfig::builder()
             .application_data_filter(|path| policy::native_ip(path.remote().ip()))
@@ -109,7 +134,7 @@ impl Endpoint {
             inner,
             address,
             allowlist,
-            slots: Arc::new(Semaphore::new(limits.sessions)),
+            slots,
             custom,
         })
     }

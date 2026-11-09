@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::native_discovery::runtime::owner::{ResolvedAddresses, RuntimeError, RuntimeOwner};
 use crate::native_discovery::runtime::publisher::PublicationStatus;
+use crate::network::signaling::RelayOperations;
 use crate::network::{NetworkError, SignaledEndpoint, YggEndpoint};
 
 use super::error::StartupError;
@@ -35,6 +36,11 @@ pub(crate) use start::SharedResourcesStart;
 pub(crate) use start::StageControls;
 
 pub(crate) const MAX_SNAPSHOT_ADDRESSES: usize = 4;
+
+/// Bounded number of retained Arc-shared orphan owners per composition.
+/// Beyond the bound, excess owners are released abort-only (their Drop)
+/// with a recorded error, never accumulated without bound.
+pub(crate) const ORPHAN_BOUND: usize = 8;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Status {
@@ -55,6 +61,13 @@ pub(crate) enum OwnerRequest {
 pub(crate) struct CompositionSlot {
     pub(crate) resources: Option<StartupResources>,
     pub(crate) closing: Option<ClosingClaims>,
+    /// Arc-shared native owners whose joined close is still pending (a
+    /// retained orphan is pending ownership, not a completed close); the
+    /// ordered close closes them, at most ORPHAN_BOUND are retained.
+    pub(crate) orphan_native: Vec<std::sync::Arc<SignaledEndpoint>>,
+    /// Arc-shared payload pairs recorded the same way as `orphan_native`,
+    /// bounded at ORPHAN_BOUND.
+    pub(crate) orphan_ygg: Vec<(std::sync::Arc<YggEndpoint>, YggPump)>,
 }
 
 pub(crate) struct StartupResources {
@@ -202,6 +215,7 @@ pub(crate) struct SharedReadiness {
     pub(crate) ygg: YggPhase,
 }
 
+#[derive(Clone)]
 pub(crate) struct SharedResources {
     shared: Arc<SharedState>,
     owner_commands: mpsc::Sender<OwnerRequest>,
@@ -248,6 +262,130 @@ impl SharedResources {
             resources.native_transferred = true;
         }
         Ok(endpoint)
+    }
+
+    /// Live-role transfer: takes the native endpoint WITHOUT stopping address
+    /// maintenance or withdrawing publication, so the retained composition
+    /// keeps publishing and resolving while the role owns and serves the
+    /// endpoint. Returns the endpoint plus the retained relay-operations
+    /// handle so relay reserve/release stay possible after the take.
+    /// Synchronous (slot lock only, no await), therefore trivially cancel-safe.
+    pub(crate) fn take_native_live(&self) -> Option<(SignaledEndpoint, RelayOperations)> {
+        let mut slot = slot_lock(&self.shared.slot);
+        let resources = slot.resources.as_mut()?;
+        let operations = resources
+            .endpoint
+            .as_ref()
+            .map(SignaledEndpoint::relay_operations);
+        let endpoint = resources.endpoint.take();
+        if endpoint.is_some() {
+            resources.native_transferred = true;
+        }
+        endpoint.map(|endpoint| (endpoint, operations.expect("operations cloned before take")))
+    }
+
+    /// Restores role-transferred owners to the retained slot so the
+    /// composition owner's ordered close closes them when a role waiter is
+    /// cancelled. Synchronous (slot lock only), therefore trivially
+    /// cancel-safe. When the slot is already closing, the owners are recorded
+    /// as orphans so the running ordered close still closes them.
+    pub(crate) fn restore_live_owners(
+        &self,
+        endpoint: Option<SignaledEndpoint>,
+        payload: Option<(YggEndpoint, YggPump)>,
+    ) {
+        let mut slot = slot_lock(&self.shared.slot);
+        let Some(resources) = slot.resources.as_mut() else {
+            // Closing slot: each owner becomes a bounded orphan independently;
+            // a bound hit never discards the unrelated pending owner.
+            let mut endpoint = endpoint;
+            let mut payload = payload;
+            match endpoint.take() {
+                Some(endpoint) if slot.orphan_native.len() < ORPHAN_BOUND => {
+                    slot.orphan_native.push(std::sync::Arc::new(endpoint));
+                }
+                Some(endpoint) => {
+                    drop(slot);
+                    // Bounded degradation: release abort-only instead of
+                    // growing without bound.
+                    self.shared.record_error(StartupError::Close {
+                        stage: "orphan-bound",
+                    });
+                    drop(endpoint);
+                    slot = slot_lock(&self.shared.slot);
+                }
+                None => {}
+            }
+            match payload.take() {
+                Some((ygg, pump)) if slot.orphan_ygg.len() < ORPHAN_BOUND => {
+                    slot.orphan_ygg.push((std::sync::Arc::new(ygg), pump));
+                }
+                Some((ygg, pump)) => {
+                    drop(slot);
+                    // Bounded degradation: release abort-only instead of
+                    // growing without bound.
+                    self.shared.record_error(StartupError::Close {
+                        stage: "orphan-bound",
+                    });
+                    drop((ygg, pump));
+                    slot = slot_lock(&self.shared.slot);
+                }
+                None => {}
+            }
+            return;
+        };
+        if let Some(endpoint) = endpoint {
+            resources.endpoint = Some(endpoint);
+            resources.native_transferred = false;
+        }
+        if let Some((ygg, pump)) = payload {
+            let ygg_resources = resources.ygg.get_or_insert_with(|| YggResources {
+                start: None,
+                bridge: None,
+                payload: None,
+                payload_transferred: false,
+            });
+            ygg_resources.payload = Some((ygg, pump));
+            ygg_resources.payload_transferred = false;
+        }
+    }
+
+    /// Records an Arc-shared native endpoint still held by a dialer task at
+    /// cancellation time; the ordered close unwraps and closes it once the
+    /// owner task outlives every dialer. Synchronous (slot lock only).
+    /// Bounded at ORPHAN_BOUND: excess owners are released abort-only with a
+    /// recorded error.
+    pub(crate) fn record_orphan_native(&self, endpoint: std::sync::Arc<SignaledEndpoint>) {
+        let mut slot = slot_lock(&self.shared.slot);
+        if slot.orphan_native.len() >= ORPHAN_BOUND {
+            drop(slot);
+            // Bounded degradation: release abort-only instead of growing
+            // without bound.
+            self.shared.record_error(StartupError::Close {
+                stage: "orphan-bound",
+            });
+            drop(endpoint);
+            return;
+        }
+        slot.orphan_native.push(endpoint);
+    }
+
+    /// Records an Arc-shared payload pair still held by a dialer task at
+    /// cancellation time; the ordered close unwraps and closes it. Synchronous
+    /// (slot lock only). Bounded at ORPHAN_BOUND like `record_orphan_native`.
+    pub(crate) fn record_orphan_ygg(&self, pair: (std::sync::Arc<YggEndpoint>, YggPump)) {
+        let mut slot = slot_lock(&self.shared.slot);
+        if slot.orphan_ygg.len() >= ORPHAN_BOUND {
+            drop(slot);
+            // Bounded degradation: release abort-only instead of growing
+            // without bound.
+            self.shared.record_error(StartupError::Close {
+                stage: "orphan-bound",
+            });
+            drop(pair);
+            return;
+        }
+        slot.orphan_ygg.push(pair);
     }
 
     /// Transfers paired payload endpoint/pump. Caller closes them before the remaining bridge.
@@ -494,6 +632,20 @@ impl SharedResources {
             .cloned()
             .ok_or(shaar_ygg::ProbeError::Closed)?;
         bridge.probe(peer, budget).await
+    }
+
+    /// Test-only handle to the retained Yggdrasil bridge (a real `Arc`
+    /// clone): probes and the dropped-datagram counter run on it without
+    /// borrowing the composition. `Err(())` when no bridge is retained.
+    #[cfg(test)]
+    pub(crate) fn ygg_bridge_for_tests(&self) -> Result<std::sync::Arc<shaar_ygg::YggBridge>, ()> {
+        slot_lock(&self.shared.slot)
+            .resources
+            .as_ref()
+            .and_then(|resources| resources.ygg.as_ref())
+            .and_then(|ygg| ygg.bridge.as_ref())
+            .cloned()
+            .ok_or(())
     }
 
     #[cfg(test)]

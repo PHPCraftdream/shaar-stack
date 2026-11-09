@@ -34,6 +34,9 @@ struct StartupSettings {
     ygg_peers: Option<Vec<String>>,
     app_peers: Vec<PublicKey>,
     mode: Fallback,
+    /// When true, native/signaling and Ygg payload endpoints share ONE
+    /// bounded admission pool instead of fresh per-endpoint pools.
+    shared_admission: bool,
 }
 
 #[cfg(test)]
@@ -85,12 +88,24 @@ impl SharedResourcesStart {
         plan: &ComposedStartupPlan<'_>,
         limits: Limits,
     ) -> Self {
+        Self::start_shared(identity, plan, limits, false)
+    }
+
+    /// When `shared_admission` is true, the native/signaling endpoint and the
+    /// Yggdrasil payload endpoint are built over ONE shared admission pool.
+    pub(crate) fn start_shared(
+        identity: &Identity,
+        plan: &ComposedStartupPlan<'_>,
+        limits: Limits,
+        shared_admission: bool,
+    ) -> Self {
         Self::start_seamed(
             identity,
             plan,
             limits,
             false,
             false,
+            shared_admission,
             #[cfg(test)]
             None,
         )
@@ -102,7 +117,7 @@ impl SharedResourcesStart {
         plan: &ComposedStartupPlan<'_>,
         limits: Limits,
     ) -> Self {
-        Self::start_seamed(identity, plan, limits, true, false, None)
+        Self::start_seamed(identity, plan, limits, true, false, false, None)
     }
 
     #[cfg(test)]
@@ -111,7 +126,7 @@ impl SharedResourcesStart {
         plan: &ComposedStartupPlan<'_>,
         limits: Limits,
     ) -> Self {
-        Self::start_seamed(identity, plan, limits, false, true, None)
+        Self::start_seamed(identity, plan, limits, false, true, false, None)
     }
 
     #[cfg(test)]
@@ -143,7 +158,43 @@ impl SharedResourcesStart {
             after_native_close,
         };
         (
-            Self::start_seamed(identity, plan, limits, false, false, Some(gates)),
+            Self::start_seamed(identity, plan, limits, false, false, false, Some(gates)),
+            controls,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn start_shared_seamed_for_tests(
+        identity: &Identity,
+        plan: &ComposedStartupPlan<'_>,
+        limits: Limits,
+        shared_admission: bool,
+        cleanup_hold: bool,
+        pause_after_bridge: bool,
+    ) -> (Self, StageControls) {
+        let (after_bridge_gate, after_bridge) = if pause_after_bridge {
+            let (gate, control) = stage_pair();
+            (Some(gate), Some(control))
+        } else {
+            (None, None)
+        };
+        let controls = StageControls {
+            after_bridge,
+            after_native_close: None,
+        };
+        (
+            Self::start_seamed(
+                identity,
+                plan,
+                limits,
+                false,
+                cleanup_hold,
+                shared_admission,
+                Some(StageGates {
+                    after_bridge: after_bridge_gate,
+                    after_native_close: None,
+                }),
+            ),
             controls,
         )
     }
@@ -154,6 +205,7 @@ impl SharedResourcesStart {
         limits: Limits,
         #[cfg_attr(not(test), allow(unused_variables))] payload_fault: bool,
         #[cfg_attr(not(test), allow(unused_variables))] cleanup_hold: bool,
+        shared_admission: bool,
         #[cfg(test)] controls: Option<StageGates>,
     ) -> Self {
         let network = plan.network();
@@ -174,6 +226,7 @@ impl SharedResourcesStart {
             ygg_peers,
             app_peers,
             mode,
+            shared_admission,
         };
         let (status_tx, status_rx) = watch::channel(Status::Pending);
         let (completion_tx, _) = watch::channel(None);
@@ -183,6 +236,8 @@ impl SharedResourcesStart {
             slot: std::sync::Mutex::new(super::CompositionSlot {
                 resources: None,
                 closing: None,
+                orphan_native: Vec::new(),
+                orphan_ygg: Vec::new(),
             }),
             status_tx,
             status_rx,
@@ -300,6 +355,13 @@ impl SharedResourcesStart {
         self.outcome = Some(result.clone());
         result
     }
+
+    /// True while a previous shutdown returned an incomplete-close error and
+    /// the command/join routes are retained for repetition. Callers must keep
+    /// their operation resumable instead of caching a terminal result.
+    pub(crate) fn shutdown_pending(&self) -> bool {
+        self.outcome.is_none()
+    }
 }
 
 async fn run_startup(
@@ -316,6 +378,7 @@ async fn run_startup(
         ygg_peers,
         app_peers,
         mode,
+        shared_admission,
     } = settings;
     #[cfg(test)]
     let (after_bridge, after_native_close) = controls.map_or((None, None), |gates| {
@@ -337,15 +400,37 @@ async fn run_startup(
             _ => return finish_fatal(shared, StartupError::NetworkRequired, owner_requests).await,
         };
 
-    let endpoint = match SignaledEndpoint::bind(
-        identity,
-        SocketAddr::from(([0, 0, 0, 0], 0)),
-        signaling_bind,
-        &app_peers,
-        limits,
-    )
-    .await
-    {
+    // One shared admission pool when requested, created BEFORE the signaling
+    // endpoint bind; otherwise each endpoint keeps a fresh per-endpoint pool.
+    let shared_slots = if shared_admission {
+        Some(Arc::new(tokio::sync::Semaphore::new(limits.sessions)))
+    } else {
+        None
+    };
+    let endpoint_result = match shared_slots.as_ref() {
+        Some(slots) => {
+            SignaledEndpoint::bind_shared_slots(
+                identity,
+                SocketAddr::from(([0, 0, 0, 0], 0)),
+                signaling_bind,
+                &app_peers,
+                limits,
+                Arc::clone(slots),
+            )
+            .await
+        }
+        None => {
+            SignaledEndpoint::bind(
+                identity,
+                SocketAddr::from(([0, 0, 0, 0], 0)),
+                signaling_bind,
+                &app_peers,
+                limits,
+            )
+            .await
+        }
+    };
+    let endpoint = match endpoint_result {
         Ok(endpoint) => endpoint,
         Err(_) => return finish_fatal(shared, StartupError::NativeBind, owner_requests).await,
     };
@@ -483,7 +568,21 @@ async fn run_startup(
             Ok(allowlist) => allowlist,
             Err(_) => return finish_fatal(shared, StartupError::YggPayload, owner_requests).await,
         };
-        match YggEndpoint::bind(identity, &bridge, allowlist, limits).await {
+        let bind_result = match shared_slots.as_ref() {
+            // Shared admission pool with the native/signaling endpoint.
+            Some(slots) => {
+                YggEndpoint::bind_shared_slots(
+                    identity,
+                    &bridge,
+                    allowlist,
+                    limits,
+                    Arc::clone(slots),
+                )
+                .await
+            }
+            None => YggEndpoint::bind(identity, &bridge, allowlist, limits).await,
+        };
+        match bind_result {
             Ok(pair) => Some(pair),
             Err(_) => return finish_fatal(shared, StartupError::YggPayload, owner_requests).await,
         }

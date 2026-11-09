@@ -73,6 +73,7 @@ struct Shared {
     ignored: AtomicU64,
     queued_datagrams: AtomicU64,
     dropped_datagrams: AtomicU64,
+    carrier_submitted_datagrams: AtomicU64,
     datagrams: mpsc::Sender<Register>,
     datagram_sends: Semaphore,
     datagram_changed: Notify,
@@ -88,6 +89,25 @@ impl Shared {
 
     fn ignore(&self) {
         self.ignored.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_carrier_submission(&self) {
+        let _ = self.carrier_submitted_datagrams.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |count| Some(count.saturating_add(1)),
+        );
+    }
+
+    /// Records the boundary call before constructing its real transport future.
+    /// The count proves helper invocation, not future polling or transport acceptance.
+    fn send_carrier<'a>(
+        &'a self,
+        peer: &'a [u8; 32],
+        frame: &'a [u8],
+    ) -> impl std::future::Future<Output = Result<(), YggError>> + 'a {
+        self.record_carrier_submission();
+        self.transport.send_to(peer, frame)
     }
 
     async fn handle(&self, bytes: &[u8], from: [u8; 32], registry: &Registry) {
@@ -191,6 +211,7 @@ impl YggBridge {
             ignored: AtomicU64::new(0),
             queued_datagrams: AtomicU64::new(0),
             dropped_datagrams: AtomicU64::new(0),
+            carrier_submitted_datagrams: AtomicU64::new(0),
             datagrams,
             datagram_sends: Semaphore::new(MAX_DATAGRAM_SENDS),
             datagram_changed: Notify::new(),
@@ -227,6 +248,14 @@ impl YggBridge {
     /// Valid envelopes refused for missing/revoked registration or a full receiver.
     pub fn dropped_datagrams(&self) -> u64 {
         self.shared.dropped_datagrams.load(Ordering::Relaxed)
+    }
+
+    /// Carrier send invocations; excludes Ping/Pong.
+    /// Counts attempts even when the returned transport future fails, times out or is cancelled.
+    pub fn carrier_submitted_datagrams(&self) -> u64 {
+        self.shared
+            .carrier_submitted_datagrams
+            .load(Ordering::Relaxed)
     }
 
     /// Register the expected authenticated session key. Only local code can create this
