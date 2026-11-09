@@ -166,7 +166,7 @@ async fn disallowed_key_causes_zero_target_connections_and_allowed_key_succeeds(
                 denied_log.clone(),
             )
             .expect("denied role builds");
-            let (denied_stop, denied_stop_rx) = tokio::sync::oneshot::channel();
+            let (denied_stop, denied_stop_rx) = tokio::sync::oneshot::channel::<()>();
             let (denied_started, captured_denied_put) = {
                 let mut capture = Box::pin(denied_peer.capture_put_record());
                 let mut start = Box::pin(denied_role.start());
