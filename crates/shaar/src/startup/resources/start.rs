@@ -83,6 +83,10 @@ impl Drop for SharedResourcesStart {
 }
 
 impl SharedResourcesStart {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Retained non-shared admission startup contract")
+    )]
     pub(crate) fn start(
         identity: &Identity,
         plan: &ComposedStartupPlan<'_>,

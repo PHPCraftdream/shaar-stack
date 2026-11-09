@@ -130,7 +130,7 @@ impl Drop for ClientParts {
 }
 
 /// Retained phase machine of the client role.
-pub(crate) enum ClientPhase {
+enum ClientPhase {
     /// Built, nothing acquired.
     New,
     /// Composition admitted, construction wait in progress.
@@ -225,13 +225,13 @@ impl ClientRole {
     pub async fn start(&mut self) -> Result<(), StartupError> {
         // Preflight runs before taking the phase; `start_shared` copies what the owner task needs.
         if matches!(self.phase, ClientPhase::New) {
-            let service_key = PublicKey::from_bytes(self.config.server_key_bytes())
-                .map_err(|_| StartupError::InvalidPolicy)?;
-            let service_keys = [service_key];
-            let plan = preflight_client(&self.config, &self.identity, &service_keys)?;
-            let start =
-                SharedResourcesStart::start_shared(&self.identity, &plan, self.limits, false);
-            drop(plan);
+            let start = {
+                let service_key = PublicKey::from_bytes(self.config.server_key_bytes())
+                    .map_err(|_| StartupError::InvalidPolicy)?;
+                let service_keys = [service_key];
+                let plan = preflight_client(&self.config, &self.identity, &service_keys)?;
+                SharedResourcesStart::start_shared(&self.identity, &plan, self.limits, false)
+            };
             self.phase = ClientPhase::Starting(start);
             return self.resume_start().await;
         }
@@ -298,7 +298,7 @@ impl ClientRole {
             .take_ygg_payload()
             .map(|(ygg_endpoint, pump)| (Arc::new(ygg_endpoint), pump));
         // Same derivation as the composition; unreachable `None` after preflight is a truthful failure, never a fallback.
-        let mut relay_addr = self
+        let relay_addr = self
             .config
             .network()
             .and_then(|network| network.signaling())

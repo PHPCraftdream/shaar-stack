@@ -395,7 +395,7 @@ pub(crate) async fn run_ordered_close(
         // moved out of the dropped continuation (Drop during an in-flight
         // shutdown pass records nothing).
         payload_pending = {
-            let mut slot = slot_lock(&shared.slot);
+            let slot = slot_lock(&shared.slot);
             !slot.orphan_ygg.is_empty()
         };
         if !payload_pending {
@@ -427,7 +427,7 @@ pub(crate) async fn run_ordered_close(
     } else {
         // No own payload: the snapshot is equally fresh here (no close ran).
         payload_pending = {
-            let mut slot = slot_lock(&shared.slot);
+            let slot = slot_lock(&shared.slot);
             !slot.orphan_ygg.is_empty()
         };
     }

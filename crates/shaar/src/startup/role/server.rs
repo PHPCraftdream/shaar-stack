@@ -324,7 +324,7 @@ impl ServerRole {
                     let ServerPhase::Starting(start) = &mut self.phase else {
                         unreachable!("re-seated starting phase")
                     };
-                    let mut resources = match start.wait().await {
+                    let resources = match start.wait().await {
                         Err(error) => return Err(error),
                         Ok(resources) => resources,
                     };

@@ -10,8 +10,6 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
 
-#[cfg(test)]
-use iroh::EndpointAddr;
 use iroh_base::EndpointId;
 use shaar_ygg::{YggBridge, YggPump};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -27,6 +25,8 @@ use super::ygg_start::RetainedYggStart;
 mod close;
 mod maintain;
 mod start;
+#[cfg(test)]
+mod test_access;
 
 pub(crate) use maintain::Maintenance;
 // The startup facade re-export consumes this path in non-test builds, so
@@ -52,6 +52,10 @@ pub(crate) enum Status {
 
 pub(crate) enum OwnerRequest {
     Shutdown(oneshot::Sender<bool>),
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Retained quiesced handoff contract")
+    )]
     QuiesceNative(oneshot::Sender<bool>),
 }
 
@@ -83,6 +87,10 @@ pub(crate) struct StartupResources {
 /// Closing claims held inside the slot lock: extraction, claim updates and
 /// restore are single critical sections, so readiness never observes an
 /// absent-both window.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Retained close-time readiness observations")
+)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ClosingClaims {
     pub(crate) native_bound: bool,
@@ -205,6 +213,13 @@ pub(crate) fn slot_lock(
     slot.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "Retained readiness contract exercised by in-crate tests"
+    )
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct SharedReadiness {
     pub(crate) publication: Option<PublicationStatus>,
@@ -218,6 +233,10 @@ pub(crate) struct SharedReadiness {
 #[derive(Clone)]
 pub(crate) struct SharedResources {
     shared: Arc<SharedState>,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Retained quiesced handoff command route")
+    )]
     owner_commands: mpsc::Sender<OwnerRequest>,
 }
 
@@ -228,6 +247,13 @@ impl fmt::Debug for SharedResources {
 }
 
 impl SharedResources {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained resource contract exercised by in-crate tests"
+        )
+    )]
     pub(crate) fn with_endpoint<R>(&self, f: impl FnOnce(&SignaledEndpoint) -> R) -> Option<R> {
         let slot = slot_lock(&self.shared.slot);
         slot.resources.as_ref()?.endpoint.as_ref().map(f)
@@ -235,6 +261,13 @@ impl SharedResources {
 
     /// Transfers native endpoint ownership only after owner-driven quiescence.
     /// cancel-safe: YES — the owner task retains quiescence; the endpoint never crosses an async reply.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained resource contract exercised by in-crate tests"
+        )
+    )]
     pub(crate) async fn transfer_native(&self) -> Result<Option<SignaledEndpoint>, StartupError> {
         let (reply, response) = tokio::sync::oneshot::channel();
         self.owner_commands
@@ -328,7 +361,6 @@ impl SharedResources {
                         stage: "orphan-bound",
                     });
                     drop((ygg, pump));
-                    slot = slot_lock(&self.shared.slot);
                 }
                 None => {}
             }
@@ -399,6 +431,13 @@ impl SharedResources {
         payload
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained resource contract exercised by in-crate tests"
+        )
+    )]
     pub(crate) async fn reserve_configured_relay(
         &self,
     ) -> Result<shaar_p2p::RelayLease, NetworkError> {
@@ -415,6 +454,13 @@ impl SharedResources {
         operation.reserve(relay).await
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained resource contract exercised by in-crate tests"
+        )
+    )]
     pub(crate) async fn reserve_relay(
         &self,
         relay: shaar_p2p::RelayAddr,
@@ -430,6 +476,13 @@ impl SharedResources {
         operation.reserve(relay).await
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained resource contract exercised by in-crate tests"
+        )
+    )]
     pub(crate) async fn release_configured_relay(&self) -> Result<(), NetworkError> {
         let (operation, relay) = {
             let slot = slot_lock(&self.shared.slot);
@@ -444,6 +497,13 @@ impl SharedResources {
         operation.release(relay).await
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained resource contract exercised by in-crate tests"
+        )
+    )]
     pub(crate) async fn release_relay(
         &self,
         relay: shaar_p2p::RelayAddr,
@@ -469,6 +529,13 @@ impl SharedResources {
         Maintenance::resolve(&commands, key).await
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained resource contract exercised by in-crate tests"
+        )
+    )]
     pub(crate) async fn readiness(&self) -> SharedReadiness {
         let commands = {
             let slot = slot_lock(&self.shared.slot);
@@ -509,6 +576,13 @@ impl SharedResources {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Retained resource contract exercised by in-crate tests"
+        )
+    )]
     pub(crate) fn ygg_phase(&self) -> YggPhase {
         let slot = slot_lock(&self.shared.slot);
         match slot.resources.as_ref() {
@@ -521,149 +595,5 @@ impl SharedResources {
                 .as_ref()
                 .map_or(YggPhase::None, |claims| claims.ygg),
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn submit_watcher_snapshot_for_tests(
-        &self,
-        address: EndpointAddr,
-    ) -> Result<(), RuntimeError> {
-        let commands = slot_lock(&self.shared.slot)
-            .resources
-            .as_ref()
-            .and_then(|resources| resources.maintenance.as_ref())
-            .map(|maintenance| maintenance.commands.clone())
-            .ok_or(RuntimeError::Closed)?;
-        Maintenance::submit_for_tests(&commands, address).await
-    }
-
-    /// Test-only completion barrier: the reply resolves from the active
-    /// resolver's own completion event, so `true` proves the cancel request
-    /// was processed and the resolver future drained. Without an active
-    /// resolver it answers immediately.
-    #[cfg(test)]
-    pub(crate) async fn resolve_idle_for_tests(&self) -> bool {
-        let commands = slot_lock(&self.shared.slot)
-            .resources
-            .as_ref()
-            .and_then(|resources| resources.maintenance.as_ref())
-            .map(|maintenance| maintenance.commands.clone());
-        match commands {
-            Some(commands) => Maintenance::resolve_idle_for_tests(&commands).await,
-            None => false,
-        }
-    }
-
-    /// Direct publisher-watch state of the retained Mainline owner, independent
-    /// of maintenance removal.
-    #[cfg(test)]
-    pub(crate) fn mainline_publication_status_for_tests(
-        &self,
-    ) -> Option<crate::native_discovery::runtime::publisher::PublicationStatus> {
-        slot_lock(&self.shared.slot)
-            .resources
-            .as_ref()
-            .and_then(|resources| resources.owner.as_ref())
-            .map(RuntimeOwner::publication_status)
-    }
-
-    /// Clones the retained Mainline owner's publication observer so tests can
-    /// observe held cleanup cancellation directly.
-    #[cfg(test)]
-    pub(crate) fn mainline_cleanup_observer_for_tests(&self) -> Option<n0_mainline::Observer> {
-        self.shared
-            .cleanup_hold_observer_for_tests
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-
-    /// Test-only Mainline actor routing id, captured at the owner stage so
-    /// regressions can assert a resolve target is an isolated owned query.
-    #[cfg(test)]
-    pub(crate) fn mainline_actor_id_for_tests(&self) -> Option<n0_mainline::Id> {
-        self.shared
-            .mainline_actor_id_for_tests
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-
-    /// Arms the unique Mainline cleanup hold over the retained owner's
-    /// publication observer; `Err(())` when the owner stage never stored one.
-    #[cfg(test)]
-    pub(crate) fn mainline_cleanup_hold_for_tests(&self) -> Result<n0_mainline::CleanupHold, ()> {
-        let observer = self.mainline_cleanup_observer_for_tests().ok_or(())?;
-        observer.hold_cleanup().map_err(|_| ())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn arm_native_close_fault_for_tests(&self) {
-        self.shared
-            .native_close_fault_for_tests
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn arm_mainline_close_skip_for_tests(&self) {
-        self.shared
-            .mainline_close_skip_for_tests
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn arm_ygg_close_fault_for_tests(&self) {
-        self.shared
-            .close_fault_for_tests
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn ygg_bridge_probe_for_tests(
-        &self,
-        peer: [u8; 32],
-        budget: std::time::Duration,
-    ) -> Result<std::time::Duration, shaar_ygg::ProbeError> {
-        let bridge = slot_lock(&self.shared.slot)
-            .resources
-            .as_ref()
-            .and_then(|resources| resources.ygg.as_ref())
-            .and_then(|ygg| ygg.bridge.as_ref())
-            .cloned()
-            .ok_or(shaar_ygg::ProbeError::Closed)?;
-        bridge.probe(peer, budget).await
-    }
-
-    /// Test-only handle to the retained Yggdrasil bridge (a real `Arc`
-    /// clone): probes and the dropped-datagram counter run on it without
-    /// borrowing the composition. `Err(())` when no bridge is retained.
-    #[cfg(test)]
-    pub(crate) fn ygg_bridge_for_tests(&self) -> Result<std::sync::Arc<shaar_ygg::YggBridge>, ()> {
-        slot_lock(&self.shared.slot)
-            .resources
-            .as_ref()
-            .and_then(|resources| resources.ygg.as_ref())
-            .and_then(|ygg| ygg.bridge.as_ref())
-            .cloned()
-            .ok_or(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn endpoint_for_tests<R>(
-        &self,
-        f: impl FnOnce(&SignaledEndpoint) -> R,
-    ) -> Option<R> {
-        self.with_endpoint(f)
-    }
-
-    /// Clones the retained owner's publication watch so tests await real
-    /// publisher changes instead of polling readiness queries.
-    #[cfg(test)]
-    pub(crate) fn publication_watch_for_tests(&self) -> Option<watch::Receiver<PublicationStatus>> {
-        self.shared
-            .publication_watch_for_tests
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
     }
 }

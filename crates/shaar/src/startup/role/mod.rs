@@ -22,17 +22,9 @@ use dialers::RouteLink;
 /// Tuning for the client path policy. Production binaries use
 /// [`RoleOptions::default`]; controlled fixtures tighten the same validated
 /// struct, never bypass it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct RoleOptions {
     pub policy: PolicyConfig,
-}
-
-impl Default for RoleOptions {
-    fn default() -> Self {
-        Self {
-            policy: PolicyConfig::default(),
-        }
-    }
 }
 
 impl RoleOptions {

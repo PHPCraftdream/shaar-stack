@@ -6,34 +6,22 @@ use super::codec::{DecodedRecord, PolicyRecordParts};
 use iroh_base::EndpointId;
 use std::{collections::BTreeMap, net::SocketAddr};
 
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_KEYS: usize = 64;
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_RECORD_BYTES: usize = 1104;
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_BATCH_RECORDS: usize = 32;
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_BATCH_BYTES: usize = 1104 * 32;
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_ADDRESSES: usize = 4;
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_METADATA_ENTRIES: usize = 1;
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_USER_DATA_BYTES: usize = 245;
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_AGE_US: i64 = 300_000_000;
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_FUTURE_US: i64 = 30_000_000;
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 const MAX_CACHE_US: u64 = 30_000_000;
 
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ClockSample {
     pub(super) wall_us: i64,
     pub(super) monotonic_us: u64,
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RecordObservation {
     pub(super) sequence: i64,
@@ -88,7 +76,6 @@ pub(super) enum QuerySource {
     CacheOnly,
     LocalActivePut,
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Debug)]
 pub(super) struct CompletedQuery {
     source: QuerySource,
@@ -96,7 +83,6 @@ pub(super) struct CompletedQuery {
     records: Vec<RecordObservation>,
 }
 impl CompletedQuery {
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn new(
         source: QuerySource,
         completed_at: ClockSample,
@@ -109,7 +95,6 @@ impl CompletedQuery {
         }
     }
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecordError {
     Unauthorized,
@@ -126,7 +111,6 @@ pub(crate) enum RecordError {
     InvalidObservation,
     BatchTooLarge,
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Clone, Debug)]
 struct PeerState {
     winner: Option<RecordObservation>,
@@ -134,7 +118,6 @@ struct PeerState {
     cache_deadline: Option<u64>,
 }
 impl PeerState {
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     fn new() -> Self {
         Self {
             winner: None,
@@ -143,26 +126,22 @@ impl PeerState {
         }
     }
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Debug)]
 pub(super) enum PreparedQuery {
     ExpiredCacheOnly,
     Conflict(ConflictCommit),
     Deliver(DeliverCommit),
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Debug)]
 pub(super) struct ConflictCommit {
     key: EndpointId,
     winner: Option<RecordObservation>,
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Debug)]
 pub(super) struct DeliverCommit {
     key: EndpointId,
     winner: Option<RecordObservation>,
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 #[derive(Debug)]
 pub(super) struct PolicyOwner {
     peers: BTreeMap<EndpointId, PeerState>,
@@ -170,7 +149,6 @@ pub(super) struct PolicyOwner {
     clock_fault: bool,
 }
 impl PolicyOwner {
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn new() -> Self {
         Self {
             peers: BTreeMap::new(),
@@ -178,7 +156,6 @@ impl PolicyOwner {
             clock_fault: false,
         }
     }
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn admit_expected_key(&mut self, key: EndpointId) -> Result<(), RecordError> {
         if self.clock_fault {
             return Err(RecordError::ClockFault);
@@ -226,7 +203,6 @@ impl PolicyOwner {
     /// `query.completed_at` is the backend receipt sample and anchors the
     /// cache receipt deadline; signed-age freshness is re-checked at the
     /// commit point against the caller's current-use wall time.
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn prepare_query(
         &mut self,
         key: EndpointId,
@@ -347,7 +323,6 @@ impl PolicyOwner {
     /// deadline is `R + min(30s, max(0, 300s - max(0, W - signed)))`, so a
     /// verification or scheduling delay can neither admit an age-expired
     /// immediate result nor extend signed freshness.
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn commit_query_deliver(
         &mut self,
         outcome: DeliverCommit,
@@ -390,7 +365,6 @@ impl PolicyOwner {
 
     /// Applies a prepared equal-sequence conflict commit; the caller reports
     /// `EqualSequenceConflict` afterwards.
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn commit_query_conflict(&mut self, outcome: ConflictCommit) {
         let Some(peer) = self.peers.get_mut(&outcome.key) else {
             return;
@@ -406,7 +380,6 @@ impl PolicyOwner {
     /// usable cache deadlines are dropped immediately, while the replay state
     /// (sequence watermarks and conflict flags) is retained for the owner
     /// lifetime.
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn note_terminal_clock_fault(&mut self) {
         self.clock_fault = true;
         for peer in self.peers.values_mut() {
@@ -433,7 +406,6 @@ impl PolicyOwner {
             }
         }
     }
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn lookup_cache(
         &mut self,
         key: EndpointId,
@@ -452,7 +424,6 @@ impl PolicyOwner {
         check_freshness(now.wall_us, winner.signed_at_us)?;
         Ok(())
     }
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn query_required(
         &mut self,
         key: EndpointId,
@@ -474,7 +445,6 @@ impl PolicyOwner {
         }
         Ok(check_freshness(now.wall_us, winner.signed_at_us).is_err())
     }
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn addresses(
         &mut self,
         key: EndpointId,
@@ -542,7 +512,6 @@ impl PolicyOwner {
             peer.cache_deadline = None;
         }
     }
-    #[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
     pub(super) fn observe_clock(&mut self, now: ClockSample) -> Result<(), RecordError> {
         if self.clock_fault {
             return Err(RecordError::ClockFault);
@@ -560,7 +529,6 @@ impl PolicyOwner {
         Ok(())
     }
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 pub(super) fn check_freshness(now_wall_us: i64, signed_at_us: i64) -> Result<u64, RecordError> {
     if signed_at_us < 0 {
         return Err(RecordError::TooOld);
@@ -580,7 +548,6 @@ pub(super) fn check_freshness(now_wall_us: i64, signed_at_us: i64) -> Result<u64
 pub(super) fn sequence_from_unsigned(value: u64) -> Result<i64, RecordError> {
     i64::try_from(value).map_err(|_| RecordError::InvalidSequence)
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "pending P09 wiring"))]
 pub(super) fn sequence_from_signed(value: i64) -> Result<i64, RecordError> {
     if value < 0 {
         Err(RecordError::InvalidSequence)
