@@ -127,7 +127,7 @@ async fn key_only_client_resolves_the_signed_publication_and_forwards_a_byte() {
         // GET — observe it actually hit the wire at the fixture bootstrap
         // before any record is served.
         let target = n0_mainline::MutableItem::target_from_key(item.key(), None);
-        let (_get_source, _get_payload) = tokio::time::timeout(ROLE_BUDGET, async {
+        let (get_source, get_transaction) = tokio::time::timeout(ROLE_BUDGET, async {
             tokio::select! {
                 g = client_peer.capture_get(target) => g,
                 result = &mut client => panic!(
@@ -138,6 +138,11 @@ async fn key_only_client_resolves_the_signed_publication_and_forwards_a_byte() {
         })
         .await
         .expect("the client's service-key GET is observed on the wire within the budget");
+        tokio::select! {
+            _ = client_peer.reply_get(get_source, &get_transaction, &item) => {}
+            result = &mut client => panic!("client ended during actual signed GET reply: {result:?}"),
+            result = &mut server => panic!("server ended during actual signed GET reply: {result:?}"),
+        }
 
         // Only now serve the independently captured signed publication and
         // await the resolved route as a native-path positive. It does not

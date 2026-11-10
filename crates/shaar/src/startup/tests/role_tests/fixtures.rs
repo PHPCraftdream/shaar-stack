@@ -45,7 +45,7 @@ use crate::native_discovery::runtime::owner::LoopbackPeer;
 use crate::network::Limits;
 use crate::path::PolicyConfig;
 use crate::startup::StartupError;
-use crate::startup::role::{RoleEvent, RoleEventLog, RoleOptions, serve_client_with_events};
+use crate::startup::role::{ClientRole, RoleEvent, RoleEventLog, RoleOptions};
 
 /// Generous wall-clock bound around one whole role composition (real transit
 /// start, real Mainline PUT/GET, real relay reservation and negotiation,
@@ -391,13 +391,13 @@ pub(super) async fn forward_and_echo<S, C>(
 }
 
 /// Arms one client role against `bootstrap_peer` WITHOUT any record server:
-/// the arming barrier requires BOTH the client's own initial PUT captured
-/// AND acknowledged against that peer AND `ListenerReady` observed, all
-/// while the pinned future is driven. `options` is the explicit arming
-/// policy. Returns the stop sender, the pinned future, the client's log and
-/// the listener address. Callers arm the Mainline record server only AFTER all
-/// clients they intend to arm have been armed (a PUT landing in the record
-/// server's GET loop would panic).
+/// retain startup and capture its initial PUT before running the client; only
+/// after acknowledging that PUT does the live role loop start. The arming
+/// barrier also requires `ListenerReady` observed, while the pinned run future
+/// is driven. `options` is the explicit arming policy. Returns the stop sender,
+/// the pinned future, the client's log and the listener address. Callers arm
+/// the Mainline record server only AFTER all clients they intend to arm have
+/// been armed (a PUT landing in the record server's GET loop would panic).
 pub(super) async fn arm_client_on_peer(
     config: &'static ClientConfig,
     identity: &'static Identity,
@@ -405,56 +405,67 @@ pub(super) async fn arm_client_on_peer(
     options: RoleOptions,
     budget: Duration,
 ) -> (oneshot::Sender<()>, RoleFuture, RoleEventLog, SocketAddr) {
-    let (stop, stop_rx) = oneshot::channel();
     let log = RoleEventLog::new();
-    let mut role = pin_role(serve_client_with_events(
-        config,
+    let mut role = ClientRole::with_events(
+        config.clone(),
         identity,
         Limits::new(4).expect("fixture limits"),
         options,
-        async move {
-            let _ = stop_rx.await;
-        },
         log.clone(),
-    ));
-    let listener_ready = |event: &RoleEvent| matches!(event, RoleEvent::ListenerReady(_));
-    // BOTH barriers must be observed before any record server is armed:
-    // the client's own initial PUT captured AND acknowledged (a PUT
-    // landing in the record server's GET loop would panic) and the
-    // listener bound.
-    let mut put_armed = false;
-    let mut listener: Option<SocketAddr> = None;
-    tokio::time::timeout(budget, async {
-        while !put_armed || listener.is_none() {
-            tokio::select! {
-                result = &mut role => panic!(
-                    "client role ended while arming against the bootstrap peer: {result:?}"
-                ),
-                captured = bootstrap_peer.capture_put_record(), if !put_armed => {
-                    let (source, transaction, _signed, _item) = captured;
-                    bootstrap_peer.acknowledge(source, &transaction).await;
-                    put_armed = true;
+    )
+    .expect("client role builds for retained startup");
+    let (stop, stop_rx) = oneshot::channel();
+
+    let (client, listener) = tokio::time::timeout(budget, async {
+        // Do not poll `run` while the bootstrap PUT is outstanding: it may
+        // issue a real service GET, which this peer intentionally does not
+        // answer.
+        let captured = {
+            let mut start = Box::pin(role.start());
+            let mut capture = Box::pin(bootstrap_peer.capture_put_record());
+            let mut started = false;
+            let mut captured = None;
+            while !started || captured.is_none() {
+                tokio::select! {
+                    result = &mut start, if !started => {
+                        result.expect("client startup succeeds before its run loop");
+                        started = true;
+                    }
+                    record = &mut capture, if captured.is_none() => {
+                        captured = Some(record);
+                    }
                 }
-                event = log.wait(&listener_ready), if listener.is_none() => match event {
-                    RoleEvent::ListenerReady(address) => listener = Some(address),
-                    other => panic!(
-                        "unexpected role event while arming the client: {other:?}"
-                    ),
-                },
             }
-        }
+            captured.expect("initial PUT captured")
+        };
+        let (source, transaction, _signed, _item) = captured;
+        bootstrap_peer.acknowledge(source, &transaction).await;
+
+        let mut client = pin_role(async move {
+            let mut role = role;
+            let mut shutdown = std::pin::pin!(async move {
+                let _ = stop_rx.await;
+            });
+            let outcome = role.run(&mut shutdown).await;
+            let close = role.shutdown().await;
+            outcome.and(close)
+        });
+        let listener_ready = |event: &RoleEvent| matches!(event, RoleEvent::ListenerReady(_));
+        let listener = tokio::select! {
+            result = &mut client => panic!(
+                "client role ended while awaiting ListenerReady: {result:?}"
+            ),
+            event = log.wait(&listener_ready) => match event {
+                RoleEvent::ListenerReady(address) => address,
+                other => panic!("unexpected role event while arming the client: {other:?}"),
+            },
+        };
+        (client, listener)
     })
     .await
-    .expect(
-        "client arming (initial PUT captured and acknowledged AND listener ready) \
-             within the budget",
-    );
-    (
-        stop,
-        role,
-        log,
-        listener.expect("listener address observed"),
-    )
+    .expect("client arming (startup, initial PUT acknowledgement, and listener ready) within the budget");
+
+    (stop, client, log, listener)
 }
 
 /// The 5b admit-and-capture pattern, pinned-driving edition: server admission

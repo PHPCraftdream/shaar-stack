@@ -155,8 +155,6 @@ async fn disallowed_key_causes_zero_target_connections_and_allowed_key_succeeds(
             }
             let server_item = server_item.expect("real signed server publication retained");
 
-            // Denied client's own PUT races start independently; if start wins,
-            // its capture is re-armed below while both role loops are driven.
             let (denied_log, _unused_denied_log) = role_logs();
             let mut denied_role = ClientRole::with_events(
                 denied_config,
@@ -167,43 +165,45 @@ async fn disallowed_key_causes_zero_target_connections_and_allowed_key_succeeds(
             )
             .expect("denied role builds");
             let (denied_stop, denied_stop_rx) = tokio::sync::oneshot::channel::<()>();
-            let (denied_started, captured_denied_put) = {
+
+            // Capture the denied client's PUT and finish start before constructing
+            // its run loop. Both outcomes are retained independently while the
+            // same server pump is driven; completed futures are never repolled.
+            let (denied_start_result, captured_denied_put) = {
                 let mut capture = Box::pin(denied_peer.capture_put_record());
                 let mut start = Box::pin(denied_role.start());
+                let mut start_result = None;
+                let mut captured_put = None;
                 tokio::time::timeout(DENIAL_BUDGET, async {
-                    tokio::select! {
-                        result = &mut start => (Some(result), None),
-                        captured = capture.as_mut() => (None, Some(captured)),
-                        result = &mut server_run => panic!("server ended during denied startup: {result:?}"),
+                    while start_result.is_none() || captured_put.is_none() {
+                        tokio::select! {
+                            result = &mut start, if start_result.is_none() => {
+                                start_result = Some(result);
+                            }
+                            captured = capture.as_mut(), if captured_put.is_none() => {
+                                captured_put = Some(captured);
+                            }
+                            result = &mut server_run => panic!("server ended during denied startup: {result:?}"),
+                        }
                     }
                 })
                 .await
-                .expect("denied start or its actual PUT capture completes")
+                .expect("denied start and its actual PUT capture complete");
+                (
+                    start_result.expect("denied start completes"),
+                    captured_put.expect("denied client's actual PUT is captured"),
+                )
             };
-            let mut denied_put_seen = captured_denied_put.is_some();
-            if let Some((source, transaction, _signed, _item)) = captured_denied_put {
-                tokio::time::timeout(DENIAL_BUDGET, async {
-                    tokio::select! {
-                        _ = denied_peer.acknowledge(source, &transaction) => {}
-                        result = &mut server_run => panic!("server ended during denied PUT ACK: {result:?}"),
-                    }
-                })
-                .await
-                .expect("denied client's PUT is ACKed");
-            }
-            if let Some(result) = denied_started {
-                result.expect("denied role starts independently of PUT capture");
-            } else {
-                tokio::time::timeout(DENIAL_BUDGET, async {
-                    tokio::select! {
-                        result = denied_role.start() => result,
-                        result = &mut server_run => panic!("server ended while denied start resumed: {result:?}"),
-                    }
-                })
-                .await
-                .expect("denied start resumes after its actual PUT ACK")
-                .expect("denied role starts");
-            }
+            denied_start_result.expect("denied role starts");
+            let (source, transaction, _signed, _item) = captured_denied_put;
+            tokio::time::timeout(DENIAL_BUDGET, async {
+                tokio::select! {
+                    _ = denied_peer.acknowledge(source, &transaction) => {}
+                    result = &mut server_run => panic!("server ended during denied PUT ACK: {result:?}"),
+                }
+            })
+            .await
+            .expect("denied client's PUT is ACKed");
 
             // Retain the denied client's lifetime sender observation before run;
             // the same server's dropped-envelope counter below independently
@@ -216,31 +216,6 @@ async fn disallowed_key_causes_zero_target_connections_and_allowed_key_succeeds(
                     let _ = denied_stop_rx.await;
                 });
                 let mut denied_run = Box::pin(denied_role.run(&mut denied_shutdown));
-                if !denied_put_seen {
-                    let (source, transaction, _signed, _item) = {
-                        let mut capture = Box::pin(denied_peer.capture_put_record());
-                        tokio::time::timeout(DENIAL_BUDGET, async {
-                            tokio::select! {
-                                captured = capture.as_mut() => captured,
-                                result = &mut server_run => panic!("server ended during denied PUT capture: {result:?}"),
-                                result = &mut denied_run => panic!("denied client ended during PUT capture: {result:?}"),
-                            }
-                        })
-                        .await
-                        .expect("denied client's actual PUT is captured")
-                    };
-                    tokio::time::timeout(DENIAL_BUDGET, async {
-                        tokio::select! {
-                            _ = denied_peer.acknowledge(source, &transaction) => {}
-                            result = &mut server_run => panic!("server ended during denied PUT ACK: {result:?}"),
-                            result = &mut denied_run => panic!("denied client ended during PUT ACK: {result:?}"),
-                        }
-                    })
-                    .await
-                    .expect("denied client's PUT is ACKed");
-                    denied_put_seen = true;
-                }
-                assert!(denied_put_seen);
 
                 // Reply to this exact captured cold service-key GET with the
                 // real signed publication. Completion of reply_get is the
