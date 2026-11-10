@@ -1,0 +1,1161 @@
+{
+  "criterion_record": "docs/legal/notices-source-status.md#current-corpus-pass-2026-11-09",
+  "finite_gaps": [
+    "iroh-dns 1.3.0: no verbatim LICENSE/COPYING/NOTICE member or complete embedded license text is present in retained crate. README names LICENSE-APACHE and LICENSE-MIT; Cargo.toml identifies https://github.com/n0-computer/iroh and .cargo_vcs_info.json pins revision 17c0612f80f78f5288e97b818b1360ae6ea0a51a and path_in_vcs iroh-dns. Candidate members: iroh-dns/LICENSE-APACHE and iroh-dns/LICENSE-MIT. The complete package-level MIT OR Apache-2.0 terms are missing. No acquisition performed.",
+    "iroh 1.3.0: held LICENSE-BSD3 is authentic component notice text scoped only to Tailscale-derived portions; complete package-level MIT OR Apache-2.0 terms are not held.",
+    "Current prepared-tree per-file equality remains unproven for libp2p-dns embedded header, libp2p-relay embedded header, libp2p-swarm embedded header, simple-dns LICENSE, iroh LICENSE-BSD3, noq-proto two license files, and noq two license files. Prior saved receipts for n0-future, n0-mainline, serde_bencode, and multibase show equal original/prepared hashes for the same archive digest, but do not attest current green-prepared bytes.",
+    "For most registry archive identities, reviewed receipts do not record an official acquisition URL. Locally verified archive hash equality does not establish source acquisition origin. URLs/revisions are stated only when recorded in cited receipts.",
+    "Historical crates.io requests for registry ironwood 0.2.1 and yggdrasil 0.3.1 returned 403 and are not the actual pinned path package identities. Pinned Ygg evidence here is specifically the Yggdrasil-ng revision/archive and shared root LICENSE.",
+    "This finite 17-path identity corpus is not a full root/nested dependency-license inventory, legal determination, artifact-inclusion proof, or distribution authorization."
+  ],
+  "identities": [
+    {
+      "cargo_identity": {
+        "name": "hickory-resolver",
+        "prepared_path": "target/p2p/resolver/hickory-resolver-0.26.3",
+        "source_kind": "root-lock path patch",
+        "version": "0.26.3"
+      },
+      "material_group": "backend-and-discovery",
+      "materials": [
+        {
+          "bytes": 11360,
+          "preserved_path": "docs/legal/notices-material/prepared/backend-and-discovery/hickory-resolver/LICENSE-APACHE",
+          "sha256": "6b9522191b8cb7126b2d214edd7f782d2ccd83c467e9c03b8af9e0bf903b49b4",
+          "source_member": "hickory-resolver-0.26.3/LICENSE-APACHE"
+        },
+        {
+          "bytes": 1101,
+          "preserved_path": "docs/legal/notices-material/prepared/backend-and-discovery/hickory-resolver/LICENSE-MIT",
+          "sha256": "dc470946f0a127507a9e577a20da1eb19eae0abc383b2be1f786f6427944f06c",
+          "source_member": "hickory-resolver-0.26.3/LICENSE-MIT"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 7198,
+        "declared_license": "MIT OR Apache-2.0",
+        "member": "hickory-resolver-0.26.3/Cargo.toml",
+        "package_name": "hickory-resolver",
+        "repository": "https://github.com/hickory-dns/hickory-dns",
+        "sha256": "77f8bbd4fee5d6b9e5ae9930fe4df68c775858413d9743b112ce31f218e11e99",
+        "version": "0.26.3"
+      },
+      "preparation_evidence": {
+        "original_files": {
+          "LICENSE-APACHE": "6b9522191b8cb7126b2d214edd7f782d2ccd83c467e9c03b8af9e0bf903b49b4",
+          "LICENSE-MIT": "dc470946f0a127507a9e577a20da1eb19eae0abc383b2be1f786f6427944f06c"
+        },
+        "prepared_files": {
+          "LICENSE-APACHE": "6b9522191b8cb7126b2d214edd7f782d2ccd83c467e9c03b8af9e0bf903b49b4",
+          "LICENSE-MIT": "dc470946f0a127507a9e577a20da1eb19eae0abc383b2be1f786f6427944f06c"
+        },
+        "status": "original_and_prepared_license_member_hashes_equal"
+      },
+      "receipt": {
+        "bytes": 8681,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/p2p-resolver-provenance.json",
+        "recipe_files": {
+          "cache_patch.py": "4987d9d149b7950321b1dbfeb591de72315b8ae20fd602756df6d4c529039b9a",
+          "patch.py": "19ddab02df61de8a0e2889700ae24a7633c685137727b089a9c98b88538fe478",
+          "prepare.py": "35b8b09f59065fff502966b5aa35a856be6562fead5d5f8a4b243905b4832047"
+        },
+        "sha256": "a4f5a844a09246579cb22c638f9f0778877eaec881226737ad858381800b3bfd",
+        "vcs_revision": "bd37cafbdd86112a6da32878f8c9bab22e14377e"
+      },
+      "upstream_archive": {
+        "bytes": 158607,
+        "origin": null,
+        "origin_status": "Green receipt contains no acquisition URL; retained bytes hash-match recorded archive identity.",
+        "path": "p08-dns-ownership-source-1/hickory-resolver/archive/source.crate",
+        "sha256": "3f3da5255c95d5a716857d54b5b8f4e8d67c3484d3beaaaae2ce25063b3ba981"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "iroh",
+        "prepared_path": "target/backend/iroh/iroh-1.3.0",
+        "source_kind": "root-lock path patch",
+        "version": "1.3.0"
+      },
+      "material_group": "backend-and-discovery",
+      "classification": "component_text_only_package_terms_missing",
+      "materials": [
+        {
+          "bytes": 1669,
+          "preserved_path": "docs/legal/notices-material/prepared/backend-and-discovery/iroh/LICENSE-BSD3",
+          "scope": "component_notice",
+          "scope_note": "Authentic LICENSE-BSD3 text is scoped only to Tailscale-derived portions; complete package-level MIT OR Apache-2.0 terms are not held.",
+          "sha256": "7c6c032bf8c84fb4cd99784965a39be9e836fb7f244b3cf40c42faf4b211c10a",
+          "source_member": "iroh-1.3.0/LICENSE-BSD3"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 10743,
+        "declared_license": "MIT OR Apache-2.0",
+        "member": "iroh-1.3.0/Cargo.toml",
+        "package_name": "iroh",
+        "repository": "https://github.com/n0-computer/iroh",
+        "sha256": "b956e143b49dcfc074031774bb16fab72d396bcbe858d09f15678f0a77ba4a8e",
+        "version": "1.3.0"
+      },
+      "preparation_evidence": {
+        "evidence": "Aggregate receipt records archive and patch-set hashes only.",
+        "status": "unresolved_per_file_original_prepared_license_equality"
+      },
+      "receipt": {
+        "archive_key": "iroh",
+        "bytes": 934,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/target-backend-provenance.json",
+        "sha256": "ee42b2e8e1fb1d5807cd7f7b7b4be1aa7a3af8ec2c66d0fcb21c1824d60a20cc"
+      },
+      "upstream_archive": {
+        "bytes": 338128,
+        "origin": null,
+        "origin_status": "Aggregate green target-backend receipt binds archive digest, not origin URL.",
+        "path": "iroh-source-1.3.0/iroh-1.3.0.crate",
+        "sha256": "885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833"
+      }
+    },
+    {
+      "acquisition_receipt": {
+        "bytes": 2022,
+        "path": "native-mainline-239-1101-codec-01/codec-source-receipt.json",
+        "sha256": "87b666193930bc2ab3a35a522ad4e067ad22009026d717377ae759e75dc56c72"
+      },
+      "cargo_identity": {
+        "name": "iroh-dns",
+        "prepared_path": "target/native-graph/iroh-dns-1.3.0",
+        "source_kind": "root-lock path patch",
+        "version": "1.3.0"
+      },
+      "material_group": "backend-and-discovery",
+      "materials": [],
+      "missing_text_target": {
+        "acquisition_performed": false,
+        "basis": "Archive Cargo.toml names repository; .cargo_vcs_info.json pins revision and path; archive README links both candidates. These are candidate targets only, not acquired/verified license bytes.",
+        "candidate_license_members": [
+          "iroh-dns/LICENSE-APACHE",
+          "iroh-dns/LICENSE-MIT"
+        ],
+        "metadata_members": {
+          "iroh-dns-1.3.0/.cargo_vcs_info.json": {
+            "bytes": 102,
+            "sha256": "a4073a335de69599f4798b48875a2c7aa4c33a6a8678ce35a7574a6116dfb110"
+          },
+          "iroh-dns-1.3.0/README.md": {
+            "bytes": 729,
+            "sha256": "e13ff384c7955d1d66cc101b3ba47fbbd29b9af749757a2ef62674c5711c9dac"
+          }
+        },
+        "path_in_vcs": "iroh-dns",
+        "repository": "https://github.com/n0-computer/iroh",
+        "revision": "17c0612f80f78f5288e97b818b1360ae6ea0a51a",
+        "status": "targets_named_by_archive_README_not_acquired"
+      },
+      "package_manifest": {
+        "bytes": 2854,
+        "declared_license": "MIT OR Apache-2.0",
+        "member": "iroh-dns-1.3.0/Cargo.toml",
+        "package_name": "iroh-dns",
+        "repository": "https://github.com/n0-computer/iroh",
+        "sha256": "693dc11424bf52b3146a828a6da4f930219db4af3707b0604f2d38bbb32edaa5",
+        "version": "1.3.0"
+      },
+      "preparation_evidence": {
+        "evidence": "Bounded in-memory archive scan found no license-named member or complete embedded license header; SPDX is not text. README identifies LICENSE-APACHE and LICENSE-MIT member targets; absent from retained crate archive and not acquired.",
+        "status": "no_verbatim_license_member_found"
+      },
+      "receipt": {
+        "bytes": 3508,
+        "note": "Saved prior preparation receipt; not current green-batch prepared tree.",
+        "path": "base58-71-22fb68d-verify-ubuntu-01/native-graph/iroh-dns-1.3.0.provenance.json",
+        "recipe_files": {
+          ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230",
+          "execution/ci.py": "2396248e89c49fe7f177291f8d49b968cbf06222e7bf60bdd4c41bb90d30ae5f",
+          "execution/verify.sh": "2a54ae14a3d5c4945cce619039c8a734cb6ce9dc0eba84da871ead0a590f2722",
+          "graph.py": "ee39f89728a223d2513d76ac6766a13ecb046609e218b0e833dc09c1c4afcb29",
+          "prepare.py": "346e4f5cb4065f29564adb0b1c25be94965e2e2d938b6b8d8c10cd6f2b8f35b6",
+          "runner.py": "2b48aaa57ce3e5d544b47a03ecbac83c8107e84465bd6b10a2cd496961401323",
+          "test_source.py": "1e2a29470b72fe03df154d3ec38a836048904ad10ff192b5191afe555262bdb9",
+          "tests/publication_tests.rs": "8c77b1a4caa6f910631fd7645353400673f6834fd2a07454adafaacece7b765a"
+        },
+        "sha256": "1e2670bd867fc1f7f1f5ca08d42f47c39cce29a66afcf10868a6cb1ea1f1a760"
+      },
+      "upstream_archive": {
+        "bytes": 42763,
+        "origin": "https://static.crates.io/crates/iroh-dns/iroh-dns-1.3.0.crate",
+        "origin_status": "Official requested URL recorded in retained codec receipt.",
+        "path": "native-mainline-239-1101-codec-01/iroh-dns-1.3.0.crate",
+        "sha256": "80276761b56e904e26ea71d0863beef0bb8d5ab6b639cbd1338e4b615209e3a1"
+      }
+    },
+    {
+      "acquisition_receipt": {
+        "bytes": 2673,
+        "path": "native-mainline-212-1101-source-01/source-receipt.json",
+        "sha256": "ca1db572bb32505ad53b7c2b326777dc6aab1d79e10b69a668ab94b34895485b"
+      },
+      "cargo_identity": {
+        "name": "iroh-mainline-address-lookup",
+        "prepared_path": "target/native-graph/adapter/iroh-mainline-address-lookup",
+        "source_kind": "generated root-lock path dependency",
+        "version": "0.6.1"
+      },
+      "material_group": "backend-and-discovery",
+      "materials": [
+        {
+          "bytes": 10831,
+          "preserved_path": "docs/legal/notices-material/prepared/backend-and-discovery/iroh-mainline-address-lookup/LICENSE-APACHE",
+          "sha256": "7986218ec4ea89de3511a843ae27fea2584a525036c220ff7b26589179f07888",
+          "source_member": "iroh-address-lookups-0f5f547cc65514e4537d4e66f776319ea8e30a2e/LICENSE-APACHE"
+        },
+        {
+          "bytes": 1048,
+          "preserved_path": "docs/legal/notices-material/prepared/backend-and-discovery/iroh-mainline-address-lookup/LICENSE-MIT",
+          "sha256": "33616ec4c88b6e00de66e6c06f1a55d80bb32a9d7939f3aa83d28e673a1adcae",
+          "source_member": "iroh-address-lookups-0f5f547cc65514e4537d4e66f776319ea8e30a2e/LICENSE-MIT"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 1411,
+        "declared_license": "MIT OR Apache-2.0",
+        "member": "iroh-address-lookups-0f5f547cc65514e4537d4e66f776319ea8e30a2e/iroh-mainline-address-lookup/Cargo.toml",
+        "package_name": "iroh-mainline-address-lookup",
+        "repository": "https://github.com/n0-computer/iroh-address-lookups",
+        "sha256": "de68229c044cd90ea93739eeefb7f039f1565394c1e5d541b581e8f86e0c2de9",
+        "version": "0.6.1"
+      },
+      "preparation_evidence": {
+        "changed_files": [
+          "iroh-mainline-address-lookup/Cargo.toml"
+        ],
+        "hashes": {
+          "LICENSE-APACHE": "7986218ec4ea89de3511a843ae27fea2584a525036c220ff7b26589179f07888",
+          "LICENSE-MIT": "33616ec4c88b6e00de66e6c06f1a55d80bb32a9d7939f3aa83d28e673a1adcae"
+        },
+        "status": "original_and_prepared_license_member_hashes_equal"
+      },
+      "receipt": {
+        "bytes": 6100,
+        "path": "base58-71-22fb68d-verify-ubuntu-01/native-graph/adapter.provenance.json",
+        "recipe_files": {
+          ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230"
+        },
+        "sha256": "8dab7f575679f2df48ede158c00966d0920f3abbb91b4aad8438baefd9c0b3f3"
+      },
+      "source_project_scope": {
+        "archive_root_manifest": {
+          "bytes": 1045,
+          "member": "iroh-address-lookups-0f5f547cc65514e4537d4e66f776319ea8e30a2e/Cargo.toml",
+          "sha256": "07ea06e3455c77d8754cbf807fadb9050c073d95936ccb5b6aaf873f548f24d3",
+          "workspace_members": [
+            "iroh-mainline-address-lookup",
+            "iroh-mdns-address-lookup"
+          ]
+        },
+        "archive_root_shared_license_files": {
+          "LICENSE-APACHE": {
+            "bytes": 10831,
+            "sha256": "7986218ec4ea89de3511a843ae27fea2584a525036c220ff7b26589179f07888"
+          },
+          "LICENSE-MIT": {
+            "bytes": 1048,
+            "sha256": "33616ec4c88b6e00de66e6c06f1a55d80bb32a9d7939f3aa83d28e673a1adcae"
+          }
+        },
+        "scope_note": "Selected package manifest identifies adapter; both license files live at archive workspace root and are shared within that upstream workspace."
+      },
+      "upstream_archive": {
+        "bytes": 59252,
+        "origin": "https://codeload.github.com/n0-computer/iroh-address-lookups/tar.gz/0f5f547cc65514e4537d4e66f776319ea8e30a2e",
+        "origin_status": "Upstream Git archive receipt; not registry-byte equivalence.",
+        "path": "native-mainline-212-1101-source-01/adapter-source.tar.gz",
+        "revision": "0f5f547cc65514e4537d4e66f776319ea8e30a2e",
+        "sha256": "035d35f41362c79d43f44dc1d5cdaf9c8c718fa3781fd09cf458b7b47cb014ba"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "libp2p-dns",
+        "prepared_path": "target/p2p/dns/libp2p-dns-0.45.0",
+        "source_kind": "root-lock path patch",
+        "version": "0.45.0"
+      },
+      "material_group": "backend-and-discovery",
+      "materials": [
+        {
+          "member_bytes": 33634,
+          "member_sha256": "5f6291a1c453fc7c38c3992b4beacaa48741d9b390485ef2ffce186f2e3d7ca7",
+          "preserved_path": "docs/legal/notices-material/prepared/backend-and-discovery/libp2p-dns/src-lib.rs.header",
+          "slice": {
+            "boundary": "complete embedded MIT text plus terminating newline",
+            "bytes": 1124,
+            "end_exclusive": 1124,
+            "sha256": "22375f95ada42f478cc29687320886b83f0d59971ac6968755c12f6d95e207ca",
+            "start": 0
+          },
+          "source_member": "libp2p-dns-0.45.0/src/lib.rs"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 2011,
+        "declared_license": "MIT",
+        "member": "libp2p-dns-0.45.0/Cargo.toml",
+        "package_name": "libp2p-dns",
+        "repository": "https://github.com/libp2p/rust-libp2p",
+        "sha256": "6d08833df367d63ece317345c148ac45d7e456f8a46829394485a1b5e2460c72",
+        "version": "0.45.0"
+      },
+      "preparation_evidence": {
+        "changed_files": [
+          "Cargo.toml",
+          "src/bounded_expansion.rs",
+          "src/lib.rs"
+        ],
+        "original_files_src_lib_rs": "5f6291a1c453fc7c38c3992b4beacaa48741d9b390485ef2ffce186f2e3d7ca7",
+        "prepared_files_src_lib_rs": "450e1580fa6473c689ff7748a7a3f5ebd7f99968d1bc100ddb62f4815b0dc204",
+        "status": "prepared_header_slice_not_separately_hashed"
+      },
+      "receipt": {
+        "bytes": 2259,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/p2p-dns-provenance.json",
+        "recipe_files": {
+          "bounds.rs": "bfbad7fcf51bb05769802efdc9a5cac6347613f859ef87c8c4695252821e0bb0",
+          "patch.py": "4a7219626b82ee3c599eb7d2e3f867aecd348b4749643ee5f2ebae10794780d5",
+          "prepare.py": "5d1c3f2beb059c25f8ce39f1c3e9d89ea125b55dd6856efe0487a2b1f27e07cd"
+        },
+        "sha256": "9c396d5d50c4cf27341f28aadde1f377db279c54ab6ca5f6d2a9399f097b3e4d"
+      },
+      "upstream_archive": {
+        "bytes": 24199,
+        "origin": null,
+        "origin_status": "Receipt records archive hash and VCS revision 7171dce2f90c05ba7892d4ba926abb1881db27c7; no URL.",
+        "path": "p08-amino-source-bundle-1/libp2p-dns/source.crate",
+        "sha256": "18694695e98ff9ce26ee245fdede7cd0b4186cb793b25da3258d9c053400a291"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "libp2p-kad",
+        "prepared_path": "target/p2p/kad/libp2p-kad-0.49.0",
+        "source_kind": "root-lock path patch",
+        "version": "0.49.0"
+      },
+      "material_group": "backend-and-discovery",
+      "materials": [
+        {
+          "member_bytes": 4881,
+          "member_sha256": "6cd186b1794375636465899b27157719dc374c2d86f8fbf8de9caf8449dae57b",
+          "preserved_path": "docs/legal/notices-material/prepared/backend-and-discovery/libp2p-kad/src-lib.rs.header",
+          "slice": {
+            "boundary": "complete embedded MIT text plus terminating newline",
+            "bytes": 1124,
+            "end_exclusive": 1124,
+            "sha256": "22375f95ada42f478cc29687320886b83f0d59971ac6968755c12f6d95e207ca",
+            "start": 0
+          },
+          "source_member": "libp2p-kad-0.49.0/src/lib.rs"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 2745,
+        "declared_license": "MIT",
+        "member": "libp2p-kad-0.49.0/Cargo.toml",
+        "package_name": "libp2p-kad",
+        "repository": "https://github.com/libp2p/rust-libp2p",
+        "sha256": "50e86d7ddc0dc83e6501eb700ff799c6dbe9e5b3eb6a8c7f37d97cbe6eeb04e2",
+        "version": "0.49.0"
+      },
+      "preparation_evidence": {
+        "original_files_src_lib_rs": "6cd186b1794375636465899b27157719dc374c2d86f8fbf8de9caf8449dae57b",
+        "prepared_files_src_lib_rs": "6cd186b1794375636465899b27157719dc374c2d86f8fbf8de9caf8449dae57b",
+        "status": "original_and_prepared_source_member_hashes_equal"
+      },
+      "receipt": {
+        "bytes": 6244,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/p2p-kad-provenance.json",
+        "sha256": "a5ae47767bed8c0e938ee596ffb1218371957210c83780693d44210c5ba247fc"
+      },
+      "upstream_archive": {
+        "bytes": 124820,
+        "origin": null,
+        "origin_status": "Receipt records archive hash and VCS revision 7171dce2f90c05ba7892d4ba926abb1881db27c7; no URL.",
+        "path": "p08-amino-source-bundle-1/libp2p-kad/source.crate",
+        "sha256": "973caa45045e53f3cf1cf3d596888b82602b30640fd75485836c81aa66e7c38a"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "libp2p-relay",
+        "prepared_path": "target/p2p/relay/libp2p-relay-0.22.0",
+        "source_kind": "root-lock path patch",
+        "version": "0.22.0"
+      },
+      "material_group": "network-protocols",
+      "materials": [
+        {
+          "member_bytes": 3197,
+          "member_sha256": "f4963302d33c64da41c3d2fb6b0ec70abea4a6c17da658c5952a88f2436457b3",
+          "preserved_path": "docs/legal/notices-material/prepared/network-protocols/libp2p-relay/src-lib.rs.header",
+          "slice": {
+            "boundary": "complete embedded MIT text plus terminating newline",
+            "bytes": 1157,
+            "end_exclusive": 1157,
+            "sha256": "dcb5d7853eed00c1c60b6a4ebe37222ca3dcc2409cb34c3dcc4d938cc50b4a87",
+            "start": 0
+          },
+          "source_member": "libp2p-relay-0.22.0/src/lib.rs"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 2738,
+        "declared_license": "MIT",
+        "member": "libp2p-relay-0.22.0/Cargo.toml",
+        "package_name": "libp2p-relay",
+        "repository": "https://github.com/libp2p/rust-libp2p",
+        "sha256": "f3061305dbee39b496413c961205fe14041b038cae232cfdcf72c55d155204e6",
+        "version": "0.22.0"
+      },
+      "preparation_evidence": {
+        "evidence": "Receipt has selected prepared source hashes but no original/prepared src/lib.rs file hashes.",
+        "status": "unresolved_per_file_original_prepared_header_equality"
+      },
+      "receipt": {
+        "bytes": 2192,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/p2p-relay-provenance.json",
+        "sha256": "82127635d0646bafc649fc173f3605b6decd60b5c0384a1129da51b95453b185"
+      },
+      "upstream_archive": {
+        "bytes": 56512,
+        "origin": null,
+        "origin_status": "Receipt/archive digest matched locally; no source URL in inspected receipt.",
+        "path": "libp2p-relay-0.22.0-archive-1/relay.crate",
+        "sha256": "e5227b053db429996242c00f6c756fd9b5382b942a03eec34b465431df29697a"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "libp2p-swarm",
+        "prepared_path": "target/p2p/swarm/libp2p-swarm-0.48.0",
+        "source_kind": "root-lock path patch",
+        "version": "0.48.0"
+      },
+      "material_group": "network-protocols",
+      "materials": [
+        {
+          "member_bytes": 93038,
+          "member_sha256": "ffa84fc0ed5092b8932f2278e5247fe5fafcc576bf6399d674d564ff0e1386f6",
+          "preserved_path": "docs/legal/notices-material/prepared/network-protocols/libp2p-swarm/src-lib.rs.header",
+          "slice": {
+            "boundary": "complete embedded MIT text plus terminating newline",
+            "bytes": 1124,
+            "end_exclusive": 1124,
+            "sha256": "807a93f76384e2cd0d26a180975c1064a1365a5ec3c9ea207bf813a188a1e6f4",
+            "start": 0
+          },
+          "source_member": "libp2p-swarm-0.48.0/src/lib.rs"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 3178,
+        "declared_license": "MIT",
+        "member": "libp2p-swarm-0.48.0/Cargo.toml",
+        "package_name": "libp2p-swarm",
+        "repository": "https://github.com/libp2p/rust-libp2p",
+        "sha256": "a95f3d8eccec2ad0bde80b00b5c3684d3a851851eb980b276f5b2865d519d36e",
+        "version": "0.48.0"
+      },
+      "preparation_evidence": {
+        "evidence": "Receipt has archive/patch fields but no per-file original/prepared source hashes.",
+        "status": "unresolved_per_file_original_prepared_header_equality"
+      },
+      "receipt": {
+        "bytes": 349,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/p2p-swarm-provenance.json",
+        "sha256": "75af7038a26b4090eeec7f34fea446f4730ea527d6eac8c433b5569b8585f99c"
+      },
+      "upstream_archive": {
+        "bytes": 114085,
+        "origin": null,
+        "origin_status": "Receipt/archive digest matched locally; no source URL in inspected receipt.",
+        "path": "libp2p-swarm-0.48.0-archive-1/swarm.crate",
+        "sha256": "57ccbe1baeaef036ffde4b265871e11c64d29464036bba635378f356bcdca854"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "multibase",
+        "prepared_path": "target/native-graph/multibase-0.9.3",
+        "source_kind": "root-lock path patch",
+        "version": "0.9.3"
+      },
+      "material_group": "network-protocols",
+      "materials": [
+        {
+          "bytes": 1119,
+          "preserved_path": "docs/legal/notices-material/prepared/network-protocols/multibase/LICENSE",
+          "sha256": "0cb24bdcd14ab74a06b78eb8ff06d3efa0a4014111da713d489d8242ad90ad1b",
+          "source_member": "multibase-0.9.3/LICENSE"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 1639,
+        "declared_license": "MIT",
+        "member": "multibase-0.9.3/Cargo.toml",
+        "package_name": "multibase",
+        "repository": "https://github.com/multiformats/rust-multibase",
+        "sha256": "181418f0a7baf128642d766d745b55f7e66218aed5d70b32c9a32a992048a0aa",
+        "version": "0.9.3"
+      },
+      "preparation_evidence": {
+        "original_files_LICENSE": "0cb24bdcd14ab74a06b78eb8ff06d3efa0a4014111da713d489d8242ad90ad1b",
+        "prepared_files_LICENSE": "0cb24bdcd14ab74a06b78eb8ff06d3efa0a4014111da713d489d8242ad90ad1b",
+        "scope": "Saved prior preparation receipt binds same archive digest; does not certify current green prepared tree.",
+        "status": "original_and_prepared_license_member_hashes_equal"
+      },
+      "receipt": {
+        "bytes": 4418,
+        "path": "base58-71-22fb68d-verify-ubuntu-01/native-graph/multibase-0.9.3.provenance.json",
+        "recipe_files": {
+          ".github/probes/native-graph-multibase/prepare.py": "2ba236c05e1ffbd7c36eca47564acb58a69442e820a27d3d0b52ca242f169faf",
+          ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230"
+        },
+        "sha256": "b4ef9518aa30f490112f681f5fc83febda16bcc1a334fdbfdab3847d1062ea40"
+      },
+      "upstream_archive": {
+        "bytes": 17913,
+        "origin": null,
+        "origin_status": "Saved preparation receipt lacks origin URL; retained archive hash matches receipt.",
+        "path": "multibase-0.9.3-71-01/multibase-0.9.3.crate",
+        "sha256": "7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6"
+      }
+    },
+    {
+      "acquisition_receipt": {
+        "bytes": 8354,
+        "path": "native-record-240-1101-simpledns-01/source-receipt.json",
+        "sha256": "1d5d8fdf9614b94b6a017e45ed7697b6075fdc3fc91ca61db8928dc992ba4dce"
+      },
+      "cargo_identity": {
+        "name": "simple-dns",
+        "prepared_path": "target/p2p/simple-dns/simple-dns-0.12.0",
+        "source_kind": "root-lock path patch",
+        "version": "0.12.0"
+      },
+      "material_group": "network-protocols",
+      "materials": [
+        {
+          "bytes": 1086,
+          "preserved_path": "docs/legal/notices-material/prepared/network-protocols/simple-dns/LICENSE",
+          "sha256": "c6550232507f928b83ef50f4be1e64c434da5ac2f434cdf9a2d89344af33e8fd",
+          "source_member": "simple-dns-0.12.0/LICENSE"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 1248,
+        "declared_license": "MIT",
+        "member": "simple-dns-0.12.0/Cargo.toml",
+        "package_name": "simple-dns",
+        "repository": "https://github.com/balliegojr/simple-dns",
+        "sha256": "b6b2b5f1afe417e5255e4c43cd6fe20e62c66bdc64a300e76e038f2d1b778468",
+        "version": "0.12.0"
+      },
+      "preparation_evidence": {
+        "evidence": "Acquisition receipt records archive member hash; no prepared-tree license hash.",
+        "status": "unresolved_prepared_LICENSE_hash"
+      },
+      "upstream_archive": {
+        "bytes": 54597,
+        "origin": null,
+        "origin_status": "Archive receipt records product-lock match, not acquisition URL.",
+        "path": "native-record-240-1101-simpledns-01/simple-dns-0.12.0.crate",
+        "sha256": "2b6f884fa9a8d48101774bfbd3aeb81e968dd22cffd19a372da69f183db22c1a"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "n0-future",
+        "prepared_path": "target/native-graph/n0-future-0.3.2",
+        "source_kind": "root-lock path patch",
+        "version": "0.3.2"
+      },
+      "material_group": "native-mainline",
+      "materials": [
+        {
+          "bytes": 10831,
+          "preserved_path": "docs/legal/notices-material/prepared/native-mainline/n0-future/LICENSE-APACHE",
+          "sha256": "7986218ec4ea89de3511a843ae27fea2584a525036c220ff7b26589179f07888",
+          "source_member": "n0-future-0.3.2/LICENSE-APACHE"
+        },
+        {
+          "bytes": 1048,
+          "preserved_path": "docs/legal/notices-material/prepared/native-mainline/n0-future/LICENSE-MIT",
+          "sha256": "33616ec4c88b6e00de66e6c06f1a55d80bb32a9d7939f3aa83d28e673a1adcae",
+          "source_member": "n0-future-0.3.2/LICENSE-MIT"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 2985,
+        "declared_license": "MIT OR Apache-2.0",
+        "member": "n0-future-0.3.2/Cargo.toml",
+        "package_name": "n0-future",
+        "repository": "https://github.com/n0-computer/n0-future",
+        "sha256": "d29bbdf28dd0d4660d970a3998c29de3f1918bde0f72763fb0ba42b9875c78f7",
+        "version": "0.3.2"
+      },
+      "preparation_evidence": {
+        "original_files": {
+          "LICENSE-APACHE": "7986218ec4ea89de3511a843ae27fea2584a525036c220ff7b26589179f07888",
+          "LICENSE-MIT": "33616ec4c88b6e00de66e6c06f1a55d80bb32a9d7939f3aa83d28e673a1adcae"
+        },
+        "prepared_files": {
+          "LICENSE-APACHE": "7986218ec4ea89de3511a843ae27fea2584a525036c220ff7b26589179f07888",
+          "LICENSE-MIT": "33616ec4c88b6e00de66e6c06f1a55d80bb32a9d7939f3aa83d28e673a1adcae"
+        },
+        "scope": "Prior saved receipt for same archive identity; not current green prepared tree.",
+        "status": "original_and_prepared_license_member_hashes_equal"
+      },
+      "receipt": {
+        "bytes": 5542,
+        "path": "base58-71-22fb68d-verify-ubuntu-01/native-graph/n0-future-0.3.2.provenance.json",
+        "recipe_files": {
+          ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230"
+        },
+        "sha256": "4206d09a0872a75060485699206a72be1d7a01f9692537bc00927e84d76a37e4"
+      },
+      "upstream_archive": {
+        "bytes": 35589,
+        "origin": null,
+        "origin_status": "Saved prep receipt does not record URL; retained archive digest matches it.",
+        "path": "n0-future-0.3.2-archive-1/n0-future.crate",
+        "sha256": "e2ab99dfb861450e68853d34ae665243a88b8c493d01ba957321a1e9b2312bbe"
+      }
+    },
+    {
+      "acquisition_receipt": {
+        "bytes": 6256,
+        "path": "native-mainline-212-1101-n0-01/source-receipt.json",
+        "sha256": "376be7a0e26d0c59b57fb740ad8556485092d075ea04ee0167289bcaa39a80bd"
+      },
+      "cargo_identity": {
+        "name": "n0-mainline",
+        "prepared_path": "target/native-graph/n0-mainline-0.7.0",
+        "source_kind": "root-lock path patch",
+        "version": "0.7.0"
+      },
+      "material_group": "native-mainline",
+      "materials": [
+        {
+          "bytes": 10831,
+          "preserved_path": "docs/legal/notices-material/prepared/native-mainline/n0-mainline/LICENSE-APACHE",
+          "sha256": "903131e2786f073a942fbf8fae122d9e576e4dad758c6da7f9f2ba58fd8611ab",
+          "source_member": "n0-mainline-0.7.0/LICENSE-APACHE"
+        },
+        {
+          "bytes": 1122,
+          "preserved_path": "docs/legal/notices-material/prepared/native-mainline/n0-mainline/LICENSE-MIT",
+          "sha256": "b15c26badf54093f4ad05ad947983010d2a6a1ed2f5787aef42797d521e44ccb",
+          "source_member": "n0-mainline-0.7.0/LICENSE-MIT"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 2864,
+        "declared_license": "MIT OR Apache-2.0",
+        "member": "n0-mainline-0.7.0/Cargo.toml",
+        "package_name": "n0-mainline",
+        "repository": "https://github.com/n0-computer/n0-mainline",
+        "sha256": "b5f7626d4373f15282d6fd8db148e9980be939f9c588e8097fb6f1f5b5c597fc",
+        "version": "0.7.0"
+      },
+      "preparation_evidence": {
+        "original_files": {
+          "LICENSE-APACHE": "903131e2786f073a942fbf8fae122d9e576e4dad758c6da7f9f2ba58fd8611ab",
+          "LICENSE-MIT": "b15c26badf54093f4ad05ad947983010d2a6a1ed2f5787aef42797d521e44ccb"
+        },
+        "prepared_files": {
+          "LICENSE-APACHE": "903131e2786f073a942fbf8fae122d9e576e4dad758c6da7f9f2ba58fd8611ab",
+          "LICENSE-MIT": "b15c26badf54093f4ad05ad947983010d2a6a1ed2f5787aef42797d521e44ccb"
+        },
+        "scope": "Prior saved receipt, same archive digest; does not certify current green prepared tree.",
+        "status": "original_and_prepared_license_member_hashes_equal"
+      },
+      "receipt": {
+        "bytes": 20774,
+        "path": "base58-71-22fb68d-verify-ubuntu-01/native-graph/n0-mainline-0.7.0.provenance.json",
+        "recipe_files": {
+          ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230",
+          "ci/bencode/edits.py": "bbf109613ce88b44f0186aa3576cf55bbce10d71b516b11eb12d946b942b7e62",
+          "ci/bencode/prepare.py": "e1b7c800338c055c618eb73b8da516008b7a648f03579467fd59f4d548c6540e"
+        },
+        "sha256": "018e8087db2fcf3516363600c8e6f9d82c3a4fefa9773ed068aea0fad5d4f51b"
+      },
+      "upstream_archive": {
+        "bytes": 84039,
+        "origin": "https://static.crates.io/crates/n0-mainline/n0-mainline-0.7.0.crate",
+        "path": "native-mainline-212-1101-n0-01/n0-mainline-0.7.0.crate",
+        "sha256": "f64972176bd209d1ebe98310743614e19728a33a4b288ae8147cca9f0b8c7463"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "noq",
+        "prepared_path": "target/backend/noq/noq-1.3.0",
+        "source_kind": "root-lock path patch",
+        "version": "1.3.0"
+      },
+      "material_group": "native-mainline",
+      "materials": [
+        {
+          "bytes": 11384,
+          "preserved_path": "docs/legal/notices-material/prepared/native-mainline/noq/LICENSE-APACHE",
+          "sha256": "a237a9d796dd30eebc8def7ee282c691be4c884454444510d702644f20669c15",
+          "source_member": "noq-1.3.0/LICENSE-APACHE"
+        },
+        {
+          "bytes": 1097,
+          "preserved_path": "docs/legal/notices-material/prepared/native-mainline/noq/LICENSE-MIT",
+          "sha256": "9e654cd17a17880f43a84c9c024f9ca7a320ed906d521072c15aa2e8daff8df0",
+          "source_member": "noq-1.3.0/LICENSE-MIT"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 6417,
+        "declared_license": "MIT OR Apache-2.0",
+        "member": "noq-1.3.0/Cargo.toml",
+        "package_name": "noq",
+        "repository": "https://github.com/n0-computer/noq",
+        "sha256": "3ba8f309c1c955eb766fc5fce45f7d5b251570dc87b54bc701066081b362c7a8",
+        "version": "1.3.0"
+      },
+      "preparation_evidence": {
+        "evidence": "Aggregate receipt records archive and patch hashes only.",
+        "status": "unresolved_per_file_original_prepared_license_equality"
+      },
+      "receipt": {
+        "archive_key": "noq",
+        "bytes": 934,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/target-backend-provenance.json",
+        "sha256": "ee42b2e8e1fb1d5807cd7f7b7b4be1aa7a3af8ec2c66d0fcb21c1824d60a20cc"
+      },
+      "upstream_archive": {
+        "bytes": 108044,
+        "origin": null,
+        "origin_status": "Aggregate green receipt gives archive digest only.",
+        "path": "noq-stream-api-1.3.0-archive/noq-1.3.0.crate",
+        "sha256": "b78be567e796cfa74bb9bdc4117790af2d505eb887019cf8803244353eb09d89"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "noq-proto",
+        "prepared_path": "target/backend/noq-proto/noq-proto-1.3.0",
+        "source_kind": "root-lock path patch",
+        "version": "1.3.0"
+      },
+      "material_group": "native-mainline",
+      "materials": [
+        {
+          "bytes": 11384,
+          "preserved_path": "docs/legal/notices-material/prepared/native-mainline/noq-proto/LICENSE-APACHE",
+          "sha256": "a237a9d796dd30eebc8def7ee282c691be4c884454444510d702644f20669c15",
+          "source_member": "noq-proto-1.3.0/LICENSE-APACHE"
+        },
+        {
+          "bytes": 1097,
+          "preserved_path": "docs/legal/notices-material/prepared/native-mainline/noq-proto/LICENSE-MIT",
+          "sha256": "9e654cd17a17880f43a84c9c024f9ca7a320ed906d521072c15aa2e8daff8df0",
+          "source_member": "noq-proto-1.3.0/LICENSE-MIT"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 5301,
+        "declared_license": "MIT OR Apache-2.0",
+        "member": "noq-proto-1.3.0/Cargo.toml",
+        "package_name": "noq-proto",
+        "repository": "https://github.com/n0-computer/noq",
+        "sha256": "de968c48ce158568890e41b199acdd8030746b3d27021ea57508edd1058c6f5d",
+        "version": "1.3.0"
+      },
+      "preparation_evidence": {
+        "evidence": "Aggregate receipt records archive and patch hashes only.",
+        "status": "unresolved_per_file_original_prepared_license_equality"
+      },
+      "receipt": {
+        "archive_key": "noq-proto",
+        "bytes": 934,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/target-backend-provenance.json",
+        "sha256": "ee42b2e8e1fb1d5807cd7f7b7b4be1aa7a3af8ec2c66d0fcb21c1824d60a20cc"
+      },
+      "upstream_archive": {
+        "bytes": 476227,
+        "origin": null,
+        "origin_status": "Aggregate green receipt gives archive digest only.",
+        "path": "noq-proto-gate-1.3.0-archive/noq-proto-1.3.0.crate",
+        "sha256": "7c1e5b6fe668491eca022f745a0a9402585626c73a7b839b3424ace15d6a9c8f"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "serde_bencode",
+        "prepared_path": "target/native-graph/serde_bencode-0.2.4",
+        "source_kind": "root-lock path patch",
+        "version": "0.2.4"
+      },
+      "material_group": "native-mainline",
+      "materials": [
+        {
+          "bytes": 1076,
+          "preserved_path": "docs/legal/notices-material/prepared/native-mainline/serde_bencode/LICENSE.md",
+          "sha256": "90d7e062634054e6866d3c81e6a2b3058a840e6af733e98e80bdfe1a7dec6912",
+          "source_member": "serde_bencode-0.2.4/LICENSE.md"
+        }
+      ],
+      "package_manifest": {
+        "bytes": 1130,
+        "declared_license": "MIT",
+        "member": "serde_bencode-0.2.4/Cargo.toml",
+        "package_name": "serde_bencode",
+        "repository": "https://github.com/toby/serde-bencode",
+        "sha256": "3da2266702df6666cc71f86152498d2edcc1504c2cd45288238404760d3c4fc0",
+        "version": "0.2.4"
+      },
+      "preparation_evidence": {
+        "original_files_LICENSE_md": "90d7e062634054e6866d3c81e6a2b3058a840e6af733e98e80bdfe1a7dec6912",
+        "prepared_files_LICENSE_md": "90d7e062634054e6866d3c81e6a2b3058a840e6af733e98e80bdfe1a7dec6912",
+        "scope": "Prior saved receipt for same archive digest; not current green prepared tree.",
+        "status": "original_and_prepared_license_member_hashes_equal"
+      },
+      "receipt": {
+        "bytes": 6049,
+        "path": "base58-71-22fb68d-verify-ubuntu-01/native-graph/serde_bencode-0.2.4.provenance.json",
+        "recipe_files": {
+          ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230",
+          "edits.py": "bbf109613ce88b44f0186aa3576cf55bbce10d71b516b11eb12d946b942b7e62",
+          "prepare.py": "e1b7c800338c055c618eb73b8da516008b7a648f03579467fd59f4d548c6540e"
+        },
+        "sha256": "d77058c60441d1ea71a263d6bdd39aa37ac32c0023c20ae13e21417755160501"
+      },
+      "upstream_archive": {
+        "bytes": 18546,
+        "origin": null,
+        "origin_status": "Saved prep receipt has no URL; archive bytes match recorded digest.",
+        "path": "native-mainline-parser-251-1101-source-01/serde_bencode-0.2.4.crate",
+        "sha256": "a70dfc7b7438b99896e7f8992363ab8e2c4ba26aa5ec675d32d1c3c2c33d413e"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "ironwood",
+        "prepared_path": "target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/ironwood",
+        "source_kind": "root_and_nested_lock_pinned_path",
+        "version": "0.2.1"
+      },
+      "material_group": "pinned-shared-material",
+      "package_manifest": {
+        "bytes": 529,
+        "declared_license": "MPL-2.0",
+        "member": "Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/ironwood/Cargo.toml",
+        "package_name": "ironwood",
+        "repository": null,
+        "sha256": "30c4c06d719c970fdcb44ad6af23f42f0d7bfd8f7f9495663b685de599d2a432",
+        "version": "0.2.1"
+      },
+      "preparation_evidence": {
+        "bytes": 16726,
+        "member": "Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/LICENSE",
+        "receipt_original_hash": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+        "receipt_prepared_hash": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+        "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+        "status": "shared_root_LICENSE_original_prepared_and_archive_member_equal"
+      },
+      "receipt": {
+        "bytes": 10471,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/target-ygg-provenance.json",
+        "sha256": "c6e988b0e52bfd6410719a123679570da78c0cd1146f4fda2cb7b64e287c21f3"
+      },
+      "shared_material_reference": {
+        "bytes": 16726,
+        "copied_by_this_chunk": false,
+        "preserved_path": "docs/legal/notices-material/ygg-pinned-revision-c9a54f1-LICENSE",
+        "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+        "source_member": "Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/LICENSE"
+      },
+      "upstream_archive": {
+        "bytes": 239365,
+        "origin": "https://codeload.github.com/Revertron/Yggdrasil-ng/tar.gz/c9a54f1587bb133a06072596484c972a336db0d2",
+        "path": "yggdrasil-ng-c9a54f1-archive-1/src.tar.gz",
+        "revision": "c9a54f1587bb133a06072596484c972a336db0d2",
+        "sha256": "4d978c1a8714e0569fd0a3782adab2f6b81b9c9e54d733dbeaa023aaebae96c1"
+      }
+    },
+    {
+      "cargo_identity": {
+        "name": "yggdrasil",
+        "prepared_path": "target/ygg/Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/yggdrasil",
+        "source_kind": "root_and_nested_lock_pinned_path",
+        "version": "0.3.1"
+      },
+      "material_group": "pinned-shared-material",
+      "package_manifest": {
+        "bytes": 3882,
+        "declared_license": "MPL-2.0",
+        "member": "Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/crates/yggdrasil/Cargo.toml",
+        "package_name": "yggdrasil",
+        "repository": null,
+        "sha256": "c85bf55c2a7675902637326e50835089c3398103668fd914f946de0267e64529",
+        "version": "0.3.1"
+      },
+      "preparation_evidence": {
+        "bytes": 16726,
+        "member": "Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/LICENSE",
+        "receipt_original_hash": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+        "receipt_prepared_hash": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+        "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+        "status": "shared_root_LICENSE_original_prepared_and_archive_member_equal"
+      },
+      "receipt": {
+        "bytes": 10471,
+        "path": "notices-green-42481654381/dependency-license-report-Linux/target-ygg-provenance.json",
+        "sha256": "c6e988b0e52bfd6410719a123679570da78c0cd1146f4fda2cb7b64e287c21f3"
+      },
+      "shared_material_reference": {
+        "bytes": 16726,
+        "copied_by_this_chunk": false,
+        "preserved_path": "docs/legal/notices-material/ygg-pinned-revision-c9a54f1-LICENSE",
+        "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+        "source_member": "Yggdrasil-ng-c9a54f1587bb133a06072596484c972a336db0d2/LICENSE"
+      },
+      "upstream_archive": {
+        "bytes": 239365,
+        "origin": "https://codeload.github.com/Revertron/Yggdrasil-ng/tar.gz/c9a54f1587bb133a06072596484c972a336db0d2",
+        "path": "yggdrasil-ng-c9a54f1-archive-1/src.tar.gz",
+        "revision": "c9a54f1587bb133a06072596484c972a336db0d2",
+        "sha256": "4d978c1a8714e0569fd0a3782adab2f6b81b9c9e54d733dbeaa023aaebae96c1"
+      }
+    }
+  ],
+  "identity_record_fields": {
+    "cargo_identity": "Exact lock path identity; source_kind/prepared_path disambiguate from any same-name/version registry artifact.",
+    "identity_rows_without_verbatim_license_text_semantics": "Counts path identity rows with no retained verbatim license text at all; iroh has a component notice but is not counted here. It is not a complete-package-terms count.",
+    "identity_rows_with_component_text_only": "A material-bearing identity with retained authentic component notice text but without complete package-level license terms; confirmed only for iroh@1.3.0 in this corpus.",
+    "identity_rows_without_complete_package_license_terms": "Rows lacking retained complete package-level license terms, including component-only text and rows with no verbatim license text.",
+    "materials": "Exact archive member and full byte size/hash. Embedded headers add half-open [start,end_exclusive) member slice and its hash. preserved_path is repository-relative and copied verbatim. A material may be component-scoped and does not by itself establish complete package-level license terms.",
+    "preparation_evidence": "Receipt-recorded original/prepared file hashes or explicit unresolved status. Prior saved receipts do not certify current CI prepared-tree bytes.",
+    "receipt": "Exact receipt path/size/hash; acquisition receipt is distinct from preparation receipt where both exist.",
+    "upstream_archive": "Retained original archive path/size/hash and origin/revision only where a receipt records them; archive hash alone does not prove acquisition origin."
+  },
+  "non_claims": [
+    "No SPDX expression is used as verbatim text.",
+    "No registry package is conflated with same-name/version path identity.",
+    "No source archive was extracted to disk, executed, or imported."
+  ],
+  "path_conventions": {
+    "archive_paths": "Relative to primary .rush/downloads service DATA root.",
+    "preserved_paths": "Relative to repository root.",
+    "receipt_paths": "Relative to primary .rush/downloads service DATA root."
+  },
+  "recorded_preparation_recipe_evidence": {
+    "base58-71-22fb68d-verify-ubuntu-01/native-graph/adapter.provenance.json": {
+      "receipt_sha256": "8dab7f575679f2df48ede158c00966d0920f3abbb91b4aad8438baefd9c0b3f3",
+      "recipe_files": {
+        ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230"
+      }
+    },
+    "base58-71-22fb68d-verify-ubuntu-01/native-graph/multibase-0.9.3.provenance.json": {
+      "receipt_sha256": "b4ef9518aa30f490112f681f5fc83febda16bcc1a334fdbfdab3847d1062ea40",
+      "recipe_files": {
+        ".github/probes/native-graph-multibase/prepare.py": "2ba236c05e1ffbd7c36eca47564acb58a69442e820a27d3d0b52ca242f169faf",
+        ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230"
+      }
+    },
+    "base58-71-22fb68d-verify-ubuntu-01/native-graph/n0-future-0.3.2.provenance.json": {
+      "receipt_sha256": "4206d09a0872a75060485699206a72be1d7a01f9692537bc00927e84d76a37e4",
+      "recipe_files": {
+        ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230"
+      }
+    },
+    "base58-71-22fb68d-verify-ubuntu-01/native-graph/n0-mainline-0.7.0.provenance.json": {
+      "receipt_sha256": "018e8087db2fcf3516363600c8e6f9d82c3a4fefa9773ed068aea0fad5d4f51b",
+      "recipe_files": {
+        ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230",
+        "ci/bencode/edits.py": "bbf109613ce88b44f0186aa3576cf55bbce10d71b516b11eb12d946b942b7e62",
+        "ci/bencode/prepare.py": "e1b7c800338c055c618eb73b8da516008b7a648f03579467fd59f4d548c6540e",
+        "ci/ingress.py": "0517d97fb5123a15cd725f17f86d7da3c958bf4d0fa1e97c59462c5d389d3dd8",
+        "ci/ownership/actor.py": "93bd1e6f6ec5fd4754979ecc2734302b49fdaa3aba14a84b1a437f2245d5a1f9",
+        "ci/ownership/completion.py": "58d171da902111b4d5b51c543fdf4bc7ebdf663214dfd3ad752d8d538d768b0c",
+        "ci/ownership/completion.rs": "52c0d3c12668df52c88e26a2e48d64fba9d64bfb7009267500f8eb9d8e6dfcb6",
+        "ci/ownership/queries.py": "e1d872f7243f23ef5a55036964d5006d34aadb3d8669ee43daa7b4dff7d871bc",
+        "ci/ownership/query_resource_tests.rs": "1cbe504c1706d58a7c8dd7380c168a34e49055c2884c00f6b06f649320dc49af",
+        "ci/ownership/tests/actor_admission_tests.rs": "8aab3b3e0d187de1088fca8986e8a221fe20337e7b379a5c63cfa0a3cd0d2796",
+        "ci/ownership/tests/actor_put_tests.rs": "00d1e78195fe12c2c6fba064f53ff906aa4c670c4b0f055bedd1a83203e55123",
+        "ci/ownership/tests/actor_resource_tests.rs": "9393fbb6558cfd3a8aa03f081b070a27543404d7eb18b8feca231174a228baa3",
+        "ci/ownership/tests/hostile_resource_tests/admission_wake_tests.rs": "556fe1010b4c83ed43f7e04b51f9f9376086ca04fbaa06b88c318dbf3deaa511",
+        "ci/ownership/tests/hostile_resource_tests/completion_tests.rs": "3e8779a237cd30d9f15b5b0c38fb68cc4e6c4665f96111c75ae5d709ffd7bccc",
+        "ci/ownership/tests/hostile_resource_tests/newoverload_put_tests.rs": "a2480d22c2394dff74e3d75e7e7b5667376d39de2d4a0b41b005bcc463480e53",
+        "ci/ownership/tests/hostile_resource_tests/provenance_tests.rs": "6c148466f42d97680fde5d18b6f87192437ef3417caa604796439876827d673e",
+        "ci/ownership/tests/hostile_resource_tests/public_put_tests.rs": "a46dcb03dfdb86efcee9ceb52a3ff6bce4e8310a71640bba505e7ee6df3ddd1d",
+        "ci/ownership/tests/hostile_resource_tests/put_lifecycle_tests.rs": "f69c5a809859d6e21bea5c87f8bc895aa3b4f975aee2c42a251fa8c46d19fc5c",
+        "ci/ownership/tests/hostile_resource_tests/terminal_put_tests.rs": "f8796645c6fd8e634abae67963ce4bd5f5747294118b76d8cb3136b75f4d9dff",
+        "ci/ownership/tests/hostile_tests.rs": "ca54a2831279d8d908b87dbf569e22690e2ac770dd9ac7d5166eadb67c895042",
+        "ci/ownership/tests/public_put/deadline.rs": "0e5e23f410a7df5305692cb5bcc5a8cb28e610bd8812ddecff2535fdece6cab4",
+        "ci/ownership/tests/public_put/fatal_retirement.rs": "dfebce70586350ff2629f66528d1c8f2671a4e0de4cec8ea9fa4eae382efd873",
+        "ci/ownership/tests/public_put/held_retirement.rs": "dcbbf8c7fd2321af703cc8317df21a09a9aee2e46bfe5dd0c9fece8a96a4360d",
+        "ci/ownership/tests/public_put/retirement.rs": "dcbf6188d4eb35c32d604b4c4fc569b6cb4c12ed0c9c4db0c2f67eaebcbaeca2",
+        "ci/resources/actor/mod.rs": "d98e55b05f7f80aeb8720d013540397f8b4f3341361f90866e58f65ba0448cf8",
+        "ci/resources/actor/owned_resources/admission.rs": "1b1cd216256cdb9ff4d640c82403f4c27023d55d3d9dc1ad228ee749532d83c4",
+        "ci/resources/actor/owned_resources/failure.rs": "502a4e474cc006c9cbddf58d1fe6b8159f4284aead2dc91f5cab98af0aac42c2",
+        "ci/resources/actor/owned_resources/maintenance.rs": "01d77f2d7416ee1465928d892087ff2a879f35a361e1c1f7983d3a2a696c4d0c",
+        "ci/resources/actor/owned_resources/put.rs": "2db97cb3fc32a785bc9d88cb208e1deeb291a63de6ef54a0959b61b62e8ed854",
+        "ci/resources/actor/owned_resources/queries.rs": "09ce90c9398bc57c12ebf528ca16031f82739786ba6d34dd64d94d3c24f5e128",
+        "ci/resources/actor/owned_resources/tick.rs": "2bc45a73d33c33261710a2a66af58bcb144f4502a553cd8c2301eaa212dbf949",
+        "ci/resources/edits.py": "b583daae10a9715d7c6c04e877377756ee1dfa4cd37ee36568422f3acdda894b",
+        "ci/resources/resource.rs": "5a8f79d44a23931c648e012a404ed8687882430935ee1ed91fd885d299e681f9",
+        "ci/resources/socket/publication_observer.rs": "fda2c26254931ee542930306b195446944fa045c3f4bf785cd2c58edf7accf4c",
+        "ci/resources/socket/socket_owned.rs": "479ad71399ae2bdc6742c613311a856a329a604bfd8d510f2898a0423c58dea1",
+        "ci/resources/socket/socket_resources.rs": "0aeb404cdc082a11e74d4f39bef6428026675675b3fa0f55aa2afece1bfbf521",
+        "ci/resources/socket/test_controls.rs": "8705243184ee613f886ce9143dfa328166d1861bfeec71addde1c364065d3c40",
+        "ci/resources/store_edits.py": "e71ac6d40d9cd59b060f20fc588a6fb2af309b072d3e81d2c6a245585d4e2f30",
+        "ci/resources/stores/store_owner.rs": "f64073e807370c54bc05ef24518f84c4e33f87e61bce2c480720376063e864ae",
+        "ci/resources/stores/visited_store.rs": "5c74c8da8b2329124a56ff8fcdd3fc1ef76b11cfbecd7b06011482ea4b8dff7a",
+        "ci/resources/tests/lifecycle/lifecycle_tests/put_start_tests.rs": "cbe14460801d666b90de0612c32f502459f38f25609c0230cf3ea315bc8cde04",
+        "ci/resources/tests/lifecycle/lifecycle_tests/retry_tests.rs": "2ffefc42f7e56cd6a0d83a9bffc2962e1b60827e9d58592cdcf9a5a62841faf1",
+        "ci/resources/tests/lifecycle/mod.rs": "d021f65804cc5e33ed539e50797f87f0cdca7116cf11b522386b20f336e53744",
+        "ci/resources/tests/socket_resource_tests.rs": "e35d35f10f8260172a54f690f812adf2a739afc438b9a0c81ec03da2032a08c1",
+        "ci/resources/tests/store_resource_tests.rs": "9f274659feff4a691ae10e8fafc4ae3562f6137b5ecbd78309e86cbb40e1d6d3",
+        "lifetime.py": "fa90da4fced551002a16ab0d9ed531ad2e3f3713975bccb9c4b43b32335fddaa",
+        "numeric.py": "464e052bb74b6c9f75af5fbbe4b12fa599de4a72b1d2cc72f1279cfa5caf31d8",
+        "owner.rs": "7f7822bd6608bdaf289971e88e9fc93c57a01ee6d34fed0badabe2a8c45f6f81",
+        "prepare.py": "7652ab016c88b421efdbb4566ce07d64ab85153bb033ca1ddd117d736ea7b0c5",
+        "tests/actor_tests.rs": "fa8f6795261c0adf1687e4db3af536d679c71d4c036dbfe7cb37299b0aa309eb",
+        "tests/ingress_tests.rs": "b197c9ca0e483a5349637b48c4720e80e0d57dc4713ed5ab2cc3d8f53b833b54",
+        "tests/lifecycle_tests.rs": "3ace6a327acbbb77832cce345adc072264638a3ec5d925640de5af5227a3adf4",
+        "tests/owned_api.rs": "9516f232978e3c9a75d079cf68fe4d3faa4b0f0bbd7592dabcb4fbf5adf51e28",
+        "tests/regressions.rs": "b10c2166598e6bded5ce1e31d2f773b43ae50be1a0adca3dd8fa5db9421e2431",
+        "tests/udp_ingress_tests.rs": "659ecbd94f3615dfeca226973d59da92f4ad4ebda68a939369adfa15e1229f80"
+      }
+    },
+    "base58-71-22fb68d-verify-ubuntu-01/native-graph/serde_bencode-0.2.4.provenance.json": {
+      "receipt_sha256": "d77058c60441d1ea71a263d6bdd39aa37ac32c0023c20ae13e21417755160501",
+      "recipe_files": {
+        ".github/probes/native-graph/prepare.py": "c8530e43de24afc6a73b1b34555b2834a2a4278c26e354b03510c93962fbb230",
+        "edits.py": "bbf109613ce88b44f0186aa3576cf55bbce10d71b516b11eb12d946b942b7e62",
+        "prepare.py": "e1b7c800338c055c618eb73b8da516008b7a648f03579467fd59f4d548c6540e"
+      }
+    },
+    "notices-green-42481654381/dependency-license-report-Linux/p2p-dns-provenance.json": {
+      "receipt_sha256": "9c396d5d50c4cf27341f28aadde1f377db279c54ab6ca5f6d2a9399f097b3e4d",
+      "recipe_files": {
+        "bounds.rs": "bfbad7fcf51bb05769802efdc9a5cac6347613f859ef87c8c4695252821e0bb0",
+        "patch.py": "4a7219626b82ee3c599eb7d2e3f867aecd348b4749643ee5f2ebae10794780d5",
+        "prepare.py": "5d1c3f2beb059c25f8ce39f1c3e9d89ea125b55dd6856efe0487a2b1f27e07cd"
+      }
+    },
+    "notices-green-42481654381/dependency-license-report-Linux/p2p-kad-provenance.json": {
+      "preparer_sha256": "2d9079e2e3196a04a58ff11b61f3eb1940b9c905155d07348b2d0d99fbba0f58",
+      "receipt_sha256": "a5ae47767bed8c0e938ee596ffb1218371957210c83780693d44210c5ba247fc"
+    },
+    "notices-green-42481654381/dependency-license-report-Linux/p2p-relay-provenance.json": {
+      "patch_sha256": "cd9f5ff9e63875e4aada9aeebb915b72cfe5035d2b8710e0468d9380bcb785ee",
+      "receipt_sha256": "82127635d0646bafc649fc173f3605b6decd60b5c0384a1129da51b95453b185"
+    },
+    "notices-green-42481654381/dependency-license-report-Linux/p2p-resolver-provenance.json": {
+      "receipt_sha256": "a4f5a844a09246579cb22c638f9f0778877eaec881226737ad858381800b3bfd",
+      "recipe_files": {
+        "cache_patch.py": "4987d9d149b7950321b1dbfeb591de72315b8ae20fd602756df6d4c529039b9a",
+        "patch.py": "19ddab02df61de8a0e2889700ae24a7633c685137727b089a9c98b88538fe478",
+        "prepare.py": "35b8b09f59065fff502966b5aa35a856be6562fead5d5f8a4b243905b4832047"
+      }
+    },
+    "notices-green-42481654381/dependency-license-report-Linux/p2p-swarm-provenance.json": {
+      "patch_sha256": "cd9f5ff9e63875e4aada9aeebb915b72cfe5035d2b8710e0468d9380bcb785ee",
+      "receipt_sha256": "75af7038a26b4090eeec7f34fea446f4730ea527d6eac8c433b5569b8585f99c"
+    },
+    "notices-green-42481654381/dependency-license-report-Linux/target-backend-provenance.json": {
+      "patch_sha256": "4f326a72eb5b5aa5d8855c1bbaa70aa38150804a8f7ad02587bf580ebcceaf13",
+      "patch_sources": {
+        "actor_shutdown.rs": "55f549ebdbe0ba1d4343317a3757a696dbaff381ce116cffb09c068d672c2ae2",
+        "ingress_budget.rs": "5c1e772d879e4a4b85e98853cbe658e07da1dfd1241dca873845d2bcf0e2c8b5",
+        "policy.py": "4f326a72eb5b5aa5d8855c1bbaa70aa38150804a8f7ad02587bf580ebcceaf13",
+        "runtime.py": "d615fad52639ff1685e286dab52dcde287a5b506b2f28f0cf6711612c64b6c52"
+      },
+      "receipt_sha256": "ee42b2e8e1fb1d5807cd7f7b7b4be1aa7a3af8ec2c66d0fcb21c1824d60a20cc"
+    },
+    "notices-green-42481654381/dependency-license-report-Linux/target-ygg-provenance.json": {
+      "receipt_sha256": "c6e988b0e52bfd6410719a123679570da78c0cd1146f4fda2cb7b64e287c21f3",
+      "recipe_files": {
+        "checks.py": "f3ebfb5233d9314f8a8625c584365dc6caaa69bc28e5bf19648d98886eb9a3f7",
+        "lifecycle_patch.py": "e361b39b44c1daa595f55b89d6eff9fa88e6b4e037b893a8cd3ae62340f13e14",
+        "patches/core.py": "801aa43351b7601b6f8eeb808b4499dcdaf853517ab6d7b0e887e58ccb0d21cc",
+        "patches/links.py": "1ba01dc421625ae02a6b5c76631e9b38ddac34b918fa801d811c0fc8e544ad0b",
+        "patches/proto.py": "e7dca8615c835140f8bdb57c29059e81a7479bc66900a083428ab1ab8c346028",
+        "prepare.py": "94654beb42024d9af60d01f9d8e6b946634f9cdf020fd1cd4428375886af1dd4",
+        "ygg-manifest.json": "1b8429ba86f59ad39649b025693b858153b7e620e952538efa52185a28575a41"
+      }
+    }
+  },
+  "repository_head": "20b601c2d8187e63355dfd8e9c7fe7785d576867",
+  "schema": "task13-prepared-material-inventory/v1",
+  "scope": {
+    "distinct_lock_union": {
+      "identities": 557,
+      "identities_shared_by_locks": 198,
+      "path_identities": 24,
+      "registry_identities": 533
+    },
+    "excluded_first_party_identities": {
+      "root_workspace_members": [
+        "shaar 0.1.0",
+        "shaar-client 0.1.0",
+        "shaar-p2p 0.1.0",
+        "shaar-platform 0.1.0",
+        "shaar-server 0.1.0",
+        "shaar-ygg 0.1.0"
+      ],
+      "standalone_first_party": {
+        "name": "shaar-ygg-core",
+        "reason": "Root manifest excludes this standalone first-party adapter crate; it is not third-party source material.",
+        "version": "0.1.0"
+      }
+    },
+    "generated_adapter_identity_count": 1,
+    "material_totals": {
+      "existing_pinned_license_reused_without_copy": {
+        "bytes": 16726,
+        "path": "docs/legal/notices-material/ygg-pinned-revision-c9a54f1-LICENSE",
+        "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+      },
+      "identity_rows": 17,
+      "identity_rows_with_material": 16,
+      "identity_rows_with_complete_package_license_text": 15,
+      "identity_rows_with_component_text_only": 1,
+      "identity_rows_without_complete_package_license_terms": 2,
+      "identity_rows_without_verbatim_license_text": 1,
+      "identity_rows_without_verbatim_license_text_semantics": "Counts path identity rows with no retained verbatim license text at all; iroh has a component notice but is not counted here. It is not a complete-package-terms count.",
+      "new_preserved_bytes": 82613,
+      "new_preserved_files": 20
+    },
+    "nested_lock": {
+      "entries": 218,
+      "path": "crates/shaar-ygg-core/Cargo.lock",
+      "path_entries": 3,
+      "registry_entries": 215,
+      "sha256": "da64aa9e56683f5856ed5440a597a7d600b2c3ee5262b98de4aef024f85b5fe4"
+    },
+    "pinned_ygg_identity_count": 2,
+    "prepared_material_groups": {
+      "backend-and-discovery": "Resolver, Iroh backend, generated Mainline adapter and discovery crates.",
+      "native-mainline": "N0 Mainline/futures, noq transport/protocol and serde bencode.",
+      "network-protocols": "Libp2p swarm/relay, DNS packet library and multibase protocol encoding.",
+      "pinned-shared-material": "Pinned Yggdrasil-ng path packages share existing root LICENSE; no duplicate file."
+    },
+    "prepared_patch_identity_count": 14,
+    "root_lock": {
+      "entries": 537,
+      "path": "Cargo.lock",
+      "path_entries": 24,
+      "registry_entries": 513,
+      "sha256": "ae186edff0a2fad29ffc4d6f4590a79a975a5ef6112c34606c6d5361be9c0597"
+    },
+    "third_party_path_identity_count": 17
+  }
+}
