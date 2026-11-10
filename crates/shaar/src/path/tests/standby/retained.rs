@@ -55,26 +55,57 @@ async fn native_retries_follow_the_policy_schedule_behind_a_usable_yggdrasil_rou
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_exhausted_native_budget_leaves_a_usable_yggdrasil_route_in_place() {
+async fn an_exhausted_native_budget_leaves_ygg_usable_and_runs_capped_maintenance() {
     let mut rig = rig(
-        &[Dial::Fail, Dial::Fail, Dial::Fail, Dial::Up(None)],
+        &[
+            Dial::Fail,
+            Dial::Fail,
+            Dial::Fail,
+            Dial::Fail,
+            Dial::Fail,
+            Dial::Fail,
+        ],
         &[Dial::Up(None)],
         Mode::Standby,
         config(),
     );
     assert_eq!(rig.owner.follow().await, Ok(PathKind::Yggdrasil));
 
-    // Attempts at 0, 5 and 15; the budget is then spent and nothing is ever reported.
     assert!(cancelled_after(200, rig.owner.follow()).await);
     assert_eq!(ms(rig.start), 200);
     assert!(rig.owner.native_exhausted());
     assert_eq!(rig.owner.active(), Some(PathKind::Yggdrasil));
     assert_eq!(kind(rig.owner.route()), Some(PathKind::Yggdrasil));
-    assert_eq!(rig.native_dials(), [(0, 30), (5, 35), (15, 45)]);
+    assert_eq!(
+        rig.native_dials(),
+        [
+            (0, 30),
+            (5, 35),
+            (15, 45),
+            (35, 65),
+            (55, 85),
+            (75, 105),
+            (95, 125),
+            (115, 145),
+            (135, 165),
+            (155, 185),
+            (175, 205),
+            (195, 225)
+        ]
+    );
 
-    assert!(cancelled_after(100, rig.owner.follow()).await);
-    assert_eq!(rig.native_dials().len(), 3, "no attempt after the budget");
-    assert!(rig.owner.native_exhausted());
+    assert!(cancelled_after(20, rig.owner.follow()).await);
+    assert_eq!(ms(rig.start), 220);
+    assert_eq!(rig.owner.attempts_used(), 3);
+    assert_eq!(
+        rig.native_dials().len(),
+        13,
+        "one probe at 215, no catch-up burst"
+    );
+    assert!(
+        rig.owner.native_exhausted(),
+        "maintenance does not refill the ordinary budget"
+    );
     assert_eq!(kind(rig.owner.route()), Some(PathKind::Yggdrasil));
 }
 
@@ -90,13 +121,13 @@ async fn the_fallback_retry_pause_survives_cancelled_follow_calls() {
     let mut rig = rig(&[], &fallback, Mode::Standby, config());
     assert_eq!(rig.owner.follow().await, Ok(PathKind::Yggdrasil));
 
-    // The native budget is spent at 15; the Ygg link is lost at 40, so there is no
-    // route at all, and the retained pause runs from 40 to 60.
+    // The budget is spent at 15; maintenance runs at 35. Ygg loss at 40
+    // suspends native maintenance and retains the fallback pause until 60.
     assert!(cancelled_after(50, rig.owner.follow()).await);
     assert!(rig.owner.native_exhausted());
     assert_eq!(rig.owner.active(), None);
     assert_eq!(kind(rig.owner.route()), None);
-    assert_eq!(rig.native_dials().len(), 3);
+    assert_eq!(rig.native_dials(), [(0, 30), (5, 35), (15, 45), (35, 65)]);
     assert_eq!(rig.fallback_dials(), [(0, 30)]);
     assert_eq!(log(&rig.fallback).links_dropped, 1);
 
@@ -125,7 +156,7 @@ async fn the_fallback_retry_pause_survives_cancelled_follow_calls() {
     assert_eq!(ms(rig.start), 120);
     let spaced = [(0, 30), (60, 90), (80, 110), (100, 130), (120, 150)];
     assert_eq!(rig.fallback_dials(), spaced);
-    assert_eq!(rig.native_dials().len(), 3);
+    assert_eq!(rig.native_dials(), [(0, 30), (5, 35), (15, 45), (35, 65)]);
     assert_eq!(kind(rig.owner.route()), Some(PathKind::Yggdrasil));
 }
 

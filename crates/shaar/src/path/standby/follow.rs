@@ -12,6 +12,8 @@ use tokio::time::{Instant, sleep_until};
 
 use super::super::model::{Decision, Event, PathKind};
 use super::super::owner::Dialer;
+#[cfg(test)]
+use super::NativeObservation;
 use super::side::{Done, Outcome, State, finished};
 use super::{Cmd, StandbyError, StandbyOwner};
 
@@ -57,16 +59,22 @@ where
     /// Feed one event to the policy and keep what its decision asks for.
     fn step(&mut self, event: Event) -> Result<(), StandbyError> {
         let now = self.millis(Instant::now());
-        match self.policy.step(now, event) {
+        let decision = self.policy.step(now, event);
+        if !self.policy.budget_spent() {
+            self.native_exhausted = false;
+        }
+        match decision {
             Decision::AttemptNative { attempt, deadline } => {
-                // A newer request replaces an older unstarted one: the policy
-                // already expired that attempt.
                 self.native_cmd = Some(Cmd {
                     attempt,
                     deadline: self.instant(deadline),
                 });
             }
-            Decision::NativeExhausted => self.native_exhausted = true,
+            Decision::NativeExhausted => {
+                self.native_exhausted = true;
+                #[cfg(test)]
+                self.observe(NativeObservation::Exhausted { at: now });
+            }
             Decision::Closed => return Err(StandbyError::Closed),
             // Routing is derived from the policy's active path.
             Decision::Wait | Decision::NoPath | Decision::Use(_) => {}
@@ -74,17 +82,23 @@ where
         Ok(())
     }
 
-    /// Start whatever each idle side should be doing. Returns the attempt number of
-    /// a native request whose deadline had already passed; the caller reports it failed.
+    /// Start work for each idle side. A native request that has expired is reported failed.
     fn start_work(&mut self, now: Instant) -> Option<u64> {
         if self.native.is_idle() {
             if self.native.link.is_some() {
                 self.native.start_watch();
             } else if let Some(cmd) = self.native_cmd.take() {
-                if now >= cmd.deadline {
+                if now >= cmd.deadline
+                    || !self.policy.accepts_attempt(cmd.attempt, self.millis(now))
+                {
                     return Some(cmd.attempt);
                 }
-                // The original deadline, so a request that waited is not extended.
+                #[cfg(test)]
+                self.observe(NativeObservation::AttemptStarted {
+                    attempt: cmd.attempt,
+                    at: self.millis(now),
+                    deadline: self.millis(cmd.deadline),
+                });
                 self.native.start_dial(cmd.attempt, cmd.deadline);
             }
         }
@@ -122,15 +136,38 @@ where
             attempt,
         } = done;
         self.native.state = State::Idle(dialer);
+        let accepted = self
+            .policy
+            .accepts_attempt(attempt, self.millis(Instant::now()));
         match outcome {
-            Outcome::Dialed(Ok(link)) => {
+            Outcome::Dialed(Ok(link)) if accepted => {
                 let generation = self.native.install(link);
-                self.native_exhausted = false;
+                #[cfg(test)]
+                self.observe(NativeObservation::Accepted {
+                    attempt,
+                    generation,
+                    at: self.millis(Instant::now()),
+                });
                 // Any unstarted request is stale now that a link is held.
                 self.native_cmd = None;
                 Event::NativeUp { generation }
             }
-            Outcome::Dialed(Err(_)) => Event::AttemptFailed { attempt },
+            Outcome::Dialed(Ok(_)) => {
+                #[cfg(test)]
+                self.observe(NativeObservation::AttemptFailed {
+                    attempt,
+                    at: self.millis(Instant::now()),
+                });
+                Event::AttemptFailed { attempt }
+            }
+            Outcome::Dialed(Err(_)) => {
+                #[cfg(test)]
+                self.observe(NativeObservation::AttemptFailed {
+                    attempt,
+                    at: self.millis(Instant::now()),
+                });
+                Event::AttemptFailed { attempt }
+            }
             Outcome::Lost => {
                 self.native.link = None;
                 Event::NativeDown {

@@ -39,6 +39,27 @@ use super::policy::PathPolicy;
 
 use side::Side;
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NativeObservation {
+    AttemptStarted {
+        attempt: u64,
+        at: Millis,
+        deadline: Millis,
+    },
+    AttemptFailed {
+        attempt: u64,
+        at: Millis,
+    },
+    Exhausted {
+        at: Millis,
+    },
+    Accepted {
+        attempt: u64,
+        generation: u64,
+        at: Millis,
+    },
+}
 /// Why `follow` could not produce a route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StandbyError {
@@ -80,11 +101,13 @@ where
     standby: bool,
     /// One slot: the policy has already expired an older unstarted attempt.
     native_cmd: Option<Cmd>,
-    /// The policy reported the native budget spent; cleared by the next native link.
+    /// The policy reported the native budget spent; cleared only after a stable hold.
     native_exhausted: bool,
     dialer_closed: bool,
     fallback_closed: bool,
     closed: bool,
+    #[cfg(test)]
+    observer: Option<Box<dyn FnMut(NativeObservation)>>,
 }
 
 impl<D, F> StandbyOwner<D, F>
@@ -114,6 +137,8 @@ where
             dialer_closed: false,
             fallback_closed: false,
             closed: false,
+            #[cfg(test)]
+            observer: None,
         })
     }
 
@@ -140,7 +165,7 @@ where
         }
     }
 
-    /// The native budget was reported spent and no native link was installed since.
+    /// The native budget was reported spent and has not been refilled by a stable hold.
     #[cfg(test)]
     pub(crate) fn native_exhausted(&self) -> bool {
         self.native_exhausted
@@ -158,6 +183,28 @@ where
     #[cfg(test)]
     pub(crate) fn observation_time(&self, at: Instant) -> Millis {
         self.millis(at)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_observer(&mut self, observer: impl FnMut(NativeObservation) + 'static) {
+        self.observer = Some(Box::new(observer));
+    }
+
+    #[cfg(test)]
+    pub(super) fn observe(&mut self, observation: NativeObservation) {
+        if let Some(observer) = self.observer.as_mut() {
+            observer(observation);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn attempt_is_in_flight(&self) -> bool {
+        self.policy.attempt_is_in_flight()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn attempts_used(&self) -> u32 {
+        self.policy.attempts_used()
     }
 
     /// Shut down in dependency order: the policy is told first, then each side's
