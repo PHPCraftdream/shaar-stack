@@ -79,6 +79,13 @@ impl PathPolicy {
             return Decision::Closed;
         }
         self.clock = self.clock.max(now);
+        // No future deadline or hold boundary is representable after saturation.
+        if self.clock == u64::MAX {
+            self.closed = true;
+            self.in_flight = None;
+            self.next_attempt_at = None;
+            return Decision::Closed;
+        }
         let now = self.clock;
         match event {
             Event::Shutdown => {
@@ -357,5 +364,64 @@ impl PathPolicy {
     #[cfg(test)]
     pub(crate) fn cooldown_deadline(&self) -> Option<Millis> {
         self.next_attempt_at
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::{Decision, Event, Mode, PathKind, PathPolicy, PolicyConfig};
+
+    fn spent_standby() -> PathPolicy {
+        let config = PolicyConfig {
+            max_attempts: 1,
+            ..PolicyConfig::default()
+        };
+        let mut policy = PathPolicy::new(Mode::Standby, config, 0).expect("valid policy");
+        assert_eq!(
+            policy.step(0, Event::YggdrasilReady { generation: 1 }),
+            Decision::Use(PathKind::Yggdrasil)
+        );
+        assert!(matches!(
+            policy.step(0, Event::Tick),
+            Decision::AttemptNative { attempt: 1, .. }
+        ));
+        assert_eq!(
+            policy.step(1, Event::AttemptFailed { attempt: 1 }),
+            Decision::NativeExhausted
+        );
+        policy
+    }
+
+    #[test]
+    fn overflowing_maintenance_attempt_identity_closes_without_reuse() {
+        let mut policy = spent_standby();
+        policy.last_attempt = u64::MAX;
+        assert_eq!(policy.step(4_001, Event::Tick), Decision::Closed);
+        assert_eq!(policy.last_attempt, u64::MAX);
+        assert_eq!(policy.next_wakeup(), None);
+        assert!(!policy.attempt_is_in_flight());
+        assert!(!policy.accepts_attempt(u64::MAX, 4_001));
+        assert_eq!(policy.step(4_002, Event::Tick), Decision::Closed);
+    }
+
+    #[test]
+    fn saturated_clock_stops_retries_and_cannot_shorten_native_hold() {
+        let mut policy = spent_standby();
+        assert_eq!(policy.step(u64::MAX, Event::Tick), Decision::Closed);
+        assert_eq!(
+            policy.last_attempt, 1,
+            "no zero-duration native command was issued"
+        );
+        assert_eq!(policy.next_wakeup(), None);
+        assert!(!policy.attempt_is_in_flight());
+        assert_eq!(policy.step(u64::MAX, Event::Tick), Decision::Closed);
+
+        let mut held = spent_standby();
+        assert_eq!(
+            held.step(u64::MAX - 1, Event::NativeUp { generation: 1 }),
+            Decision::Wait
+        );
+        assert_eq!(held.step(u64::MAX, Event::Tick), Decision::Closed);
+        assert_eq!(held.next_wakeup(), None);
     }
 }
