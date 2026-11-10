@@ -16,6 +16,13 @@ const PUBLICATION_TTL: Duration = Duration::from_secs(SIGNED_AGE_SECONDS);
 const MAX_DNS_BYTES: usize = 1000;
 const MAX_SIGNED_BYTES: usize = 1104;
 const MAX_FUTURE_US: i64 = 30_000_000;
+const CLOCK_RATE_SCALE: i128 = 1_000_000;
+const MAX_CLOCK_RATE_DEFICIT_PPM: i128 = 500;
+
+fn exceeds_clock_rate_deficit(wall_elapsed: i128, minimum_monotonic_elapsed: u64) -> bool {
+    wall_elapsed * CLOCK_RATE_SCALE
+        < i128::from(minimum_monotonic_elapsed) * (CLOCK_RATE_SCALE - MAX_CLOCK_RATE_DEFICIT_PPM)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PublishError {
@@ -101,6 +108,7 @@ pub(super) struct PublisherState {
     last_wall_us: Option<i64>,
     last_monotonic_before_us: Option<u64>,
     last_monotonic_after_us: Option<u64>,
+    clock_anchor: Option<(i64, u64)>,
     clock_fault: bool,
     generation: u64,
     last_signed_at: tokio::time::Instant,
@@ -115,6 +123,7 @@ impl PublisherState {
             last_wall_us: None,
             last_monotonic_before_us: None,
             last_monotonic_after_us: None,
+            clock_anchor: None,
             clock_fault: false,
             generation: 0,
             last_signed_at: tokio::time::Instant::now(),
@@ -233,14 +242,16 @@ impl PublisherState {
             self.active = None;
             return Err(PublishError::ClockFault);
         }
-        if let (Some(last_wall), Some(last_monotonic_after)) =
-            (self.last_wall_us, self.last_monotonic_after_us)
+        let previous = self.last_wall_us.zip(self.last_monotonic_after_us);
+        // Adjacent samples catch stalls after forward jumps; the fixed anchor
+        // prevents repeated overlapping brackets from hiding a cumulative stall.
+        for (last_wall, last_monotonic_after) in [previous, self.clock_anchor].into_iter().flatten()
         {
             let wall_elapsed = i128::from(sample.wall_us) - i128::from(last_wall);
             let proven_monotonic_elapsed = sample
                 .monotonic_before_us
                 .saturating_sub(last_monotonic_after);
-            if wall_elapsed < i128::from(proven_monotonic_elapsed) {
+            if exceeds_clock_rate_deficit(wall_elapsed, proven_monotonic_elapsed) {
                 #[cfg(test)]
                 eprintln!(
                     "publisher clock rejection (elapsed-deficit): previous_wall_us={last_wall}, previous_monotonic_after_us={last_monotonic_after}, wall_elapsed_us={wall_elapsed}, minimum_monotonic_elapsed_us={proven_monotonic_elapsed}, sample={sample:?}",
@@ -250,6 +261,8 @@ impl PublisherState {
                 return Err(PublishError::ClockFault);
             }
         }
+        self.clock_anchor
+            .get_or_insert((sample.wall_us, sample.monotonic_after_us));
         self.last_wall_us = Some(sample.wall_us);
         self.last_monotonic_before_us = Some(sample.monotonic_before_us);
         self.last_monotonic_after_us = Some(sample.monotonic_after_us);

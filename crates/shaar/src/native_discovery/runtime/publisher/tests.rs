@@ -143,7 +143,7 @@ fn monotonic_rollback_is_terminal_even_when_wall_advances() {
 }
 
 #[test]
-fn wall_advancing_less_than_monotonic_is_terminal() {
+fn wall_advancing_half_as_fast_as_monotonic_is_terminal() {
     let identity = test_identity();
     let mut state = PublisherState::new(test_key(&identity));
     state
@@ -255,6 +255,187 @@ fn negative_wall_time_is_rejected_without_unsigned_wrap() {
         state.next_timestamp(-1),
         Err(PublishError::TimestampOverflow)
     );
+}
+
+#[test]
+fn observed_windows_clock_pairs_allow_forward_progress_with_bounded_rate_difference() {
+    let identity = test_identity();
+    let observed = [
+        (
+            1_794_309_404_059_869,
+            5_750,
+            1_794_309_404_182_505,
+            128_388,
+            128_390,
+        ),
+        (
+            1_794_309_404_426_831,
+            28_125,
+            1_794_309_406_370_152,
+            1_971_513,
+            1_971_519,
+        ),
+        (
+            1_794_309_417_370_558,
+            46_899,
+            1_794_309_420_359_054,
+            3_035_529,
+            3_035_535,
+        ),
+        (
+            1_794_309_417_262_329,
+            988,
+            1_794_309_477_310_157,
+            60_050_768,
+            60_050_776,
+        ),
+    ];
+    for (wall, after, next_wall, next_before, next_after) in observed {
+        let mut state = PublisherState::new(test_key(&identity));
+        state
+            .check_clock(sample(wall, after))
+            .expect("reference sample");
+        state
+            .check_clock(ClockSample {
+                wall_us: next_wall,
+                monotonic_before_us: next_before,
+                monotonic_after_us: next_after,
+            })
+            .expect("observed forward progress stays inside the approved rate bound");
+        assert!(!state.clock_fault);
+    }
+}
+
+#[test]
+fn rate_deficit_below_at_and_above_500_ppm_has_exact_terminal_boundaries() {
+    let identity = test_identity();
+    let wall = 1_700_000_000_000_000_i64;
+    for (deficit, allowed) in [(499, true), (500, true), (501, false)] {
+        let mut state = PublisherState::new(test_key(&identity));
+        let (_, packet) = state
+            .replace(&identity, &[test_address()], sample(wall, 0))
+            .expect("initial publication");
+        let watermark = packet.expect("signed packet").timestamp_us;
+        let result = state.refresh(&identity, sample(wall + 1_000_000 - deficit, 1_000_000));
+        if allowed {
+            assert!(result.is_ok(), "allowed deficit {deficit}: {result:?}");
+            assert!(state.has_active());
+        } else {
+            assert_eq!(result, Err(PublishError::ClockFault));
+            assert!(!state.has_active());
+            assert_eq!(state.last_timestamp_us, Some(watermark));
+            assert_eq!(
+                state.refresh(&identity, sample(wall + 2_000_000, 2_000_000)),
+                Err(PublishError::ClockFault),
+                "catch-up cannot clear a terminal excessive deficit"
+            );
+        }
+    }
+}
+
+#[test]
+fn fractional_rate_allowance_is_not_rounded_up_to_hide_a_deficit() {
+    let identity = test_identity();
+    let mut state = PublisherState::new(test_key(&identity));
+    state
+        .check_clock(sample(10_000, 0))
+        .expect("initial sample");
+    // One microsecond over 1,999 us exceeds 500 ppm; over 2,000 us it is exact.
+    assert_eq!(
+        state.check_clock(sample(11_998, 1_999)),
+        Err(PublishError::ClockFault)
+    );
+    let mut exact = PublisherState::new(test_key(&identity));
+    exact
+        .check_clock(sample(10_000, 0))
+        .expect("initial sample");
+    assert_eq!(exact.check_clock(sample(11_999, 2_000)), Ok(()));
+}
+
+#[test]
+fn overlapping_adjacent_brackets_cannot_hide_a_cumulative_wall_stall() {
+    let identity = test_identity();
+    let mut state = PublisherState::new(test_key(&identity));
+    state
+        .check_clock(ClockSample {
+            wall_us: 1_000,
+            monotonic_before_us: 0,
+            monotonic_after_us: 2,
+        })
+        .expect("initial bracket");
+    for before in [1, 2] {
+        state
+            .check_clock(ClockSample {
+                wall_us: 1_000,
+                monotonic_before_us: before,
+                monotonic_after_us: before + 2,
+            })
+            .expect("adjacent uncertainty still overlaps the original sample");
+    }
+    assert_eq!(
+        state.check_clock(ClockSample {
+            wall_us: 1_000,
+            monotonic_before_us: 3,
+            monotonic_after_us: 5,
+        }),
+        Err(PublishError::ClockFault)
+    );
+    assert!(state.clock_fault);
+}
+
+#[test]
+fn a_forward_wall_jump_does_not_grant_credit_for_a_later_stall() {
+    let identity = test_identity();
+    let mut state = PublisherState::new(test_key(&identity));
+    state.check_clock(sample(1_000, 0)).expect("initial sample");
+    state
+        .check_clock(sample(1_001_000, 1))
+        .expect("forward jump");
+    assert_eq!(
+        state.check_clock(sample(1_001_000, 2_001)),
+        Err(PublishError::ClockFault),
+        "adjacent comparison rejects a stall even when the lifetime anchor has forward credit"
+    );
+}
+
+#[test]
+fn invalid_brackets_and_observed_rollback_remain_strict_inside_rate_allowance() {
+    let identity = test_identity();
+    let mut rollback = PublisherState::new(test_key(&identity));
+    rollback
+        .check_clock(sample(10_000, 0))
+        .expect("initial sample");
+    assert_eq!(
+        rollback.check_clock(sample(9_999, 1)),
+        Err(PublishError::ClockFault)
+    );
+    let mut invalid = PublisherState::new(test_key(&identity));
+    invalid
+        .check_clock(sample(10_000, 0))
+        .expect("initial sample");
+    assert_eq!(
+        invalid.check_clock(ClockSample {
+            wall_us: 10_001,
+            monotonic_before_us: 2,
+            monotonic_after_us: 1,
+        }),
+        Err(PublishError::ClockFault)
+    );
+}
+
+#[test]
+fn clock_rate_comparison_handles_full_clock_delta_ranges_without_overflow() {
+    assert!(!super::exceeds_clock_rate_deficit(
+        i128::from(u64::MAX),
+        u64::MAX
+    ));
+    assert!(super::exceeds_clock_rate_deficit(0, u64::MAX));
+    let identity = test_identity();
+    let mut state = PublisherState::new(test_key(&identity));
+    state
+        .check_clock(sample(i64::MIN, 0))
+        .expect("initial comparison sample");
+    assert_eq!(state.check_clock(sample(i64::MAX, u64::MAX)), Ok(()));
 }
 
 fn test_identity() -> crate::identity::Identity {

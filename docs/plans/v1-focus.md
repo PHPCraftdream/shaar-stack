@@ -769,6 +769,206 @@ integration dependencies are accepted, proceed to existing permission-gated P07,
 then start #214 after #33/#34 acceptance rather than another research or proof
 campaign. P10, P13 and P16 must retain their P07 dependencies.
 
+### Shared startup 5c accepted (2026-11-10)
+
+Exact `8cbd2d7e2300bb6a2dcb619e1d4d31165208209b`, CI `42754605543`:
+Linux and Windows each selected, executed and passed 411 cases (SDK 345,
+Client 12, Server 12, Ygg adapter 42). One privileged-UID identity probe on
+Linux was explicitly ignored and is not counted as executed. Primary compared
+exact case inventories with execution events and receipts, delivered the exact
+green revision upstream, preserved local decisions/checkpoints, and removed both
+transferred startup worktrees and their task branches. This is targeted shared
+startup acceptance, not full P10, efficiency acceptance or complete P11/P12.
+
+### Late native recovery: task 32 contract (recorded 2026-11-10, before code)
+
+Advances steps 3–5 after accepted 5c. In one running Standby composition, native
+remains unavailable until the ordinary configured attempt budget is genuinely
+spent while authenticated Ygg TCP forwarding continues. Native then becomes
+reachable; a genuine renewed native dial discovers it, the configured stable hold
+completes, and NEW connections use native without restarting the composition.
+An already forwarding Ygg stream remains healthy on its owned lease: no migration,
+replay or forced teardown. A manually injected NativeUp observation, a shorter
+outage or an increased ordinary attempt budget does not satisfy this case.
+
+Renewed-attempt boundary:
+- Keep the normal finite attempt budget unchanged (default `max_attempts = 6`).
+  Exhaustion is real and remains observable; do not silently refill that burst
+  budget just because Ygg became ready or a caller re-entered `follow`.
+- Only a Standby owner retaining a usable authenticated Ygg route may schedule
+  post-exhaustion native maintenance. Use the existing `backoff_cap` as a retained
+  cooldown: the first maintenance attempt starts no earlier than one cap after
+  exhaustion; after a failed maintenance attempt, the next starts no earlier than
+  its completion plus one full cap. At most one native attempt is active, with the
+  existing `attempt_timeout`; no catch-up burst after a delayed poll.
+- Maintenance permits continued recovery over an arbitrarily long outage; it is
+  not a claim of a finite lifetime attempt count. It must use constant retained
+  state and a bounded attempt rate, not accumulating epochs, tasks or buffers.
+  Default cooldown is 4,000 ms and attempt deadline 3,000 ms. No new public mode,
+  configuration field, retry multiplier or dependency is introduced.
+- A successful native attempt still obeys `stable_hold` (default 5,000 ms) before
+  new connections return to native. Only the existing genuinely stable recovery
+  may refill the ordinary budget for a later down episode. Failed/unstable probes
+  must not discard the healthy Ygg route or refill the burst budget early.
+- Preserve distinct monotonic attempt/generation identities, stale-result
+  rejection, original in-flight deadlines, and retained cooldown across cancelled
+  waiters/re-entry. Shutdown stops future scheduling and joins acquired owners.
+  Signal/no-usable-fallback owners retain their finite typed exhaustion behavior.
+
+Observable regressions include deterministic policy/controller deadline, repeated
+failed maintenance, cancellation/re-entry, stale completion and shutdown controls;
+and a real controlled TCP-forwarding case using the normal budget, long outage,
+held Ygg stream and eventual genuine native recovery. The full scenario has a
+finite deadline derived from its configured attempt/backoff/hold and cleanup
+bounds, with phase-specific diagnostics; no fixed sleep as a readiness oracle.
+Required owners/responders stay driven, and the existing admission/capacity and
+same-key authentication contracts remain intact. Keep the case available to the
+later direct-share/efficiency campaign; do not exclude it to improve metrics.
+
+Non-goals: task 33's full transition gap review, task 25's p95/full P10 campaign,
+new protocol/transport/CLI, public peers, TUN/root/router changes, packaging or
+release. No local builds/tests/Cargo/project Python/preparation/smoke/benchmarks
+or fake load. Verification is targeted GitHub CI with exact selected/executed
+receipts, then reviewed exact-green delivery and personal cleanup. The plan and
+criterion are primary-owned; workers do not edit them.
+
+## P10 finish correction (approved 2026-11-10)
+
+Applies to #32 → #33 → #25, scenario steps 3–5. Preserve all acceptance
+criteria, cumulative CI obligations and failure history. The primary owns this
+plan; the live product executor remains read-only on both plan files.
+
+Before each first push, the reviewer must record the following checklist with
+source references, derived types and explicit unresolved items. A verdict without
+this checklist is incomplete:
+- Check each changed API call against exact pinned source, not memory.
+- Derive closure, future, `join!` and `select!` types; trace borrows across await
+  and the storage/drop boundaries of retained futures.
+- Check `expect`/`allow` lint attributes in normal and test feature contexts.
+- For every changed parser/oracle, inspect at least one valid and one invalid
+  input, including a counterfactual that rejects the broken behavior.
+
+This is source-level compilation-risk review, not proof of compilation. GitHub
+CI must still establish compilation and execution on both operating systems.
+
+Target the first CI on the day of first code. More than one day of uncommitted
+leaf work requires immediate boundary reassessment. For #32, review the smallest
+self-contained model/policy plus unit-test slice first; then production wiring
+and fixtures in separate commits, with sequential CI in the same branch. Do not
+stage incomplete dependencies, remove tests, discard existing work or rewrite
+history to obtain the split. A slice is not full leaf acceptance. Required
+integration cases remain obligations until executed on the final candidate.
+
+Fixtures have an explicit review boundary: identity uniqueness, actual publication
+barriers, continuously driven owners, deadlines and positive/negative oracles.
+During #32/#33 retain monotonic observations for first forwarded byte (known
+address and cold DHT), Ygg failover and actual selected data path. #25 reuses these
+fixtures for p95 3 s / 10 s first byte, p95 10 s failover and at least 95% direct
+share. Do not substitute one run for a distribution, omit failures from the
+campaign or start a separate metrics framework. Keep the long-outage case.
+
+Superseding owner decision on 2026-11-10: local cargo fmt and cargo clippy are
+allowed, including necessary clippy dependency compilation and third-party
+build.rs. Before each leaf push use the exact CI formatting checks for the six
+owned packages and separate core manifest, plus offline, locked
+`cargo clippy -p <affected-crate> --all-targets -- -D warnings`, with CI features.
+The owner approved this fmt boundary after actual fmt-all reached 34 unformatted
+pinned Ygg core files; retain its failed receipt and do not alter those bytes.
+Pinned source preparation through existing CI prepare-only recipes and the exact
+registry proposal recorded in north-star are separately authorized. No fallback
+URLs, lock/version changes, test/check/fixture runners or unrelated project Python
+are authorized. Standalone local build/test/check, smoke, benchmarks and fake load
+remain banned. Report local clippy separately from CI execution and acceptance.
+These decisions supersede older blanket Cargo/preparation bans below.
+
+The first two delivery CIs found a real Windows cross-clock rate mismatch, not a
+lint failure. The owner explicitly authorized 500 ppm for relative elapsed-time
+deficit, while observed rollback, invalid/backward brackets, stalled clocks and
+excessive deficit remain terminal. Exact integer comparisons and both adjacent
+and fixed-lifetime-anchor checks prevent rounding accumulation and forward-jump
+credit. Signed age 300 s/future 30 s and publication timestamp rules do not change.
+Real Windows samples and below/at/above-bound controls must run in CI; local lint
+or a diagnostic-only green does not accept the repair or late native recovery.
+
+Notices remain primary-owned and off the P10 critical path: at most 20 minutes
+of offline review per bounded pass, no new content workers, no new acquisition
+without exact permission and no bypass of 404 responses. Missing terms and
+provenance remain explicit; partial corpus is not legal clearance.
+
+Executors write only their assigned worktree. A wrong-root write requires STOP
+and disclosure, never executor restoration/deletion. Only the primary transfers
+reviewed content. No repeat assignment to a boundary-violating executor without
+an explicit worktree-only restriction. Preserve exact-green upstream delivery,
+selected/executed receipts, personal cleanup and all public-network/release gates.
+
+Aim for #32 acceptance within two CI runs and shorter delivery latency. These
+are feedback signals, not correctness gates or permission to game feat/fix labels.
+Three consecutive failures still require the consolidated-review stop rule.
+
+## Audit-adjusted delivery passes (approved 2026-11-09)
+
+The user requested: “скорректируй план под аудит, сгруппируй смежные задачи,
+что их удобно было решать за один проход”. Groups below organize shared reading,
+ownership and verification; they are not new umbrella tasks or permission to
+implement all stages in one unreviewed batch. Task numbers in this section are
+session TaskList IDs, not GitHub issue numbers.
+
+### Ordered passes and observable exits
+
+| Pass | Existing tasks and scenario | Work kept together | Exit and boundary |
+| --- | --- | --- | --- |
+| A — Finish shared startup | #31, internal repair #38; steps 1–6 | Shared production roles, both binary call sites, continuously driven discovery/forwarding fixtures, cancellation/cleanup, shared capacity, Signal/denial/relay oracles | Exact candidate passes relevant Linux/Windows CI; inspect selected/executed/passed receipts, personally deliver exact green and clean transferred worktrees. This is not full P10 or complete P11/P12. |
+| B — Close P10 using one transition context | #32 → #33 → #25; steps 3–5; #1 is the acceptance parent | Late native recovery after normal retry exhaustion; immediately map transition evidence; then measure the agreed profile and run explicit full P10 on the final candidate | Sequential checkpoints remain mandatory: accept recovery before gap-check and gap-check before metrics. Fix only concrete uncovered cases. Preserve 3 s known / 10 s cold first byte, 10 s failover, 95% direct share and bounded resources. No public-network substitute. |
+| C — Finish the two product entrypoints | #6 and #7; steps 1–6 | Review Server and Client against the same accepted startup/configuration/error/shutdown contracts; share the integration fixture and avoid implementing SDK startup twice | Each binary retains its own acceptance result. Independent file scopes may run in parallel after P10; shared files have one writer. Reuse 5c evidence, add only missing product obligations. |
+| D — Integration and interoperability | #8, then #12; steps 1–6 | Controlled P13 path/fault/NAT matrix, followed by separately bounded live interoperability smoke using verified CI binaries | Controlled acceptance and live smoke are distinct receipts. Public smoke is authorized in principle by the user; exact lawful targets/peers and enforceable budgets must be agreed before execution. No TUN/root/router changes, scanning or load testing. |
+| E — Resource closure and operational handoff | #9 and #10; steps 1–6 | Resource/complexity review and documentation of the accepted behavior, limits, configuration and recovery | After #8, independent measurement/review and documentation scopes may run in parallel; finalize documentation against the measured final behavior. Do not repeat full P10 merely to produce more evidence. |
+| N — Independent notices lane | #13 → #14; distribution prerequisite for steps 1–6 | Exact corpus/provenance inventory and authentic material, then deterministic assembly/checks over accepted inputs | Keep legal files separate from networking. Full package terms, embedded component notices and missing provenance are different classifications. New acquisition requires its own exact-source/request budget. Partial corpus does not unblock #14. |
+| F — V1 readiness | #11 after #9, #10 and #14 | Final evidence, remaining gates and clean repository/artifact handoff | Readiness is not release publication. Missing proof and any unexecuted smoke remain explicit. |
+
+### Task consolidation and short feedback loop
+
+- Fold the duplicate startup parent #24 and internal fixture/oracle tracking
+  #35/#37 into #31. Their acceptance obligations are retained below, not marked
+  complete by deletion. Keep #38 as the bounded current repair until verified.
+  #36 is a historical source milestone, not runtime acceptance. Do not restore
+  previously deleted completed tasks.
+- The combined #31 still requires real signed key-only discovery, genuine native
+  payload after signaling, lifetime zero application payload on libp2p/Signal,
+  independent Ygg standby, denied zero-target plus allowed positive control,
+  shared cross-path capacity, retained waiter cancellation and joined cleanup.
+  Preserve actual GET/PUT barriers and completion guards. CLOSE is not RX drain.
+- Delegate one coherent contract with an observable exit, non-goals, explicit
+  protected scopes and an oracle counterfactual. A contract may span files;
+  an arbitrary one-file split is not an acceptance boundary. Review before CI.
+- Commit each reviewed, independently meaningful unit in its task worktree and
+  send it to targeted CI without unrelated polish. If a new leaf has not reached
+  its first CI on the day of first code, reassess its boundary; more than one day
+  uncommitted requires immediate slicing review before more implementation.
+  This is an escalation threshold, not a deadline that weakens correctness.
+- Do not retroactively split the existing 5c candidate to hide failing fixtures,
+  erase cumulative selection obligations or reset its failure streak. All
+  available failure causes remain part of the consolidated repair review.
+- One active writer worktree per executable unit; readonly custody trees are
+  not executors. Remove them after verified preservation/integration. Primary
+  stays on main; feature work, commits and CI stay in in-repository worktrees.
+- Report accepted scenarios and time to verified delivery, not commit-count
+  velocity or unsupported percentage-complete estimates. Written, compiled,
+  executed, accepted and delivered are separate states. Use background CI watch
+  immediately after pushes; the heartbeat is recovery, not execution pacing.
+- No local builds/tests/Cargo/project Python/preparation/benchmarks/fake load.
+  No new CI family, dependency/version change or release permission is created.
+
+### Custody at this correction
+
+The original startup tree `p10-role-startup-1108` is clean readonly custody at
+`8bbb640`; the active repair tree `p10-5c-ci-repair-1109` preserves candidate
+`21a4f51`. The independent notices tree owns its unaccepted corpus delta and
+bounded reviewer correction. These are not three overlapping startup writers.
+All must be preserved until their reviewed transfer or explicit supersession.
+The isolated planning tree edits only this plan and the north-star decision log.
+A plan correction does not certify any product candidate or authorize pushing
+local checkpoint history upstream.
+
 ## CI recovery rule
 
 The #267 repair streak already exceeds three failures. The previously authorized
