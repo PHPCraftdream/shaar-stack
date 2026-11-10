@@ -28,6 +28,30 @@ const CLIENT: u8 = 0x6D;
 const TRANSIT: u8 = 0x6E;
 const SAMPLES: usize = 20;
 
+fn sample_artifact_directory() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("SDK manifest is nested under workspace crates")
+        .join("target/ci-selected")
+}
+
+#[test]
+fn sample_artifact_path_is_workspace_scoped_not_crate_local() {
+    let directory = sample_artifact_directory();
+    assert!(directory.is_absolute());
+    assert!(!directory.starts_with(env!("CARGO_MANIFEST_DIR")));
+    let workspace = directory
+        .parent()
+        .expect("target")
+        .parent()
+        .expect("workspace");
+    let manifest = std::fs::read_to_string(workspace.join("Cargo.toml"))
+        .expect("artifact is under the real workspace");
+    assert!(manifest.lines().any(|line| line == "[workspace]"));
+    assert!(directory.ends_with("target/ci-selected"));
+}
+
 /// Nearest rank ceil(0.95 * 20): the nineteenth ordered observation.
 fn p95(samples: &[Duration; SAMPLES]) -> Duration {
     let mut ordered = *samples;
@@ -189,8 +213,9 @@ async fn known_and_cold_startup_measure_first_target_bytes_without_ready_route_b
         assert_eq!(ordinal, 2 * SAMPLES);
         assert!(samples_csv.len() <= 8192, "fixed campaign output stays bounded");
         // libtest hides successful stdout; the existing CI receipt artifact keeps rows.
-        tokio::fs::create_dir_all("target/ci-selected").await.expect("receipt directory opens");
-        tokio::fs::write("target/ci-selected/p10-startup-samples.csv", samples_csv).await
+        let directory = sample_artifact_directory();
+        tokio::fs::create_dir_all(&directory).await.expect("receipt directory opens");
+        tokio::fs::write(directory.join("p10-startup-samples.csv"), samples_csv).await
             .expect("all startup samples are preserved before threshold assertions");
         assert!(p95(&cohorts[0]) <= Duration::from_secs(3), "known-address p95 exceeds 3 s");
         assert!(p95(&cohorts[1]) <= Duration::from_secs(10), "cold-DHT p95 exceeds 10 s");
