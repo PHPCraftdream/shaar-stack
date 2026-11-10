@@ -411,9 +411,9 @@ async fn silent_native_packet_loss_measures_twenty_first_byte_failovers() {
     use std::fmt::Write as _;
 
     timeout(Duration::from_secs(600), async {
-        let (server_id, client_id) = (identity(0xCD), identity(0xCE));
+        let (server_id, client_id) = (identity(0x75), identity(0x76));
         let client_key = client_id.transport_key().public();
-        let (server_bridge, client_bridge, port) = ygg_pair(0xCD, 0xCE).await;
+        let (server_bridge, client_bridge, port) = ygg_pair(0x75, 0x76).await;
         let mut target = Target::start().await;
         let mut samples = [Duration::MAX; 20];
         let mut rows = String::with_capacity(8192);
@@ -469,7 +469,7 @@ async fn silent_native_packet_loss_measures_twenty_first_byte_failovers() {
         target.stop().await;
         client_bridge.close().await.expect("client bridge joins");
         server_bridge.close().await.expect("server bridge joins");
-        ygg_released(0xCD, port).await;
+        ygg_released(0x75, port).await;
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors().nth(2).expect("workspace root").join("target/ci-selected");
         assert!(rows.len() <= 8192);

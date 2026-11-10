@@ -1072,15 +1072,38 @@ healthy Native and blocked Ygg phase, and proves packets actually passed and
 were dropped. Twenty observations use the same nineteenth-order p95, at most
 10 s. Endpoint shutdown alone does not prove this silent-loss criterion.
 Source preflight found the pinned path-idle default is 15 s (connection idle
-30 s), already longer than this budget. The native endpoint now bounds negotiated
-path idle at 6 s with a 2 s per-path keepalive, leaving default 2 s policy grace
-and payload headroom. Connection idle and the 10 s handshake deadline remain
-unchanged: Noq arms the path-idle timer only after multipath negotiation. The
-trade-off is more idle path control packets (2 s rather than 5 s), still bounded
-per retained path; no APP is admitted on signaling. Kernel and fixture commits
-remain separate. Before full acceptance, also prove loss of the last Native
-payload path while a custom signaling path still keeps the connection alive;
-the direct-only fixture does not discharge this additional source-review gap.
+30 s), already longer than this budget. The first path-only tuning was not
+sufficient: CI `42864492151` on `97f4971` failed on both OS (101 passed, two
+failed). The new 0xCD/0xCE fixture seeds collided with an existing
+`peer_composition` cancellation fixture, and silent-loss trial zero did not
+return within 30 s. The failed distribution is not accepted. Source inspection
+then found Noq refuses a local idle abandonment of the LAST open path with
+`LastOpenPath`; awaiting connection closure cannot solve both all-silent loss
+and Native-only loss while signaling survives.
+
+The repair bounds connection AND path idle at 6 s, with a 2 s per-path
+keepalive, leaving default 2 s policy grace and payload headroom. The SDK
+handshake limit remains an upper bound of 10 s; backend idle may expire earlier,
+and actual backend timeout errors map to the existing typed `Deadline` result.
+Access denial/capacity and other transport failures remain distinct. A private
+Native-loss observer consumes replayed `paths_stream` snapshots, returning when
+all eligible IP payload paths disappear even if the signaling connection is
+still alive; public `Session.closed()` retains its connection-only semantics.
+It is event-driven and cancel-safe, without a polling task or an unbounded log.
+The already-locked `futures 0.3.34` direct edge moves from dev to normal (it was
+already production-transitive through `shaar-p2p`); no package, version, feature
+or lock is changed. Packet-loss identities now use the separately checked
+0x75/0x76 pair. The trade-off is more idle path control packets (2 s rather than
+5 s) and earlier failure of a completely silent peer, bounded per retained path.
+No APP is admitted on signaling.
+
+A real same-connection regression must add a Native path to an authenticated
+custom signaling connection, forward Native bytes, silently block the Native
+route, observe Native loss, and prove the SAME connection still receives fresh
+custom control with zero custom APP. Healthy waiter cancellation and re-entry
+after loss are checked. Kernel and fixture commits remain separate; this
+additional source-review gap is closed only after actual CI execution, not by
+the direct-only fixture or local lint.
 
 The combined connection ledger is declared before execution: 40 startup
 connections, two existing default-budget long-outage connections, and 40

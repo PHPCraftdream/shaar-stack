@@ -12,8 +12,8 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-pub(super) struct NativeGate {
-    pub(super) address: SocketAddr,
+pub(in crate::network) struct NativeGate {
+    pub(in crate::network) address: SocketAddr,
     blocked: Arc<AtomicBool>,
     stop: oneshot::Sender<()>,
     task: JoinHandle<(usize, usize)>,
@@ -21,7 +21,7 @@ pub(super) struct NativeGate {
 
 impl NativeGate {
     /// cancel-safe: YES — no task exists until both owned loopback binds finish.
-    pub(super) async fn start(upstream: SocketAddr) -> Self {
+    pub(in crate::network) async fn start(upstream: SocketAddr) -> Self {
         assert!(upstream.ip().is_loopback() && upstream.is_ipv4());
         let front = UdpSocket::bind("127.0.0.1:0")
             .await
@@ -77,14 +77,14 @@ impl NativeGate {
     }
 
     /// Starts silent loss without closing either endpoint or emitting an error.
-    pub(super) fn block(&self) -> Instant {
+    pub(in crate::network) fn block(&self) -> Instant {
         let started = Instant::now();
         self.blocked.store(true, Ordering::SeqCst);
         started
     }
 
     /// cancel-safe: NO — consumes the join handle; callers retain this stop to completion.
-    pub(super) async fn stop(self) -> (usize, usize) {
+    pub(in crate::network) async fn stop(self) -> (usize, usize) {
         let _ = self.stop.send(());
         self.task.await.expect("gate task joins")
     }

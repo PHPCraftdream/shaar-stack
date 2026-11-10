@@ -209,4 +209,6 @@ mod fallback;
 #[cfg(test)]
 mod standby_tests;
 #[cfg(test)]
+pub(in crate::network) use standby_tests::block::NativeGate;
+#[cfg(test)]
 mod tests;

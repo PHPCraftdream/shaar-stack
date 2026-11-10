@@ -3,10 +3,10 @@
 #![forbid(unsafe_code)]
 //! Real-transport fixture for the standby path owner: a native and a Yggdrasil
 //! route to one server, counted dialers, an echo target and exact-forward helpers.
-//! Existing cases use 0xC1..0xC9; the packet-loss campaign owns 0xCD/0xCE.
+//! Existing cases use 0xC1..0xC9; the packet-loss campaign owns 0x75/0x76.
 //! Every task is owned and joined.
 
-mod block;
+pub(super) mod block;
 mod denial;
 mod forwarding;
 mod outage;
@@ -93,7 +93,7 @@ impl Dialer for NativeDial {
 
     /// cancel-safe: yes — level-triggered on the session.
     async fn lost(&mut self, link: &Session) {
-        let _ = link.closed().await;
+        link.native_lost().await;
     }
 
     /// cancel-safe: yes — the retained close future resumes on the next call.
