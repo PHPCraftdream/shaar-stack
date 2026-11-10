@@ -1027,8 +1027,27 @@ additional bytes supply no second event, and cancelling the receiver must not
 consume a later observation. Production transport and policy are unchanged.
 The accompanying regression is written first; local lint does not execute it.
 
-The remaining campaign must record its sample count and percentile estimator
-before execution, include all failures, and distinguish:
+The oracle slice `7456cdd` is executed: CI `42852611880` selected, executed
+and passed 52 identical startup case identities on each OS, including the new
+target-byte regression, with zero ignored. This proves the observer, not latency.
+
+The next startup slice fixes 20 sequential fresh-client observations for each
+of two cohorts, before execution. Its nearest-rank p95 is the nineteenth ordered
+sample. Known-address clients receive the independently bound server socket as
+an optional hint; cold clients have no address hint or shared client cache and
+must emit a service-key GET before the captured signed record is answered.
+Both use default policy. Each timer starts before retained client startup,
+including its initial publication, listener, lookup and handshake, and ends at
+the actual target read. No Native route barrier delays opening the probe. The
+live server socket is independently retained and unblocked for all 40 samples;
+eligibility is not inferred from the selected lease. Non-native forwards remain
+in the direct-latency distribution as `Duration::MAX`; a missing forward fails
+the whole case. Actual leased paths and every sample are printed. Startup-only
+direct share is reported separately: long-outage availability phases, failover
+and final combined direct-share acceptance remain open, not excluded by this
+slice. Owners are joined before evaluating aggregate thresholds.
+
+The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;
 - fixed-target input from listener/route readiness or a whole echoed round trip;

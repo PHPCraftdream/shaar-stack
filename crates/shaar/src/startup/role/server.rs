@@ -567,7 +567,7 @@ async fn drive_loop(
         return Some(error);
     }
     #[cfg(test)]
-    emit(parts.events.as_ref(), RoleEvent::Admitted);
+    super::emit_server_admission(parts);
     #[cfg(test)]
     emit_payload_acquired(parts.events.as_ref(), parts.payload.is_some());
     loop {
