@@ -42,6 +42,10 @@ type StatusFuture = Pin<Box<dyn Future<Output = Option<PublicationStatus>> + Sen
 type TestReply = oneshot::Sender<Result<(), RuntimeError>>;
 
 pub(crate) enum MaintenanceCommand {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Retained readiness query contract")
+    )]
     Status(oneshot::Sender<Option<PublicationStatus>>),
     Resolve(EndpointId, ResolveReply),
     #[cfg(test)]
@@ -76,6 +80,13 @@ pub(crate) enum MaintenanceJoin {
     /// a join is a one-shot lifecycle event — one bounded allocation instead
     /// of moving a ~300-byte enum through every close-path observation.
     Exit(Box<MaintenanceExit>),
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Detailed join failure is retained for lifecycle contract tests"
+        )
+    )]
     Failed(MaintenanceJoinFailure),
 }
 
@@ -126,6 +137,10 @@ impl Maintenance {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Retained readiness query contract")
+    )]
     pub(crate) async fn query_status(
         commands: &mpsc::Sender<MaintenanceCommand>,
     ) -> Option<PublicationStatus> {

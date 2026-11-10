@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{env, path::PathBuf, process::ExitCode};
+use std::{env, fmt::Write as _, path::PathBuf, process::ExitCode};
 
 use shaar::{
     config::{Fallback, ServerOverrides, load_server},
@@ -32,13 +32,82 @@ async fn run() -> Result<(), String> {
     let config = load_server(path, &ServerOverrides::default())
         .await
         .map_err(|error| format!("configuration: {error}"))?;
-    validate_fallback(config.fallback())?;
     let identity = Identity::load(config.key_file())
         .await
         .map_err(|_| "could not load configured identity key".to_owned())?;
     let keys = test_support::read_allowlist(config.allowlist_path()).await?;
     let allowlist =
         Allowlist::new(&keys).map_err(|_| "allowlist exceeds 256 entries".to_owned())?;
+    // Composed startup: the shared role layer owns listeners, fallback and
+    // relay negotiation; the configured fallback is genuinely honored here.
+    if config.network().is_some() {
+        let fallback = match config.fallback() {
+            Fallback::Standby => "standby",
+            Fallback::Signal => "signal",
+        };
+        let mut key_hex = String::with_capacity(64);
+        for byte in identity.public_key_bytes() {
+            write!(&mut key_hex, "{byte:02x}").expect("hex formatting cannot fail");
+        }
+        eprintln!("shaar-server: composed startup: public_key={key_hex} fallback={fallback}");
+        let limits =
+            Limits::new(MAX_SESSIONS).map_err(|_| "session limit out of range".to_owned())?;
+        // Truthful signal errors: a failed console handler is reported, not
+        // swallowed, after the role future returns.
+        let signal_failure = std::sync::Arc::new(std::sync::Mutex::new(None::<std::io::Error>));
+        let slot = std::sync::Arc::clone(&signal_failure);
+        let mut role = shaar::startup::ServerRole::new(
+            config.clone(),
+            &identity,
+            allowlist,
+            limits,
+            shaar::startup::RoleOptions::default(),
+        )
+        .map_err(|error| format!("composed startup: {error}"))?;
+        let mut shutdown = std::pin::pin!(async {
+            if let Err(error) = shutdown_signal().await {
+                *slot
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+            }
+        });
+        // Primary/secondary truthful contract: the start or run outcome is
+        // primary, the joined close secondary. A start failure retains
+        // pending rollback in `Starting`, so the production error caller
+        // still drives `role.shutdown()` instead of dropping the role into
+        // the runtime-exit drop path.
+        let mut primary: Option<shaar::startup::StartupError> = match role.start().await {
+            Ok(()) => role.run(&mut shutdown).await.err(),
+            Err(error) => Some(error),
+        };
+        let secondary = role.shutdown().await.err();
+        let role_result: Result<(), String> = match (primary.take(), secondary) {
+            (Some(error), Some(close)) => Err(format!("{error}; joined close failed: {close}")),
+            (Some(error), None) | (None, Some(error)) => Err(error.to_string()),
+            (None, None) => Ok(()),
+        };
+        let signal_error = signal_failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        match (role_result, signal_error) {
+            (Err(role_error), Some(signal_error)) => {
+                return Err(format!(
+                    "composed startup: {role_error}; console signal handler failed: {signal_error}"
+                ));
+            }
+            (Err(role_error), None) => return Err(format!("composed startup: {role_error}")),
+            (Ok(()), Some(signal_error)) => {
+                return Err(format!("console signal handler failed: {signal_error}"));
+            }
+            (Ok(()), None) => return Ok(()),
+        }
+    }
+    // Legacy direct-only path: no network settings configured.
+    eprintln!(
+        "shaar-server: warning: {}",
+        direct_only_notice(config.fallback())
+    );
     let bind = config.bind();
     if bind.ip().is_unspecified() {
         eprintln!(
@@ -228,13 +297,16 @@ async fn drain_sessions(
     drain_error
 }
 
-fn validate_fallback(fallback: Fallback) -> Result<(), String> {
-    match fallback {
-        Fallback::Standby => Err(
-            "fallback `standby` is unavailable: this server supports direct transport only".into(),
-        ),
-        Fallback::Signal => Ok(()),
-    }
+/// Explicit direct-only notice: names the configured fallback as inactive
+/// instead of rejecting it — no silent direct-only fallback.
+fn direct_only_notice(fallback: Fallback) -> String {
+    let fallback = match fallback {
+        Fallback::Standby => "standby",
+        Fallback::Signal => "signal",
+    };
+    format!(
+        "no composed network settings; running direct-only; configured fallback {fallback} is not active"
+    )
 }
 
 fn config_path() -> Result<PathBuf, String> {

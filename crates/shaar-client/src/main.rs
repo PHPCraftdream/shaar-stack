@@ -131,17 +131,89 @@ async fn abort_workers(
 
 async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
     let config = read_config(&config_path).await?;
-    let address = config
-        .server_address()
-        .ok_or("server_address is required for direct client")?;
-    match config.fallback() {
-        Fallback::Standby => {
-            eprintln!("shaar-client: Standby/Ygg fallback is unavailable; using direct only")
-        }
-        Fallback::Signal => eprintln!("shaar-client: Signal carries no data; using direct only"),
-    }
     let key_hex = peer_from_config(&config)?;
     let identity = Identity::load(config.key_file().to_path_buf()).await?;
+    // Composed startup: the shared role layer owns dialing and fallback; the
+    // configured fallback is genuinely honored here, and server_address is
+    // only an optional explicit direct-address hint.
+    if config.network().is_some() {
+        let fallback = match config.fallback() {
+            Fallback::Standby => "standby",
+            Fallback::Signal => "signal",
+        };
+        let hint = match config.server_address() {
+            Some(address) => address.to_string(),
+            None => "none".to_owned(),
+        };
+        eprintln!(
+            "shaar-client: composed startup: public_key={key_hex} fallback={fallback} server_address={hint}"
+        );
+        let limits = Limits::new(1).map_err(|_| "client session limit out of range")?;
+        // Truthful signal errors: a failed console handler is reported, not
+        // swallowed, after the role future returns.
+        let signal_failure = std::sync::Arc::new(std::sync::Mutex::new(None::<std::io::Error>));
+        let slot = std::sync::Arc::clone(&signal_failure);
+        let mut role = shaar::startup::ClientRole::new(
+            config.clone(),
+            &identity,
+            limits,
+            shaar::startup::RoleOptions::default(),
+        )
+        .map_err(|error| -> Box<dyn Error> { format!("composed startup: {error}").into() })?;
+        let mut shutdown = std::pin::pin!(async {
+            if let Err(error) = shutdown_signal().await {
+                *slot
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+            }
+        });
+        // Primary/secondary truthful contract: the start or run outcome is
+        // primary, the joined close secondary. A start failure retains
+        // pending rollback in `Starting`, so the production error caller
+        // still drives `role.shutdown()` instead of dropping the role into
+        // the runtime-exit drop path.
+        let mut primary: Option<shaar::startup::StartupError> = match role.start().await {
+            Ok(()) => role.run(&mut shutdown).await.err(),
+            Err(error) => Some(error),
+        };
+        let secondary = role.shutdown().await.err();
+        let role_result: Result<(), String> = match (primary.take(), secondary) {
+            (Some(error), Some(close)) => Err(format!("{error}; joined close failed: {close}")),
+            (Some(error), None) | (None, Some(error)) => Err(error.to_string()),
+            (None, None) => Ok(()),
+        };
+        let signal_error = signal_failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        match (role_result, signal_error) {
+            (Err(role_error), Some(signal_error)) => {
+                return Err(format!(
+                    "composed startup: {role_error}; console signal handler failed: {signal_error}"
+                )
+                .into());
+            }
+            (Err(role_error), None) => {
+                return Err(format!("composed startup: {role_error}").into());
+            }
+            (Ok(()), Some(signal_error)) => {
+                return Err(format!("console signal handler failed: {signal_error}").into());
+            }
+            (Ok(()), None) => return Ok(()),
+        }
+    }
+    // Legacy direct-only path: no network settings configured.
+    let address = config
+        .server_address()
+        .ok_or("server_address is required for direct-only operation without network settings")?;
+    match config.fallback() {
+        Fallback::Standby => eprintln!(
+            "shaar-client: no composed network settings; running direct-only; configured fallback standby is not active"
+        ),
+        Fallback::Signal => eprintln!(
+            "shaar-client: no composed network settings; running direct-only; configured fallback signal is not active"
+        ),
+    }
     let listener = TcpListener::bind(config.listen()).await?;
     let bind = if address.is_ipv4() {
         "0.0.0.0:0".parse()?

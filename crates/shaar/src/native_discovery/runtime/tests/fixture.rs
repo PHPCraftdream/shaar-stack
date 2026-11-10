@@ -47,10 +47,9 @@ fn encode(value: &Value) -> Vec<u8> {
     packet
 }
 
-// Widened to `pub(crate)` ONLY for the cfg(test)-only startup regression
-// suite (this module itself is compiled under #[cfg(test)]); the runtime
-// owner re-exports it for that suite. `capture_get` is widened for the same
-// suite (GET-admission observation in the startup resolver regression).
+// This cfg(test)-only fixture is shared by native runtime and startup role
+// regressions. `capture_get` is crate-visible for startup resolver observation;
+// `reply_get` is available to the denial case to answer its captured GET.
 pub(crate) struct LoopbackPeer {
     socket: UdpSocket,
     pub(crate) address: SocketAddr,
@@ -111,7 +110,7 @@ impl LoopbackPeer {
             .expect("actual empty GET response");
     }
 
-    pub(in crate::native_discovery::runtime::owner) async fn reply_get(
+    pub(crate) async fn reply_get(
         &self,
         source: SocketAddr,
         transaction: &[u8],

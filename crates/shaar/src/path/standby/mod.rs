@@ -118,6 +118,7 @@ where
     }
 
     /// The path designated to carry payload.
+    #[cfg(test)]
     pub(crate) fn active(&self) -> Option<PathKind> {
         self.policy.active()
     }
@@ -140,6 +141,7 @@ where
     }
 
     /// The native budget was reported spent and no native link was installed since.
+    #[cfg(test)]
     pub(crate) fn native_exhausted(&self) -> bool {
         self.native_exhausted
     }

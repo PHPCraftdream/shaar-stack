@@ -76,10 +76,20 @@ async fn binary_empty_and_probe_shaped_carriers_share_the_reader_with_probes() {
             .probe(server_key, BUDGET)
             .await
             .expect("client route ready");
+        assert_eq!(
+            client.carrier_submitted_datagrams(),
+            0,
+            "probe Ping is not a carrier submission"
+        );
         server
             .probe(client_key, BUDGET)
             .await
             .expect("server route ready");
+        assert_eq!(
+            server.carrier_submitted_datagrams(),
+            0,
+            "probe Ping is not a carrier submission"
+        );
         let c = to_client.sender();
         let s = to_server.sender();
         let ping = Frame {
@@ -106,14 +116,41 @@ async fn binary_empty_and_probe_shaped_carriers_share_the_reader_with_probes() {
             exact(&c, &mut to_server, &bytes, &stale).await;
             exact(&s, &mut to_client, &bytes, &stale).await;
             stale.push(bytes);
+            let client_submissions_before_probe = client.carrier_submitted_datagrams();
+            let server_submissions_before_probe = server.carrier_submitted_datagrams();
             client
                 .probe(server_key, BUDGET)
                 .await
                 .expect("probe still independent");
+            assert_eq!(
+                client.carrier_submitted_datagrams(),
+                client_submissions_before_probe,
+                "Ping/Pong probes do not change carrier submission count"
+            );
+            assert_eq!(
+                server.carrier_submitted_datagrams(),
+                server_submissions_before_probe,
+                "Ping/Pong probe replies do not change carrier submission count"
+            );
         }
         assert_eq!(server.pending_probes(), 0);
         assert_eq!(client.pending_probes(), 0);
+        assert!(
+            client.carrier_submitted_datagrams() > 0,
+            "real DatagramSender carrier exchanges are observed"
+        );
+        let before_zero_budget = client.carrier_submitted_datagrams();
+        assert_eq!(
+            c.send(b"deadline", Duration::ZERO).await,
+            Err(DatagramError::TimedOut)
+        );
+        assert_eq!(
+            client.carrier_submitted_datagrams(),
+            before_zero_budget,
+            "zero-budget rejection precedes carrier submission"
+        );
         let oversize = vec![0; c.mtu() + 1];
+        let before_rejections = client.carrier_submitted_datagrams();
         assert_eq!(
             c.send(&oversize, BUDGET).await,
             Err(DatagramError::Oversize {
@@ -121,18 +158,53 @@ async fn binary_empty_and_probe_shaped_carriers_share_the_reader_with_probes() {
                 mtu: c.mtu()
             })
         );
+        assert_eq!(client.carrier_submitted_datagrams(), before_rejections);
+        let before_cancelled_send = client.carrier_submitted_datagrams();
+        let cancelled_frame = codec::encode(b"cancel before polling").expect("small frame");
+        let cancelled = client.shared.send_carrier(&server_key, &cancelled_frame);
         assert_eq!(
-            c.send(b"deadline", Duration::ZERO).await,
-            Err(DatagramError::TimedOut)
+            client.carrier_submitted_datagrams(),
+            before_cancelled_send + 1,
+            "actual carrier-send boundary counts at invocation"
         );
+        drop(cancelled);
+        assert_eq!(
+            client.carrier_submitted_datagrams(),
+            before_cancelled_send + 1,
+            "dropping the unpolled real transport future retains its invocation count"
+        );
+        let submissions_before_close = client.carrier_submitted_datagrams();
         close(&client).await;
         close(&server).await;
         assert_eq!(
             c.send(&oversize, Duration::ZERO).await,
             Err(DatagramError::Closed)
         );
+        assert_eq!(
+            client.carrier_submitted_datagrams(),
+            submissions_before_close,
+            "closed DatagramSender rejection precedes carrier submission"
+        );
         assert_eq!(to_server.recv().await, Err(DatagramError::Closed));
         TcpListener::bind(("127.0.0.1", port)).expect("port released with retained capabilities");
+        let before_transport_error = client.carrier_submitted_datagrams();
+        let error_frame = codec::encode(b"closed transport").expect("small frame");
+        let failed_send = client.shared.send_carrier(&server_key, &error_frame);
+        assert_eq!(
+            client.carrier_submitted_datagrams(),
+            before_transport_error + 1,
+            "transport-error attempt is counted at the real send boundary"
+        );
+        assert_eq!(failed_send.await, Err(YggError::Closed));
+        client
+            .shared
+            .carrier_submitted_datagrams
+            .store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+        let saturated_frame = codec::encode(b"saturated counter").expect("small frame");
+        let saturated_send = client.shared.send_carrier(&server_key, &saturated_frame);
+        assert_eq!(client.carrier_submitted_datagrams(), u64::MAX);
+        assert_eq!(saturated_send.await, Err(YggError::Closed));
+        assert_eq!(client.carrier_submitted_datagrams(), u64::MAX);
         let replacement = YggTransport::start(config(0xC1, vec![], vec![]))
             .await
             .expect("key claim released");
@@ -195,9 +267,15 @@ async fn unregistered_peered_keys_are_rejected_and_revocation_is_peer_local() {
             .expect("other registration");
         let revoked_sender = good_rx.sender();
         good_rx.close();
+        let submissions_before_revoked = server.carrier_submitted_datagrams();
         assert_eq!(
             revoked_sender.send(b"revoked", BUDGET).await,
             Err(DatagramError::Revoked)
+        );
+        assert_eq!(
+            server.carrier_submitted_datagrams(),
+            submissions_before_revoked,
+            "revoked capability refuses before carrier submission"
         );
         assert_eq!(good_rx.recv().await, Err(DatagramError::Revoked));
         exact(
@@ -279,9 +357,15 @@ async fn malformed_envelopes_never_deliver_and_a_full_sink_cannot_block_probes()
             .acquire_many(u32::try_from(super::MAX_DATAGRAM_SENDS).expect("small send budget"))
             .await
             .expect("send budget available");
+        let submissions_before_busy = client.carrier_submitted_datagrams();
         assert_eq!(
             sender.send(b"send backpressure", BUDGET).await,
             Err(DatagramError::Busy)
+        );
+        assert_eq!(
+            client.carrier_submitted_datagrams(),
+            submissions_before_busy,
+            "send-budget refusal precedes carrier submission"
         );
         client
             .probe(server_key, BUDGET)

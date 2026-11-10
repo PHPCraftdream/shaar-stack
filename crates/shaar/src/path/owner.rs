@@ -19,6 +19,13 @@ use super::policy::PathPolicy;
 pub(crate) struct DialError;
 
 /// Why the owner could not establish the native path.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the signal-mode native-only owner is exercised by the path traces; the roles drive StandbyOwner"
+    )
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EstablishError {
     /// The attempt budget is spent; no further attempt is made by this call.
@@ -45,6 +52,13 @@ pub(crate) trait Dialer {
     async fn close(&mut self) -> Result<(), DialError>;
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the signal-mode native-only owner is exercised by the path traces; the roles drive StandbyOwner"
+    )
+)]
 pub(crate) struct PathOwner<D: Dialer> {
     dialer: D,
     policy: PathPolicy,
@@ -54,6 +68,13 @@ pub(crate) struct PathOwner<D: Dialer> {
     closed: bool,
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the signal-mode native-only owner is exercised by the path traces; the roles drive StandbyOwner"
+    )
+)]
 impl<D: Dialer> PathOwner<D> {
     /// Start in `signal` mode with the policy clock at zero; the first attempt is due at once.
     pub(crate) fn new(dialer: D, config: PolicyConfig) -> Result<Self, ConfigError> {
