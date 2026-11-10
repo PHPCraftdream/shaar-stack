@@ -212,11 +212,10 @@ async fn failure_is_published_without_any_subscribed_waiter() {
     // NO watch waiter is ever subscribed before the owner completes: the
     // owner join route is the deterministic completion barrier, independent
     // of scheduler order.
-    let joined = retained
+    retained
         .await_owner_without_waiter_for_tests()
         .await
         .expect("failed owner joins cleanly");
-    assert!(matches!(joined, ()));
     // The outcome recorded through the permanent receiver survives for the
     // first-ever subscriber.
     let error = retained

@@ -68,20 +68,30 @@ An in-house Yggdrasil implementation is not permitted.
   oracle assumptions), make one reviewed repair commit and report it before CI
   resumes. A task change or context compaction does not reset the streak; only a
   real success does.
-- Execution limits: no standalone local builds, tests, `cargo check`, project Python,
-  dependency preparation, smoke runs, benchmarks or fake load. Locally only
+- Execution limits: no standalone local builds, tests, `cargo check`, unrelated
+  project Python, unapproved dependency preparation, smoke runs, benchmarks or
+  fake load. Locally only
   cargo fmt, cargo clippy, syntax checks and own stdlib DATA readers (`python -I`).
-  Before each leaf push, run `cargo fmt --all -- --check` and
+  Before each leaf push, run the exact CI formatting checks for the six owned
+  workspace packages and the separate `shaar-ygg-core` manifest, plus
   `cargo clippy -p <affected-crate> --all-targets -- -D warnings` with the same
   features as CI, covering each affected crate and relevant feature context.
+  The owner approved this boundary after actual `cargo fmt --all -- --check`
+  exposed formatting differences in 34 pinned Ygg core files. Do not format,
+  ignore or silently replace those verified upstream sources to obtain a green.
   The owner's 2026-11-10 permission covers dependency compilation and third-party
   `build.rs` execution required by clippy, not separate build/test/check commands.
-  Use offline, locked resolution: no dependency downloads or preparation. Missing
-  cached dependencies are a blocker, not permission to fetch or alter versions.
+  Use offline, locked resolution. The owner separately authorized pinned local
+  source preparation for these checks, using existing CI prepare-only recipes
+  with `python -I`, not test/check/fixture runners or lock generation. Registry
+  acquisition is limited to its separately approved exact proposal and budgets;
+  missing sources never authorize fallback URLs or version changes.
   Report local clippy separately from compilation/execution established in CI.
-  Downloaded material is untrusted DATA in a new empty directory, never executed or
-  imported. Repeat this limit in every worker prompt and inspect execution evidence
-  after the worker finishes. No new subagents without the user's explicit request.
+  Downloaded material is untrusted DATA in a new empty directory; never execute or
+  import it as tools. Only checksum-verified dependencies explicitly authorized
+  for clippy may be compiled by that check, including their required build.rs.
+  Repeat this limit in every worker prompt and inspect execution evidence after
+  the worker finishes. No new subagents without the user's explicit request.
 - One owner and an ordered repository: at session entry verify HEAD, the latest
   checkpoint, live executors and the single repository owner; do not start work
   while another owner is active. Every dirty file has a custodian and a disposition;
@@ -99,6 +109,9 @@ An in-house Yggdrasil implementation is not permitted.
 
 | Date | Decision | User words |
 |---|---|---|
+| 2026-11-10 | Permit at most 500 ppm relative wall/monotonic elapsed-time deficit after real Windows CI showed positive wall progress rejected for 2–1,952 microsecond cross-clock deficits. Preserve terminal observed wall rollback, invalid/backward monotonic brackets, stall and excessive-deficit rejection. Use adjacent and lifetime-anchor checks with exact integer comparison to prevent forward-credit and repeated-rounding bypasses; no public configuration or change to signed age/future limits. | "Разрешить 500 ppm" |
+| 2026-11-10 | Keep the actual failed fmt-all receipt explicit: a preparation-only workspace boundary fixed discovery, then fmt-all found diffs in 34 pinned Ygg core files. Preserve their reviewed bytes and use the exact CI formatting boundary for owned packages and the separate core manifest, without ignore rules or upstream formatting patches. This supersedes the earlier literal fmt-all requirement. | "Сначала исправить --all"; after the 34-file evidence, "Принять границу CI" |
+| 2026-11-10 | Authorize pinned local source preparation for fmt/clippy using existing CI prepare-only recipes. Separately approve registry proposal SHA-256 `00a252e01a61373fb541f7238de982fea16f25122daa161b381e69fbf8053ae5`: at most 465 exact index GETs and 533 exact locked archive GETs, reuse local archives first, one GET per URL, no redirects/retries/fallback, at most two connections, 30 s/request, 30 min/pass, 16 MiB/index object, 64 MiB/archive, 1 GiB total. No standalone build/test/check or additional network authority. | "нужно всё локально опдготовить, чтобы в ci было чему сростись"; "Разрешить этот набор" |
 | 2026-11-10 | Allow local cargo fmt and cargo clippy before each leaf push with CI-equivalent features, including necessary clippy dependency compilation and third-party build.rs; no standalone build/test/check, dependency preparation/downloads, project Python, smoke, benchmarks or fake load. This supersedes the earlier blanket local Cargo ban. The owner answered the explicit build.rs coverage question with the permission quoted here. | "Локальный clippy и format - нужно ращрешить"; "разрешаю и clippy и форматирование" |
 | 2026-10-31 | P07/Yggdrasil deferred beyond v1 | Superseded on 2026-11-04 |
 | 2026-11-04 | Yggdrasil restored to v1; original architecture kept | "придерживаемся изначального плана" |

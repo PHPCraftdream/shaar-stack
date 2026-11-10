@@ -246,12 +246,14 @@ impl ServerRole {
         }
     }
 
-    /// Test-only constructor: attaches the event observer and builds the
-    /// composition through the REAL seamed start (shared server admission,
-    /// optional cleanup hold, optional post-bridge startup gate). The role
-    /// is LEFT in `Starting`; `start()` resumes it. Returns the stage
-    /// controls for the armed gate.
+    /// Builds the real seamed start with shared admission and optional gates.
+    /// Attaches the test observer, leaves the role in `Starting`, and returns
+    /// controls for the armed gate; `start()` resumes construction.
     #[cfg(test)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Test seam exposes independent startup gates"
+    )]
     pub(crate) fn with_events_seamed_for_tests(
         config: ServerConfig,
         identity: &Identity,
@@ -264,7 +266,7 @@ impl ServerRole {
     ) -> Result<(Self, crate::startup::resources::StageControls), StartupError> {
         options.validate()?;
         let keys: Vec<PublicKey> = allowlist.keys().collect();
-        let plan = preflight_server(&config, &identity, &keys)?;
+        let plan = preflight_server(&config, identity, &keys)?;
         let (start, controls) = SharedResourcesStart::start_shared_seamed_for_tests(
             identity,
             &plan,
@@ -273,7 +275,6 @@ impl ServerRole {
             cleanup_hold,
             pause_after_bridge,
         );
-        drop(plan);
         // Same composition as `with_events` + the seamed starting phase:
         // `Self::new` validates the options, the role skips `new`'s `New`
         // phase by entering `Starting` directly; `start()` resumes it.

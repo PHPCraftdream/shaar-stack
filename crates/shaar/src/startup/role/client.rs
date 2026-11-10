@@ -516,7 +516,7 @@ async fn run_parts(
                 }
             };
             #[cfg(test)]
-            if let Some(address) = listener.local_addr().ok() {
+            if let Ok(address) = listener.local_addr() {
                 emit(parts.events.as_ref(), RoleEvent::ListenerReady(address));
             }
             #[cfg(test)]

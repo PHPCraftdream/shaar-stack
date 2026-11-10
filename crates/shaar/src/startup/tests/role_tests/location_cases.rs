@@ -316,10 +316,9 @@ async fn pinned_relay_negotiation_carries_native_payload_with_zero_relay_payload
         ));
         let listener_ready = |event: &RoleEvent| matches!(event, RoleEvent::ListenerReady(_));
         let listener_address = tokio::time::timeout(ROLE_BUDGET, async {
-            loop {
                 tokio::select! {
                     event = client_log.wait(&listener_ready) => match event {
-                        RoleEvent::ListenerReady(address) => break address,
+                        RoleEvent::ListenerReady(address) => address,
                         other => panic!(
                             "unexpected role event while awaiting the listener: {other:?}"
                         ),
@@ -329,7 +328,6 @@ async fn pinned_relay_negotiation_carries_native_payload_with_zero_relay_payload
                     ),
                     result = &mut server => panic!("server ended while awaiting client listener: {result:?}"),
                 }
-            }
         })
         .await
         .expect("client listener becomes ready within the budget");

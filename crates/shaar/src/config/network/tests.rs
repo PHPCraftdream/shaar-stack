@@ -328,9 +328,9 @@ fn signaling_fields_are_enforced() {
     ));
 
     // relay with characters outside the base58btc alphabet.
-    let text = make(format!(
-        "    signaling: {{\n        relay: not-a-peerid!!\n        relay_address: 192.0.2.20:7000\n    }}\n"
-    ));
+    let text = make(
+        "    signaling: {\n        relay: not-a-peerid!!\n        relay_address: 192.0.2.20:7000\n    }\n".to_owned()
+    );
     let err = ServerConfig::from_text(&text, &ServerOverrides::default()).unwrap_err();
     assert!(matches!(
         err,

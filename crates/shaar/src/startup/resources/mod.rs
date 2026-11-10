@@ -454,12 +454,9 @@ impl SharedResources {
         operation.reserve(relay).await
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Retained resource contract exercised by in-crate tests"
-        )
+    #[expect(
+        dead_code,
+        reason = "Explicit relay seam retained; roles use configured relay operations"
     )]
     pub(crate) async fn reserve_relay(
         &self,
@@ -497,12 +494,9 @@ impl SharedResources {
         operation.release(relay).await
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Retained resource contract exercised by in-crate tests"
-        )
+    #[expect(
+        dead_code,
+        reason = "Explicit relay seam retained; roles use configured relay operations"
     )]
     pub(crate) async fn release_relay(
         &self,

@@ -137,9 +137,8 @@ impl<S: futures::io::AsyncRead + Unpin> futures::io::AsyncRead for CountingIo<S>
         std::pin::Pin::new(&mut self.io)
             .poll_read(cx, buf)
             .map(|ready| {
-                ready.map(|read| {
+                ready.inspect(|&read| {
                     counted.fetch_add(read as u64, std::sync::atomic::Ordering::SeqCst);
-                    read
                 })
             })
     }
@@ -154,9 +153,8 @@ impl<S: futures::io::AsyncWrite + Unpin> futures::io::AsyncWrite for CountingIo<
         std::pin::Pin::new(&mut self.io)
             .poll_write(cx, buf)
             .map(|ready| {
-                ready.map(|written| {
+                ready.inspect(|&written| {
                     counted.fetch_add(written as u64, std::sync::atomic::Ordering::SeqCst);
-                    written
                 })
             })
     }

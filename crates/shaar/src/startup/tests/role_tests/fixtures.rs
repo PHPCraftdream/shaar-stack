@@ -21,7 +21,8 @@
 //! - location case 2: identity 0x54, client identity 0x55, transit 0x56
 //! - denial case 5:   identity 0x57, allowed client 0x58, denied client
 //!   0x59, transit 0x5A
-//! (The 5b suites own 0xB* and 0xE* ranges; no overlap.)
+//!
+//! The 5b suites own 0xB* and 0xE* ranges; no overlap.
 
 use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -79,7 +80,6 @@ pub(super) fn tuned_policy() -> RoleOptions {
 /// count: any case that claims a payload path while the fixed server target
 /// was never reached (or was reached twice) fails loudly.
 pub(super) struct EchoTarget {
-    address: SocketAddr,
     count: Arc<AtomicUsize>,
     stop: watch::Sender<bool>,
     tasks: JoinSet<()>,
@@ -141,12 +141,7 @@ pub(super) async fn echo_target() -> (EchoTarget, SocketAddr) {
         connections.abort_all();
         while connections.join_next().await.is_some() {}
     });
-    let target = EchoTarget {
-        address,
-        count,
-        stop,
-        tasks,
-    };
+    let target = EchoTarget { count, stop, tasks };
     (target, address)
 }
 
@@ -293,30 +288,8 @@ where
     tokio::select! {
         result = &mut *server => panic!("{who}: server role ended while waiting: {result:?}"),
         result = &mut *client => panic!("{who}: client role ended while waiting: {result:?}"),
-        event = server_log.wait(&pred) => return event,
-        event = client_log.wait(&pred) => return event,
-    }
-}
-
-/// Drives both pinned futures until the CLIENT completes; used when a client
-/// is expected to end (e.g. truthful budget exhaustion). The server must
-/// stay alive; a server that ends is a loud failure.
-pub(super) async fn drive_client_to_end<S, C>(
-    server: &mut S,
-    client: &mut C,
-    who: &'static str,
-) -> Result<(), StartupError>
-where
-    S: Future<Output = Result<(), StartupError>> + Unpin,
-    C: Future<Output = Result<(), StartupError>> + Unpin,
-{
-    tokio::select! {
-        result = &mut *server => panic!(
-            "{who}: server role ended while waiting for the client: {result:?}"
-        ),
-        // A pinned future cannot fail to join; its Result is returned
-        // truthfully for the caller to inspect.
-        result = &mut *client => result,
+        event = server_log.wait(&pred) => event,
+        event = client_log.wait(&pred) => event,
     }
 }
 
@@ -523,10 +496,9 @@ where
     C: Future<Output = Result<(), StartupError>> + Unpin,
 {
     let io = async {
-        let stream = TcpStream::connect(listener)
+        TcpStream::connect(listener)
             .await
-            .unwrap_or_else(|_| panic!("{who} opens its held forwarding stream"));
-        stream
+            .unwrap_or_else(|_| panic!("{who} opens its held forwarding stream"))
     };
     let mut stream = tokio::select! {
         result = &mut *server => {
