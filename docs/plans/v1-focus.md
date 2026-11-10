@@ -1042,8 +1042,10 @@ the actual target read. No Native route barrier delays opening the probe. The
 live server socket is independently retained and unblocked for all 40 samples;
 eligibility is not inferred from the selected lease. Non-native forwards remain
 in the direct-latency distribution as `Duration::MAX`; a missing forward fails
-the whole case. Actual leased paths and every sample are printed. Startup-only
-direct share is reported separately: long-outage availability phases, failover
+the whole case. Actual leased paths and every sample are printed and retained
+in a bounded `p10-startup-samples.csv` inside the existing selected-test receipt
+artifact; successful libtest stdout alone is not accessible sample evidence.
+Startup-only direct share is reported separately: long-outage availability phases, failover
 and final combined direct-share acceptance remain open, not excluded by this
 slice. Owners are joined before evaluating aggregate thresholds.
 

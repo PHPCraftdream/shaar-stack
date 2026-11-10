@@ -1,5 +1,6 @@
 //! Real startup distributions; no route-ready or echo-RTT timing shortcut.
 
+use std::fmt::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
@@ -96,6 +97,8 @@ async fn known_and_cold_startup_measure_first_target_bytes_without_ready_route_b
         let mut ordinal = 0;
         let mut direct = 0;
         let mut cohorts = [[Duration::MAX; SAMPLES]; 2];
+        let mut samples_csv = String::with_capacity(8192);
+        samples_csv.push_str("cohort,sample,native_available,path,first_byte_ns,direct_latency_ns\n");
         for (cohort, samples) in cohorts.iter_mut().enumerate() {
             for (index, sample) in samples.iter_mut().enumerate() {
                 ordinal += 1;
@@ -155,6 +158,8 @@ async fn known_and_cold_startup_measure_first_target_bytes_without_ready_route_b
                     direct += 1;
                     *sample = elapsed;
                 }
+                writeln!(samples_csv, "{cohort},{index},true,{:?},{},{}", paths[0], elapsed.as_nanos(), sample.as_nanos())
+                    .expect("formatting bounded sample into a String cannot fail");
                 // Non-native samples remain in the percentile as MAX, never disappear.
                 eprintln!("P10 startup cohort={cohort} sample={index} native_available=true path={:?} first_byte_us={} direct_latency={sample:?}", paths[0], elapsed.as_micros());
                 let _ = stop.send(());
@@ -182,6 +187,11 @@ async fn known_and_cold_startup_measure_first_target_bytes_without_ready_route_b
         assert_key_released_once(CLIENT, "campaign client").await;
         assert_key_released_once(TRANSIT, "campaign transit").await;
         assert_eq!(ordinal, 2 * SAMPLES);
+        assert!(samples_csv.len() <= 8192, "fixed campaign output stays bounded");
+        // libtest hides successful stdout; the existing CI receipt artifact keeps rows.
+        tokio::fs::create_dir_all("target/ci-selected").await.expect("receipt directory opens");
+        tokio::fs::write("target/ci-selected/p10-startup-samples.csv", samples_csv).await
+            .expect("all startup samples are preserved before threshold assertions");
         assert!(p95(&cohorts[0]) <= Duration::from_secs(3), "known-address p95 exceeds 3 s");
         assert!(p95(&cohorts[1]) <= Duration::from_secs(10), "cold-DHT p95 exceeds 10 s");
         assert!(direct * 100 >= ordinal * 95, "startup-only direct share below 95%; long-outage campaign remains additional");
