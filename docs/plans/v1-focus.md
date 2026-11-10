@@ -905,6 +905,110 @@ Aim for #32 acceptance within two CI runs and shorter delivery latency. These
 are feedback signals, not correctness gates or permission to game feat/fix labels.
 Three consecutive failures still require the consolidated-review stop rule.
 
+## Transition evidence audit for #215 (2026-11-10)
+
+Audit base: exact `2f844c072dca84b70e290be0442586d509949ae0`. The maintained
+P10 leaf contracts and acceptance-order correction above define this check;
+no missing external issue body is inferred from the historical #215 label.
+
+Late native recovery is accepted at that revision: CI `42826919454` selected,
+executed and passed 174 identical case identities on each OS, with zero ignored.
+The kernel milestone `bab958d` / CI `42815929877` separately executed all 76
+selected cases per OS, including ten new maintenance controls. The real role case
+uses the unchanged default six-attempt budget and holds the same old Ygg TCP
+stream across real exhaustion, delayed signed-record availability, a genuine
+renewed native dial, the latest session's stable hold, and a successful new native
+TCP forward. Actual worker leases must be exactly Ygg then Native; route history
+alone is not the payload oracle. Admission order and joined release remain checked.
+This is functional recovery acceptance, not efficiency or full P10 acceptance.
+
+### Receipt and identity basis
+
+Primary re-read the authentic libtest inventories, execution events and receipts
+as inert DATA, without executing their contents or project verification scripts:
+
+| Evidence | Verified execution per OS | Proof level |
+| --- | --- | --- |
+| 3a, `780d7b6`, CI `42111786584` | 139 SDK cases | Historical direct resolve/key/forward and owner acceptance. |
+| 3b, `60b5e25`, CI `42117935856` | 150 SDK cases | Historical native same-key/address loss and new-stream recovery. |
+| 3c, `ff5e609`, CI `42141894144` | 65 SDK cases | Scripted phase contracts and actual socket signaling zero-APP. Every one of these case identities is also executed in the current 174-case receipt. |
+| 5c, `8cbd2d7`, CI `42754605543` | SDK 345, Client 12, Server 12, Ygg adapter 42: total 411 | Shared production-role composition, binary caller wiring and adapter contracts; not full P11/P12 or full P10. The separate two-case CI-runner self-test is not product evidence and is excluded. |
+| Recovery, `2f844c0`, CI `42826919454` | 174 SDK cases | Current functional transition/auth/cancel/close evidence below, including all ten new maintenance controls. |
+
+The Ygg adapter/core crates, root lock and reviewed backend/Ygg preparation
+recipes are byte-unchanged between accepted 5c and this audit base. Their 42-case
+component evidence is retained as unchanged-component proof, not relabeled as
+fresh execution on this SHA. Current real owned-carrier/session tests supplement
+it. Later source changes still require the final current-SHA full run in #25.
+
+### Functional contract map
+
+The literal libtest IDs below are present in the verified current 174-case set.
+Rows name representative anchors; related boundary/interleaving cases remain in
+the same receipt, rather than being inferred from a green job badge.
+
+| Contract | Named case anchors | Boundary of the proof |
+| --- | --- | --- |
+| Key-only signed discovery, exact-key native and fixed-target bytes | `startup::tests::role_tests::location_cases::key_only_client_resolves_the_signed_publication_and_forwards_a_byte`; `network::admission::tests::wrong_pinned_key_cannot_authenticate_the_real_server` | Real owned discovery and QUIC; no server-address hint. Not public Mainline interoperability. |
+| First dial, backoff, absolute deadline, finite Signal exhaustion and invalid config | `path::tests::owner::failed_dials_are_retried_on_the_backoff_schedule`; `path::tests::owner::a_dial_that_hangs_ends_at_its_deadline_and_the_next_one_waits_the_backoff`; `path::tests::owner::a_spent_budget_stops_after_exactly_max_attempts`; `path::tests::owner::invalid_parameters_are_rejected_before_any_dial` | Deterministic scheduling and typed outcomes, not latency distribution. |
+| Native loss, grace, stable hold, stale evidence and refill | `path::tests::recovery::grace_expires_even_while_a_retry_dial_is_pending`; `path::tests::recovery::a_loss_at_the_hold_boundary_does_not_refill_a_down_path`; `path::tests::traces::stale_and_reordered_generations_cannot_undo_newer_facts`; `path::tests::traces::a_stale_attempt_report_across_a_refill_cannot_cancel_the_new_attempt` | Paused-time boundaries plus the real recovery compositions; old streams are not migrated or replayed. |
+| Down-window signaling cannot carry APP or block native recovery | `network::admission::negotiation_tests::actual_down_window_negotiates_then_restores_native_only_payload`; `network::admission::negotiation_tests::failed_signaling_hint_cannot_prevent_native_recovery`; `network::admission::negotiation_tests::signaling_paths_carry_zero_application_frames_during_native_promotion`; `path::tests::negotiation::hanging_negotiations_reserve_half_the_attempt_for_native` | Actual native promotion and per-path zero signaling APP, through joined close; no sampled-IP-existence shortcut. |
+| Signal Ygg remains control-only in production roles | `startup::tests::role_tests::signal_cases::signal_mode_negotiates_but_ygg_never_carries_application_payload`; `network::admission::ygg::standby_tests::forwarding::signal_mode_negotiates_through_ygg_but_never_forwards_payload_through_it` | Authenticated probe positive and forbidden APP negative; not a Boolean readiness claim. |
+| Owned Ygg carrier authority is exact and current | `network::admission::ygg::tests::allowed_tls_key_on_another_ygg_identity_never_gets_session`; `network::admission::ygg::tests::source_attestation_requires_live_exact_carrier_address`; `network::admission::ygg::tests::real_ygg_sessions_authenticate_exchange_and_release_owned_path` | Prefix/type alone grants no authority; real carrier, TLS identity and release are checked. Unchanged adapter cases additionally cover revocation and queue/waiter bounds. |
+| Real native/Ygg/native forwarding to one target | `network::admission::ygg::standby_tests::forwarding::native_ygg_native_new_tcp_follows_policy`; `startup::tests::role_tests::standby_cases::idle_policy_progress_restores_native_without_disturbing_active_streams` | Genuine fixed-target bytes and actual worker lease choice; endpoint shutdown is not an OS packet-filter or public-NAT test. |
+| Ordinary exhaustion versus bounded long-lived maintenance | `path::tests::standby::maintenance::capped_maintenance_preserves_budget_and_ygg_route`; `path::tests::standby::maintenance::maintenance_cooldown_is_completion_based_and_late_poll_starts_one_probe`; `startup::tests::role_tests::standby_cases::idle_policy_progress_restores_native_without_disturbing_active_streams` | Default-budget real-I/O barrier plus exact deterministic cap/no-burst controls. No lifetime-attempt-count claim. |
+| Ygg loss, total outage and recovery remain distinct | `path::tests::standby::maintenance::ygg_down_cancels_maintenance_until_restored_and_keeps_failure_deadline`; `path::tests::traces::losing_yggdrasil_inside_the_hold_returns_to_the_live_native_path_at_once`; `network::admission::ygg::standby_tests::outage::exhausted_native_budget_keeps_ygg_usable_then_total_outage_is_unavailable` | No maintenance after fallback loss is observed; Unavailable is not Exhausted or Closed. |
+| Allowlist before target, wrong key and shared cross-path admission | `startup::tests::role_tests::denial_cases::disallowed_key_causes_zero_target_connections_and_allowed_key_succeeds`; `network::admission::ygg::standby_tests::denial::forbidden_clients_never_receive_a_serving_session_and_reach_no_target`; `startup::tests::role_tests::lifecycle_cases::capacity::cross_path_capacity_refuses_while_one_shared_slot_is_held` | Zero-target negatives have real allowed-target positives; capacity is shared, not duplicated per path. |
+| Cancellation/re-entry does not recreate work or deadlines | `path::tests::standby::maintenance::original_attempt_deadline_and_cooldown_survive_cancelled_follow_reentry`; `path::tests::negotiation::cancelled_negotiation_resumes_without_a_duplicate_attempt`; `startup::tests::role_tests::lifecycle_cases::cancellation::retained_roles_cancel_and_resume_borrowed_waiters` | Retained owners and waiter cancellation; this does not promise survival of a failed transport's existing stream. |
+| Shutdown, error custody and release stay joined/retryable | `path::tests::standby::maintenance::shutdown_joins_active_maintenance_and_stops_scheduling`; `startup::tests::resources::close_tests::one_backend_close_error_via_the_real_boundary_still_closes_every_other_owner`; `startup::tests::ygg_start_tests::cancelled_shutdown_is_resumable_and_still_joins` | Actual failure propagation, repeated close and resource/key/port release; no detached retry loop. |
+
+Role observations retain a bounded ordered prefix of 4,096 events. They do not
+promise unlimited lossless storage: after sealing, a missing later event times
+out. The default-budget acceptance case's finite deadline and capped probe rate
+keep its event count far below this bound; required late route/worker events must
+be present for the case to pass. No sealed-prefix or dropped-event state is used
+to claim an unobserved transition.
+
+### Concrete boundary gap found in this audit
+
+At the maximum representable policy time, saturating deadline arithmetic could
+issue a maintenance command with `deadline == now`. The controller rejects that
+expired command, but a capped retry could again saturate to the same instant,
+creating synchronous retry churn. Saturated hold arithmetic could also shorten
+a hold at that final tick. This change closes the policy before processing a
+saturated clock; it introduces no new switching algorithm or public parameter.
+
+Two private-boundary regression IDs accompany the repair:
+- `path::policy::boundary_tests::saturated_clock_stops_retries_and_cannot_shorten_native_hold`
+- `path::policy::boundary_tests::overflowing_maintenance_attempt_identity_closes_without_reuse`
+
+These two cases are new proof obligations for this candidate's CI receipt, not
+claims from the earlier 174-case run or local clippy. The saturation case fails
+on the old zero-duration command; the identity case checks the existing checked
+increment closes rather than reusing an attempt ID. No huge iteration count or
+local test execution is needed. Once both are executed successfully, the audit
+has no additional functional transition gap to carry into #25.
+
+### Explicit remaining gates, not missing functional implementation
+
+- #25 must measure the agreed p95 first forwarded byte (known 3 s, cold DHT 10 s),
+  failover under controlled native blocking (10 s), direct share (at least 95%)
+  and bounded resources. Listener/route readiness and a whole echo RTT are not
+  the first-forwarded-byte metric. Reuse the real role/target fixtures and actual
+  worker path observations; add only their missing measurement hooks, not a new
+  protocol, transport framework or CI family.
+- Native availability for the direct-share cohort must be independently
+  controlled and known, not defined by having already selected Native. Keep the
+  long-outage recovery case in the campaign with its real availability phases;
+  do not inflate its ordinary budget, shorten the outage or omit adverse samples.
+- #25 also owns the explicit current-candidate full P10 run. Targeted 76/174 and
+  historical 411 do not substitute; later measurement-code changes require fresh
+  proof on their actual SHA.
+- P11/P12 complete product entrypoint acceptance, P13's extended fault/NAT and
+  packet-filter matrix, separately bounded public interoperability, resources,
+  notices and release decisions retain their own dependencies and gates. The
+  shared-role/binary-wiring evidence does not silently close those stages.
+
 ## Audit-adjusted delivery passes (approved 2026-11-09)
 
 The user requested: “скорректируй план под аудит, сгруппируй смежные задачи,
