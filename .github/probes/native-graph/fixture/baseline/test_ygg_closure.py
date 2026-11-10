@@ -140,6 +140,17 @@ class CheckEdgesTests(unittest.TestCase):
         with self.assertRaisesRegex(AuditError, "unapproved dependency edge: shaar-ygg"):
             self.check(added=[(("shaar-ygg", "0.1.0"), ("evil", "1.0.0"))])
 
+    def test_native_observer_admits_only_the_exact_existing_futures_edge(self):
+        self.check(added=[(("shaar", "0.1.0"), ("futures", "0.3.34"))])
+        for owner, version in (("shaar", "0.3.35"), ("hex", "0.3.34")):
+            owner_version = "0.1.0" if owner == "shaar" else "0.4.3"
+            with self.subTest(owner=owner, version=version), self.assertRaisesRegex(
+                    AuditError, "unapproved dependency edge"):
+                self.check(added=[((owner, owner_version), ("futures", version))])
+        edge = (("shaar", "0.1.0"), ("futures", "0.3.34"))
+        with self.assertRaisesRegex(AuditError, "edge removal"):
+            y.check_edges(_parsed(_BASE_EDGES + [edge], {}), _parsed(_BASE_EDGES, {}))
+
     def test_removal_outside_the_emoji_chain_is_rejected(self):
         with self.assertRaisesRegex(AuditError, "edge removal"):
             self.check(removed=[(("shaar", "0.1.0"), ("hex", "0.4.3"))])
@@ -186,6 +197,27 @@ class CheckUnitsTests(unittest.TestCase):
         candidate = copy.deepcopy(control)
         candidate[0]["dependencies"].append(_dep("tokio", self.tokio))
         y.check_units(control, candidate)
+
+    def test_native_observer_unit_edge_preserves_version_owner_and_features(self):
+        product = _form("shaar", "0.1.0")
+        stream = _form("futures", "0.3.34", ("std",))
+        control = [product, stream]
+        candidate = copy.deepcopy(control)
+        candidate[0]["dependencies"].append(_dep("futures", stream))
+        y.check_units(control, candidate)
+        changed = copy.deepcopy(candidate)
+        changed[0]["dependencies"][0]["unit"]["package"] = ("futures", "0.3.35", stream["package"][2])
+        with self.assertRaisesRegex(AuditError, "unapproved unit dependency"):
+            y.check_units(control, changed)
+        changed = copy.deepcopy(candidate)
+        changed[1]["features"].append("thread-pool")
+        with self.assertRaisesRegex(AuditError, "unapproved unit feature change"):
+            y.check_units(control, changed)
+        other = [_form("hex", "0.4.3"), stream]
+        changed = copy.deepcopy(other)
+        changed[0]["dependencies"].append(_dep("futures", stream))
+        with self.assertRaisesRegex(AuditError, "unapproved unit dependency"):
+            y.check_units(other, changed)
 
     def test_undeclared_units_edges_and_features_are_rejected(self):
         extra = {

@@ -74,7 +74,11 @@ FEATURE_ADDS = {
     ('zerocopy', '0.8.63'): frozenset(('simd',)),
 }
 
+# Native payload-loss observation uses the already locked production-transitive Stream trait.
+NATIVE_OBSERVER_EDGE = (('shaar', '0.1.0'), ('futures', '0.3.34'))
+
 METADATA_EDGES = frozenset({
+    NATIVE_OBSERVER_EDGE,
     (('curve25519-dalek', '4.1.3'), ('digest', '0.10.7')),
     (('curve25519-dalek', '4.1.3'), ('zeroize', '1.9.1')),
     (('generic-array', '0.14.7'), ('zeroize', '1.9.1')),
@@ -93,6 +97,7 @@ METADATA_EDGES = frozenset({
 })
 
 UNIT_EDGES = frozenset({
+    NATIVE_OBSERVER_EDGE,
     (('cipher', '0.4.4'), ('zeroize', '1.9.1')),
     (('generic-array', '0.14.7'), ('zeroize', '1.9.1')),
     (('shaar', '0.1.0'), ('url', '2.5.8')),

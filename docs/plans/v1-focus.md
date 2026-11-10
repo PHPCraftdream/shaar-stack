@@ -1245,6 +1245,37 @@ normal/test clippy contexts; Python and Rust tests remain CI-only. One reviewed
 follow-up commit and report must precede another fork push; all runtime obligations
 above remain open.
 
+CI `42894735758` on the reviewed rcgen follow-up `6d5f737` passed the
+previous driver-fixture boundary but failed both OS jobs during the locked native
+graph comparison: `features.AuditError: unapproved dependency edge: shaar -> futures`.
+The failure streak is five. The SDK campaign and its numerical acceptance again
+did not execute. This is not evidence against the failover threshold itself.
+
+The earlier Native-loss observer moved the already locked, production-transitive
+futures 0.3.34 dependency from SDK dev to normal dependencies, but omitted its
+exact direct edge from the metadata AND compiler-unit declarations. Both terminal
+traces and the complete retained metadata/unit deltas were reviewed together.
+Full native graph artifact downloads (1,853,413,977 bytes Linux and 1,682,159,109
+bytes Windows) both ended with `unexpected EOF`; they were not blindly retried.
+Bounded HTTP Range reads recovered only the inert evidence JSON and four needed
+metadata/build JSON entries per OS, with ZIP CRC and retained SHA-256 verification.
+No downloaded code was imported or executed. An own stdlib DATA reader compared
+the complete normal-edge and captured compiler-unit deltas against the literal
+existing declarations, including the established Yggdrasil growth and Base58
+transition. With the exact observer pair declared, it found no other unexplained
+metadata edges, unit edges, unit identities or feature changes on either OS.
+This DATA review is not local execution of the project verifier or CI acceptance.
+
+The bounded repair declares only `shaar 0.1.0 -> futures 0.3.34` in both edge sets.
+Regression controls cover admission of that pair and rejection of another version,
+another owner, unexpected feature growth and removal. Existing checksum, source,
+feature, closure and unit identity guards remain unchanged. There are no new
+packages, versions, locks, Rust behavior changes or CI segments. Syntax checks and
+the accepted formatting/offline locked normal/test clippy boundary passed; the
+Python controls and all runtime obligations still require CI. One reviewed repair
+commit and report are required before resuming fork CI; only a real success resets
+the five-failure streak.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;
