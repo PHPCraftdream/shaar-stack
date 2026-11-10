@@ -7,16 +7,11 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV6};
 
 const MAX_ADDRESSES: usize = 4;
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "P09 actor boundary is not wired yet")
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SnapshotError {
     TooManyAddresses,
     InvalidAddress,
     UnsupportedTransport,
-    Oversize,
 }
 
 #[cfg_attr(

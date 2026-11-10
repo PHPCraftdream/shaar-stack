@@ -481,10 +481,12 @@ async fn maintain(
         }
 
         #[cfg(test)]
-        if publish.is_none() && latest.is_none() && retry_at.is_none() {
-            if let Some(reply) = waiting_reply.take() {
-                let _ = reply.send(Ok(()));
-            }
+        if publish.is_none()
+            && latest.is_none()
+            && retry_at.is_none()
+            && let Some(reply) = waiting_reply.take()
+        {
+            let _ = reply.send(Ok(()));
         }
     }
 

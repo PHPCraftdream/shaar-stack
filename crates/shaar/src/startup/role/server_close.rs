@@ -67,7 +67,7 @@ pub(super) async fn close_parts(mut parts: super::server::ServerParts) -> Result
                     if let Some(events) = parts.events.as_ref()
                         && let Some(StartupError::Close { stage }) = first_error.as_ref()
                     {
-                        events.record(super::RoleEvent::ClosePending { stage: *stage });
+                        events.record(super::RoleEvent::ClosePending { stage });
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     continue;

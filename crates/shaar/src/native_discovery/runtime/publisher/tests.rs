@@ -43,7 +43,7 @@ fn rejects_empty_and_invalid_snapshots_after_revoking_generation() {
     let mut state = PublisherState::new(test_key(&identity));
     let address = test_address();
     let (old_generation, _) = state
-        .replace(&identity, &[address.clone()], sample(1_000, 0))
+        .replace(&identity, std::slice::from_ref(&address), sample(1_000, 0))
         .expect("valid initial snapshot");
     assert!(matches!(
         state.replace(&identity, &[], sample(1_001, 1)),

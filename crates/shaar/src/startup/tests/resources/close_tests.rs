@@ -317,11 +317,11 @@ async fn repeated_shutdown_is_idempotent_and_caches_the_terminal_result() {
     // First shutdown runs the ordered close inside the owner task.
     let first = tokio::time::timeout(BUDGET, fixture.start.shutdown())
         .await
-        .expect("first shutdown finishes within the budget")
-        .expect("first shutdown is clean");
-    // The terminal result is cached WITHOUT repolling consumed handles.
-    let second = fixture.start.shutdown().await.expect("second shutdown");
-    let third = fixture.start.shutdown().await.expect("third shutdown");
+        .expect("first shutdown finishes within the budget");
+    assert_eq!(first, Ok(()), "first shutdown is clean");
+    // Compare the cached Result, not the unit value after unwrapping it.
+    let second = fixture.start.shutdown().await;
+    let third = fixture.start.shutdown().await;
     assert_eq!(first, second, "repeated shutdown repeats the cached result");
     assert_eq!(second, third);
     // Truthful readiness after the close.

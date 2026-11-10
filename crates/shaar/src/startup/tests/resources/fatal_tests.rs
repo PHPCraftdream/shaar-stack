@@ -121,7 +121,7 @@ async fn payload_stage_fault_after_ygg_acquisition_rolls_back_the_bridge_owned_t
         SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, mainline_port),
         &[SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 9)],
         SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, signaling_port).into(),
-        &[transit_uri.clone()],
+        std::slice::from_ref(&transit_uri),
         Some("standby"),
     );
     let config = parse_server_config(&text);

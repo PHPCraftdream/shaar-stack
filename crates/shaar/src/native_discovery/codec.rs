@@ -91,7 +91,7 @@ impl From<SnapshotError> for DecodeError {
             SnapshotError::InvalidAddress | SnapshotError::UnsupportedTransport => {
                 Self::InvalidAddress
             }
-            SnapshotError::TooManyAddresses | SnapshotError::Oversize => Self::OverLimit,
+            SnapshotError::TooManyAddresses => Self::OverLimit,
         }
     }
 }

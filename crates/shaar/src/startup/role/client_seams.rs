@@ -40,7 +40,6 @@ impl ClientRole {
             false,
             pause_after_bridge,
         );
-        drop(plan);
         let mut role = Self::with_events(config, identity, limits, options, events)?;
         role.phase = ClientPhase::Starting(start);
         Ok((role, controls))

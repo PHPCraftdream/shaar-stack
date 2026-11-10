@@ -189,21 +189,24 @@ async fn faulted_maintenance_retains_owner_and_joined_close_releases_resources()
             stage: "address-maintenance",
         })
     );
-    let slot = slot_lock(&shared.slot);
-    let resources = slot.resources.as_ref().expect("slot retained");
-    assert!(
-        resources.owner.is_none(),
-        "owner dropped only AFTER its close() joined publisher and dht"
-    );
-    assert!(
-        resources.maintenance.is_none() && resources.endpoint.is_none() && resources.ygg.is_none(),
-        "joined close releases every retained resource"
-    );
-    assert!(
-        slot.closing.is_none(),
-        "no closing claims leak past restore"
-    );
-    drop(slot);
+    {
+        let slot = slot_lock(&shared.slot);
+        let resources = slot.resources.as_ref().expect("slot retained");
+        assert!(
+            resources.owner.is_none(),
+            "owner dropped only AFTER its close() joined publisher and dht"
+        );
+        assert!(
+            resources.maintenance.is_none()
+                && resources.endpoint.is_none()
+                && resources.ygg.is_none(),
+            "joined close releases every retained resource"
+        );
+        assert!(
+            slot.closing.is_none(),
+            "no closing claims leak past restore"
+        );
+    }
     // Independent release oracles after the actual joins: BOTH the
     // explicitly configured Mainline actor socket and the native
     // endpoint socket rebind. The Mainline rebind is the backend proof;

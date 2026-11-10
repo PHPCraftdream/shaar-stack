@@ -67,11 +67,11 @@ impl SharedResources {
     /// regressions can assert a resolve target is an isolated owned query.
     #[cfg(test)]
     pub(crate) fn mainline_actor_id_for_tests(&self) -> Option<n0_mainline::Id> {
-        self.shared
+        *self
+            .shared
             .mainline_actor_id_for_tests
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone()
     }
 
     /// Arms the unique Mainline cleanup hold over the retained owner's

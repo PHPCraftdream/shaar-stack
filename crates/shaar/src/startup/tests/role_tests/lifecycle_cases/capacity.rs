@@ -148,7 +148,7 @@ async fn cross_path_capacity_refuses_while_one_shared_slot_is_held() {
         .await
         .expect("B arms against its bootstrap peer while server remains live");
         drop(arm_b);
-        let mut record_b = std::pin::pin!(shared_peer.serve_record(&item));
+        let mut record_b = Box::pin(shared_peer.serve_record(&item));
         let result_b = tokio::time::timeout(ADMISSION_BUDGET, async {
             tokio::select! {
                 result = &mut server => panic!("server ended while B is refused: {result:?}"),
@@ -234,7 +234,7 @@ async fn cross_path_capacity_refuses_while_one_shared_slot_is_held() {
             .await
             .expect("C arms with the server continuously serving");
         drop(arm_c);
-        let mut record_c = std::pin::pin!(client_c_peer.serve_record(&item));
+        let mut record_c = Box::pin(client_c_peer.serve_record(&item));
         let route_native =
             |event: &RoleEvent| matches!(event, RoleEvent::RouteActive(PathKind::Native));
         let admission_native =

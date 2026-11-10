@@ -52,6 +52,10 @@ struct StageGates {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::type_complexity,
+    reason = "Returns both endpoints of two one-shot stage gates"
+)]
 fn stage_pair() -> (
     (oneshot::Sender<()>, oneshot::Receiver<()>),
     (oneshot::Receiver<()>, oneshot::Sender<()>),
