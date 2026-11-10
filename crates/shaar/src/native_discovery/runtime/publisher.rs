@@ -224,6 +224,11 @@ impl PublisherState {
                 .last_monotonic_before_us
                 .is_some_and(|last| sample.monotonic_after_us < last)
         {
+            #[cfg(test)]
+            eprintln!(
+                "publisher clock rejection (invalid-or-backward): previous_wall_us={:?}, previous_monotonic_before_us={:?}, previous_monotonic_after_us={:?}, sample={sample:?}",
+                self.last_wall_us, self.last_monotonic_before_us, self.last_monotonic_after_us,
+            );
             self.clock_fault = true;
             self.active = None;
             return Err(PublishError::ClockFault);
@@ -236,6 +241,10 @@ impl PublisherState {
                 .monotonic_before_us
                 .saturating_sub(last_monotonic_after);
             if wall_elapsed < i128::from(proven_monotonic_elapsed) {
+                #[cfg(test)]
+                eprintln!(
+                    "publisher clock rejection (elapsed-deficit): previous_wall_us={last_wall}, previous_monotonic_after_us={last_monotonic_after}, wall_elapsed_us={wall_elapsed}, minimum_monotonic_elapsed_us={proven_monotonic_elapsed}, sample={sample:?}",
+                );
                 self.clock_fault = true;
                 self.active = None;
                 return Err(PublishError::ClockFault);

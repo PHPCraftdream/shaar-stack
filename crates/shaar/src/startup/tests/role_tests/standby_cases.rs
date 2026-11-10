@@ -321,6 +321,7 @@ async fn mainline_outage_leaves_the_alternate_transport_owned_and_standby_carrie
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn idle_policy_progress_restores_native_without_disturbing_active_streams() {
     tokio::time::timeout(RESTORE_BUDGET, async {
+        eprintln!("native-restore phase: startup");
         let mut service_peer = LoopbackPeer::bind().await;
         let fixture = RelayFixture::start().await;
         let relay_id = fixture.address.peer_id().to_string();
@@ -373,6 +374,7 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
         ));
         let item =
             admit_and_capture(&mut service_peer, &mut server, &server_log, RESTORE_BUDGET).await;
+        eprintln!("native-restore phase: server admitted and initial PUT captured");
 
         // CLIENT through the silent phase: the EAGER standby policy owns the
         // route through the transit as soon as the fallback dial succeeds,
@@ -392,6 +394,7 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
                 result = &mut server => panic!("server ended during restore-client arming: {result:?}"),
             }
         };
+        eprintln!("native-restore phase: client armed; waiting for Ygg route");
         wait_role_event(
             &mut server,
             &mut client,
@@ -415,6 +418,7 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
         // THE RESTORE: serve the freshly captured server record to the
         // client's bootstrap; the next Tick-driven native attempt resolves,
         // and the policy returns the payload to native after `stable_hold`.
+        eprintln!("native-restore phase: held Ygg stream echoed; exposing signed record");
         let mut record = Box::pin(client_peer.serve_record(&item));
         let route_active_native =
             |event: &RoleEvent| matches!(event, RoleEvent::RouteActive(PathKind::Native));
@@ -430,6 +434,7 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
         })
         .await
         .expect("the idle policy progress restores the native route");
+        eprintln!("native-restore phase: recovered native route");
 
         // SECOND stream rides NATIVE; the FIRST stream still echoes over its
         // original Ygg lease — the in-flight stream was never replaced.
@@ -463,12 +468,14 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
             "exactly the two fixed-target connections (first + second stream)"
         );
 
+        eprintln!("native-restore phase: both stream checks passed; joined shutdown");
         let _ = server_stop.send(());
         let _ = client_stop.send(());
         tokio::select! {
             () = shutdown_roles(&mut server, &mut client) => {},
             _ = &mut record => panic!("record responder ended during restored shutdown"),
         }
+        eprintln!("native-restore phase: both roles joined");
         drop(record);
         drop(held_first);
 
@@ -489,12 +496,15 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
         );
 
         echo.close().await;
+        eprintln!("native-restore phase: echo target joined");
         let closed = tokio::time::timeout(RESTORE_BUDGET, transit.close()).await;
         assert!(
             closed.is_ok() && closed.expect("checked").is_ok(),
             "owned transit closes cleanly"
         );
+        eprintln!("native-restore phase: transit joined; closing relay fixture");
         fixture.close().await;
+        eprintln!("native-restore phase: relay fixture joined");
         probe_claim_free(RESTORE_SERVER, "server identity claim released").await;
         probe_claim_free(RESTORE_CLIENT, "client identity claim released").await;
         probe_claim_free(RESTORE_TRANSIT, "transit identity claim released").await;
