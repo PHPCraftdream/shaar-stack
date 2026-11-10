@@ -11,6 +11,10 @@ SPEC = importlib.util.spec_from_file_location("ci_policy", Path(__file__).with_n
 POLICY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(POLICY)
 SHA = re.compile(r"[0-9a-f]{40}\Z")
+CONTROL_KEYS = ("selection", "scope", "head", "base", "checkout")
+CONTROL_OUTPUT = "control_metadata"
+SELECTION_KEYS = frozenset((*POLICY.DOMAINS, "ci_policy", "identity_probe", "full", "rust", "product", "prepare"))
+CONTROL_LIMIT = 4096
 FULL_MARKER = re.compile(r"(?m)^\[ci:full\]\r?$")
 
 
@@ -91,18 +95,56 @@ def plan(event_name, event, head, reference=""):
     return result
 
 
+def serialize_outputs(result, expected_checkout):
+    required = (*CONTROL_KEYS, "targets", "suites", "reasons", "event", "trigger")
+    if not isinstance(result, dict) or not set(required).issubset(result):
+        raise ValueError("CI plan result is missing required metadata")
+    selection = result["selection"]
+    if (not isinstance(selection, dict) or set(selection) != SELECTION_KEYS
+            or any(type(value) is not bool for value in selection.values())):
+        raise ValueError("CI selection schema is invalid")
+    scope = result["scope"]
+    if not isinstance(scope, str) or scope not in {"targeted", "full"} or selection["full"] is not (scope == "full"):
+        raise ValueError("CI selection scope mismatch")
+    for value in (result["head"], result["checkout"], expected_checkout):
+        if not isinstance(value, str) or not SHA.fullmatch(value) or value == "0" * 40:
+            raise ValueError("CI plan requires nonzero full commit identities")
+    if result["checkout"] != expected_checkout:
+        raise ValueError("CI plan checkout differs from expected checkout")
+    base = result["base"]
+    if scope == "targeted":
+        if not isinstance(base, str) or not SHA.fullmatch(base) or base == "0" * 40 or base == result["head"]:
+            raise ValueError("targeted CI plan requires a distinct nonzero base")
+    elif base is not None:
+        raise ValueError("full CI plan must not have a comparison base")
+    receipt = json.dumps(result, indent=2, ensure_ascii=True) + "\n"
+    control = {key: result[key] for key in CONTROL_KEYS}
+    control_json = json.dumps(control, separators=(",", ":"), ensure_ascii=True)
+    if len(control_json.encode("utf-8")) > CONTROL_LIMIT:
+        raise ValueError("CI control metadata exceeds the bounded transport")
+    return receipt, json.dumps(selection, separators=(",", ":")), json.dumps(result["targets"], separators=(",", ":")), control_json
+
+
+def write_outputs(result, expected_checkout, receipt_path, github_output, summary_path):
+    receipt, selection, targets, control = serialize_outputs(result, expected_checkout)
+    summary_text = ("## CI selection\n\nScope: **" + result["scope"] + "**; trigger: **" + result["trigger"] + "**\n\n")
+    summary_text += "Suites: " + ", ".join(result["suites"]) + "\n\n"
+    summary_text += "The receipt lists exact project selectors. Skipped suites were not tested.\n"
+    Path(receipt_path).write_bytes(receipt.encode("utf-8"))
+    with open(github_output, "a", encoding="utf-8") as output:
+        output.write("selection=" + selection + "\n")
+        output.write("targets=" + targets + "\n")
+        output.write(CONTROL_OUTPUT + "=" + control + "\n")
+    with open(summary_path, "a", encoding="utf-8") as summary:
+        summary.write(summary_text)
+    return receipt
+
+
 def main():
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
     result = plan(os.environ["GITHUB_EVENT_NAME"], event, os.environ["GITHUB_SHA"], os.environ.get("GITHUB_REF", ""))
-    serialized = json.dumps(result, indent=2, ensure_ascii=True) + "\n"
-    Path("ci-plan.json").write_text(serialized, encoding="utf-8")
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-        output.write("selection=" + json.dumps(result["selection"], separators=(",", ":")) + "\n")
-        output.write("targets=" + json.dumps(result["targets"], separators=(",", ":")) + "\n")
-    with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-        summary.write("## CI selection\n\nScope: **" + result["scope"] + "**; trigger: **" + result["trigger"] + "**\n\n")
-        summary.write("Suites: " + ", ".join(result["suites"]) + "\n\n")
-        summary.write("The receipt lists exact project selectors. Skipped suites were not tested.\n")
+    serialized = write_outputs(result, os.environ["GITHUB_SHA"], "ci-plan.json",
+                               os.environ["GITHUB_OUTPUT"], os.environ["GITHUB_STEP_SUMMARY"])
     print(serialized, end="")
 
 

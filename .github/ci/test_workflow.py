@@ -114,6 +114,36 @@ def validate_preparation_logs(action):
             raise AssertionError("source preparation step must capture stdout, stderr, and exact status")
 
 
+def validate_plan_control_transport(text):
+    plan = job_blocks(text).get("plan", "")
+    checks = job_blocks(text).get("checks", "")
+    mainline = named_steps(text).get("Verify mainline lifecycle archive against planned revision", "")
+    required = (
+        ("control_metadata: ${{ steps.plan.outputs.control_metadata }}", plan),
+        ("selection: ${{ steps.plan.outputs.selection }}", plan),
+        ("targets: ${{ steps.plan.outputs.targets }}", plan),
+        ("uses: actions/upload-artifact@", plan),
+        ("name: ci-selection", plan),
+        ("path: ci-plan.json", plan),
+        ("if-no-files-found: error", plan),
+        ("CI_PLAN_JSON: ${{ needs.plan.outputs.control_metadata }}", checks),
+        ("CI_TARGETS: ${{ needs.plan.outputs.targets }}", checks),
+        ("os: [ubuntu-latest, windows-latest]", checks),
+        ('p=json.loads(os.environ["CI_PLAN_JSON"])', mainline),
+        ('--plan-json "$CI_PLAN_JSON"', mainline),
+    )
+    for fragment, block in required:
+        if fragment not in block:
+            raise AssertionError("CI plan transport is missing required contract: " + fragment)
+    if ("receipt: ${{" in plan or "steps.receipt.outputs" in plan or "- id: receipt" in plan
+            or "json=json.dumps(data,separators=(',',':'))" in plan):
+        raise AssertionError("full receipt output or compaction step must remain removed")
+    if "CI_PLAN_CONTROL_JSON" in checks:
+        raise AssertionError("checks must use only the established CI_PLAN_JSON name")
+    if checks.index("CI_PLAN_JSON:") > checks.index("- uses: actions/checkout@"):
+        raise AssertionError("bounded plan metadata must be available before checkout")
+
+
 class WorkflowTests(unittest.TestCase):
     def test_sdk_publisher_dev_codec_resolution_changes_only_one_existing_edge(self):
         sdk = tomllib.loads((ROOT / "crates/shaar/Cargo.toml").read_text(encoding="utf-8"))
@@ -212,6 +242,29 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("always() && fromJSON(needs.plan.outputs.selection).publication", evidence)
         self.assertIn("if-no-files-found: error", evidence)
         self.assertIn("target/publication-evidence/", evidence)
+
+    def test_plan_control_transport_is_bounded_and_published_before_checkout(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertLessEqual(len(text.splitlines()), 700)
+        validate_plan_control_transport(text)
+        plan = job_blocks(text)["plan"]
+        checks = job_blocks(text)["checks"]
+        self.assertNotIn("CI_PLAN_CONTROL_JSON", checks)
+
+    def test_plan_control_transport_rejects_full_receipt_counterfactuals(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        mutations = (
+            text.replace("CI_PLAN_JSON: ${{ needs.plan.outputs.control_metadata }}",
+                         "CI_PLAN_JSON: ${{ needs.plan.outputs.receipt }}", 1),
+            text.replace("control_metadata: ${{ steps.plan.outputs.control_metadata }}",
+                         "receipt: ${{ steps.receipt.outputs.json }}", 1),
+            text.replace("      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9\n        with:\n          name: ci-selection\n          path: ci-plan.json\n          if-no-files-found: error\n", "", 1),
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation != text):
+                self.assertNotEqual(mutation, text)
+                with self.assertRaises(AssertionError):
+                    validate_plan_control_transport(mutation)
 
     def test_mainline_archive_gate_and_prepare_sources_routing(self):
         text = WORKFLOW.read_text(encoding="utf-8")

@@ -41,7 +41,7 @@ jobs:
     outputs:
       selection: ${{ steps.plan.outputs.selection }}
       targets: ${{ steps.plan.outputs.targets }}
-      receipt: ${{ steps.receipt.outputs.json }}
+      control_metadata: ${{ steps.plan.outputs.control_metadata }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -60,8 +60,6 @@ jobs:
       - run: python -I -m unittest discover -s .github/ci
       - id: plan
         run: python -I .github/ci/plan.py
-      - id: receipt
-        run: python -I -c "import json,os,pathlib; data=json.loads(pathlib.Path('ci-plan.json').read_text(encoding='utf-8')); open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8').write('json='+json.dumps(data,separators=(',',':'))+'\\n')"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ci-selection
@@ -122,7 +120,7 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: "1.99.1"
       CI_TARGETS: ${{ needs.plan.outputs.targets }}
-      CI_PLAN_JSON: ${{ needs.plan.outputs.receipt }}
+      CI_PLAN_JSON: ${{ needs.plan.outputs.control_metadata }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
