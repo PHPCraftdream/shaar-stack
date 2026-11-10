@@ -81,6 +81,36 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 RUN.VERIFY.verify(expected, {"binary": (output, status)}, "")
 
+    def test_slow_progress_requires_selected_unfinished_identity_and_terminal_success(self):
+        listing = {"selected": "fast: test\nslow: test\n"}
+        notice = "test slow has been running for over 60 seconds\n"
+        prefix = "running 2 tests\ntest fast ... ok\n"
+        terminal = "test slow ... ok\n"
+        summary = "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 134.06s\n"
+        output = prefix + notice + terminal + summary
+        for text in (output, output.replace("\n", "\r\n"),
+                     output.replace("test slow ... ok", "test slow - should panic ... ok")):
+            execution = RUN.VERIFY.cargo_execution(text)
+            self.assertEqual(RUN.VERIFY.verify(listing, {"selected": (execution, 0)}, ""), 2)
+        invalid = (
+            prefix + notice + summary,
+            prefix + notice.replace("test slow ", "test other ") + terminal + summary,
+            prefix + notice + notice + terminal + summary,
+            prefix + terminal + notice + summary,
+            prefix + terminal + summary + notice,
+            prefix + notice.replace("over 60", "over 61") + terminal + summary,
+            prefix + notice.replace("has been", "has  been") + terminal + summary,
+            prefix + notice + terminal.replace("... ok", "... FAILED") + summary,
+            prefix + notice + terminal.replace("... ok", "... ignored") + summary,
+            output.replace("2 passed", "1 passed"),
+            output + summary,
+        )
+        for text in invalid:
+            with self.subTest(output=text), self.assertRaises(ValueError):
+                RUN.VERIFY.verify(listing, {"selected": (text, 0)}, "")
+        with self.assertRaises(ValueError):
+            RUN.VERIFY.verify(listing, {"selected": (output, 101)}, "")
+
     def test_verifier_accepts_exact_should_panic_events_and_rejects_near_misses(self):
         ordinary = "network::admission::negotiation_frames::role_frame_oracle_accepts_control_only_stats"
         datagram = "network::admission::negotiation_frames::role_frame_oracle_rejects_relay_datagram_rx"

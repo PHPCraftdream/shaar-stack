@@ -12,6 +12,7 @@ import sys
 NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_:]*$")
 RESULT = re.compile(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured; (\d+) filtered out; finished in .+$", re.MULTILINE)
 EVENT = re.compile(r"^test (\S+)(?: - should panic)? \.\.\. (ok|FAILED|ignored)$", re.MULTILINE)
+PROGRESS = re.compile(r"^test ([A-Za-z_][A-Za-z0-9_:]*) has been running for over 60 seconds$")
 
 
 def _scanner(path: Path):
@@ -102,6 +103,26 @@ def verify(inventories: dict[str, str], executions: dict[str, tuple[str, int]], 
             if not closing:
                 raise ValueError(f"missing captured output terminator: {binary}")
             output = before + "\n" + after[closing.end():]
+        # A slow-test notice is progress, never execution evidence. Bind it to
+        # one selected unfinished test; retain all terminal events and counts.
+        terminal = set()
+        notices = set()
+        finished = False
+        lines = []
+        for line in output.splitlines():
+            notice = PROGRESS.fullmatch(line)
+            if notice:
+                name = notice.group(1)
+                if name not in expected or name in terminal or name in notices or finished:
+                    raise ValueError(f"unexpected slow-test progress notice: {binary}")
+                notices.add(name)
+                continue
+            event = EVENT.fullmatch(line)
+            if event:
+                terminal.add(event.group(1))
+            finished = finished or RESULT.fullmatch(line) is not None
+            lines.append(line)
+        output = "\n".join(lines)
         events = EVENT.findall(output)
         observed = Counter(name for name, _ in events)
         if observed != expected:
