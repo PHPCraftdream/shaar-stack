@@ -11,6 +11,7 @@ use crate::identity::Identity;
 use super::{ALPN, NetworkError, STREAM_LIMIT, Session, session::ACCESS_DENIED};
 
 mod policy;
+pub(super) use policy::native_ip;
 pub use policy::{Allowlist, Limits};
 #[cfg_attr(
     not(test),
@@ -30,9 +31,9 @@ pub(crate) mod negotiation_frames;
 mod negotiation_tests;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-// Leave the default 2 s policy grace and payload headroom inside 10 s failover.
-// Per-path timers apply only after negotiation; handshake deadlines stay unchanged.
-const NATIVE_PATH_IDLE_TIMEOUT: Duration = Duration::from_secs(6);
+// Bound silent peer/path loss with room for the default 2 s policy grace.
+// The SDK handshake limit stays 10 s; backend idle timeout can expire first.
+const NATIVE_IDLE_TIMEOUT_MS: u32 = 6_000;
 const NATIVE_PATH_KEEPALIVE: Duration = Duration::from_secs(2);
 
 /// A single native socket and immutable admission policy. Not Clone.
@@ -100,7 +101,8 @@ impl Endpoint {
         Self::validate_bind(address)?;
         let transport = QuicTransportConfig::builder()
             .application_data_filter(|path| policy::native_ip(path.remote().ip()))
-            .default_path_max_idle_timeout(NATIVE_PATH_IDLE_TIMEOUT)
+            .max_idle_timeout(Some(VarInt::from_u32(NATIVE_IDLE_TIMEOUT_MS).into()))
+            .default_path_max_idle_timeout(Duration::from_millis(u64::from(NATIVE_IDLE_TIMEOUT_MS)))
             .default_path_keep_alive_interval(NATIVE_PATH_KEEPALIVE)
             .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_LIMIT)))
             .max_concurrent_uni_streams(VarInt::from_u32(0))
@@ -264,7 +266,7 @@ impl Endpoint {
         let connection = tokio::time::timeout(HANDSHAKE_TIMEOUT, async { incoming.await })
             .await
             .map_err(|_| NetworkError::Deadline)?
-            .map_err(|error| NetworkError::Handshake(Box::new(error)))?;
+            .map_err(NetworkError::from_handshake)?;
         if !self.allowlist.contains(&connection.remote_id()) {
             connection.close(VarInt::from_u32(ACCESS_DENIED), b"");
             return Err(NetworkError::AccessDenied);

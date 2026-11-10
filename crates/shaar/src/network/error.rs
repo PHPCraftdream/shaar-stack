@@ -45,7 +45,36 @@ impl NetworkError {
         ) {
             return Self::Capacity;
         }
+        if matches!(
+            &error,
+            ConnectError::Connection {
+                source: ConnectionError::TimedOut,
+                ..
+            } | ConnectError::Connecting {
+                source: ConnectingError::ConnectionError {
+                    source: ConnectionError::TimedOut,
+                    ..
+                },
+                ..
+            }
+        ) {
+            return Self::Deadline;
+        }
         Self::Connect(Box::new(error))
+    }
+
+    pub(super) fn from_handshake(error: iroh::endpoint::ConnectingError) -> Self {
+        if matches!(
+            &error,
+            iroh::endpoint::ConnectingError::ConnectionError {
+                source: iroh::endpoint::ConnectionError::TimedOut,
+                ..
+            }
+        ) {
+            Self::Deadline
+        } else {
+            Self::Handshake(Box::new(error))
+        }
     }
 }
 
