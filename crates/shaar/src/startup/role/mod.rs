@@ -12,9 +12,9 @@ mod dialers;
 mod server;
 mod server_close;
 
-#[cfg(test)]
-use crate::path::PathKind;
 use crate::path::{ConfigError, Dialer, PolicyConfig, StandbyOwner};
+#[cfg(test)]
+use crate::path::{NativeObservation, PathKind};
 use crate::startup::error::StartupError;
 use dialers::ErasedClientOwner;
 use dialers::RouteLink;
@@ -79,6 +79,14 @@ pub(crate) enum RoleEvent {
     /// Test-only observation of the REAL Yggdrasil payload-pair
     /// acquisition result (true = the pair was transferred live).
     YggPayloadAcquired(bool),
+    /// Owner observations are emitted only at actual policy/dial progress;
+    /// `observed_at` provides the common Tokio monotonic timeline for route holds.
+    NativeOwner {
+        observation: NativeObservation,
+        observed_at: tokio::time::Instant,
+    },
+    /// The client role switched its active route to native at this instant.
+    NativeRouteActive(tokio::time::Instant),
 }
 
 /// Hard bound on recorded role events. Route switches can repeat without
@@ -199,6 +207,31 @@ fn emit_payload_acquired(events: Option<&RoleEventLog>, acquired: bool) {
 /// The boxed joined-close continuation of the retained client role.
 pub(super) type ClientCloseContinuation =
     dyn std::future::Future<Output = Result<(), StartupError>>;
+
+/// Attaches the cfg(test) event observer without adding production API.
+#[cfg(test)]
+pub(super) fn observe_owner<D, F>(
+    owner: Result<StandbyOwner<D, F>, ConfigError>,
+    events: Option<RoleEventLog>,
+) -> Result<StandbyOwner<D, F>, ConfigError>
+where
+    D: Dialer + 'static,
+    D::Link: 'static,
+    F: Dialer + 'static,
+    F::Link: 'static,
+{
+    owner.map(|mut owner| {
+        if let Some(events) = events {
+            owner.set_observer(move |observation| {
+                events.record(RoleEvent::NativeOwner {
+                    observation,
+                    observed_at: tokio::time::Instant::now(),
+                });
+            });
+        }
+        owner
+    })
+}
 
 /// Boxes a standby owner into the object-safe seam; the futures are NOT
 /// `Send` and are polled inline, never spawned.

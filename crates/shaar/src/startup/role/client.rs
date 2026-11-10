@@ -179,8 +179,7 @@ impl ClientRole {
         )
     }
 
-    /// cfg(test) constructor that attaches the in-crate event observer; the
-    /// production behavior is identical.
+    /// cfg(test) constructor attaching the observer; production behavior is identical.
     #[cfg(test)]
     pub(crate) fn with_events(
         config: ClientConfig,
@@ -333,13 +332,17 @@ impl ClientRole {
                 );
                 let built = match ygg_arc {
                     // Never dialed when absent: the standby gate blocks the fallback in `Mode::Signal`.
-                    Some(ygg) => StandbyOwner::new(
-                        native_dialer,
-                        YggDialer::new(ygg, service_key),
-                        mode,
-                        policy,
-                    )
-                    .map(super::boxed_owner),
+                    Some(ygg) => {
+                        let owner = StandbyOwner::new(
+                            native_dialer,
+                            YggDialer::new(ygg, service_key),
+                            mode,
+                            policy,
+                        );
+                        #[cfg(test)]
+                        let owner = super::observe_owner(owner, self.events.clone());
+                        owner.map(super::boxed_owner)
+                    }
                     None => StandbyOwner::new(native_dialer, MissingYggDialer, mode, policy)
                         .map(super::boxed_owner),
                 };
@@ -538,6 +541,13 @@ async fn run_parts(
                         .map(|route| (kind, route));
                     #[cfg(test)]
                     emit(parts.events.as_ref(), RoleEvent::RouteActive(kind));
+                    #[cfg(test)]
+                    if kind == PathKind::Native {
+                        emit(
+                            parts.events.as_ref(),
+                            RoleEvent::NativeRouteActive(tokio::time::Instant::now()),
+                        );
+                    }
                 }
                 // The owner is closed; end the loop cleanly.
                 Err(StandbyError::Closed) => break,

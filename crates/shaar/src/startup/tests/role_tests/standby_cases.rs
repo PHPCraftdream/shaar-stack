@@ -17,7 +17,7 @@ use crate::config::{ClientConfig, ServerConfig};
 use crate::identity::Identity;
 use crate::native_discovery::runtime::owner::LoopbackPeer;
 use crate::network::{Allowlist, Limits, RelayFixture};
-use crate::path::{PathKind, PolicyConfig};
+use crate::path::{NativeObservation, PathKind, PolicyConfig};
 use crate::startup::role::{
     RoleEvent, RoleOptions, serve_client_with_events, serve_server_with_events,
 };
@@ -34,7 +34,9 @@ use super::fixtures::{
 const CASE_A_SERVICE: u8 = 0x5B;
 const CASE_A_CLIENT: u8 = 0x5C;
 const CASE_A_TRANSIT: u8 = 0x5D;
-// Native-restore case: server 0x66, client 0x67, transit 0x68.
+// Task 32 reuses the already-owned native-restore cohort; there is no new
+// process-wide Ygg seed allocation. The signed record responder stays unarmed
+// until the actual owner exhaustion barrier.
 const RESTORE_SERVER: u8 = 0x66;
 const RESTORE_CLIENT: u8 = 0x67;
 const RESTORE_TRANSIT: u8 = 0x68;
@@ -49,34 +51,34 @@ const RESTORE_TRANSIT: u8 = 0x68;
 /// headroom and only fails loudly instead of hanging CI.
 const STANDBY_BUDGET: Duration = Duration::from_secs(60);
 
-/// Native-restore case bound: the EAGER standby policy switches to the Ygg
-/// fallback as soon as the fallback dial through the transit succeeds, while
-/// Tick-driven native attempts continue in the background against the silent
-/// bootstrap. `max_attempts: 6` keeps those attempts alive — with 2 the
-/// policy would report `NativeExhausted` and never re-attempt, so a later-
-/// served record could never restore native. The restore resolves quickly
-/// once served, plus the 200ms `stable_hold` switch, two payload streams and
-/// two shutdowns. 90s bounds the whole body against CI hangs.
-const RESTORE_BUDGET: Duration = Duration::from_secs(90);
-
-/// W4 tuned policy with a WIDER attempt budget: with `max_attempts: 2` the
-/// policy reports `NativeExhausted` after the two silent resolves and PARKS
-/// FOREVER (path/policy.rs `next_attempt` never schedules again after the
-/// exhaustion report), so a later-served record could never trigger the
-/// restore. Six attempts keep the Tick-driven `AttemptNative` decisions alive
-/// (`next_attempt` checks only `native.up`/`in_flight`, never `active`);
-/// legal per `PolicyConfig::validate`.
-fn restore_policy() -> RoleOptions {
-    RoleOptions {
-        policy: PolicyConfig {
-            loss_grace: 200,
-            attempt_timeout: 15_000,
-            backoff_base: 20,
-            backoff_cap: 200,
-            max_attempts: 6,
-            stable_hold: 200,
-        },
+/// The default-policy bound includes six 3 s attempts, their 0.5+1+2+4+4 s
+/// backoffs, one 4 s cooldown, one 3 s renewed dial, and the 5 s stable hold.
+fn task32_policy_bound() -> Duration {
+    let policy = PolicyConfig::default();
+    let attempts = policy
+        .attempt_timeout
+        .saturating_mul(u64::from(policy.max_attempts));
+    let mut delay = policy.backoff_base;
+    let mut backoffs = 0_u64;
+    for _ in 1..policy.max_attempts {
+        backoffs = backoffs.saturating_add(delay);
+        delay = delay.saturating_mul(2).min(policy.backoff_cap);
     }
+    Duration::from_millis(
+        attempts
+            .saturating_add(backoffs)
+            .saturating_add(policy.backoff_cap)
+            .saturating_add(policy.attempt_timeout)
+            .saturating_add(policy.stable_hold),
+    )
+}
+
+/// Fixture allowances comprise the role phase waits, real echoes, joined
+/// shutdown and owned-fixture release probes.
+fn task32_case_bound() -> Duration {
+    let role = super::fixtures::ROLE_BUDGET;
+    let claim = Duration::from_secs(10);
+    task32_policy_bound() + role + role + role + role + role + role + role + claim + claim + claim
 }
 
 // Regressions caught: a native-attempt failure that fails the whole
@@ -305,35 +307,29 @@ async fn mainline_outage_leaves_the_alternate_transport_owned_and_standby_carrie
 // C3 — idle policy progress restores native without disturbing active streams
 // ---------------------------------------------------------------------------
 
-// 5c criteria: "no stale path-only snapshot may replace ongoing policy work"
-// + idle policy progress. Policy reading (path/policy.rs): the policy DOES
-// re-attempt native while a Yggdrasil fallback is active — `next_attempt`
-// (lines 262-287) issues Tick-driven `AttemptNative` whenever `!native.up`
-// and no attempt is in flight, without consulting `active` — and
-// `select_payload` (lines 249-252) returns to native once
-// `native.up && now >= native.since + stable_hold`; the budget refills only
-// after that hold (`refill`, lines 289-294). NATIVE-RESTORE is implemented.
-// Regressions caught: a switch that tears down in-flight forward workers (the
-// FIRST stream must keep echoing over its original Ygg lease), a policy that
-// never re-attempts native under an active fallback, or a stale snapshot
-// that replaces the restored session ordering (the ordered snapshot oracle
-// proves the native admission is the RESTORED session).
+/// Task32 replaces the earlier tuned native restore with the true default-budget
+/// exhaustion case; the production startup and forwarding oracles stay in place.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn idle_policy_progress_restores_native_without_disturbing_active_streams() {
-    tokio::time::timeout(RESTORE_BUDGET, async {
-        eprintln!("native-restore phase: startup");
+    let outer_deadline = tokio::time::Instant::now() + task32_case_bound();
+    tokio::time::timeout_at(outer_deadline, async {
+        eprintln!("Task32 phase: startup");
         let mut service_peer = LoopbackPeer::bind().await;
+        let policy = PolicyConfig::default();
+        assert_eq!(policy.max_attempts, 6);
+        assert_eq!(policy.attempt_timeout, 3_000);
+        assert_eq!(policy.backoff_cap, 4_000);
+        assert_eq!(policy.stable_hold, 5_000);
         let fixture = RelayFixture::start().await;
         let relay_id = fixture.address.peer_id().to_string();
         let relay_address = fixture.address.socket_addr();
         let (transit, transit_port) = start_listener(RESTORE_TRANSIT).await;
         let transit_uri = format!("tcp://127.0.0.1:{transit_port}");
         let (echo, echo_address) = echo_target().await;
-
         let server_identity: &'static Identity = Box::leak(Box::new(identity(RESTORE_SERVER)));
         let client_identity: &'static Identity = Box::leak(Box::new(identity(RESTORE_CLIENT)));
-        let client_key =
-            PublicKey::from_bytes(&client_identity.public_key_bytes()).expect("fixture client key");
+        let client_key = PublicKey::from_bytes(&client_identity.public_key_bytes())
+            .expect("fixture client key");
         let server_config: &'static ServerConfig = Box::leak(Box::new(server_role_config(
             echo_address,
             bootstrap_v4(&service_peer),
@@ -342,10 +338,6 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
             &transit_uri,
             "standby",
         )));
-        // CLIENT bootstrap: a LoopbackPeer with NOTHING served — pre-
-        // `serve_record` GETs simply go unanswered (the socket only replies
-        // while a fixture future is awaiting it): exactly the silent phase.
-        // Plus the dead relay port.
         let mut client_peer = LoopbackPeer::bind().await;
         let client_config: &'static ClientConfig = Box::leak(Box::new(client_role_config(
             &pub_key_hex(server_identity),
@@ -356,10 +348,9 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
             "standby",
             None,
         )));
+        assert!(client_config.server_address().is_none());
 
-        // SERVER role: pinned; admission and its real initial PUT are
-        // concurrently retained, then the PUT is acknowledged.
-        let (server_log, _unused_log) = role_logs();
+        let (server_log, _unused_server_log) = role_logs();
         let (server_stop, server_stop_rx) = oneshot::channel();
         let mut server: RoleFuture = pin_role(serve_server_with_events(
             server_config,
@@ -367,148 +358,251 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
             Allowlist::new(&[client_key]).expect("fixture allowlist"),
             Limits::new(4).expect("fixture limits"),
             tuned_policy(),
-            async move {
-                let _ = server_stop_rx.await;
-            },
+            async move { let _ = server_stop_rx.await; },
             server_log.clone(),
         ));
-        let item =
-            admit_and_capture(&mut service_peer, &mut server, &server_log, RESTORE_BUDGET).await;
-        eprintln!("native-restore phase: server admitted and initial PUT captured");
+        let item = admit_and_capture(
+            &mut service_peer, &mut server, &server_log, super::fixtures::ROLE_BUDGET,
+        ).await;
 
-        // CLIENT through the silent phase: the EAGER standby policy owns the
-        // route through the transit as soon as the fallback dial succeeds,
-        // while native attempts against the unanswered bootstrap continue in
-        // the background. The client is armed on its bootstrap peer (PUT
-        // captured and acknowledged BEFORE the record server below is armed).
+        eprintln!("Task32 phase: server admitted and signed initial PUT captured");
         let (client_stop, mut client, client_log, listener_address) = {
             let arming = arm_client_on_peer(
                 client_config,
                 client_identity,
                 &mut client_peer,
-                restore_policy(),
-                RESTORE_BUDGET,
+                RoleOptions { policy },
+                super::fixtures::ROLE_BUDGET,
             );
             tokio::select! {
                 armed = arming => armed,
-                result = &mut server => panic!("server ended during restore-client arming: {result:?}"),
+                result = &mut server => panic!("Task32 server ended during client arming: {result:?}"),
             }
         };
-        eprintln!("native-restore phase: client armed; waiting for Ygg route");
-        wait_role_event(
+        eprintln!("Task32 phase: client armed; awaiting authenticated Ygg route");
+        let route_ygg = wait_role_event(
             &mut server,
             &mut client,
             &server_log,
             &client_log,
-            |event| matches!(event, RoleEvent::RouteActive(PathKind::Yggdrasil)),
-            "client",
+            |event| *event == RoleEvent::RouteActive(PathKind::Yggdrasil),
+            "Task32 Ygg route",
         )
         .await;
-        // FIRST stream: a HELD Ygg lease with a live echo.
-        let first_pattern = b"shaar-5c-restore-first";
-        let mut held_first = hold_echoing_stream(
-            listener_address,
-            first_pattern,
+        assert_eq!(route_ygg, RoleEvent::RouteActive(PathKind::Yggdrasil));
+        let admitted_ygg = wait_role_event(
             &mut server,
             &mut client,
-            "first stream",
+            &server_log,
+            &client_log,
+            |event| *event == RoleEvent::SessionAdmitted(PathKind::Yggdrasil),
+            "Task32 server-side Ygg admission",
         )
         .await;
-
-        // THE RESTORE: serve the freshly captured server record to the
-        // client's bootstrap; the next Tick-driven native attempt resolves,
-        // and the policy returns the payload to native after `stable_hold`.
-        eprintln!("native-restore phase: held Ygg stream echoed; exposing signed record");
-        let mut record = Box::pin(client_peer.serve_record(&item));
-        let route_active_native =
-            |event: &RoleEvent| matches!(event, RoleEvent::RouteActive(PathKind::Native));
-        tokio::time::timeout(RESTORE_BUDGET, async {
+        assert_eq!(admitted_ygg, RoleEvent::SessionAdmitted(PathKind::Yggdrasil));
+        let mut held_ygg = hold_echoing_stream(
+            listener_address,
+            b"task32-held-ygg-before-exhaustion",
+            &mut server,
+            &mut client,
+            "Task32 held Ygg TCP stream",
+        )
+        .await;
+        assert_eq!(echo.count(), 1);
+        eprintln!("Task32 phase: held Ygg stream echoed; awaiting real ordinary exhaustion");
+        let exhausted_pred = |event: &RoleEvent| matches!(
+            event,
+            RoleEvent::NativeOwner { observation: NativeObservation::Exhausted { .. }, .. }
+        );
+        // Exact exchange keeps the old lease live before we await the callback.
+        echo_on_held_stream(
+            &mut held_ygg,
+            b"task32-ygg-before-exhaustion",
+            &mut server,
+            &mut client,
+            "Task32 Ygg stream before barrier",
+        )
+        .await;
+        let exhausted = tokio::time::timeout_at(outer_deadline, async {
             tokio::select! {
-                result = &mut server => panic!("server role ended early: {result:?}"),
-                result = &mut client => panic!("client role ended early: {result:?}"),
-                _ = &mut record => {
-                    panic!("client bootstrap record server terminated during the restore")
-                }
-                event = client_log.wait(&route_active_native) => event,
+                result = &mut server => panic!("Task32 server ended before exhaustion: {result:?}"),
+                result = &mut client => panic!("Task32 client ended before exhaustion: {result:?}"),
+                event = client_log.wait(&exhausted_pred) => event,
             }
         })
         .await
-        .expect("the idle policy progress restores the native route");
-        eprintln!("native-restore phase: recovered native route");
+        .expect("real NativeExhausted event inside derived whole-case deadline");
+        let observations: Vec<_> = client_log
+            .snapshot()
+            .into_iter()
+            .filter_map(|event| match event {
+                RoleEvent::NativeOwner { observation, .. } => Some(observation),
+                _ => None,
+            })
+            .collect();
+        let exhausted_index = observations.iter().position(|observation|
+            matches!(observation, NativeObservation::Exhausted { .. })
+        ).expect("bounded role log retains the actual exhaustion observation");
+        let prefix = &observations[..exhausted_index];
+        let starts: Vec<_> = prefix.iter().filter_map(|observation| match observation {
+            NativeObservation::AttemptStarted { attempt, .. } => Some(*attempt),
+            _ => None,
+        }).collect();
+        let failures = prefix.iter().filter(|observation|
+            matches!(observation, NativeObservation::AttemptFailed { .. })
+        ).count();
+        assert_eq!(starts, (1..=u64::from(policy.max_attempts)).collect::<Vec<_>>(),
+            "ordinary attempt identities are distinct and sequential: {observations:?}");
+        assert_eq!(failures, usize::try_from(policy.max_attempts).expect("default count fits usize"),
+            "all ordinary dials genuinely failed before exhaustion: {observations:?}");
+        assert!(!prefix.iter().any(|observation|
+            matches!(observation, NativeObservation::Accepted { .. })
+        ), "no genuine native success precedes ordinary exhaustion: {observations:?}");
 
-        // SECOND stream rides NATIVE; the FIRST stream still echoes over its
-        // original Ygg lease — the in-flight stream was never replaced.
-        {
-            let transfers = async {
-                forward_and_echo(
-                    listener_address,
-                    b"shaar-5c-restore-second",
-                    &mut server,
-                    &mut client,
-                    "second stream",
-                )
-                .await;
-                echo_on_held_stream(
-                    &mut held_first,
-                    first_pattern,
-                    &mut server,
-                    &mut client,
-                    "first stream",
-                )
-                .await;
-            };
+        let RoleEvent::NativeOwner {
+            observation: NativeObservation::Exhausted { at: exhaustion_ms },
+            observed_at: exhaustion_at,
+        } = exhausted else { unreachable!("exhaustion predicate selected owner exhaustion"); };
+        // The real old Ygg TCP stream still echoes after the genuine exhaustion
+        // barrier. Only afterward is the captured signed publication exposed.
+        tokio::time::timeout_at(
+            outer_deadline,
+            echo_on_held_stream(
+                &mut held_ygg,
+                b"task32-old-ygg-stream-after-exhaustion-before-record",
+                &mut server,
+                &mut client,
+                "Task32 old Ygg stream after exhaustion",
+            ),
+        )
+        .await
+        .expect("same held Ygg stream still echoes after the real exhaustion barrier");
+        eprintln!("Task32 phase: exhausted at {exhaustion_ms} ms; old Ygg stream still echoes; exposing record");
+        let mut record = Box::pin(client_peer.serve_record(&item));
+        let accepted_pred = |event: &RoleEvent| {
+            matches!(
+                event,
+                RoleEvent::NativeOwner {
+                    observation: NativeObservation::Accepted { attempt, .. },
+                    ..
+                } if *attempt > u64::from(policy.max_attempts)
+            )
+        };
+        let accepted = tokio::time::timeout_at(outer_deadline, async {
             tokio::select! {
-                () = transfers => {},
-                _ = &mut record => panic!("record responder ended during restored forwarding"),
+                result = &mut server => panic!("Task32 server ended during renewed native dial: {result:?}"),
+                result = &mut client => panic!("Task32 client ended during renewed native dial: {result:?}"),
+                _ = &mut record => panic!("signed record responder ended before native recovery"),
+                event = client_log.wait(&accepted_pred) => event,
             }
+        })
+        .await
+        .expect("genuine native recovery dial within the derived deadline");
+        let first_maintenance_ms = client_log
+            .snapshot()
+            .into_iter()
+            .find_map(|event| match event {
+                RoleEvent::NativeOwner {
+                    observation: NativeObservation::AttemptStarted { attempt, at, .. },
+                    ..
+                } if attempt > u64::from(policy.max_attempts) => Some(at),
+                _ => None,
+            })
+            .expect("owner actually starts a post-exhaustion maintenance attempt");
+        assert!(
+            first_maintenance_ms >= exhaustion_ms.saturating_add(policy.backoff_cap),
+            "first maintenance dial started before retained backoff-cap cooldown"
+        );
+        let RoleEvent::NativeOwner {
+            observation: NativeObservation::Accepted { at: accepted_ms, .. },
+            observed_at: accepted_at,
+        } = accepted else { unreachable!("accepted predicate selected an owner success"); };
+        assert!(accepted_ms >= exhaustion_ms, "native success is after ordinary exhaustion");
+
+        eprintln!("Task32 phase: genuine renewed native dial accepted at {accepted_ms} ms; stable hold");
+        let native_route_pred = |event: &RoleEvent| matches!(event, RoleEvent::NativeRouteActive(_));
+        let native_route = tokio::time::timeout_at(outer_deadline, async {
+            tokio::select! {
+                result = &mut server => panic!("Task32 server ended during stable hold: {result:?}"),
+                result = &mut client => panic!("Task32 client ended during stable hold: {result:?}"),
+                _ = &mut record => panic!("signed record responder ended during stable hold"),
+                event = client_log.wait(&native_route_pred) => event,
+            }
+        })
+        .await
+        .expect("native route selection follows stable hold within derived bound");
+        let RoleEvent::NativeRouteActive(route_at) = native_route else {
+            unreachable!("native route predicate selected native route event");
+        };
+        let held_ms = u64::try_from(route_at.saturating_duration_since(accepted_at).as_millis())
+            .unwrap_or(u64::MAX);
+        assert!(
+            held_ms >= policy.stable_hold.saturating_sub(1),
+            "native active after {held_ms} ms; stable_hold={} ms",
+            policy.stable_hold
+        );
+        assert!(route_at > exhaustion_at, "native selection follows real exhaustion");
+
+        eprintln!("Task32 phase: native route active after {held_ms} ms; checking both TCP streams");
+        let forwarding = async {
+            forward_and_echo(
+                listener_address,
+                b"task32-new-native-tcp-stream",
+                &mut server,
+                &mut client,
+                "Task32 new native TCP stream",
+            )
+            .await;
+            echo_on_held_stream(
+                &mut held_ygg,
+                b"task32-same-old-ygg-stream-after-native-switch",
+                &mut server,
+                &mut client,
+                "Task32 original Ygg stream after switch",
+            )
+            .await;
+        };
+        tokio::select! {
+            () = forwarding => {},
+            _ = &mut record => panic!("signed record responder ended during final stream checks"),
         }
-        assert_eq!(
-            echo.count(),
-            2,
-            "exactly the two fixed-target connections (first + second stream)"
+        assert_eq!(echo.count(), 2, "old Ygg and new native streams each reached target");
+        let admitted = server_log.snapshot();
+        let ygg_index = admitted
+            .iter()
+            .position(|event| *event == RoleEvent::SessionAdmitted(PathKind::Yggdrasil))
+            .expect("the original Ygg admission remains recorded");
+        let native_index = admitted
+            .iter()
+            .position(|event| *event == RoleEvent::SessionAdmitted(PathKind::Native))
+            .expect("server admitted the recovered native session");
+        assert!(
+            ygg_index < native_index,
+            "native admission follows the original Ygg admission: {admitted:?}"
         );
 
-        eprintln!("native-restore phase: both stream checks passed; joined shutdown");
+        eprintln!("Task32 phase: both stream checks passed; joined shutdown");
         let _ = server_stop.send(());
         let _ = client_stop.send(());
         tokio::select! {
             () = shutdown_roles(&mut server, &mut client) => {},
-            _ = &mut record => panic!("record responder ended during restored shutdown"),
+            _ = &mut record => panic!("record responder ended during joined shutdown"),
         }
-        eprintln!("native-restore phase: both roles joined");
+        eprintln!("Task32 phase: both role wrappers joined");
         drop(record);
-        drop(held_first);
-
-        // Ordered lossless snapshot oracle: the native admission comes AFTER
-        // the Ygg admission — the native session is the RESTORED one.
-        let seen = server_log.snapshot();
-        let ygg_index = seen
-            .iter()
-            .position(|event| *event == RoleEvent::SessionAdmitted(PathKind::Yggdrasil))
-            .expect("the first (Ygg) session admission was recorded");
-        let native_index = seen
-            .iter()
-            .position(|event| *event == RoleEvent::SessionAdmitted(PathKind::Native))
-            .expect("the restored native session admission was recorded");
-        assert!(
-            ygg_index < native_index,
-            "the native admission is the RESTORED session, never the first: {seen:?}"
-        );
-
+        drop(held_ygg);
         echo.close().await;
-        eprintln!("native-restore phase: echo target joined");
-        let closed = tokio::time::timeout(RESTORE_BUDGET, transit.close()).await;
-        assert!(
-            closed.is_ok() && closed.expect("checked").is_ok(),
-            "owned transit closes cleanly"
-        );
-        eprintln!("native-restore phase: transit joined; closing relay fixture");
+        tokio::time::timeout(super::fixtures::ROLE_BUDGET, transit.close())
+            .await
+            .expect("Task32 transit close bound")
+            .expect("transit closes cleanly");
         fixture.close().await;
-        eprintln!("native-restore phase: relay fixture joined");
-        probe_claim_free(RESTORE_SERVER, "server identity claim released").await;
-        probe_claim_free(RESTORE_CLIENT, "client identity claim released").await;
-        probe_claim_free(RESTORE_TRANSIT, "transit identity claim released").await;
+        drop(service_peer);
+        probe_claim_free(RESTORE_SERVER, "Task32 server key released").await;
+        probe_claim_free(RESTORE_CLIENT, "Task32 client key released").await;
+        probe_claim_free(RESTORE_TRANSIT, "Task32 transit key released").await;
+        eprintln!("Task32 phase: all fixtures joined and key claims released");
     })
     .await
-    .expect("the native-restore case completes within its budget");
+    .expect("Task32 real I/O recovery within derived policy and fixture bounds");
 }
