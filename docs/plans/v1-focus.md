@@ -1105,6 +1105,26 @@ after loss are checked. Kernel and fixture commits remain separate; this
 additional source-review gap is closed only after actual CI execution, not by
 the direct-only fixture or local lint.
 
+CI `42869046520` on `3115cf6` is also failed, not accepted. Each OS selected
+370 cases and verified an initial 120-case batch, then stopped at a failed
+121-case batch: Linux 120 passed / one failed, Windows 119 passed / two failed.
+Across actual execution, Linux has 240 passed / one failed; Windows 239 passed /
+two failed. The remaining 129 selected cases were NOT executed on either OS,
+including the old cancellation fixture. Its seed collision is repaired in source,
+not yet confirmed by execution; an earlier operator claim of its pass was wrong.
+The packet-loss fixture wrongly treated an intermediate same-kind
+Native generation as the final answer; `follow` explicitly permits such recovery.
+It now continues to Ygg under the ORIGINAL block timestamp and outer deadline.
+A direct-only endpoint's connection counters retain APP-positive evidence when
+a live-path snapshot cannot establish that history; there is still no custom
+transport in that fixture. Both initial and recovered Native paths must remain
+inside the controlled gate. The Windows same-connection timeout is not declared
+fixed: the next bounded diagnostic records actual addresses, route generations,
+RTT, control progress and closure state, and rejects an ungated Native path
+instead of assuming that one proxy blocks every possible route. Thresholds,
+sample count and outage duration are not relaxed. Failure streak is two; a third
+failure requires the consolidated-review stop before further CI pushes.
+
 The combined connection ledger is declared before execution: 40 startup
 connections, two existing default-budget long-outage connections, and 40
 failover-phase connections (82 total). Native availability is independently

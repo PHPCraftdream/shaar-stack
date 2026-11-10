@@ -427,11 +427,16 @@ async fn silent_native_packet_loss_measures_twenty_first_byte_failovers() {
                 &client_id, &server_id, gate.address, &client_bridge,
                 Mode::Standby, PolicyConfig::default(),
             ).await;
+            owner.set_observer(move |event| eprintln!("P10 trial={trial} actual_owner={event:?}"));
             assert_eq!(owner.follow().await, Ok(PathKind::Native));
             let native = native_lease(&owner);
             let (_, (ordinal, byte, _)) = tokio::join!(forward_exact(&native, b"n"), target.first_byte());
             assert_eq!((ordinal, byte), (trial * 2 + 1, b'n'));
-            native_only(&native);
+            // This endpoint has ONLY IP transports. Aggregate counters retain
+            // STREAM evidence even if its carrying path closed before sampling.
+            let stats = native.connection.stats();
+            assert!(stats.frame_tx.stream > 0 && stats.frame_rx.stream > 0);
+            assert!(!native.connection.paths().is_empty(), "healthy lease has no open paths: {:?}", native.connection.close_reason());
             assert!(native.connection.paths().iter().all(|path|
                 matches!(path.remote_addr(), iroh_base::TransportAddr::Ip(address) if *address == gate.address)
             ), "every native path must pass through the controlled gate");
@@ -441,7 +446,25 @@ async fn silent_native_packet_loss_measures_twenty_first_byte_failovers() {
             let ygg_server = ygg_server(&server_id, &client_id, &server_bridge, target.addr).await;
             // Silent bidirectional packet loss, not an announced endpoint close.
             let blocked_at = gate.block();
-            let followed = timeout(Duration::from_secs(30), owner.follow()).await;
+            let followed = timeout(Duration::from_secs(30), async {
+                loop {
+                    match owner.follow().await {
+                        Ok(PathKind::Native) => {
+                            // Same-kind recovery is legitimate progress, not failover.
+                            // Keep the ORIGINAL block timestamp and outer deadline.
+                            let recovered = native_lease(&owner);
+                            let paths: Vec<_> = recovered.connection.paths().iter()
+                                .map(|path| (path.remote_addr().clone(), path.is_selected(), path.rtt()))
+                                .collect();
+                            eprintln!("P10 trial={trial} intermediate_native elapsed={:?} gate={} upstream={} paths={paths:?}", blocked_at.elapsed(), gate.address, server_addr);
+                            assert!(paths.iter().all(|(remote, _, _)| matches!(remote,
+                                iroh_base::TransportAddr::Ip(address) if *address == gate.address
+                            )), "a recovered Native path bypassed the controlled gate");
+                        }
+                        result => break result,
+                    }
+                }
+            }).await;
             if matches!(followed, Ok(Ok(PathKind::Yggdrasil))) {
                 let ygg = ygg_lease(&owner);
                 let (ordinal, byte, at) = timeout(Duration::from_secs(30), async {

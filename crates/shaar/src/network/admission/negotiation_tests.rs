@@ -490,10 +490,20 @@ async fn native_loss_is_observed_while_the_same_signaling_connection_stays_alive
             () = control.native_lost() => panic!("healthy Native was reported lost"),
             () = async {} => {}
         }
+        let describe = || control.connection.paths().iter().map(|path| {
+            (path.remote_addr().clone(), path.is_selected(), path.rtt(), path.stats().frame_rx.ping)
+        }).collect::<Vec<_>>();
+        eprintln!("P10 control pre-block gate={} upstream={} paths={:?}", gate.address, native[1], describe());
+        assert!(control.connection.paths().iter().filter(|path| path.is_ip()).all(|path|
+            matches!(path.remote_addr(), iroh_base::TransportAddr::Ip(address) if *address == gate.address)
+        ), "the control connection has an ungated Native path");
         let blocked_at = gate.block();
-        timeout(Duration::from_secs(9), control.native_lost())
-            .await
-            .expect("actual native-path loss is observable without connection closure");
+        let loss = timeout(Duration::from_secs(9), control.native_lost()).await;
+        if loss.is_err() {
+            eprintln!("P10 control loss timeout elapsed={:?} gate={} upstream={} close={:?} custom_pings_before={before} after={} paths={:?}",
+                blocked_at.elapsed(), gate.address, native[1], control.connection.close_reason(), custom_pings(&control), describe());
+        }
+        loss.expect("actual native-path loss is observable without connection closure");
         assert!(blocked_at.elapsed() <= Duration::from_secs(9));
         assert!(control.connection.close_reason().is_none());
         assert!(accepted.connection.close_reason().is_none());
