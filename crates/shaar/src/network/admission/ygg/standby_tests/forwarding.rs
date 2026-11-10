@@ -506,6 +506,7 @@ async fn silent_native_packet_loss_measures_twenty_first_byte_failovers() {
 }
 
 /// A one-address proxy is deliberately NOT an endpoint-wide network block.
+/// The alternate path is validated before loss; this is not cold route discovery.
 /// This functional positive is outside the performance cohort; excluding two
 /// healthy Native forwards cannot inflate the campaign's Native share.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -537,11 +538,17 @@ async fn partial_proxy_loss_preserves_an_independently_reachable_native_address(
             .await
             .expect("proxied Native authenticates");
         forward_exact(&initial, b"proxied-native").await;
-        let _blocked_at = proxy.block();
         let direct = client
             .connect(server_key, address)
             .await
-            .expect("other Native address remains reachable");
+            .expect("second Native connection authenticates before disruption");
+        // An address hint alone is not a validated alternate path.
+        direct
+            .connection
+            .ensure_native_path(address)
+            .await
+            .expect("independent Native address validates before proxy loss");
+        let _blocked_at = proxy.block();
         forward_exact(&direct, b"independent-direct-native").await;
         assert!(direct.connection.paths().iter().any(|path|
             matches!(path.remote_addr(), iroh_base::TransportAddr::Ip(remote) if *remote == address)

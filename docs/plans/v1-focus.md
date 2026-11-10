@@ -1312,6 +1312,40 @@ changed. Python is checked locally only for syntax; tests remain CI-only. The
 accepted fmt and offline locked normal/test clippy boundary must pass, followed
 by one personally reviewed repair commit and report before the next fork push.
 
+CI `42910616786` on `122bc04` passed the source/graph boundary and reached
+SDK execution, but failed both OS jobs in the partial-proxy positive control:
+the second post-drop `connect()` returned `Deadline`. The streak is seven.
+Actual SDK receipts select 371 cases per OS: the first 120 are strictly verified;
+the next 119 executed with 118 passes and one failure, leaving 132 unexecuted.
+Thus observed totals are 238 passed / 1 failed, not 371 executed or accepted.
+The old retained-role cancellation case remains among the unexecuted cases; the
+separately selected native graph witness target also has no execution claim.
+
+The real all-IP silent-loss campaign and same-connection signaling regression
+reported libtest success on both OS. The retained failover CSVs each contain 40
+rows: 20 healthy Native/eligible and 20 blocked Yggdrasil/ineligible, all trial
+IDs present. Recomputed nearest-rank p95 first-target-byte times are Linux
+9,029,807,293 ns and Windows 9,045,538,400 ns. These are authentic observations
+from a failed batch, not accepted receipt counts, current-candidate proof or full
+P10 acceptance. Startup/long-outage ledgers and the combined share remain open.
+
+The positive-control fixture's missing precondition is a validated alternate
+Native path before proxy loss. Its second address was only an endpoint hint;
+Iroh resolves it through a peer-level mapped socket and existing route state,
+so a fresh post-drop handshake is not a proof of preserving an existing healthy
+alternate. The bounded fixture repair authenticates the second connection while
+the proxy is healthy and uses the existing `ensure_native_path` readiness barrier
+to validate/retain the independent real address before blocking only the proxy.
+A new exact TCP forward must then succeed after blocking, with the real address
+still observed, two target accepts, two authenticated sessions and joined cleanup.
+It does not claim fresh-address discovery or a new handshake after blocking.
+Both healthy forwards remain outside the performance cohort. No policy, timeout,
+metric threshold, outage clock, trial count, key/allowlist or backend behavior is
+changed; no forced route selection or all-IP gate bypass is introduced. Both OS
+failures and the complete available receipts were reviewed before this repair.
+Local fmt and offline locked normal/test clippy passed; runtime remains CI-only.
+One reviewed repair commit/report must precede the next fork push.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;
