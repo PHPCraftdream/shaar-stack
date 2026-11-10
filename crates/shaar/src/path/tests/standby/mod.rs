@@ -4,5 +4,6 @@
 //! every dial and loss happens at a known millisecond, so each contract has exact offsets.
 
 mod fakes;
+mod maintenance;
 mod primary;
 mod retained;

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! The path policy: a deterministic state machine over injected monotonic time.
 //!
-//! State is a fixed-size struct. Retries are bounded by `max_attempts` and the
-//! budget refills only after the native path stayed up for `stable_hold`.
+//! State is a fixed-size struct. Ordinary retries are bounded by `max_attempts`;
+//! standby maintenance probes wait for the capped cooldown after each failure, and
+//! the ordinary budget refills only after the native path stayed up for `stable_hold`.
 //! Identical evidence changes nothing, so it can never restart a switching cycle.
 
 use super::model::{ConfigError, Decision, Event, Millis, Mode, PathKind, PolicyConfig};
@@ -37,6 +38,7 @@ pub(crate) struct PathPolicy {
     in_flight: Option<InFlight>,
     next_attempt_at: Option<Millis>,
     exhausted_reported: bool,
+    last_failure_at: Option<Millis>,
 }
 
 impl PathPolicy {
@@ -61,6 +63,7 @@ impl PathPolicy {
             in_flight: None,
             next_attempt_at: Some(now),
             exhausted_reported: false,
+            last_failure_at: None,
         })
     }
 
@@ -131,7 +134,6 @@ impl PathPolicy {
     fn exhaustion_pending(&self) -> bool {
         !self.native.up
             && self.in_flight.is_none()
-            && self.next_attempt_at.is_none()
             && self.attempts_used >= self.config.max_attempts
             && !self.exhausted_reported
     }
@@ -157,7 +159,6 @@ impl PathPolicy {
         if up {
             self.in_flight = None;
             self.next_attempt_at = None;
-            self.exhausted_reported = false;
         } else {
             self.schedule_retry(now);
         }
@@ -172,6 +173,15 @@ impl PathPolicy {
         if transition {
             self.yggdrasil.up = ready;
             self.yggdrasil.since = now;
+        }
+        if self.attempts_used >= self.config.max_attempts && self.in_flight.is_none() {
+            if !self.yggdrasil_usable() {
+                self.next_attempt_at = None;
+            } else if transition {
+                self.next_attempt_at = self
+                    .last_failure_at
+                    .map(|failed_at| failed_at.saturating_add(self.config.backoff_cap).max(now));
+            }
         }
     }
 
@@ -201,20 +211,28 @@ impl PathPolicy {
         if self.in_flight.is_some() {
             return;
         }
-        self.next_attempt_at = (self.attempts_used < self.config.max_attempts)
-            .then(|| now.saturating_add(self.delay_before(self.attempts_used + 1)));
+        if self.attempts_used >= self.config.max_attempts {
+            self.last_failure_at = Some(now);
+            let route = self.yggdrasil_usable();
+            self.next_attempt_at = if route {
+                Some(now.saturating_add(self.config.backoff_cap))
+            } else {
+                None
+            };
+        } else {
+            self.next_attempt_at =
+                Some(now.saturating_add(self.delay_before(self.attempts_used + 1)));
+        }
     }
 
     fn decide(&mut self, now: Millis) -> Decision {
         self.expire_attempt(now);
-        if let Some(decision) = self.select_payload(now) {
-            return decision;
-        }
-        if let Some(decision) = self.next_attempt(now) {
-            return decision;
-        }
         self.refill(now);
-        Decision::Wait
+        let mut decision = self.select_payload(now);
+        if decision.is_none() {
+            decision = self.next_attempt(now);
+        }
+        decision.unwrap_or(Decision::Wait)
     }
 
     fn expire_attempt(&mut self, now: Millis) {
@@ -263,15 +281,32 @@ impl PathPolicy {
         if self.native.up || self.in_flight.is_some() {
             return None;
         }
+        if self.attempts_used >= self.config.max_attempts && !self.exhausted_reported {
+            self.last_failure_at.get_or_insert(now);
+            if self.yggdrasil_usable() && self.next_attempt_at.is_none() {
+                let failed_at = self.last_failure_at.unwrap_or(now);
+                self.next_attempt_at =
+                    Some(failed_at.saturating_add(self.config.backoff_cap).max(now));
+            }
+            self.exhausted_reported = true;
+            return Some(Decision::NativeExhausted);
+        }
         match self.next_attempt_at {
             Some(at) if now >= at => {
+                let maintenance = self.attempts_used >= self.config.max_attempts;
+                if maintenance && !self.yggdrasil_usable() {
+                    self.next_attempt_at = None;
+                    return None;
+                }
                 let Some(attempt) = self.last_attempt.checked_add(1) else {
                     self.closed = true;
                     self.next_attempt_at = None;
                     return Some(Decision::Closed);
                 };
                 self.last_attempt = attempt;
-                self.attempts_used = self.attempts_used.saturating_add(1);
+                if !maintenance {
+                    self.attempts_used = self.attempts_used.saturating_add(1);
+                }
                 let deadline = now.saturating_add(self.config.attempt_timeout);
                 self.in_flight = Some(InFlight { attempt, deadline });
                 self.next_attempt_at = None;
@@ -288,8 +323,39 @@ impl PathPolicy {
 
     fn refill(&mut self, now: Millis) {
         let held = now >= self.native.since.saturating_add(self.config.stable_hold);
-        if self.native.up && held {
+        if self.native.up && held && self.attempts_used > 0 {
             self.attempts_used = 0;
+            self.exhausted_reported = false;
+            self.last_failure_at = None;
+            if self.in_flight.is_none() {
+                self.next_attempt_at = None;
+            }
         }
+    }
+
+    pub(crate) fn accepts_attempt(&self, attempt: u64, now: Millis) -> bool {
+        !self.closed
+            && self.in_flight.is_some_and(|flight| {
+                flight.attempt == attempt && self.clock.max(now) < flight.deadline
+            })
+    }
+
+    pub(crate) fn budget_spent(&self) -> bool {
+        self.attempts_used >= self.config.max_attempts
+    }
+
+    #[cfg(test)]
+    pub(crate) fn attempt_is_in_flight(&self) -> bool {
+        self.in_flight.is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn attempts_used(&self) -> u32 {
+        self.attempts_used
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cooldown_deadline(&self) -> Option<Millis> {
+        self.next_attempt_at
     }
 }

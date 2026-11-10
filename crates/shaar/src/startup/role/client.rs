@@ -179,8 +179,7 @@ impl ClientRole {
         )
     }
 
-    /// cfg(test) constructor that attaches the in-crate event observer; the
-    /// production behavior is identical.
+    /// cfg(test) constructor attaching the observer; production behavior is identical.
     #[cfg(test)]
     pub(crate) fn with_events(
         config: ClientConfig,
@@ -333,13 +332,17 @@ impl ClientRole {
                 );
                 let built = match ygg_arc {
                     // Never dialed when absent: the standby gate blocks the fallback in `Mode::Signal`.
-                    Some(ygg) => StandbyOwner::new(
-                        native_dialer,
-                        YggDialer::new(ygg, service_key),
-                        mode,
-                        policy,
-                    )
-                    .map(super::boxed_owner),
+                    Some(ygg) => {
+                        let owner = StandbyOwner::new(
+                            native_dialer,
+                            YggDialer::new(ygg, service_key),
+                            mode,
+                            policy,
+                        );
+                        #[cfg(test)]
+                        let owner = super::observe_owner(owner, self.events.clone());
+                        owner.map(super::boxed_owner)
+                    }
                     None => StandbyOwner::new(native_dialer, MissingYggDialer, mode, policy)
                         .map(super::boxed_owner),
                 };
@@ -538,6 +541,13 @@ async fn run_parts(
                         .map(|route| (kind, route));
                     #[cfg(test)]
                     emit(parts.events.as_ref(), RoleEvent::RouteActive(kind));
+                    #[cfg(test)]
+                    if kind == PathKind::Native {
+                        emit(
+                            parts.events.as_ref(),
+                            RoleEvent::NativeRouteActive(tokio::time::Instant::now()),
+                        );
+                    }
                 }
                 // The owner is closed; end the loop cleanly.
                 Err(StandbyError::Closed) => break,
@@ -552,10 +562,11 @@ async fn run_parts(
                 if parts.lease.is_some() && parts.workers.len() < MAX_FORWARDS => {
                 match accepted {
                     Ok((stream, _)) => {
-                        if let Some((_, link)) = parts.lease.as_ref() {
+                        if let Some((_kind, link)) = parts.lease.as_ref() {
                             let link = Arc::clone(link);
-                            // JoinSet cap enforced by the guard above.
                             parts.workers.spawn(async move { link.forward(stream).await });
+                            #[cfg(test)]
+                            emit(parts.events.as_ref(), RoleEvent::ForwardStarted(*_kind));
                         }
                     }
                     // Local accept hiccups never kill the client; the next
@@ -593,9 +604,8 @@ async fn run_parts(
     Ok(())
 }
 
-/// The OWNED close continuation: forward drain, owner close, restore, then
-/// the composition's canonical ordered close — never closing a live endpoint
-/// itself.
+/// Owns forward drain, owner close, restore and canonical ordered resource close.
+/// Never closes a live endpoint itself.
 async fn close_parts(mut parts: ClientParts) -> Result<(), StartupError> {
     let mut first_error = parts.outcome.take();
     // Abort+join workers; the first fatal error is kept, others logged; cancelled joins are self-induced shutdown.

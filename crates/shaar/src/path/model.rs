@@ -56,8 +56,8 @@ pub(crate) enum Decision {
     Use(PathKind),
     /// Start native attempt number `attempt`; it must report before `deadline`.
     AttemptNative { attempt: u64, deadline: Millis },
-    /// The attempt budget is spent; no further native attempt is made until the
-    /// native path comes up by itself. Reported once per down episode.
+    /// The ordinary attempt budget is spent; the owner may continue bounded
+    /// maintenance only while a usable Standby fallback is retained.
     NativeExhausted,
     /// No path can carry payload right now.
     NoPath,
@@ -85,7 +85,7 @@ pub struct PolicyConfig {
     pub backoff_base: Millis,
     /// Upper bound of the delay between attempts.
     pub backoff_cap: Millis,
-    /// Absolute number of attempts before the budget is spent.
+    /// Ordinary attempts before the finite burst budget is spent.
     pub max_attempts: u32,
     /// How long the native path must stay up before payload returns to it and
     /// the attempt budget is refilled.

@@ -523,7 +523,25 @@ fn a_late_owner_still_learns_that_the_budget_is_spent() {
                 Event::Tick,
                 &[Decision::Use(YGG), Decision::NativeExhausted],
             ),
-            Step::Wakeup(None),
+            Step::Wakeup(Some(9_000)),
+            Step::Time(
+                9_000,
+                &[Decision::AttemptNative {
+                    attempt: 3,
+                    deadline: 12_000,
+                }],
+            ),
+            Step::Event(9_100, failed(2), &[]),
+            Step::Wakeup(Some(12_000)),
+            Step::Event(9_200, failed(3), &[]),
+            Step::Wakeup(Some(13_200)),
+            Step::Time(
+                13_200,
+                &[Decision::AttemptNative {
+                    attempt: 4,
+                    deadline: 16_200,
+                }],
+            ),
         ],
     );
 }
