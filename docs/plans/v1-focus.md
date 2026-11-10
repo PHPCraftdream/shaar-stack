@@ -1221,6 +1221,30 @@ connections only after all three CSV ledgers, real case receipts and joined
 cleanup are verified on the same SHA. None of these next-slice obligations is
 claimed executed yet; long-outage duration and ordinary retry budget are unchanged.
 
+The reviewed gate repair was committed as `303bf62` with parent `5b8a956`,
+reported before the fork push, and tested by CI `42893117913`. Both OS jobs failed
+before SDK execution with `ValueError: ambiguous driver closure seed: rcgen` in
+the existing product driver fixture. The consecutive failure streak is now four,
+not reset by local clippy. The retained targeted selection includes the SDK library
+and native graph witness, but neither target executed; no fresh case inventory,
+failover distribution or three-ledger acceptance was produced.
+
+A joint review of both terminal traces, baseline metadata, selection and driver
+source identifies one shared failure: the fixture selects seeds by globally unique
+package name, while the legitimate product graph contains rcgen 0.13.2 through
+libp2p-tls and 0.14.10 through Yggdrasil. The unchanged pinned Noq archive declares
+rcgen 0.14 for its test suite. The bounded follow-up selects exactly the already
+locked 0.14.10 fixture identity; it does not remove the older package if a normal
+closure edge reaches it, change any lock/version, or weaken identity, feature,
+source-path or dependency-edge equality. Missing or duplicate reviewed identities
+still fail. Five CI-only graph controls cover order independence, both reachable
+versions, missing/changed identity rejection, ambiguity rejection and unreviewed
+source rejection. They run inside the existing backend verification step, not a
+new CI segment. Local checks are syntax plus the accepted fmt and offline locked
+normal/test clippy contexts; Python and Rust tests remain CI-only. One reviewed
+follow-up commit and report must precede another fork push; all runtime obligations
+above remain open.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;

@@ -5,6 +5,8 @@ from pathlib import Path
 import tomllib
 
 SEEDS = ("noq", "tokio", "rustls", "rcgen")
+# The suite uses the pinned Noq archive's rcgen 0.14 API, not libp2p-tls's 0.13.
+RCGEN_VERSION = "0.14.10"
 
 
 def closure(metadata):
@@ -12,7 +14,8 @@ def closure(metadata):
     nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
     seeds = {}
     for name in SEEDS:
-        matches = [key for key, package in packages.items() if package["name"] == name]
+        matches = [key for key, package in packages.items() if package["name"] == name
+                   and (name != "rcgen" or package["version"] == RCGEN_VERSION)]
         if len(matches) != 1:
             raise ValueError(f"ambiguous driver closure seed: {name}")
         seeds[name] = matches[0]
