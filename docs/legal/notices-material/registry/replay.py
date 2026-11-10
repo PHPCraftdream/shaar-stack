@@ -376,9 +376,9 @@ def main():
     counts = inventory["counts"]
     if root_count != 513 or nested_count != 215 or shared_count != 195 or len(expected_identities) != 533:
         raise ValueError("Lock membership totals differ from exact 533-identity baseline")
-    if material_rows != 915 or old_material_rows != 23 or material_archive_rows != 892 or material_bytes != 4497927:
+    if material_rows != 917 or old_material_rows != 23 or material_archive_rows != 894 or material_bytes != 4505353:
         raise ValueError(f"Material row/byte totals unexpected: rows={material_rows}, old={old_material_rows}, new={material_archive_rows}, bytes={material_bytes}")
-    if counts.get("current_pass_material_file_count") != 892 or counts.get("current_pass_material_bytes") != 4414088:
+    if counts.get("current_pass_material_file_count") != 894 or counts.get("current_pass_material_bytes") != 4421514:
         raise ValueError("Current-pass material totals mismatch")
     if counts.get("current_pass_status_counts") != status_counts:
         raise ValueError("Current-pass classification counts mismatch")

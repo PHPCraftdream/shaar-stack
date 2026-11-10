@@ -500,26 +500,24 @@
     "exact_archive_matched_identities": 533,
     "missing_archive_identities": 0,
     "current_registry_classification_counts": {
-      "package-complete": 478,
+      "package-complete": 480,
       "missing": 9,
       "preserved_complete_text": 15,
       "reference-only": 24,
       "reusable_archive_missing_full_text_partial_evidence": 2,
       "component-only": 2,
-      "reusable_archive_missing_full_text": 1,
-      "review-gap": 2
+      "reusable_archive_missing_full_text": 1
     },
     "current_pass_archive_count": 515,
     "current_pass_status_counts": {
-      "package-complete": 478,
+      "package-complete": 480,
       "missing": 9,
       "reference-only": 24,
-      "component-only": 2,
-      "review-gap": 2
+      "component-only": 2
     },
-    "current_pass_material_file_count": 892,
-    "current_pass_material_bytes": 4414088,
-    "current_pass_complete_text_rows": 478,
+    "current_pass_material_file_count": 894,
+    "current_pass_material_bytes": 4421514,
+    "current_pass_complete_text_rows": 480,
     "current_pass_missing_evidence_rows": 9
   },
   "extra_local_data_candidates": [
@@ -32578,7 +32576,7 @@
         }
       ],
       "checksum": "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f",
-      "classification": "review-gap",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
       "materials": [
         {
@@ -32597,6 +32595,23 @@
           "kind": "reference_context",
           "archive_index": 304,
           "source_relative_path": "README.md"
+        },
+        {
+          "archive_member": "r-efi-5.3.0/AUTHORS",
+          "member_bytes": 3693,
+          "member_sha256": "ff92bed461f50338dd703a9ba9aee496a425957873df1d91192776e4bdf5dda7",
+          "byte_range": [
+            0,
+            3693
+          ],
+          "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/hyphen/e/f/i/package/5.3.0/terms/AUTHORS",
+          "material_bytes": 3693,
+          "material_sha256": "ff92bed461f50338dd703a9ba9aee496a425957873df1d91192776e4bdf5dda7",
+          "slice_sha256": "ff92bed461f50338dd703a9ba9aee496a425957873df1d91192776e4bdf5dda7",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "archive_index": 304,
+          "source_relative_path": "AUTHORS"
         }
       ],
       "name": "r-efi",
@@ -32616,7 +32631,7 @@
       ],
       "archive_member_count": 69,
       "decoded_tar_bytes": 341504,
-      "review_note": "Authentic material preserved; declaration or package scope remains unresolved.",
+      "review_note": "Archived README explicitly names AUTHORS. Its retained full MIT grant/disclaimer and copyright establish MIT text availability; Apache/LGPL sections remain references, not complete terms. No OR election or legal clearance is made.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
@@ -32629,9 +32644,16 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "r-efi-5.3.0/AUTHORS",
+                    "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/hyphen/e/f/i/package/5.3.0/terms/AUTHORS",
+                    "role": "package_terms",
+                    "sha256": "ff92bed461f50338dd703a9ba9aee496a425957873df1d91192776e4bdf5dda7"
+                  }
+                ],
+                "unestablished_reason": null
               },
               {
                 "expression": "Apache-2.0",
@@ -32652,7 +32674,7 @@
                 "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
@@ -32669,7 +32691,7 @@
         }
       ],
       "checksum": "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf",
-      "classification": "review-gap",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
       "materials": [
         {
@@ -32688,6 +32710,23 @@
           "kind": "reference_context",
           "archive_index": 305,
           "source_relative_path": "README.md"
+        },
+        {
+          "archive_member": "r-efi-6.0.0/AUTHORS",
+          "member_bytes": 3733,
+          "member_sha256": "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111",
+          "byte_range": [
+            0,
+            3733
+          ],
+          "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/hyphen/e/f/i/package/6.0.0/terms/AUTHORS",
+          "material_bytes": 3733,
+          "material_sha256": "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111",
+          "slice_sha256": "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "archive_index": 305,
+          "source_relative_path": "AUTHORS"
         }
       ],
       "name": "r-efi",
@@ -32707,7 +32746,7 @@
       ],
       "archive_member_count": 69,
       "decoded_tar_bytes": 347648,
-      "review_note": "Authentic material preserved; declaration or package scope remains unresolved.",
+      "review_note": "Archived README explicitly names AUTHORS. Its retained full MIT grant/disclaimer and copyright establish MIT text availability; Apache/LGPL sections remain references, not complete terms. No OR election or legal clearance is made.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
@@ -32720,9 +32759,16 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "r-efi-6.0.0/AUTHORS",
+                    "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/hyphen/e/f/i/package/6.0.0/terms/AUTHORS",
+                    "role": "package_terms",
+                    "sha256": "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111"
+                  }
+                ],
+                "unestablished_reason": null
               },
               {
                 "expression": "Apache-2.0",
@@ -32743,7 +32789,7 @@
                 "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
@@ -54895,7 +54941,7 @@
     "Cargo.lock",
     "crates/shaar-ygg-core/Cargo.lock"
   ],
-  "material_search": "Current Task13/N1 examined all 515 exact held archive manifests, legal/context candidates, README references, and selected exact source-header slices. This inventory retains exact material bytes and scoped evidence; filename matching alone is not a completeness finding. The former broad filesystem-search description is historical_pre_n1_metadata.material_search.",
+  "material_search": "Current Task13/N1 examined all 515 exact held archive manifests, legal/context candidates, README references, and selected exact source-header slices. This inventory retains exact material bytes and scoped evidence; filename matching alone is not a completeness finding. The former broad filesystem-search description is historical_pre_n1_metadata.material_search. The later explicit r-efi README-to-AUTHORS follow-up retains full AUTHORS files as package-scope MIT evidence; other referenced alternatives remain unestablished.",
   "proposed_acquisition": "Historical pre-N1 proposal only: the 515 authorized exact-checksum archive tranche was completed and is recorded in current_data_pass. Nine identities have no selected legal/context text in this bounded pass; this does not imply archive absence or term absence. No further archive request or acquisition is proposed here.",
   "scan_bounds": {
     "compressed_archive_bytes_per_archive_max": 67108864,
@@ -54988,15 +55034,14 @@
     "decoded_tar_bytes": 693829632,
     "regular_member_bytes": 671462690,
     "member_count": 27435,
-    "evidence_bytes": 10226278,
-    "material_files": 892,
-    "material_bytes": 4414088,
+    "evidence_bytes": 10233704,
+    "material_files": 894,
+    "material_bytes": 4421514,
     "status_counts": {
-      "package-complete": 478,
+      "package-complete": 480,
       "missing": 9,
       "reference-only": 24,
-      "component-only": 2,
-      "review-gap": 2
+      "component-only": 2
     },
     "classifications_limit": "Source-text data classification only; not legal clearance, OR selection, sufficiency determination, or release permission.",
     "historical_note": "Historical scan and wrapped archive evidence retained as historical inputs; current 515-archive pass and recalculated lock-set totals are reported explicitly.",
@@ -55040,5 +55085,64 @@
     "sha256": "f88dd58897b88c2a964c6b6d00ba5e7ca6c2109c70680a98f7e76124f00b4ff1",
     "archive_count": 515,
     "data_root_relative_to_worktree": "../../.rush/downloads"
+  },
+  "historical_before_authors_recovery": {
+    "inventory_sha256": "93cbbe75a0967172695898e0bbf5b0b67b70c7e2cb2f349a81b0e4fdf9f2ddb3",
+    "counts": {
+      "registry_identity_count": 533,
+      "root_registry": 513,
+      "nested_registry": 215,
+      "exact_root_nested_intersection": 195,
+      "root_only": 318,
+      "nested_only": 20,
+      "exact_archive_matched_identities": 533,
+      "missing_archive_identities": 0,
+      "current_registry_classification_counts": {
+        "package-complete": 478,
+        "missing": 9,
+        "preserved_complete_text": 15,
+        "reference-only": 24,
+        "reusable_archive_missing_full_text_partial_evidence": 2,
+        "component-only": 2,
+        "reusable_archive_missing_full_text": 1,
+        "review-gap": 2
+      },
+      "current_pass_archive_count": 515,
+      "current_pass_status_counts": {
+        "package-complete": 478,
+        "missing": 9,
+        "reference-only": 24,
+        "component-only": 2,
+        "review-gap": 2
+      },
+      "current_pass_material_file_count": 892,
+      "current_pass_material_bytes": 4414088,
+      "current_pass_complete_text_rows": 478,
+      "current_pass_missing_evidence_rows": 9
+    },
+    "material_search": "Current Task13/N1 examined all 515 exact held archive manifests, legal/context candidates, README references, and selected exact source-header slices. This inventory retains exact material bytes and scoped evidence; filename matching alone is not a completeness finding. The former broad filesystem-search description is historical_pre_n1_metadata.material_search."
+  },
+  "authors_recovery": {
+    "source": "Already held exact-checksum archives; no network acquisition.",
+    "root_binding": "Both retained READMEs explicitly say See AUTHORS file for details.",
+    "changed": [
+      {
+        "identity": "r-efi@5.3.0",
+        "bytes": 3693,
+        "sha256": "ff92bed461f50338dd703a9ba9aee496a425957873df1d91192776e4bdf5dda7",
+        "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/hyphen/e/f/i/package/5.3.0/terms/AUTHORS"
+      },
+      {
+        "identity": "r-efi@6.0.0",
+        "bytes": 3733,
+        "sha256": "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111",
+        "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/hyphen/e/f/i/package/6.0.0/terms/AUTHORS"
+      }
+    ],
+    "unestablished_alternatives": [
+      "Apache-2.0",
+      "LGPL-2.1-or-later"
+    ],
+    "boundary": "Complete MIT text availability, not OR election, legal clearance or distribution permission."
   }
 }

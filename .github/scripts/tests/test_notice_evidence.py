@@ -1,6 +1,8 @@
 """CI-only contract tests for notice_evidence; never run as local project checks."""
 from __future__ import annotations
 
+import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -477,6 +479,69 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertTrue(serialized.endswith(b"\n"))
             expected = json.dumps(parsed, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode("utf-8") + b"\n"
             self.assertEqual(serialized, expected)
+
+
+class RegistryAuthorsEvidenceTests(unittest.TestCase):
+    def inputs(self):
+        root = Path(__file__).resolve().parents[3]
+        registry = root / "docs/legal/notices-material/registry"
+        inventory = registry / "inventory.json"
+        self.assertLessEqual(inventory.stat().st_size, 16 * 1024 * 1024)
+        rows = json.loads(inventory.read_bytes())["identities"]
+        module_spec = importlib.util.spec_from_file_location("registry_replay", registry / "replay.py")
+        replay = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(replay)
+        selected = [row for row in rows if row["name"] == "r-efi"]
+        self.assertEqual({row["version"] for row in selected}, {"5.3.0", "6.0.0"})
+        return registry, replay, selected
+
+    def test_archived_authors_terms_have_explicit_root_binding_and_exact_bytes(self):
+        registry, replay, rows = self.inputs()
+        expected = {
+            "5.3.0": "ff92bed461f50338dd703a9ba9aee496a425957873df1d91192776e4bdf5dda7",
+            "6.0.0": "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111",
+        }
+        for row in rows:
+            with self.subTest(version=row["version"]):
+                self.assertEqual(row["classification"], "package-complete")
+                material = next(m for m in row["materials"] if m["archive_member"].endswith("/AUTHORS"))
+                self.assertEqual(material["role"], "package_terms")
+                path = replay.no_link_path(registry, material["material_path"])
+                content = replay.bounded_regular(path, 1024 * 1024)
+                self.assertEqual(hashlib.sha256(content).hexdigest(), expected[row["version"]])
+                self.assertEqual(material["material_sha256"], expected[row["version"]])
+                self.assertEqual(len(content), material["material_bytes"])
+                self.assertIn(b"AUTHORS-MIT:", content)
+                self.assertIn(b"Permission is hereby granted", content)
+                self.assertIn(b"THE SOFTWARE IS PROVIDED", content)
+                self.assertIn(b"COPYRIGHT:", content)
+                readme = next(m for m in row["materials"] if m["archive_member"].endswith("/README.md"))
+                readme_bytes = replay.bounded_regular(
+                    replay.no_link_path(registry, readme["material_path"]), 1024 * 1024)
+                self.assertIn(b"See AUTHORS file for details.", readme_bytes)
+                alternatives = {a["expression"]: a for g in row["terms_evidence"]["groups"]
+                                for a in g["alternatives"]}
+                self.assertEqual(alternatives["MIT"]["availability"], "available")
+                self.assertEqual(alternatives["Apache-2.0"]["availability"], "unestablished")
+                self.assertEqual(alternatives["LGPL-2.1-or-later"]["availability"], "unestablished")
+                replay.validate_terms_evidence(row)
+
+    def test_reference_role_or_missing_mit_source_cannot_establish_authors_terms(self):
+        _, replay, rows = self.inputs()
+        for original in rows:
+            for missing in (False, True):
+                row = copy.deepcopy(original)
+                mit = next(a for g in row["terms_evidence"]["groups"]
+                           for a in g["alternatives"] if a["expression"] == "MIT")
+                if missing:
+                    mit["evidence"] = []
+                else:
+                    material = next(m for m in row["materials"]
+                                    if m["archive_member"].endswith("/AUTHORS"))
+                    material["role"] = "reference_context"
+                with self.subTest(version=row["version"], missing=missing):
+                    with self.assertRaises(ValueError):
+                        replay.validate_terms_evidence(row)
 
 
 if __name__ == "__main__":
