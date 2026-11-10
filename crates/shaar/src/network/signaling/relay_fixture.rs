@@ -14,9 +14,11 @@ use shaar_p2p::{OwnedExecutor, RelayAddr};
 use tokio::{sync::oneshot, task::JoinSet};
 
 // Widened to `pub(crate)` ONLY for the cfg(test)-only startup resources
-// regression suite (this module itself is #[cfg(test)]-only).
+// regression suite (this module itself is #[cfg(test)]-only). Every byte
+// traversing the relay is counted for the zero-payload oracle.
 pub(crate) struct RelayFixture {
     pub(crate) address: RelayAddr,
+    counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
     stop: Option<oneshot::Sender<()>>,
     tasks: JoinSet<io::Result<()>>,
 }
@@ -27,14 +29,20 @@ impl RelayFixture {
         let peer = key.public().to_peer_id();
         let (ready, address) = oneshot::channel();
         let (stop, stopped) = oneshot::channel();
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let mut tasks = JoinSet::new();
-        tasks.spawn(run(key, ready, stopped));
+        tasks.spawn(run(key, ready, stopped, std::sync::Arc::clone(&counter)));
         let address = RelayAddr::new(peer, address.await.unwrap()).unwrap();
         Self {
             address,
+            counter,
             stop: Some(stop),
             tasks,
         }
+    }
+    /// Total bytes counted through every relay-node connection so far.
+    pub(crate) fn relayed_bytes(&self) -> u64 {
+        self.counter.load(std::sync::atomic::Ordering::SeqCst)
     }
     /// cancel-safe: NO — only successful return proves the relay root and I/O were joined.
     pub(crate) async fn close(mut self) {
@@ -53,10 +61,12 @@ async fn run(
     key: Keypair,
     ready: oneshot::Sender<SocketAddr>,
     mut stop: oneshot::Receiver<()>,
+    counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) -> io::Result<()> {
     let mut executor = OwnedExecutor::new();
     let peer = key.public().to_peer_id();
     let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
+        .map(move |io, _| CountingIo::new(io, counter))
         .upgrade(upgrade::Version::V1Lazy)
         .authenticate(noise::Config::new(&key).map_err(io::Error::other)?)
         .multiplex(yamux::Config::default())
@@ -103,4 +113,63 @@ async fn run(
     drop(swarm);
     let joined = executor.shutdown().await;
     result.and(joined)
+}
+
+/// Counts every byte that enters or leaves the relay node on any
+/// connection (inbound reads and outbound writes): the byte-level
+/// oracle for "zero application payload traversed the relay".
+struct CountingIo<S> {
+    io: S,
+    counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+impl<S> CountingIo<S> {
+    fn new(io: S, counter: std::sync::Arc<std::sync::atomic::AtomicU64>) -> Self {
+        Self { io, counter }
+    }
+}
+impl<S: futures::io::AsyncRead + Unpin> futures::io::AsyncRead for CountingIo<S> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> std::task::Poll<io::Result<usize>> {
+        let counted = std::sync::Arc::clone(&self.counter);
+        std::pin::Pin::new(&mut self.io)
+            .poll_read(cx, buf)
+            .map(|ready| {
+                ready.map(|read| {
+                    counted.fetch_add(read as u64, std::sync::atomic::Ordering::SeqCst);
+                    read
+                })
+            })
+    }
+}
+impl<S: futures::io::AsyncWrite + Unpin> futures::io::AsyncWrite for CountingIo<S> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<io::Result<usize>> {
+        let counted = std::sync::Arc::clone(&self.counter);
+        std::pin::Pin::new(&mut self.io)
+            .poll_write(cx, buf)
+            .map(|ready| {
+                ready.map(|written| {
+                    counted.fetch_add(written as u64, std::sync::atomic::Ordering::SeqCst);
+                    written
+                })
+            })
+    }
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_flush(cx)
+    }
+    fn poll_close(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_close(cx)
+    }
 }

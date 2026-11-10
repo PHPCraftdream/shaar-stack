@@ -82,3 +82,7 @@ mod tests;
 // (chunk 2b); the fixture is #[cfg(test)]-only and invisible otherwise.
 #[cfg(test)]
 pub(crate) use endpoint::RelayFixture;
+
+// Shared with the retained-composition and role layers for relay reserve and
+// release after the endpoint itself has been transferred.
+pub(crate) use endpoint::RelayOperations;

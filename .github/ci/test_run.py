@@ -81,6 +81,76 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 RUN.VERIFY.verify(expected, {"binary": (output, status)}, "")
 
+    def test_verifier_accepts_exact_should_panic_events_and_rejects_near_misses(self):
+        ordinary = "network::admission::negotiation_frames::role_frame_oracle_accepts_control_only_stats"
+        datagram = "network::admission::negotiation_frames::role_frame_oracle_rejects_relay_datagram_rx"
+        stream = "network::admission::negotiation_frames::role_frame_oracle_rejects_relay_stream_tx"
+        names = (ordinary, datagram, stream)
+        listing = "".join(name + ": test\n" for name in names)
+        events = (f"test {ordinary} ... ok", f"test {datagram} - should panic ... ok",
+                  f"test {stream} - should panic ... ok")
+
+        def transcript(lines):
+            return ("running 3 tests\n\n" + "\n".join(lines) + "\n\n"
+                    "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; "
+                    "0 filtered out; finished in 0.01s\n")
+
+        def verify_output(output, status=0):
+            execution = RUN.VERIFY.cargo_execution("   Compiling fixture\n" + output)
+            return RUN.VERIFY.verify({"selected": listing}, {"selected": (execution, status)}, "")
+
+        for newline in ("\n", "\r\n"):
+            output = transcript(events).replace("\n", newline)
+            with self.subTest(newline=repr(newline)):
+                self.assertEqual(verify_output(output), 3)
+
+        # The owned-DNS CLI selector remains the default; empty selection is explicit.
+        owned = "dns::tests::owned_dns_alpha: test\n"
+        self.assertEqual(RUN.VERIFY.parse_listing(owned), ("dns::tests::owned_dns_alpha",))
+        with self.assertRaises(ValueError):
+            RUN.VERIFY.parse_listing(ordinary + ": test\n")
+        # The verifier's legacy contract permits a missing harness header.
+        headerless = "\n".join(transcript(events).splitlines()[2:])
+        self.assertEqual(RUN.VERIFY.verify({"selected": listing}, {"selected": (headerless, 0)}, ""), 3)
+
+        datagram_event = events[1]
+        malformed_events = (
+            ("marked failed", (events[0], datagram_event.replace(" ... ok", " ... FAILED"), events[2])),
+            ("ordinary failed", (events[0].replace(" ... ok", " ... FAILED"), events[1], events[2])),
+            ("marked ignored", (events[0], datagram_event.replace(" ... ok", " ... ignored"), events[2])),
+            ("ordinary ignored", (events[0].replace(" ... ok", " ... ignored"), events[1], events[2])),
+            ("missing event", (events[0], events[2])),
+            ("duplicate event", (*events, datagram_event)),
+            ("unexpected event", (events[0], events[1], events[2].replace(stream, "network::admission::unexpected"))),
+            ("mixed-marker duplicate", (*events, f"test {datagram} ... ok")),
+            ("double space before marker", (events[0], datagram_event.replace(" - should", "  - should"), events[2])),
+            ("double space after marker", (events[0], datagram_event.replace("should panic", "should  panic"), events[2])),
+            ("missing marker separator", (events[0], datagram_event.replace("panic ...", "panic..."), events[2])),
+            ("wrong marker text", (events[0], datagram_event.replace("should panic", "should fail"), events[2])),
+            ("repeated marker", (events[0], datagram_event.replace(" ... ok", " - should panic ... ok"), events[2])),
+            ("tab marker spacing", (events[0], datagram_event.replace(" - should", "\t- should"), events[2])),
+            ("extra event suffix", (events[0], datagram_event + " extra", events[2])),
+            ("extra output", events + ("unexpected output",)),
+        )
+        for label, bad_events in malformed_events:
+            with self.subTest(case=label), self.assertRaises(ValueError):
+                verify_output(transcript(bad_events))
+
+        for label, output in (
+            ("wrong header count", transcript(events).replace("running 3 tests", "running 4 tests")),
+            ("wrong passed count", transcript(events).replace("3 passed", "2 passed")),
+            ("wrong failed count", transcript(events).replace("0 failed", "1 failed")),
+            ("wrong ignored count", transcript(events).replace("0 ignored", "1 ignored")),
+            ("wrong measured count", transcript(events).replace("0 measured", "1 measured")),
+            ("duplicate header", transcript(events).replace("running 3 tests\n", "running 3 tests\nrunning 3 tests\n")),
+            ("extra result", transcript(events) + "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n"),
+            ("suffix after result", transcript(events) + "extra output\n"),
+        ):
+            with self.subTest(case=label), self.assertRaises(ValueError):
+                verify_output(output)
+        with self.assertRaises(ValueError):
+            verify_output(transcript(events), status=7)
+
     def test_command_batches_are_bounded_and_preserve_exact_inventory(self):
         names = [f"module::case_{index}" for index in range(20)]
         batches = list(RUN.batches(names, limit=50))

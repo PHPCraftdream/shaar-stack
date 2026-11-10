@@ -28,7 +28,9 @@ impl Allowlist {
         self.keys.binary_search(key).is_ok()
     }
 
-    pub(super) fn keys(&self) -> impl Iterator<Item = PublicKey> + '_ {
+    /// Crate-visible key iteration for the composed role loops; the
+    /// allowlist already ran inside `accept`, so this stays read-only.
+    pub(crate) fn keys(&self) -> impl Iterator<Item = PublicKey> + '_ {
         self.keys.iter().copied()
     }
 }

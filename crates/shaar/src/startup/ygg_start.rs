@@ -88,6 +88,7 @@ impl fmt::Debug for SameIdentityYgg {
 
 impl SameIdentityYgg {
     /// Public key of the admitted core, while it is still retained here.
+    #[cfg(test)]
     pub(crate) fn public_key(&self) -> Option<[u8; 32]> {
         slot_lock(&self.shared.slot)
             .as_ref()

@@ -103,7 +103,7 @@ impl DatagramSender {
             len: bytes.len(),
             mtu,
         })?;
-        let result = timeout_at(deadline, self.shared.transport.send_to(&self.peer, &frame))
+        let result = timeout_at(deadline, self.shared.send_carrier(&self.peer, &frame))
             .await
             .map_err(|_| DatagramError::TimedOut)?;
         if Instant::now() >= deadline {

@@ -26,10 +26,14 @@ pub(crate) use negotiation::{Negotiating, Negotiation};
 #[cfg(test)]
 pub(crate) use owner::PathOwner;
 pub(crate) use owner::{DialError, Dialer};
-#[cfg(test)]
+// The startup role modules consume these through this re-export; the standby
+// child module itself stays private.
 pub(crate) use standby::{Route, StandbyError, StandbyOwner};
 
+pub(crate) use model::{ConfigError, Mode, PathKind, PolicyConfig};
+// Used only by the path trace fixtures via this re-export; kept gated so the
+// production build does not carry the unused re-export.
 #[cfg(test)]
-pub(crate) use model::{ConfigError, Decision, Event, Millis, Mode, PathKind, PolicyConfig};
+pub(crate) use model::{Decision, Event, Millis};
 #[cfg(test)]
 use policy::PathPolicy;

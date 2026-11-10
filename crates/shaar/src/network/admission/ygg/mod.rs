@@ -30,6 +30,28 @@ impl YggEndpoint {
         allowlist: Allowlist,
         limits: Limits,
     ) -> Result<(Self, YggPump), NetworkError> {
+        // Fresh per-endpoint admission pool; a shared pool opts in explicitly.
+        Self::bind_shared_slots(
+            identity,
+            bridge,
+            allowlist,
+            limits,
+            Arc::new(Semaphore::new(limits.sessions)),
+        )
+        .await
+    }
+
+    /// Binds over a caller-provided admission pool shared with the native and
+    /// signaling endpoint, so live admission is bounded across both paths.
+    /// Identity/bridge guard and all validation are identical to `bind`.
+    /// cancel-safe: NO — cancellation does not prove capability revocation and bind completion.
+    pub(crate) async fn bind_shared_slots(
+        identity: &Identity,
+        bridge: &YggBridge,
+        allowlist: Allowlist,
+        limits: Limits,
+        slots: Arc<Semaphore>,
+    ) -> Result<(Self, YggPump), NetworkError> {
         let local_key = identity.public_key_bytes();
         if bridge.public_key() != local_key {
             return Err(NetworkError::PeerMismatch);
@@ -75,7 +97,7 @@ impl YggEndpoint {
                 inner,
                 carrier,
                 allowlist,
-                slots: Arc::new(Semaphore::new(limits.sessions)),
+                slots,
                 closed: false,
             },
             pump,

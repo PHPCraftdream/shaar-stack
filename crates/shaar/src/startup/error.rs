@@ -5,9 +5,10 @@ use std::fmt;
 
 use shaar_ygg::YggError;
 
-/// Failures of composed startup preflight and the retained Yggdrasil start.
+/// Failures of composed startup preflight, the retained Yggdrasil start and
+/// the composed role loops.
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) enum StartupError {
+pub enum StartupError {
     /// Composed startup was given a legacy config without the shared
     /// network object. No silent direct-only fallback is applied.
     NetworkRequired,
@@ -31,6 +32,17 @@ pub(crate) enum StartupError {
     /// A retained shutdown stage reported an error. The stage is named;
     /// upstream text is withheld.
     Close { stage: &'static str },
+    /// Local TCP listener bind failed. Upstream bind text is withheld (it
+    /// can echo addresses).
+    Listener,
+    /// The path policy configuration was rejected by validation. Names no
+    /// parameter values.
+    InvalidPolicy,
+    /// No usable path remained within the attempt budget.
+    Exhausted,
+    /// The pinned-relay destination reservation could not be established at
+    /// startup. Names the stage only; never relay addresses or upstream text.
+    RelayReserve,
 }
 
 impl fmt::Display for StartupError {
@@ -54,6 +66,10 @@ impl fmt::Display for StartupError {
             Self::MainlineStart => write!(f, "Mainline discovery runtime start failed"),
             Self::YggPayload => write!(f, "Yggdrasil payload endpoint construction failed"),
             Self::Close { stage } => write!(f, "shutdown failed at the {stage} stage"),
+            Self::Listener => write!(f, "local listener bind failed"),
+            Self::InvalidPolicy => write!(f, "path policy configuration rejected"),
+            Self::Exhausted => write!(f, "no usable path remained within the attempt budget"),
+            Self::RelayReserve => write!(f, "relay reservation failed at startup"),
         }
     }
 }

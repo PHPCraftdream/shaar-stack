@@ -76,20 +76,20 @@ pub(crate) enum ConfigError {
 
 /// Tunable bounds of the policy. All durations are milliseconds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PolicyConfig {
+pub struct PolicyConfig {
     /// How long the native path must stay down before payload fails over.
-    pub(crate) loss_grace: Millis,
+    pub loss_grace: Millis,
     /// Deadline of one native attempt.
-    pub(crate) attempt_timeout: Millis,
+    pub attempt_timeout: Millis,
     /// Delay before the second attempt; doubles per attempt up to the cap.
-    pub(crate) backoff_base: Millis,
+    pub backoff_base: Millis,
     /// Upper bound of the delay between attempts.
-    pub(crate) backoff_cap: Millis,
+    pub backoff_cap: Millis,
     /// Absolute number of attempts before the budget is spent.
-    pub(crate) max_attempts: u32,
+    pub max_attempts: u32,
     /// How long the native path must stay up before payload returns to it and
     /// the attempt budget is refilled.
-    pub(crate) stable_hold: Millis,
+    pub stable_hold: Millis,
 }
 
 impl Default for PolicyConfig {

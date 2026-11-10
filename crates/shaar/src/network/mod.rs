@@ -29,4 +29,6 @@ const STREAM_LIMIT: u8 = 16;
 // Re-exported only for the cfg(test)-only startup resources regression suite
 // (chunk 2b).
 #[cfg(test)]
+pub(crate) use admission::negotiation_frames::RoleFrames;
+#[cfg(test)]
 pub(crate) use signaling::RelayFixture;

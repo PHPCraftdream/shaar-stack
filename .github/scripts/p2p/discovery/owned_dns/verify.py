@@ -11,7 +11,7 @@ import sys
 
 NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_:]*$")
 RESULT = re.compile(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured; (\d+) filtered out; finished in .+$", re.MULTILINE)
-EVENT = re.compile(r"^test (\S+) \.\.\. (ok|FAILED|ignored)$", re.MULTILINE)
+EVENT = re.compile(r"^test (\S+)(?: - should panic)? \.\.\. (ok|FAILED|ignored)$", re.MULTILINE)
 
 
 def _scanner(path: Path):

@@ -15,6 +15,15 @@
 //! real-owner join and the post-close key-reuse probe, whose subjects (the
 //! dropped handle's signal path and asynchronous socket teardown) have no
 //! earlier observable.
+//!
+//! `YggTransport` key claims are process-wide. This test module owns the
+//! disjoint 0x81..=0x8D cohort: joined start 0x81/listener 0x82; intentional
+//! KeyInUse holder+start 0x83; no-waiter holder+start 0x84; cancelled wait
+//! 0x85; cancelled shutdown 0x86; close-fault listener 0x87/start 0x88;
+//! post-admission cleanup 0x89; pre-admission owner 0x8A; bridge listener
+//! 0x8B/client 0x8C; invalid-peer start 0x8D. Reuse probes mirror owner seeds.
+//! The two equal holder/start pairs preserve their intentional KeyInUse oracle.
+//!
 
 use std::net::TcpListener;
 use std::pin::Pin;
@@ -114,8 +123,8 @@ fn poll_once<F: std::future::Future>(fut: Pin<&mut F>) -> Poll<F::Output> {
 
 #[tokio::test]
 async fn same_identity_start_admits_identity_and_shutdown_closes_and_caches() {
-    let (listener, port) = start_listener(0x71).await;
-    let identity = local_identity(0x53);
+    let (listener, port) = start_listener(0x82).await;
+    let identity = local_identity(0x81);
     let peer_uri = format!("tcp://127.0.0.1:{port}");
     let mut retained = start_ygg_same_identity(&identity, &[peer_uri]);
     // wait() returning IS the deterministic admission barrier: the owner has
@@ -145,12 +154,12 @@ async fn same_identity_start_admits_identity_and_shutdown_closes_and_caches() {
     close_within(&listener, "infra listener").await;
     let rebound = TcpListener::bind(("127.0.0.1", port)).expect("listener port binds again");
     drop(rebound);
-    probe_claim_free(0x53, "claim released by joined shutdown").await;
+    probe_claim_free(0x81, "claim released by joined shutdown").await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn failed_start_error_is_retained_until_shutdown_then_closed() {
-    let seed_byte = 0x54;
+    let seed_byte = 0x83;
     let identity = local_identity(seed_byte);
     let holder = YggTransport::start(local_config(seed_byte))
         .await
@@ -167,7 +176,7 @@ async fn failed_start_error_is_retained_until_shutdown_then_closed() {
         "wrong retained error: {error:?}"
     );
     let text = format!("{error} {error:?}");
-    assert!(!text.contains("0x54"), "seed marker leaked: {text}");
+    assert!(!text.contains("0x83"), "seed marker leaked: {text}");
     // The ORIGINAL error stays observable before shutdown completes.
     let error_again = retained
         .wait()
@@ -194,7 +203,7 @@ async fn failed_start_error_is_retained_until_shutdown_then_closed() {
 
 #[tokio::test]
 async fn failure_is_published_without_any_subscribed_waiter() {
-    let seed_byte = 0x5B;
+    let seed_byte = 0x84;
     let identity = local_identity(seed_byte);
     let holder = YggTransport::start(local_config(seed_byte))
         .await
@@ -234,7 +243,7 @@ async fn failure_is_published_without_any_subscribed_waiter() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn cancelled_wait_is_resumable_and_keeps_the_admitted_status() {
-    let identity = local_identity(0x55);
+    let identity = local_identity(0x85);
     let mut retained = start_ygg_same_identity(&identity, &[]);
     // Inner scope: the pinned wait future is polled exactly once and its
     // STORAGE is destroyed when the scope ends — a real cancellation, not a
@@ -260,12 +269,12 @@ async fn cancelled_wait_is_resumable_and_keeps_the_admitted_status() {
         .shutdown()
         .await
         .expect("joined shutdown after resumption");
-    probe_claim_free(0x55, "claim released after resumed wait and shutdown").await;
+    probe_claim_free(0x85, "claim released after resumed wait and shutdown").await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn cancelled_shutdown_is_resumable_and_still_joins() {
-    let identity = local_identity(0x56);
+    let identity = local_identity(0x86);
     let mut retained = start_ygg_same_identity(&identity, &[]);
     let ygg = retained.wait().await.expect("retained start admits");
     assert_eq!(
@@ -288,7 +297,7 @@ async fn cancelled_shutdown_is_resumable_and_still_joins() {
         .await
         .expect("resumed shutdown joins and closes");
     drop(ygg);
-    probe_claim_free(0x56, "claim released by resumed shutdown").await;
+    probe_claim_free(0x86, "claim released by resumed shutdown").await;
 }
 
 #[tokio::test]
@@ -298,8 +307,8 @@ async fn shutdown_propagates_and_caches_the_production_close_result() {
     // close has run, so this regression fails if the production close error
     // is discarded, if the cached result is not repeated, or if cleanup is
     // skipped.
-    let (listener, port) = start_listener(0x7B).await;
-    let identity = local_identity(0x5C);
+    let (listener, port) = start_listener(0x87).await;
+    let identity = local_identity(0x88);
     let peer_uri = format!("tcp://127.0.0.1:{port}");
     let mut retained = start_ygg_same_identity(&identity, &[peer_uri]);
     let ygg = retained.wait().await.expect("retained start admits");
@@ -344,7 +353,7 @@ async fn shutdown_propagates_and_caches_the_production_close_result() {
     close_within(&listener, "infra listener").await;
     let rebound = TcpListener::bind(("127.0.0.1", port)).expect("listener port binds again");
     drop(rebound);
-    probe_claim_free(0x5C, "claim released although the close reported failure").await;
+    probe_claim_free(0x88, "claim released although the close reported failure").await;
 }
 
 #[tokio::test]
@@ -372,7 +381,7 @@ async fn join_failure_is_reported_and_cached() {
 
 #[tokio::test]
 async fn cancellation_after_admission_closes_the_retained_transport() {
-    let identity = local_identity(0x58);
+    let identity = local_identity(0x89);
     let mut retained = start_ygg_same_identity(&identity, &[]);
     let ygg = retained.wait().await.expect("retained start admits");
     assert_eq!(
@@ -382,12 +391,12 @@ async fn cancellation_after_admission_closes_the_retained_transport() {
     );
     drop(retained);
     drop(ygg);
-    probe_claim_free(0x58, "claim released by post-admission cleanup").await;
+    probe_claim_free(0x89, "claim released by post-admission cleanup").await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn pre_admission_drop_does_not_strand_the_key_claim() {
-    let identity = local_identity(0x59);
+    let identity = local_identity(0x8A);
     let mut retained = start_ygg_same_identity(&identity, &[]);
     // Observed, not assumed: on this single-thread runtime the owner has not
     // run when the first no-op-waker poll reports Pending, so the handle is
@@ -418,7 +427,7 @@ async fn pre_admission_drop_does_not_strand_the_key_claim() {
         .expect("the owner task must not panic")
         .expect("the owner's own transport close must succeed");
     // Only now is the claim provably released by the owner itself.
-    probe_claim_free(0x59, "claim released by the owner's own close").await;
+    probe_claim_free(0x8A, "claim released by the owner's own close").await;
 }
 
 #[tokio::test]
@@ -427,9 +436,9 @@ async fn transport_transfer_is_exact_once_into_a_real_bridge() {
     // existing YggBridge, proves an authenticated probe round trip, and the
     // ordered cleanup (bridges first, then the joined startup shutdown)
     // releases key claims and ports.
-    let (listener_transport, port) = start_listener(0x79).await;
-    let client_identity = local_identity(0x5A);
-    let listener_identity = local_identity(0x79);
+    let (listener_transport, port) = start_listener(0x8B).await;
+    let client_identity = local_identity(0x8C);
+    let listener_identity = local_identity(0x8B);
     let client_public = client_identity.public_key_bytes();
     let listener_public = listener_identity.public_key_bytes();
     let listener_bridge = YggBridge::new(listener_transport, [client_public]);
@@ -478,12 +487,12 @@ async fn transport_transfer_is_exact_once_into_a_real_bridge() {
         .expect("startup shutdown joins after the transfer");
     let rebound = TcpListener::bind(("127.0.0.1", port)).expect("listener port binds again");
     drop(rebound);
-    probe_claim_free(0x5A, "claim released after bridge-owned cleanup").await;
+    probe_claim_free(0x8C, "claim released after bridge-owned cleanup").await;
 }
 
 #[tokio::test]
 async fn invalid_peer_uri_is_reported_with_redacted_diagnostic() {
-    let identity = local_identity(0x57);
+    let identity = local_identity(0x8D);
     let mut retained = start_ygg_same_identity(&identity, &["http://127.0.0.1:9".to_string()]);
     let error = retained
         .wait()
@@ -499,5 +508,5 @@ async fn invalid_peer_uri_is_reported_with_redacted_diagnostic() {
     let text = format!("{error} {error:?}");
     assert!(!text.contains("http://127.0.0.1:9"), "URI leaked: {text}");
     drop(retained);
-    probe_claim_free(0x57, "failed start released the claim").await;
+    probe_claim_free(0x8D, "failed start released the claim").await;
 }

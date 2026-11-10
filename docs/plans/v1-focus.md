@@ -688,6 +688,43 @@ interface consultation precedes implementation where ownership or publication
 semantics are not established; name a concrete blocker rather than weaken this
 boundary or invent backend APIs.
 
+#### 5c acceptance: shared production role startup (recorded 2026-11-08)
+
+Advances scenario steps 1–6 after accepted 5b (`20b601c`, CI `42498359015`,
+241 selected/executed/passed SDK cases on each OS; targeted, not full P10).
+Both Server and Client binaries use shared production startup and role loops,
+with accepted network settings and retained 5b resources. The client needs only
+the server identity as its service locator; infrastructure addresses identify
+independent Mainline/bootstrap, pinned signaling relay and third Ygg transit,
+never a hidden service endpoint. Do not require a legacy server address, reject
+an otherwise supported fallback as unimplemented, or silently choose direct-only.
+
+Controlled Linux/Windows CI exercises those same production entrypoints: cold
+Mainline lookup of a real signed native publication and a forwarded TCP byte;
+key-directed negotiation through the pinned relay, native application data and
+zero relay application data; Mainline outage with a same-key Ygg standby path
+through independent transit; Signal mode with no Ygg application payload; and
+a disallowed key causing zero fixed-target connections alongside an allowed
+positive control. The server applies one shared bounded admission limit across
+paths before forwarding. The client keeps the existing path policy and owned
+leases driven while bounded forwarding workers run; no stale path-only snapshot
+may replace ongoing policy work. Existing direct-address compatibility remains
+explicit rather than becoming the key-only test's undisclosed bootstrap.
+
+Startup, partial rollback and joined shutdown retain acquired owners across
+cancelled waiters and expose truthful errors/readiness. Cover cancellation,
+capacity, idle policy progress, both fallback modes and cleanup with actual
+resource release; reuse existing fixtures and observers instead of a new proof
+framework. Small CI ownership mappings are permitted only for new owned source
+paths and their actual cases; no full-workspace fallback or new CI family.
+
+Non-goals: complete P11/P12 acceptance, retry-budget rearming (task 32), transition
+gap review (33), efficiency/full P10 (25), Amino application-peer lookup, protocol
+redesign, public reachability, public-peer traffic, TUN/root or release actions.
+No dependency/version changes. No local builds, tests, Cargo, project Python,
+preparation, smoke, benchmarks or fake load; verification is GitHub CI. The
+criterion and this plan block are primary-owned and remain unchanged by workers.
+
 ### P10 acceptance order correction (approved 2026-11-07)
 
 The user approved synchronizing the task list and plan with accepted evidence and

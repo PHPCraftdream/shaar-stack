@@ -22,7 +22,7 @@ use crate::startup::resources::SharedResources;
 
 use super::{
     BUDGET, PROBE, identity, parse_server_config, probe_claim_free, server_config_text,
-    start_composition, start_listener, wait_admitted,
+    start_composition, start_listener,
 };
 
 pub(super) type SubmitFuture<'a> = Pin<
@@ -423,8 +423,24 @@ async fn independent_compositions_resolve_the_actual_service_watcher_record() {
         &[service_public],
     )
     .await;
-    let service_resources = wait_admitted(&mut service_start).await;
-    let client_resources = wait_admitted(&mut client_start).await;
+    // Capture each real initial PUT while its composition is admitted. The
+    // later transit probe must not postpone starting either peer's capture.
+    let ((service_resources, service_initial), (client_resources, client_initial)) = tokio::join!(
+        admit_and_capture_initial(&mut service_start, &mut service_peer),
+        admit_and_capture_initial(&mut client_start, &mut resolver_peer),
+    );
+    let (service_source, service_transaction, service_signed, service_item) = service_initial;
+    let (client_source, client_transaction, _client_signed, _client_item) = client_initial;
+    tokio::join!(
+        service_peer.acknowledge(service_source, &service_transaction),
+        resolver_peer.acknowledge(client_source, &client_transaction),
+    );
+    let (service_generation, client_generation) =
+        tokio::join!(published(&service_resources), published(&client_resources));
+    tokio::join!(
+        stable_published(&service_resources, service_generation),
+        stable_published(&client_resources, client_generation),
+    );
 
     // Signal mode keeps the control bridge without a payload owner on BOTH
     // authorized compositions.
@@ -458,8 +474,6 @@ async fn independent_compositions_resolve_the_actual_service_watcher_record() {
         !service_watcher.is_empty(),
         "service native watcher has candidates"
     );
-    let (service_signed, service_item) =
-        acknowledge_initial(&service_resources, &mut service_peer).await;
     let service_record =
         iroh_dns::endpoint_info::EndpointInfo::from_pkarr_signed_packet(&service_signed)
             .expect("service's actual captured PUT is signed");
@@ -476,10 +490,9 @@ async fn independent_compositions_resolve_the_actual_service_watcher_record() {
         "GET key is the service endpoint identity"
     );
 
-    // The client owns an independent resolver peer and first completes its
-    // own initial publication, so the serving peer never mistakes a PUT for a
-    // GET while answering the actual lookup below.
-    let _client_records = acknowledge_initial(&client_resources, &mut resolver_peer).await;
+    // The client owns an independent resolver peer and its initial real PUT
+    // was acknowledged before the control probe, so the serving peer never
+    // mistakes a PUT for a GET while answering the actual lookup below.
     let resolved = tokio::time::timeout(BUDGET, async {
         tokio::select! {
             result = client_resources.resolve(service_key) => result,

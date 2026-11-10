@@ -2,7 +2,7 @@ use std::{fmt, net::SocketAddr};
 
 use iroh_base::PublicKey;
 use shaar_p2p::{RelayAddr, RelayLease};
-use tokio::sync::watch;
+use tokio::sync::{Semaphore, watch};
 
 use crate::{
     identity::Identity,
@@ -75,7 +75,31 @@ impl SignaledEndpoint {
         peers: &[PublicKey],
         limits: Limits,
     ) -> Result<Self, NetworkError> {
-        Self::bind_configured(identity, native, signaling, peers, limits, None).await
+        Self::bind_configured(identity, native, signaling, peers, limits, None, None).await
+    }
+
+    /// Composed-startup constructor: binds over ONE admission pool shared with
+    /// the Yggdrasil payload endpoint, so live admission is bounded across both
+    /// paths before forwarding. Existing `bind` keeps a fresh per-endpoint pool.
+    /// cancel-safe: NO — cancellation does not prove joined destruction.
+    pub(crate) async fn bind_shared_slots(
+        identity: &Identity,
+        native: SocketAddr,
+        signaling: SocketAddr,
+        peers: &[PublicKey],
+        limits: Limits,
+        slots: std::sync::Arc<Semaphore>,
+    ) -> Result<Self, NetworkError> {
+        Self::bind_configured(
+            identity,
+            native,
+            signaling,
+            peers,
+            limits,
+            None,
+            Some(slots),
+        )
+        .await
     }
 
     /// Starts with validated in-memory discovery settings.
@@ -88,7 +112,16 @@ impl SignaledEndpoint {
         limits: Limits,
         discovery: DiscoveryConfig,
     ) -> Result<Self, NetworkError> {
-        Self::bind_configured(identity, native, signaling, peers, limits, Some(discovery)).await
+        Self::bind_configured(
+            identity,
+            native,
+            signaling,
+            peers,
+            limits,
+            Some(discovery),
+            None,
+        )
+        .await
     }
 
     /// cancel-safe: NO — cancellation does not prove completed backend startup.
@@ -99,6 +132,7 @@ impl SignaledEndpoint {
         peers: &[PublicKey],
         limits: Limits,
         discovery: Option<DiscoveryConfig>,
+        slots: Option<std::sync::Arc<Semaphore>>,
     ) -> Result<Self, NetworkError> {
         Endpoint::validate_bind(native)?;
         check_peers(peers)?;
@@ -111,15 +145,31 @@ impl SignaledEndpoint {
                 return Err(error);
             }
         };
-        let endpoint = match Endpoint::bind_custom(
-            identity,
-            native,
-            allowlist,
-            limits,
-            Some(owner.factory.clone()),
-        )
-        .await
-        {
+        let endpoint_result = match slots {
+            // Some: shared admission pool with the payload endpoint.
+            Some(slots) => {
+                Endpoint::bind_custom_shared(
+                    identity,
+                    native,
+                    allowlist,
+                    limits,
+                    Some(owner.factory.clone()),
+                    slots,
+                )
+                .await
+            }
+            None => {
+                Endpoint::bind_custom(
+                    identity,
+                    native,
+                    allowlist,
+                    limits,
+                    Some(owner.factory.clone()),
+                )
+                .await
+            }
+        };
+        let endpoint = match endpoint_result {
             Ok(endpoint) => endpoint,
             Err(error) => {
                 owner.close().await?;

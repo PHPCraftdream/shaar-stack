@@ -206,6 +206,18 @@ fn server_config_validation_and_fallback_startup_policy_are_explicit() {
     let defaulted =
         ServerConfig::from_text("target: 127.0.0.1:9000\n", &ServerOverrides::default()).unwrap();
     assert_eq!(defaulted.fallback(), Fallback::Standby);
-    assert!(super::super::validate_fallback(Fallback::Standby).is_err());
-    assert!(super::super::validate_fallback(Fallback::Signal).is_ok());
+    assert_eq!(
+        super::super::direct_only_notice(Fallback::Standby),
+        "no composed network settings; running direct-only; configured fallback standby is not active"
+    );
+    assert_eq!(
+        super::super::direct_only_notice(Fallback::Signal),
+        "no composed network settings; running direct-only; configured fallback signal is not active"
+    );
+    for notice in [
+        super::super::direct_only_notice(Fallback::Standby),
+        super::super::direct_only_notice(Fallback::Signal),
+    ] {
+        assert!(!notice.contains("unavailable"));
+    }
 }
