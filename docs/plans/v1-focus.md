@@ -1276,6 +1276,42 @@ Python controls and all runtime obligations still require CI. One reviewed repai
 commit and report are required before resuming fork CI; only a real success resets
 the five-failure streak.
 
+CI `42905449848` on `b9cb3f3` failed both OS graph comparisons with
+`unapproved control-to-candidate package removal`; the streak is six and the SDK
+campaign remains unexecuted. The preceding DATA review was incomplete: it
+compared name/version, features and edges but omitted prepared-source tree/recipe
+identity transitions. Its broad statement that no unexplained changes remained
+must not be treated as full source-identity proof.
+
+Both current evidence JSONs were recovered by bounded inert ZIP ranges. Their
+normal metadata hashes match the previous retained metadata byte-for-byte, and
+all backend bindings match the earlier proofs on each OS. Full source-identity
+comparison identifies three approved source transitions, not package removals:
+Iroh's exact tree/manifest changes and the shared recipe digest change for Iroh,
+Noq and Noq-proto introduced by the owner-approved test gate. Noq/Noq-proto tree,
+manifest, archive and version are unchanged. After mapping only those exact old
+and new source fingerprints for comparison, the remaining package removals are
+exactly the three established emoji-chain packages and registry multibase; the
+additions are the existing declared Yggdrasil closure and prepared multibase.
+
+The bounded source-contract repair freezes both sides' archive, tree, manifest
+and recipe digests in `baseline/backend_sources.py`. It validates the complete
+three-package transition before returning comparison copies for package keys and
+compiler-unit/dependency-owner identities. Original proof bindings and digests
+are never rewritten. A different source/version, missing/partial transition,
+forged binding or normal-context test gate is rejected. Feature equality and all
+other closure/edge/source guards remain active. CI-only synthetic controls cover
+the integrated comparison, non-mutation, drift of each fingerprint on both sides,
+partial transitions, unit-owner drift, feature growth and unchanged graphs. The
+normal/test feature separation and backend exact patch-reversal controls remain
+separate runtime CI obligations; no source is relabeled as unmodified.
+
+This is still a source-contract repair, not P10 acceptance. No Rust behavior,
+package/version/lock, preparation recipe, new download authority or CI segment is
+changed. Python is checked locally only for syntax; tests remain CI-only. The
+accepted fmt and offline locked normal/test clippy boundary must pass, followed
+by one personally reviewed repair commit and report before the next fork push.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;

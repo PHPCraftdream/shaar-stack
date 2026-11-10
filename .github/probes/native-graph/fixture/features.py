@@ -283,7 +283,8 @@ def _validate_n0future(proof, parsed, require_route=False):
 
 def _candidate_matches_control(parsed, unitsets):
     """Admit only the approved multibase transition and the declared Yggdrasil closure."""
-    from baseline import ygg_closure
+    from baseline import backend_sources, ygg_closure
+    parsed, unitsets = backend_sources.comparison_inputs(parsed, unitsets)
     cf, xf = parsed["approved_route"][4], parsed["candidate"][4]
     closure = ygg_closure.present(xf)
     if closure:

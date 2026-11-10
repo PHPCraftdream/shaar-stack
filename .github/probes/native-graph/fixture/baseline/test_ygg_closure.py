@@ -267,5 +267,112 @@ class WiringTests(unittest.TestCase):
             self.run_case(lambda tokio: [tokio, _form("evil")])
 
 
+class BackendSourceTests(unittest.TestCase):
+    def inputs(self):
+        from baseline import backend_sources as b
+        bindings = {}
+        feats = {}
+        units = {}
+        for side, role in (("old", "approved_route"), ("new", "candidate")):
+            bindings[role] = {}
+            feats[role] = {}
+            units[role] = []
+            for name, source in b.SOURCES.items():
+                key = b.key(name, side)
+                feats[role][key] = ()
+                bindings[role][name] = {
+                    "package": name, "version": "1.3.0", "identity": "prepared",
+                    "archive_sha256": source["archive"], "tree_sha256": source[side + "_tree"],
+                    "manifest_sha256": source[side + "_manifest"],
+                    "recipe_sha256": b.OLD_RECIPE if side == "old" else b.NEW_RECIPE,
+                }
+                unit = _form(name, "1.3.0")
+                unit["package"] = key
+                units[role].append(unit)
+            units[role].append(_form("shaar", "0.1.0", deps=(_dep("iroh", units[role][0]),)))
+        parsed = {}
+        for role, values in feats.items():
+            values.update(_control() if role == "approved_route" else _candidate())
+            fields = list(_parsed([], values))
+            fields[6] = bindings[role]
+            parsed[role] = tuple(fields)
+        return parsed, units
+
+    def test_exact_transition_is_wired_into_metadata_and_unit_comparison_without_mutation(self):
+        from baseline import backend_sources as b
+        parsed, units = self.inputs()
+        original = copy.deepcopy((parsed, units))
+        normalized, normalized_units = b.comparison_inputs(parsed, units)
+        self.assertEqual(normalized_units["candidate"], units["approved_route"])
+        self.assertEqual((parsed, units), original)
+        self.assertNotEqual(normalized["candidate"][4], parsed["candidate"][4])
+        features._candidate_matches_control(parsed, units)
+
+    def test_source_identity_drift_and_partial_transition_are_rejected(self):
+        from baseline import backend_sources as b
+        for name in b.SOURCES:
+            for field in ("version", "source", "missing", "unchanged"):
+                with self.subTest(name=name, field=field):
+                    parsed, units = self.inputs()
+                    values = parsed["candidate"][4]
+                    key = b.key(name, "new")
+                    value = values.pop(key)
+                    if field == "version":
+                        values[(name, "1.3.1", key[2])] = value
+                    elif field == "source":
+                        values[(name, key[1], key[2] + "-drift")] = value
+                    elif field == "unchanged":
+                        values[b.key(name, "old")] = value
+                    with self.assertRaisesRegex(AuditError, "backend source transition"):
+                        b.comparison_inputs(parsed, units)
+
+    def test_every_frozen_binding_field_is_checked_on_both_sides(self):
+        from baseline import backend_sources as b
+        for role in ("approved_route", "candidate"):
+            for name in b.SOURCES:
+                for field in ("identity", "version", "archive_sha256", "tree_sha256",
+                              "manifest_sha256", "recipe_sha256"):
+                    with self.subTest(role=role, name=name, field=field):
+                        parsed, units = self.inputs()
+                        parsed[role][6][name][field] = "forged"
+                        with self.assertRaisesRegex(AuditError, "backend source binding"):
+                            b.comparison_inputs(parsed, units)
+
+    def test_test_gate_and_other_feature_growth_are_not_normalized_away(self):
+        from baseline import backend_sources as b
+        for feature in ("shaar-native-gate", "unreviewed-feature"):
+            with self.subTest(feature=feature):
+                parsed, units = self.inputs()
+                parsed["candidate"][4][b.key("iroh", "new")] = (feature,)
+                with self.assertRaises(AuditError):
+                    features._candidate_matches_control(parsed, units)
+
+    def test_unit_source_and_feature_drift_are_not_normalized_away(self):
+        for field in ("package", "dependency", "features"):
+            with self.subTest(field=field):
+                parsed, units = self.inputs()
+                candidate = units["candidate"]
+                if field == "package":
+                    key = candidate[0]["package"]
+                    candidate[0]["package"] = key[:2] + (key[2] + "-drift",)
+                elif field == "dependency":
+                    owner = candidate[-1]["dependencies"][0]["unit"]
+                    key = owner["package"]
+                    owner["package"] = key[:2] + (key[2] + "-drift",)
+                else:
+                    candidate[0]["features"].append("unreviewed-feature")
+                with self.assertRaises(AuditError):
+                    features._candidate_matches_control(parsed, units)
+
+    def test_unchanged_graph_is_returned_without_copies(self):
+        from baseline import backend_sources as b
+        parsed, units = self.inputs()
+        parsed["candidate"] = parsed["approved_route"]
+        units["candidate"] = units["approved_route"]
+        same_parsed, same_units = b.comparison_inputs(parsed, units)
+        self.assertIs(same_parsed, parsed)
+        self.assertIs(same_units, units)
+
+
 if __name__ == "__main__":
     unittest.main()
