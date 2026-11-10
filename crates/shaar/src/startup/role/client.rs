@@ -562,10 +562,11 @@ async fn run_parts(
                 if parts.lease.is_some() && parts.workers.len() < MAX_FORWARDS => {
                 match accepted {
                     Ok((stream, _)) => {
-                        if let Some((_, link)) = parts.lease.as_ref() {
+                        if let Some((_kind, link)) = parts.lease.as_ref() {
                             let link = Arc::clone(link);
-                            // JoinSet cap enforced by the guard above.
                             parts.workers.spawn(async move { link.forward(stream).await });
+                            #[cfg(test)]
+                            emit(parts.events.as_ref(), RoleEvent::ForwardStarted(*_kind));
                         }
                     }
                     // Local accept hiccups never kill the client; the next
@@ -603,9 +604,8 @@ async fn run_parts(
     Ok(())
 }
 
-/// The OWNED close continuation: forward drain, owner close, restore, then
-/// the composition's canonical ordered close — never closing a live endpoint
-/// itself.
+/// Owns forward drain, owner close, restore and canonical ordered resource close.
+/// Never closes a live endpoint itself.
 async fn close_parts(mut parts: ClientParts) -> Result<(), StartupError> {
     let mut first_error = parts.outcome.take();
     // Abort+join workers; the first fatal error is kept, others logged; cancelled joins are self-induced shutdown.

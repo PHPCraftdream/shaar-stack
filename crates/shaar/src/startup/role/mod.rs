@@ -87,6 +87,8 @@ pub(crate) enum RoleEvent {
     },
     /// The client role switched its active route to native at this instant.
     NativeRouteActive(tokio::time::Instant),
+    /// The leased path actually handed to a newly spawned TCP forward worker.
+    ForwardStarted(PathKind),
 }
 
 /// Hard bound on recorded role events. Route switches can repeat without

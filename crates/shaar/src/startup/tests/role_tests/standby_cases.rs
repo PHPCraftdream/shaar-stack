@@ -534,7 +534,24 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
         let RoleEvent::NativeRouteActive(route_at) = native_route else {
             unreachable!("native route predicate selected native route event");
         };
-        let held_ms = u64::try_from(route_at.saturating_duration_since(accepted_at).as_millis())
+        let route_observations = client_log.snapshot();
+        let route_index = route_observations
+            .iter()
+            .position(|event| matches!(event, RoleEvent::NativeRouteActive(at) if *at == route_at))
+            .expect("the selected native route remains in the lossless observation log");
+        let stable_accepted_at = route_observations[..route_index]
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                RoleEvent::NativeOwner {
+                    observation: NativeObservation::Accepted { .. },
+                    observed_at,
+                } => Some(*observed_at),
+                _ => None,
+            })
+            .expect("the selected native session has a preceding genuine acceptance");
+        assert!(stable_accepted_at >= accepted_at);
+        let held_ms = u64::try_from(route_at.saturating_duration_since(stable_accepted_at).as_millis())
             .unwrap_or(u64::MAX);
         assert!(
             held_ms >= policy.stable_hold.saturating_sub(1),
@@ -567,6 +584,19 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
             _ = &mut record => panic!("signed record responder ended during final stream checks"),
         }
         assert_eq!(echo.count(), 2, "old Ygg and new native streams each reached target");
+        let forwarded_paths: Vec<_> = client_log
+            .snapshot()
+            .into_iter()
+            .filter_map(|event| match event {
+                RoleEvent::ForwardStarted(kind) => Some(kind),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            forwarded_paths,
+            [PathKind::Yggdrasil, PathKind::Native],
+            "actual worker leases, not route history, carry the two TCP streams"
+        );
         let admitted = server_log.snapshot();
         let ygg_index = admitted
             .iter()
