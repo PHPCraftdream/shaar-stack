@@ -1346,6 +1346,40 @@ failures and the complete available receipts were reviewed before this repair.
 Local fmt and offline locked normal/test clippy passed; runtime remains CI-only.
 One reviewed repair commit/report must precede the next fork push.
 
+CI `42915913841` on `c8b6d87` completed with Linux success and Windows
+failure, so the consecutive run failure streak is eight. Linux strict receipts
+confirm 371 SDK and two native graph witness cases passed. All three Linux CSVs
+contain 82 rows, 62 independently Native-eligible and 61 Native. Linux p95 is
+80,876,968 ns known startup, 99,338,821 ns cold startup and 9,029,498,840 ns
+all-IP failover. These are Linux-only historical-SHA observations, not two-OS
+or full P10 acceptance. Windows again selected 371 SDK cases, strictly verified
+the first 120, then executed 118 passes / one failure in the next 119-case batch;
+132 remained unexecuted. Its 40-row failover CSV has p95 9,057,522,300 ns but
+belongs to an unverified failed batch.
+
+The validated alternate-path positive now passed on Linux but Windows failed at
+TCP read with WSAECONNRESET 10054. The old helper did not retain the QUIC close
+reason, so the exact causal chain is not claimed experimentally established.
+Joint source review identifies a concrete transport configuration race consistent
+with that loss: connection idle and path idle are both five seconds. Pinned Noq
+kills the entire connection on ConnTimer::Idle but only abandons a lost path on
+PathTimer::PathIdle. Equal deadlines provide no interval to retire a silent path
+and use a validated backup before the whole connection expires.
+
+The bounded production repair keeps connection idle at five seconds and path
+keepalive at two, but retires a silent path at four seconds. A compile-time
+invariant requires nominal path idle to precede connection idle. The RFC three-PTO
+floor and Noq LastOpenPath behavior are unchanged; full all-IP loss still has the
+same global five-second bound and original outage clock, trial count and payload
+threshold. This does not assert universal behavior under arbitrary RTT/PTO.
+The unchanged partial-proxy regression exercises real alternate-path payload;
+its reset is neither ignored nor retried. The echo helper additionally reports
+the actual QUIC close reason on a read failure without suppressing the error.
+No identity/admission, retry/stable-hold policy, source recipe, package/version/lock
+or CI segment changes. Formatting and offline locked normal/test clippy passed;
+no local Rust tests ran. One reviewed repair commit/report precedes the next fork
+push, and the new mechanism still requires both-OS runtime confirmation.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;

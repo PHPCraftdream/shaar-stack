@@ -206,7 +206,12 @@ pub(super) async fn forward_exact(session: &Session, payload: &[u8]) -> ForwardS
     };
     let reading = async {
         let mut bytes = Vec::new();
-        read.read_to_end(&mut bytes).await.expect("app reads");
+        read.read_to_end(&mut bytes).await.unwrap_or_else(|error| {
+            panic!(
+                "app reads: {error:?}; connection close={:?}",
+                session.connection.close_reason()
+            )
+        });
         assert_eq!(bytes.as_slice(), payload);
     };
     let (stats, (), ()) = tokio::join!(session.forward(bridge), writing, reading);
