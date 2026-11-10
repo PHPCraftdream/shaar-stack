@@ -632,6 +632,17 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
         probe_claim_free(RESTORE_CLIENT, "Task32 client key released").await;
         probe_claim_free(RESTORE_TRANSIT, "Task32 transit key released").await;
         eprintln!("Task32 phase: all fixtures joined and key claims released");
+        assert!(admitted.iter().any(|event| matches!(event, RoleEvent::NativeBound(_))),
+            "native socket was independently retained during discovery unavailability");
+        let rows = format!(
+            "connection,phase,native_available,path\n1,fallback_stream,true,{:?}\n2,recovered_stream,true,{:?}\n",
+            forwarded_paths[0], forwarded_paths[1],
+        );
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors().nth(2).expect("workspace root").join("target/ci-selected");
+        tokio::fs::create_dir_all(&directory).await.expect("receipt directory");
+        tokio::fs::write(directory.join("p10-long-outage-paths.csv"), rows).await
+            .expect("both real stream leases retained, including adverse Ygg sample");
     })
     .await
     .expect("Task32 real I/O recovery within derived policy and fixture bounds");

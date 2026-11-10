@@ -3,8 +3,10 @@
 #![forbid(unsafe_code)]
 //! Real-transport fixture for the standby path owner: a native and a Yggdrasil
 //! route to one server, counted dialers, an echo target and exact-forward helpers.
-//! Seeds of this module stay inside 0xC1..0xC9; every task is owned and joined.
+//! Existing cases use 0xC1..0xC9; the packet-loss campaign owns 0xCD/0xCE.
+//! Every task is owned and joined.
 
+mod block;
 mod denial;
 mod forwarding;
 mod outage;

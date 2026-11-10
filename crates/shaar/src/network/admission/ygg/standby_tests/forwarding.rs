@@ -404,3 +404,79 @@ async fn signal_mode_negotiates_through_ygg_but_never_forwards_payload_through_i
     .await
     .expect("signal_mode_negotiates_through_ygg_but_never_forwards_payload_through_it deadline");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn silent_native_packet_loss_measures_twenty_first_byte_failovers() {
+    use super::block::NativeGate;
+    use std::fmt::Write as _;
+
+    timeout(Duration::from_secs(600), async {
+        let (server_id, client_id) = (identity(0xCD), identity(0xCE));
+        let client_key = client_id.transport_key().public();
+        let (server_bridge, client_bridge, port) = ygg_pair(0xCD, 0xCE).await;
+        let mut target = Target::start().await;
+        let mut samples = [Duration::MAX; 20];
+        let mut rows = String::with_capacity(8192);
+        rows.push_str("trial,phase,native_available,path,failover_ns\n");
+        for (trial, sample) in samples.iter_mut().enumerate() {
+            let (native_server, server_addr, _) = NativeServer::start(
+                &server_id, "127.0.0.1:0".parse().expect("loopback"), &[client_key], target.addr,
+            ).await;
+            let gate = NativeGate::start(server_addr).await;
+            let Client { mut owner, probe, native_addr: client_addr, .. } = client(
+                &client_id, &server_id, gate.address, &client_bridge,
+                Mode::Standby, PolicyConfig::default(),
+            ).await;
+            assert_eq!(owner.follow().await, Ok(PathKind::Native));
+            let native = native_lease(&owner);
+            let (_, (ordinal, byte, _)) = tokio::join!(forward_exact(&native, b"n"), target.first_byte());
+            assert_eq!((ordinal, byte), (trial * 2 + 1, b'n'));
+            native_only(&native);
+            assert!(native.connection.paths().iter().all(|path|
+                matches!(path.remote_addr(), iroh_base::TransportAddr::Ip(address) if *address == gate.address)
+            ), "every native path must pass through the controlled gate");
+            drop(native);
+            target.wait_closed(trial * 2 + 1).await;
+            writeln!(rows, "{trial},healthy,true,Native,0").expect("String formatting");
+            let ygg_server = ygg_server(&server_id, &client_id, &server_bridge, target.addr).await;
+            // Silent bidirectional packet loss, not an announced endpoint close.
+            let blocked_at = gate.block();
+            let followed = timeout(Duration::from_secs(30), owner.follow()).await;
+            if matches!(followed, Ok(Ok(PathKind::Yggdrasil))) {
+                let ygg = ygg_lease(&owner);
+                let (ordinal, byte, at) = timeout(Duration::from_secs(30), async {
+                    let (_, first) = tokio::join!(forward_exact(&ygg, b"y"), target.first_byte());
+                    first
+                }).await.expect("new Ygg TCP reaches the actual target");
+                assert_eq!((ordinal, byte), (trial * 2 + 2, b'y'));
+                *sample = at.checked_duration_since(blocked_at).expect("same monotonic clock");
+                writeln!(rows, "{trial},blocked,false,Yggdrasil,{}", sample.as_nanos()).expect("String formatting");
+                drop(ygg);
+                target.wait_closed(trial * 2 + 2).await;
+            }
+            eprintln!("P10 failover trial={trial} silent_drop=true outcome={followed:?} first_target_byte={sample:?}");
+            owner.close().await.expect("measured owner closes");
+            let native_summary = native_server.stop().await;
+            let ygg_summary = ygg_server.stop().await;
+            let (passed, dropped) = gate.stop().await;
+            native_released(&[server_addr, client_addr]).await;
+            assert!(native_summary.accepted >= 1);
+            assert!(passed > 0 && dropped > 0, "real traffic passed before and was dropped after blocking");
+            assert!(matches!(followed, Ok(Ok(PathKind::Yggdrasil))), "silent loss did not fail over: {followed:?}");
+            assert!(ygg_summary.accepted >= 1);
+            assert_eq!(probe.slots.available_permits(), SLOTS);
+        }
+        target.stop().await;
+        client_bridge.close().await.expect("client bridge joins");
+        server_bridge.close().await.expect("server bridge joins");
+        ygg_released(0xCD, port).await;
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors().nth(2).expect("workspace root").join("target/ci-selected");
+        assert!(rows.len() <= 8192);
+        tokio::fs::create_dir_all(&directory).await.expect("receipt directory");
+        tokio::fs::write(directory.join("p10-failover-samples.csv"), rows).await.expect("all phase rows retained");
+        samples.sort_unstable();
+        eprintln!("P10 silent-loss failover samples=20 nearest_rank_p95={:?}", samples[18]);
+        assert!(samples[18] <= Duration::from_secs(10), "silent-loss first-byte p95 exceeds 10 s: {samples:?}");
+    }).await.expect("fixed-size packet-loss campaign stays bounded");
+}

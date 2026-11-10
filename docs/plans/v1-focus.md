@@ -1049,6 +1049,52 @@ Startup-only direct share is reported separately: long-outage availability phase
 and final combined direct-share acceptance remain open, not excluded by this
 slice. Owners are joined before evaluating aggregate thresholds.
 
+Startup evidence is accepted at `e2ba2ce`, CI `42859609959`: 55 identical
+selected = executed = passed product cases per OS, zero ignored, and 40 unique
+CSV rows per OS. Independently recomputed nearest-rank p95: Linux known
+86,105,721 ns / cold 107,289,695 ns; Windows known 100,202,700 ns / cold
+128,831,300 ns. All 40 startup connections on each OS used Native. This is not
+combined campaign or full P10 acceptance. Earlier `cdaca7f` CI failed because
+the verifier rejected libtest's legitimate 60-second progress notice, despite
+54 successful test events per OS. `7307f04` repaired that strict parser, but its
+CSV was crate-local and absent from uploaded evidence; the workspace-path
+regression in `e2ba2ce` closes that custody gap without changing thresholds.
+
+The next failover slice schedules 20 trials through the existing real standby
+fixture, with default policy. A one-client loopback UDP gate first passes the
+real native handshake and payload, then silently drops datagrams in BOTH
+directions while both endpoints stay open. Two fixed UDP buffers, one pinned
+client/upstream pair and one joined task bound the gate; it is not an OS/public
+packet-filter test or an arbitrary relay. Timer origin is activation of silent
+loss, not a later loss callback or Ygg-ready event; completion is the target's
+first successful byte read on a new Ygg TCP forward. Each trial retains its
+healthy Native and blocked Ygg phase, and proves packets actually passed and
+were dropped. Twenty observations use the same nineteenth-order p95, at most
+10 s. Endpoint shutdown alone does not prove this silent-loss criterion.
+Source preflight found the pinned path-idle default is 15 s (connection idle
+30 s), already longer than this budget. The native endpoint now bounds negotiated
+path idle at 6 s with a 2 s per-path keepalive, leaving default 2 s policy grace
+and payload headroom. Connection idle and the 10 s handshake deadline remain
+unchanged: Noq arms the path-idle timer only after multipath negotiation. The
+trade-off is more idle path control packets (2 s rather than 5 s), still bounded
+per retained path; no APP is admitted on signaling. Kernel and fixture commits
+remain separate. Before full acceptance, also prove loss of the last Native
+payload path while a custom signaling path still keeps the connection alive;
+the direct-only fixture does not discharge this additional source-review gap.
+
+The combined connection ledger is declared before execution: 40 startup
+connections, two existing default-budget long-outage connections, and 40
+failover-phase connections (82 total). Native availability is independently
+true for all startup connections, BOTH long-outage connections (only discovery
+is withheld), and 20 pre-drop Native connections. It is false only for the 20
+explicitly packet-blocked phases, which still remain in the ledger. Thus 62
+connections are eligible; the original Ygg connection during long discovery
+outage remains an adverse eligible sample. Repeated writes on that same held
+stream are not new connections. Accept at least 95% Native among all eligible
+connections only after all three CSV ledgers, real case receipts and joined
+cleanup are verified on the same SHA. None of these next-slice obligations is
+claimed executed yet; long-outage duration and ordinary retry budget are unchanged.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;
