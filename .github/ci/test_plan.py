@@ -1,9 +1,12 @@
 """CI-only regressions for fine-grained ownership, Git comparison and full triggers."""
 
+import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -530,6 +533,148 @@ class GitTests(unittest.TestCase):
         self.assertTrue(full["selection"]["full"])
         with self.assertRaises(ValueError):
             PLAN.plan("workflow_dispatch", {"inputs": {"scope": "typo"}}, head)
+
+
+class ControlTransportTests(unittest.TestCase):
+    base = "79e36e2aa77b0aa669dc58d91318427edce5db71"
+    head = "dd2da363b7d7552ceaf3c25076aac18132fd3cbe"
+
+    root = Path(__file__).resolve().parents[2]
+
+    def tranche(self):
+        raw = subprocess.check_output(
+            ["git", "diff", "--no-renames", "--name-only", "-z", self.base, self.head], cwd=self.root)
+        paths = [path for path in raw.decode("utf-8").split("\0") if path]
+        result = POLICY.select(paths)
+        result.update(scope="targeted", event="push", base=self.base, head=self.head,
+                      checkout=self.head, trigger="diff")
+        return result
+
+    def test_authentic_tranche_preserves_receipt_and_bounds_control_transport(self):
+        result = self.tranche()
+        self.assertEqual(len(result["reasons"]), 897)
+        self.assertEqual(result["targets"], [])
+        self.assertTrue(result["selection"]["license"])
+        self.assertFalse(result["selection"]["mainline"])
+        self.assertFalse(result["selection"]["full"])
+        compact = json.dumps(result, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        receipt = (json.dumps(result, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
+        self.assertEqual(len(compact), 156718)
+        self.assertEqual(len(receipt), 194579)
+        self.assertEqual(hashlib.sha256(receipt).hexdigest(),
+                         "a5ae366781fad60d86dddcbd66e6920c1bcdbb36fad3f859da0445b707659d01")
+
+        _, _, _, control = PLAN.serialize_outputs(result, self.head)
+        expanded = dict(result)
+        expanded["reasons"] = result["reasons"] + [{"path": "extra-source", "suites": ["license"]}]
+        self.assertEqual(PLAN.serialize_outputs(expanded, self.head)[3], control)
+
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            os.chdir(directory)
+            try:
+                event_path = Path(directory) / "event.json"
+                output_path = Path(directory) / "output"
+                summary_path = Path(directory) / "summary"
+                event_path.write_text("{}", encoding="utf-8")
+                with patch.dict(os.environ, {
+                        "GITHUB_EVENT_PATH": str(event_path), "GITHUB_EVENT_NAME": "push",
+                        "GITHUB_SHA": self.head, "GITHUB_OUTPUT": str(output_path),
+                        "GITHUB_STEP_SUMMARY": str(summary_path)}), \
+                        patch.object(PLAN, "plan", return_value=result), patch("builtins.print"):
+                    PLAN.main()
+                receipt_path = Path(directory) / "ci-plan.json"
+                self.assertEqual(receipt_path.read_bytes(), receipt)
+                self.assertEqual(json.loads(receipt_path.read_text(encoding="utf-8")), result)
+                output = dict(line.split("=", 1) for line in output_path.read_text(encoding="utf-8").splitlines())
+            finally:
+                os.chdir(old)
+
+        self.assertEqual(json.loads(output["selection"]), result["selection"])
+        self.assertEqual(json.loads(output["targets"]), result["targets"])
+        control_raw = output[PLAN.CONTROL_OUTPUT].encode("utf-8")
+        control_value = json.loads(control_raw)
+        self.assertEqual(control_value, {key: result[key] for key in PLAN.CONTROL_KEYS})
+        self.assertNotIn("reasons", control_value)
+        self.assertLessEqual(len(control_raw), PLAN.CONTROL_LIMIT)
+        child = subprocess.run(
+            [sys.executable, "-I", "-c",
+             "import json,os; c=json.loads(os.environ['CI_PLAN_JSON']); "
+             "print(json.dumps([c[k] for k in ('scope','head','base','checkout')]))"],
+            env=dict(os.environ, CI_PLAN_JSON=control_raw.decode("utf-8")),
+            capture_output=True, text=True, check=False)
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(json.loads(child.stdout), ["targeted", self.head, self.base, self.head])
+
+    def test_control_rejects_missing_malformed_mismatched_and_oversized_inputs(self):
+        original = self.tranche()
+        mutations = []
+        missing = dict(original)
+        del missing["base"]
+        mutations.append(missing)
+        missing_selection = dict(original)
+        del missing_selection["selection"]
+        mutations.append(missing_selection)
+        malformed_boolean = dict(original, selection=dict(original["selection"]))
+        malformed_boolean["selection"]["license"] = 1
+        mutations.append(malformed_boolean)
+        unknown_selection = dict(original, selection=dict(original["selection"]))
+        unknown_selection["selection"]["unknown"] = False
+        mutations.append(unknown_selection)
+        mutations.append(None)
+        malformed_selection = dict(original, selection=None)
+        mutations.append(malformed_selection)
+        scope_mismatch = dict(original, scope="full")
+        mutations.append(scope_mismatch)
+        malformed = dict(original, head="z" * 40)
+        mutations.append(malformed)
+        zero_head = dict(original, head="0" * 40)
+        mutations.append(zero_head)
+        bad_base = dict(original, base="z" * 40)
+        mutations.append(bad_base)
+        null_base = dict(original, base=None)
+        mutations.append(null_base)
+        checkout_mismatch = dict(original, checkout="a" * 40)
+        mutations.append(checkout_mismatch)
+        with tempfile.TemporaryDirectory() as directory:
+            for index, result in enumerate(mutations):
+                receipt = Path(directory) / (str(index) + ".json")
+                output = Path(directory) / (str(index) + ".output")
+                summary = Path(directory) / (str(index) + ".summary")
+                with self.subTest(index=index), self.assertRaises(ValueError):
+                    PLAN.write_outputs(result, self.head, receipt, output, summary)
+                self.assertFalse(receipt.exists())
+                self.assertFalse(output.exists())
+                self.assertFalse(summary.exists())
+        with patch.object(PLAN, "CONTROL_LIMIT", 1):
+            with self.assertRaisesRegex(ValueError, "bounded transport"):
+                PLAN.serialize_outputs(original, self.head)
+
+    def test_full_control_accepts_null_base_and_distinct_pull_request_head(self):
+        result = POLICY.select([], full=True)
+        pr_head = "a" * 40
+        result.update(scope="full", event="pull_request", base=None, head=pr_head,
+                      checkout=self.head, trigger="commit-marker")
+        _, selection, _, control = PLAN.serialize_outputs(result, self.head)
+        self.assertTrue(json.loads(selection)["full"])
+        value = json.loads(control)
+        self.assertEqual(value, {key: result[key] for key in PLAN.CONTROL_KEYS})
+        self.assertNotEqual(value["head"], value["checkout"])
+
+    def test_mainline_and_publication_controls_preserve_policy_selection(self):
+        for path, domain in (
+                (".github/scripts/p2p/discovery/mainline/checks.py", "mainline"),
+                (".github/scripts/p2p/discovery/mainline/ci/publication/prepare.py", "publication")):
+            with self.subTest(domain=domain):
+                result = POLICY.select([path])
+                self.assertTrue(result["selection"][domain])
+                result.update(scope="targeted", event="push", base=self.base, head=self.head,
+                              checkout=self.head, trigger="diff")
+                _, _, _, control = PLAN.serialize_outputs(result, self.head)
+                value = json.loads(control)
+                self.assertEqual(value["selection"], result["selection"])
+                self.assertEqual((value["scope"], value["head"], value["base"], value["checkout"]),
+                                 ("targeted", self.head, self.base, self.head))
 
 
 if __name__ == "__main__":
