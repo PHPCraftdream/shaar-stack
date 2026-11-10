@@ -446,10 +446,10 @@ async fn native_loss_is_observed_while_the_same_signaling_connection_stays_alive
         );
         let mut sent = Frames::new(&control);
         let mut received = Frames::new(&accepted);
-        let gate = super::ygg::NativeGate::start(native[1]).await;
+        let gate = client.native_packet_gate();
         control
             .connection
-            .ensure_native_path(gate.address)
+            .ensure_native_path(native[1])
             .await
             .expect("native path added to SAME connection");
         let payload = b"native-path-positive";
@@ -493,15 +493,16 @@ async fn native_loss_is_observed_while_the_same_signaling_connection_stays_alive
         let describe = || control.connection.paths().iter().map(|path| {
             (path.remote_addr().clone(), path.is_selected(), path.rtt(), path.stats().frame_rx.ping)
         }).collect::<Vec<_>>();
-        eprintln!("P10 control pre-block gate={} upstream={} paths={:?}", gate.address, native[1], describe());
-        assert!(control.connection.paths().iter().filter(|path| path.is_ip()).all(|path|
-            matches!(path.remote_addr(), iroh_base::TransportAddr::Ip(address) if *address == gate.address)
-        ), "the control connection has an ungated Native path");
-        let blocked_at = gate.block();
+        eprintln!("P10 control pre-block endpoint_ip_gate=true paths={:?}", describe());
+        assert!(control.connection.paths().iter().any(|path| path.is_ip()), "Native positive requires an open IP path");
+        let allowed = gate.counts();
+        assert!(allowed[0] > 0 && allowed[1] > 0);
+        let blocked_at = Instant::now();
+        gate.set_blocked(true);
         let loss = timeout(Duration::from_secs(9), control.native_lost()).await;
         if loss.is_err() {
-            eprintln!("P10 control loss timeout elapsed={:?} gate={} upstream={} close={:?} custom_pings_before={before} after={} paths={:?}",
-                blocked_at.elapsed(), gate.address, native[1], control.connection.close_reason(), custom_pings(&control), describe());
+            eprintln!("P10 control loss timeout elapsed={:?} endpoint_ip_gate=true close={:?} custom_pings_before={before} after={} paths={:?} counts={:?}",
+                blocked_at.elapsed(), control.connection.close_reason(), custom_pings(&control), describe(), gate.counts());
         }
         loss.expect("actual native-path loss is observable without connection closure");
         assert!(blocked_at.elapsed() <= Duration::from_secs(9));
@@ -518,8 +519,8 @@ async fn native_loss_is_observed_while_the_same_signaling_connection_stays_alive
             .expect("loss is level-triggered");
         sent.checkpoint(&control);
         received.checkpoint(&accepted);
-        let (passed, dropped) = gate.stop().await;
-        assert!(passed > 0 && dropped > 0);
+        let counts = gate.counts();
+        assert!(counts[2] > 0 && counts[3] > 0, "real Native packets were dropped in BOTH directions");
         control.close();
         accepted.close();
         let (left, right) = tokio::join!(client.close(), server.close());

@@ -31,9 +31,10 @@ pub(crate) mod negotiation_frames;
 mod negotiation_tests;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-// Bound silent peer/path loss with room for the default 2 s policy grace.
+// First post-RX eliciting send can reset idle within the 2 s keepalive.
+// 5 s idle + 2 s keepalive + default 2 s grace leaves payload headroom.
 // The SDK handshake limit stays 10 s; backend idle timeout can expire first.
-const NATIVE_IDLE_TIMEOUT_MS: u32 = 6_000;
+const NATIVE_IDLE_TIMEOUT_MS: u32 = 5_000;
 const NATIVE_PATH_KEEPALIVE: Duration = Duration::from_secs(2);
 
 /// A single native socket and immutable admission policy. Not Clone.
@@ -153,6 +154,11 @@ impl Endpoint {
 
     pub fn local_addr(&self) -> SocketAddr {
         self.address
+    }
+
+    #[cfg(test)]
+    pub(crate) fn native_packet_gate(&self) -> Arc<iroh::endpoint::NativePacketGate> {
+        self.inner.native_packet_gate()
     }
 
     pub(crate) fn native_addr_watcher(&self) -> impl iroh::Watcher<Value = EndpointAddr> + use<> {

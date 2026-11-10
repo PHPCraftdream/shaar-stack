@@ -1,4 +1,4 @@
-"""Exact Noq 1.3.0 async raw-ingress admission; control delivery stays unchanged."""
+"""Reviewed backend transforms and the explicitly enabled SDK-test Native IP fault seam."""
 from pathlib import Path
 
 from policy import replace
@@ -266,3 +266,151 @@ def native_cid_events(root: Path):
                    "Path(evt @ PathEvent::RemoteStatus { .. }) => {",
                    "Path(evt @ (PathEvent::RemoteStatus { .. } | PathEvent::RemoteCidsAvailable { .. })) => {")
     path.write_text(text, encoding="utf-8", newline="\n")
+
+
+NATIVE_GATE_FEATURE = "shaar-native-gate"
+NATIVE_GATE_MODULE = '''// Copyright 2026 PHPCraftdream
+// SPDX-License-Identifier: MIT OR Apache-2.0
+#![forbid(unsafe_code)]
+//! Explicitly enabled SDK-test packet loss; absent from default production builds.
+
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+/// Endpoint-scoped Native IP fault injection, including discovered alternate routes.
+#[derive(Debug, Default)]
+pub struct NativePacketGate {
+    blocked: AtomicBool,
+    tx_allowed: AtomicU64,
+    rx_allowed: AtomicU64,
+    tx_dropped: AtomicU64,
+    rx_dropped: AtomicU64,
+}
+
+impl NativePacketGate {
+    /// Enables or disables silent Native IP loss; never affects Custom or Relay.
+    pub fn set_blocked(&self, blocked: bool) {
+        self.blocked.store(blocked, Ordering::SeqCst);
+    }
+
+    /// Returns allowed TX/RX attempts and dropped TX/RX datagrams, in that order.
+    /// Allowed TX counts are not claimed to be successfully delivered packets.
+    pub fn counts(&self) -> [u64; 4] {
+        [self.tx_allowed.load(Ordering::Relaxed), self.rx_allowed.load(Ordering::Relaxed),
+         self.tx_dropped.load(Ordering::Relaxed), self.rx_dropped.load(Ordering::Relaxed)]
+    }
+
+    pub(crate) fn drop_tx(&self, count: usize) -> bool {
+        self.record(count, &self.tx_allowed, &self.tx_dropped)
+    }
+
+    pub(crate) fn drop_rx(&self, count: usize) -> bool {
+        self.record(count, &self.rx_allowed, &self.rx_dropped)
+    }
+
+    fn record(&self, count: usize, allowed: &AtomicU64, dropped: &AtomicU64) -> bool {
+        let blocked = self.blocked.load(Ordering::SeqCst);
+        let counter = if blocked { dropped } else { allowed };
+        let count = u64::try_from(count).expect("bounded datagram batch fits u64");
+        let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed,
+            |old| Some(old.saturating_add(count)));
+        blocked
+    }
+}
+'''
+
+NATIVE_GATE_SWAPS = {
+    "Cargo.toml": [("[features]\n", '[features]\nshaar-native-gate = []\n')],
+    "src/endpoint.rs": [("impl Endpoint {", '''#[cfg(feature = "shaar-native-gate")]
+pub use crate::socket::native_gate::NativePacketGate;
+
+impl Endpoint {
+    /// Returns the endpoint-wide SDK-test IP packet gate.
+    /// This API and its packet-hot-path checks do not exist unless explicitly enabled.
+    #[cfg(feature = "shaar-native-gate")]
+    pub fn native_packet_gate(&self) -> Arc<NativePacketGate> {
+        self.inner.native_packet_gate.clone()
+    }
+''')],
+    "src/socket.rs": [
+        ("pub(crate) mod transports;", '''pub(crate) mod transports;
+#[cfg(feature = "shaar-native-gate")]
+pub(crate) mod native_gate;'''),
+        ("pub(crate) struct Socket {", '''pub(crate) struct Socket {
+    #[cfg(feature = "shaar-native-gate")]
+    pub(crate) native_packet_gate: Arc<crate::endpoint::NativePacketGate>,'''),
+        ("        let sock = Arc::new(Socket {", '''        let sock = Arc::new(Socket {
+            #[cfg(feature = "shaar-native-gate")]
+            native_packet_gate: transports.native_packet_gate.clone(),'''),
+        ('''            self.metrics
+                .socket
+                .recv_datagrams''', '''            #[cfg(feature = "shaar-native-gate")]
+            if matches!(remote_addr, transports::Addr::Ip(_))
+                && self.native_packet_gate.drop_rx(datagram_count)
+            {
+                noq_meta.len = 0;
+                continue;
+            }
+            self.metrics
+                .socket
+                .recv_datagrams'''),
+    ],
+    "src/socket/transports.rs": [
+        ("pub(crate) struct Transports {", '''pub(crate) struct Transports {
+    #[cfg(feature = "shaar-native-gate")]
+    pub(super) native_packet_gate: Arc<crate::endpoint::NativePacketGate>,'''),
+        ('''        Ok(Self {
+            #[cfg(not(wasm_browser))]
+            ip,
+            relay,
+            custom,
+            poll_recv_counter:''', '''        Ok(Self {
+            #[cfg(feature = "shaar-native-gate")]
+            native_packet_gate: Arc::new(Default::default()),
+            #[cfg(not(wasm_browser))]
+            ip,
+            relay,
+            custom,
+            poll_recv_counter:'''),
+        ('''        TransportsSender {
+            #[cfg(not(wasm_browser))]
+            ip,''', '''        TransportsSender {
+            #[cfg(feature = "shaar-native-gate")]
+            native_packet_gate: self.native_packet_gate.clone(),
+            #[cfg(not(wasm_browser))]
+            ip,'''),
+        ("pub(crate) struct TransportsSender {", '''pub(crate) struct TransportsSender {
+    #[cfg(feature = "shaar-native-gate")]
+    native_packet_gate: Arc<crate::endpoint::NativePacketGate>,'''),
+        ('''        match network_path {
+            #[cfg(wasm_browser)]''', '''        #[cfg(feature = "shaar-native-gate")]
+        if network_path.is_ip() && self.native_packet_gate.drop_tx(transmit.datagram_count()) {
+            return Poll::Ready(Ok(()));
+        }
+        match network_path {
+            #[cfg(wasm_browser)]'''),
+    ],
+}
+
+
+def native_gate_text(relative: str, text: str, *, reverse: bool = False) -> str:
+    swaps = NATIVE_GATE_SWAPS.get(relative, ())
+    for old, new in reversed(swaps) if reverse else swaps:
+        text = replace(text, new if reverse else old, old if reverse else new)
+    return text
+
+
+def native_packet_gate(root: Path):
+    module = root / "src/socket/native_gate.rs"
+    if module.exists():
+        raise ValueError("unexpected existing SDK-test native packet gate")
+    # Validate every exact-count edit and its reversal before writing any source.
+    transformed = {}
+    for relative in NATIVE_GATE_SWAPS:
+        before = (root / relative).read_text(encoding="utf-8")
+        after = native_gate_text(relative, before)
+        if native_gate_text(relative, after, reverse=True) != before:
+            raise ValueError("SDK-test native packet gate reversal mismatch")
+        transformed[relative] = after
+    for relative, text in transformed.items():
+        (root / relative).write_text(text, encoding="utf-8", newline="\n")
+    module.write_text(NATIVE_GATE_MODULE, encoding="utf-8", newline="\n")

@@ -689,10 +689,11 @@ class GraphTests(unittest.TestCase):
         data["resolve"]["nodes"] = [node for node in data["resolve"]["nodes"] if node["id"] != "consumer"]
         with self.assertRaises(ValueError):
             graph.audit_normal_metadata(data, Path("/generated"), normal_consumer=True)
-        data = self.metadata()
-        next(node for node in data["resolve"]["nodes"] if node["id"] == "tokio")["features"].append("test-util")
-        with self.assertRaisesRegex(ValueError, "test-util"):
-            graph.audit_normal_metadata(data, Path("/generated"), normal_consumer=True)
+        for package, feature in (("tokio", "test-util"), ("iroh", "shaar-native-gate")):
+            data = self.metadata()
+            next(node for node in data["resolve"]["nodes"] if node["id"] == package)["features"].append(feature)
+            with self.assertRaisesRegex(ValueError, feature):
+                graph.audit_normal_metadata(data, Path("/generated"), normal_consumer=True)
 
 
 if __name__ == "__main__":

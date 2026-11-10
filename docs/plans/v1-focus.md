@@ -1060,12 +1060,16 @@ the verifier rejected libtest's legitimate 60-second progress notice, despite
 CSV was crate-local and absent from uploaded evidence; the workspace-path
 regression in `e2ba2ce` closes that custody gap without changing thresholds.
 
-The next failover slice schedules 20 trials through the existing real standby
-fixture, with default policy. A one-client loopback UDP gate first passes the
-real native handshake and payload, then silently drops datagrams in BOTH
-directions while both endpoints stay open. Two fixed UDP buffers, one pinned
-client/upstream pair and one joined task bound the gate; it is not an OS/public
-packet-filter test or an arbitrary relay. Timer origin is activation of silent
+The failover slice schedules 20 trials through the existing real standby
+fixture, with default policy. Its original one-address UDP proxy did not cover
+alternate Native routes; the consolidated repair below replaces that premise
+with an endpoint-wide, SDK-test-feature-only Native IP packet gate. The real
+native handshake and payload first pass; Native IP datagrams in BOTH directions
+are then silently dropped while both endpoints stay open. One endpoint-scoped
+atomic gate covers every native transport sender and IP receive, including
+cached reconnects and discovered alternate addresses. It creates no socket,
+queue or task, and is absent from default production builds. This is not an
+OS/public packet-filter test or an arbitrary relay. Timer origin is activation of silent
 loss, not a later loss callback or Ygg-ready event; completion is the target's
 first successful byte read on a new Ygg TCP forward. Each trial retains its
 healthy Native and blocked Ygg phase, and proves packets actually passed and
@@ -1081,8 +1085,9 @@ then found Noq refuses a local idle abandonment of the LAST open path with
 `LastOpenPath`; awaiting connection closure cannot solve both all-silent loss
 and Native-only loss while signaling survives.
 
-The repair bounds connection AND path idle at 6 s, with a 2 s per-path
-keepalive, leaving default 2 s policy grace and payload headroom. The SDK
+The earlier repair set connection AND path idle to 6 s, with a 2 s per-path
+keepalive. The consolidated budget correction below also accounts for first-send
+idle reset, rather than assuming that path-idle alone establishes payload headroom. The SDK
 handshake limit remains an upper bound of 10 s; backend idle may expire earlier,
 and actual backend timeout errors map to the existing typed `Deadline` result.
 Access denial/capacity and other transport failures remain distinct. A private
@@ -1124,6 +1129,84 @@ RTT, control progress and closure state, and rejects an ungated Native path
 instead of assuming that one proxy blocks every possible route. Thresholds,
 sample count and outage duration are not relaxed. Failure streak is two; a third
 failure requires the consolidated-review stop before further CI pushes.
+
+### Consolidated review after three failures (#48)
+
+CI `42874429666` on `5b8a956` is the third consecutive failure. Each OS selected
+370 SDK cases: 239 actual passes, two failures and 129 NOT executed, with only
+the first 120-case batch receipt-verified. No point-fix push or rerun followed.
+Actual traces conclusively show the scope error: a Native retry around eight
+seconds uses the real upstream UDP address, bypassing the proxy. The signaling
+connection also gains a real upstream Native path and continues receiving fresh
+Custom control. Selecting Native or waiting for its loss was correct product
+behavior while that alternate route remained usable. Forcing Ygg or fabricating
+dial refusal would contradict the north star.
+
+The review covers the earlier seed collision, Noq `LastOpenPath` behavior,
+connection-versus-payload liveness, same-kind generation progress, closed-path
+frame evidence, complete batch selection, feature contexts, source provenance,
+formatting and resource bounds together. Noq's packet builder can reset idle
+on the first post-RX ack-eliciting send. A 2 s keepalive plus 6 s idle plus 2 s
+policy grace leaves no payload margin. The consolidated repair therefore uses
+5 s connection/path idle: nominally 2 + 5 + 2 = 9 s before payload, leaving
+headroom inside the unchanged 10 s measured p95. Noq's RFC 3*PTO floor is not
+weakened; actual CI timestamps, not this nominal calculation, remain acceptance.
+The handshake upper bound stays 10 s with typed earlier backend timeout. No
+retry budget, stable hold, controlled outage duration or threshold is reduced.
+Existing before-connect hooks cannot
+simulate packet loss; disabling NAT traversal is neither used nor smuggled into
+the fixture. A one-address proxy cannot establish endpoint-wide unavailability.
+
+The owner explicitly approved one narrow source-contract exception, recorded
+in north-star. The single consolidated repair adds a separate empty
+`shaar-native-gate` feature to the SAME pinned Iroh package and enables it only
+through the SDK dev dependency. Normal product graph checks reject its presence.
+SDK gate accessors exist only under `cfg(test)`. No package, version, lock,
+download budget, root permission, public target or production runtime option
+changes. Source presence is disclosed: backend provenance reports optional test
+instrumentation, the disabled default and the owned module hash, rather than
+continuing to claim an unmodified source.
+
+The gate is endpoint-scoped and shared by all transport sender clones. Filtering
+occurs at final `TransportsSender::poll_send`, after Mixed-address resolution,
+and at typed Native-IP ingress before Noq dispatch. Thus alternative addresses,
+IPv4/IPv6, address discovery and cached reconnects cannot bypass it. Custom and
+Relay transport variants are not filtered; Ygg owns a distinct carrier. The gate
+creates no task, socket, queue or packet log. Feature-off builds contain neither
+its state/allocation nor packet-hot-path branches/atomics. Allowed TX counts
+are attempts, NOT delivery claims. Real Native target bytes before blocking,
+actual drops in BOTH directions before shutdown, new Ygg target bytes, fresh
+Custom control and zero Custom APP remain independent runtime obligations.
+
+Exact-count patch application and reverse application are validated before any
+source write. Four pre-gate source hashes are recorded after existing reviewed
+production transformations. Reversing the gate must recover those hashes;
+previous archive-equality checks remain after removing only the reviewed delta.
+Negative controls cover duplicates, altered/missing feature guards, preexisting
+module preservation, source drift, default feature activation and normal graph
+feature leakage. The first generated source tree and revised preimage-receipt
+draft are preserved separately, never overwritten. All original archive SHA256,
+package identities and licenses are still verified by the existing prepare-only
+entrypoint, with zero network acquisition and no archive-code execution.
+
+Local preparation completed and the four preimages independently match the
+previous prepared Iroh source. Actual compiler artifact receipts distinguish
+normal `cargo clippy --lib` features (`tls-ring`, `unstable-custom-transports`)
+from SDK `--all-targets` test features (the same two plus `shaar-native-gate`).
+Both offline/locked lint contexts and the accepted formatting boundary passed;
+Cargo.lock is unchanged. These are compilation/lint and DATA-integrity proofs,
+NOT execution of Rust or Python tests. The new gate controls, all campaign cases
+and graph/source negative controls still require CI on the repair SHA.
+
+The old proxy is retained only as a separate Native-priority positive control:
+when one proxy is blocked, another independently reachable Native address must
+still authenticate and forward. Its two healthy Native forwards are outside the
+performance cohort; excluding healthy positives cannot inflate Native share.
+The actual 20-trial campaign and same-connection regression now use the complete
+endpoint gate, keeping the original clock, thresholds, sample count, old Ygg
+stream and ordinary retry budget. One personally reviewed consolidated commit
+and an explicit SHA/trade-off report are required BEFORE CI resumes. The failure
+streak remains three until a real green; full P10 is not accepted by this review.
 
 The combined connection ledger is declared before execution: 40 startup
 connections, two existing default-budget long-outage connections, and 40

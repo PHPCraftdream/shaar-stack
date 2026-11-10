@@ -210,6 +210,11 @@ impl SignaledEndpoint {
         self.endpoint.local_addr()
     }
 
+    #[cfg(test)]
+    pub(crate) fn native_packet_gate(&self) -> std::sync::Arc<iroh::endpoint::NativePacketGate> {
+        self.endpoint.native_packet_gate()
+    }
+
     pub(crate) fn native_addr_watcher(
         &self,
     ) -> impl iroh::Watcher<Value = iroh::EndpointAddr> + use<> {

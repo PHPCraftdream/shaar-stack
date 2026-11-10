@@ -515,6 +515,8 @@ def audit_normal_metadata(metadata: dict, generated_root: Path, *, normal_consum
             raise ValueError(f"required normal product features missing for {name}: {missing}")
         if "test-util" in active:
             raise ValueError(f"test-util feature leaked into normal package {name}")
+        if "shaar-native-gate" in active:
+            raise ValueError(f"shaar-native-gate feature leaked into normal package {name}")
     n0_future_id = by_name["n0-future"][0]["id"]
     tokio_ids = [pkg["id"] for pkg in metadata.get("packages", []) if pkg.get("name") == "tokio"]
     future_edges = {dep["pkg"] for dep in nodes[n0_future_id].get("deps", []) if _normal_kinds(dep)}

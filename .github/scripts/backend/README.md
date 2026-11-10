@@ -22,6 +22,28 @@ fixture tests, or encrypted packet logging. The completed-connection native path
 bridge below is a bounded production operation, not the old spike instrumentation. Normal upstream qlog behavior is not
 rewritten. Upstream versions and the original standalone lock remain unchanged.
 
+### Owner-approved SDK-test Native packet gate (2026-11-10)
+
+A narrow exception adds optional Native IP fault injection behind the empty
+`shaar-native-gate` Cargo feature. Only the SDK dev dependency enables it; the
+normal product graph rejects this feature. Default production builds compile
+out the module, state, ingress/egress checks and public gate accessor entirely.
+The gate is shared across all senders and IP receive paths of one endpoint,
+including Mixed-address expansion, alternate discovered addresses and reconnects.
+Custom/Relay transports are not filtered. It neither disables NAT discovery nor
+logs packet contents, changes identities, refuses dials or forces Ygg selection.
+
+The source now contains test instrumentation: provenance explicitly says so,
+names the disabled-by-default feature and records the owned module hash. Source
+checks remove only the exact reversible reviewed additions before the existing
+archive byte comparisons; malformed, duplicated or ungated additions fail.
+Normal graph negative controls reject feature leakage, and SDK tests require
+real allowed traffic, actual IP drops in both directions, live signaling control
+and joined cleanup. Allowed TX counters count attempts, not wire delivery; real
+target bytes remain the payload oracle. Preparation still verifies the same
+archives/pins/licenses, refuses existing output, and executes no archive code.
+No package/version/lock or download-budget change is authorized by this exception.
+
 ## Pre-accept budgets for SDK endpoint work
 
 Noq's incoming count and per-incoming/aggregate buffered-byte limits belong to its

@@ -1,5 +1,6 @@
 """CI-only preparation controls and clean-source calibration package generation."""
 import argparse
+import hashlib
 import json
 import tarfile
 from pathlib import Path
@@ -74,7 +75,10 @@ class PreparationChecks(unittest.TestCase):
         wrapper = (ROOTS["iroh"] / "src/endpoint/quic.rs").read_text(encoding="utf-8")
         self.assertEqual(wrapper.count("pub fn application_data_filter("), 1)
         provenance = ARGS.destination / "provenance.json"
-        self.assertEqual(json.loads(provenance.read_text())["fixture_instrumentation"], False)
+        receipt = json.loads(provenance.read_text())
+        self.assertTrue(receipt["fixture_instrumentation"], "the optional test source must be disclosed")
+        self.assertEqual(receipt["fixture_feature"], prepare.runtime.NATIVE_GATE_FEATURE)
+        self.assertFalse(receipt["fixture_feature_default_enabled"])
         self.assertEqual(json.loads(provenance.read_text())["completed_native_path_bridge"], True)
         self.assertEqual(json.loads(provenance.read_text())["native_cid_readiness_event"], True)
         for package, relative in [("iroh", "src/endpoint/connection.rs"), ("iroh", "src/socket/transports.rs"),
@@ -83,6 +87,8 @@ class PreparationChecks(unittest.TestCase):
             with tarfile.open(ARCHIVES[package]) as archive:
                 with archive.extractfile(f"{package}-{prepare.VERSION}/{relative}") as original:
                     actual = (ROOTS[package] / relative).read_bytes()
+                    if package == "iroh" and relative in prepare.runtime.NATIVE_GATE_SWAPS:
+                        actual = prepare.runtime.native_gate_text(relative, actual.decode("utf-8"), reverse=True).encode("utf-8")
                     if package == "iroh" and relative == "src/endpoint/connection.rs":
                         actual = policy.replace(actual.decode("utf-8"), policy.NATIVE_PATH_API, "").encode("utf-8")
                     elif package == "iroh" and relative == "src/socket/transports.rs":
@@ -90,6 +96,40 @@ class PreparationChecks(unittest.TestCase):
                     elif package == "iroh" and relative == "src/socket/transports/ip.rs":
                         actual = policy.replace(actual.decode("utf-8"), policy.NATIVE_SOCKET_HANDLE, "").encode("utf-8")
                     self.assertEqual(actual, original.read())
+
+    def test_native_packet_gate_has_exact_reversal_and_is_not_a_default_feature(self):
+        runtime = prepare.runtime
+        root = ROOTS["iroh"]
+        manifest = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["features"][runtime.NATIVE_GATE_FEATURE], [])
+        self.assertNotIn(runtime.NATIVE_GATE_FEATURE, manifest["features"]["default"])
+        self.assertEqual((root / "src/socket/native_gate.rs").read_text(encoding="utf-8"), runtime.NATIVE_GATE_MODULE)
+        receipt = json.loads((ARGS.destination / "provenance.json").read_text(encoding="utf-8"))
+        for relative in runtime.NATIVE_GATE_SWAPS:
+            actual = (root / relative).read_text(encoding="utf-8")
+            before = runtime.native_gate_text(relative, actual, reverse=True)
+            self.assertEqual(hashlib.sha256(before.encode()).hexdigest(), receipt["fixture_preimage_sha256"][relative])
+            drift = runtime.native_gate_text(relative, actual + "\n// unexpected source drift\n", reverse=True)
+            self.assertNotEqual(hashlib.sha256(drift.encode()).hexdigest(), receipt["fixture_preimage_sha256"][relative])
+            self.assertNotIn(runtime.NATIVE_GATE_FEATURE, before)
+            self.assertEqual(runtime.native_gate_text(relative, before), actual)
+            with self.assertRaisesRegex(ValueError, "source mismatch"):
+                runtime.native_gate_text(relative, actual + actual, reverse=True)
+            if relative != "Cargo.toml":
+                tampered = actual.replace('#[cfg(feature = "shaar-native-gate")]', '', 1)
+                with self.assertRaisesRegex(ValueError, "source mismatch"):
+                    runtime.native_gate_text(relative, tampered, reverse=True)
+
+    def test_native_packet_gate_refuses_existing_module_without_source_writes(self):
+        with tempfile.TemporaryDirectory(dir=ARGS.destination) as directory:
+            root = Path(directory)
+            module = root / "src/socket/native_gate.rs"
+            module.parent.mkdir(parents=True)
+            module.write_text("preserve unrelated source", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unexpected existing"):
+                prepare.runtime.native_packet_gate(root)
+            self.assertEqual(module.read_text(), "preserve unrelated source")
+            self.assertEqual(len(list(root.rglob("*"))), 3)
 
     def test_checksum_failure_never_creates_output(self):
         with tempfile.TemporaryDirectory(dir=ARGS.destination) as temporary:
@@ -330,6 +370,10 @@ class ProductWorkspaceChecks(unittest.TestCase):
         self.assertEqual(sdk["dependencies"]["iroh"]["version"], "=1.3.0")
         self.assertFalse(sdk["dependencies"]["iroh"]["default-features"])
         self.assertNotIn("qlog", sdk["dependencies"]["iroh"]["features"])
+        self.assertNotIn(prepare.runtime.NATIVE_GATE_FEATURE, sdk["dependencies"]["iroh"]["features"])
+        self.assertIn(prepare.runtime.NATIVE_GATE_FEATURE, sdk["dev-dependencies"]["iroh"]["features"])
+        self.assertEqual(sdk["dev-dependencies"]["iroh"]["version"], "=1.3.0")
+        self.assertFalse(sdk["dev-dependencies"]["iroh"]["default-features"])
         self.assertTrue((repo / "crates/shaar/tests/backend_gate.rs").is_file())
 
     def test_native_path_bridge_is_completed_only_and_waits_for_exact_establishment(self):

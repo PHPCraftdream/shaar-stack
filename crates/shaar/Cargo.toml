@@ -35,6 +35,7 @@ url = "=2.5.8"
 shaar-platform = { path = "../shaar-platform" }
 
 [dev-dependencies]
+iroh = { version = "=1.3.0", default-features = false, features = ["tls-ring", "unstable-custom-transports", "shaar-native-gate"] }
 serde_bencode = "=0.2.4"
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.20", default-features = false, features = ["fmt", "registry"] }
