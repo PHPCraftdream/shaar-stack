@@ -1009,6 +1009,42 @@ has no additional functional transition gap to carry into #25.
   notices and release decisions retain their own dependencies and gates. The
   shared-role/binary-wiring evidence does not silently close those stages.
 
+## Measurement acceptance boundary for #25 (2026-11-10)
+
+Advances scenario steps 3–5 after accepted transition audit `f335e98`:
+CI `42846614038` executed all 78 selected cases on each OS, including both
+new private-boundary cases, with identical identities and zero ignored. Exact
+source is delivered; the task branch/worktree and duplicate refs are removed.
+This is not a measured efficiency result or a full P10 pass.
+
+The first bounded slice supplies the missing fixed-target first-byte oracle.
+The echo target records its first successful one-byte read using Tokio's
+monotonic clock, before writing the echo. Each observation includes the actual
+connection ordinal and byte. A 64-entry channel bounds retained observations;
+sequential measurements must consume every event. Overflow or missing events
+cannot establish a successful sample. An EOF-only connection supplies no event,
+additional bytes supply no second event, and cancelling the receiver must not
+consume a later observation. Production transport and policy are unchanged.
+The accompanying regression is written first; local lint does not execute it.
+
+The remaining campaign must record its sample count and percentile estimator
+before execution, include all failures, and distinguish:
+- known-address startup from a fresh key-only cold service-key GET;
+- the instant the client is given its configuration/key from a later ready route;
+- fixed-target input from listener/route readiness or a whole echoed round trip;
+- the independently controlled native availability phases from the selected lease;
+- a genuinely new TCP connection from another write on an old held Ygg stream.
+
+Use the existing production-role entrypoints, continuously driven owners,
+independent signed-publication barriers, real worker lease events and joined
+cleanup. Keep default-budget long-outage recovery and its old Ygg stream in the
+campaign. The agreed 3 s / 10 s first-byte, 10 s failover and 95% direct-share
+thresholds are unchanged. A target-observer slice or one successful composition
+is not a distribution. Measurement fixtures, their rejection controls, bounded
+resources and the final explicit current-SHA full P10 run remain open until
+actually executed in CI. No new protocol, metrics framework, public peer or
+packet-filter/NAT claim is introduced here.
+
 ## Audit-adjusted delivery passes (approved 2026-11-09)
 
 The user requested: “скорректируй план под аудит, сгруппируй смежные задачи,
