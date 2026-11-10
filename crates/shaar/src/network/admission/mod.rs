@@ -30,6 +30,10 @@ pub(crate) mod negotiation_frames;
 mod negotiation_tests;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+// Leave the default 2 s policy grace and payload headroom inside 10 s failover.
+// Per-path timers apply only after negotiation; handshake deadlines stay unchanged.
+const NATIVE_PATH_IDLE_TIMEOUT: Duration = Duration::from_secs(6);
+const NATIVE_PATH_KEEPALIVE: Duration = Duration::from_secs(2);
 
 /// A single native socket and immutable admission policy. Not Clone.
 /// No SDK task is spawned: callers own/poll handshakes and shutdown themselves.
@@ -96,6 +100,8 @@ impl Endpoint {
         Self::validate_bind(address)?;
         let transport = QuicTransportConfig::builder()
             .application_data_filter(|path| policy::native_ip(path.remote().ip()))
+            .default_path_max_idle_timeout(NATIVE_PATH_IDLE_TIMEOUT)
+            .default_path_keep_alive_interval(NATIVE_PATH_KEEPALIVE)
             .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_LIMIT)))
             .max_concurrent_uni_streams(VarInt::from_u32(0))
             .stream_receive_window(VarInt::from_u32(256 * 1024))
