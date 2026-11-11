@@ -357,6 +357,30 @@ pub(crate) trait ErasedClientOwner {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), DialError>> + '_>>;
 }
 
+/// Polls the retained owner while releasing only an obsolete role-owned route lease.
+/// cancel-safe: YES — follow state stays in the owner; workers retain their own Arc leases.
+pub(super) async fn follow_releasing_stale_lease(
+    owner: &mut dyn ErasedClientOwner,
+    lease: &mut Option<(PathKind, Arc<dyn RouteLink>)>,
+) -> Result<PathKind, StandbyError> {
+    std::future::poll_fn(|context| {
+        if owner.route().is_none() {
+            *lease = None;
+        }
+        // The owner contract keeps progress across cancellation of this borrowed waiter.
+        let result = {
+            let mut following = owner.follow();
+            following.as_mut().poll(context)
+        };
+        // A loss can be observed during a Pending poll, before replacement admission.
+        if owner.route().is_none() {
+            *lease = None;
+        }
+        result
+    })
+    .await
+}
+
 impl<D, F> ErasedClientOwner for StandbyOwner<D, F>
 where
     D: Dialer + 'static,
@@ -379,5 +403,103 @@ where
         &mut self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), DialError>> + '_>> {
         Box::pin(StandbyOwner::close(self))
+    }
+}
+
+#[cfg(test)]
+mod lease_tests {
+    use super::*;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::Poll;
+    use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+
+    struct ChargedLink {
+        _permit: OwnedSemaphorePermit,
+    }
+
+    impl RouteLink for ChargedLink {
+        fn forward(
+            &self,
+            _: TcpStream,
+        ) -> Pin<Box<dyn Future<Output = Result<ForwardStats, ForwardError>> + Send + '_>> {
+            Box::pin(std::future::ready(Err(ForwardError::PathUnavailable)))
+        }
+    }
+
+    struct LosingOwner {
+        link: Option<Arc<dyn RouteLink>>,
+        slots: Arc<Semaphore>,
+        loss_observed: bool,
+    }
+
+    impl ErasedClientOwner for LosingOwner {
+        fn follow(&mut self) -> Pin<Box<dyn Future<Output = Result<PathKind, StandbyError>> + '_>> {
+            Box::pin(std::future::poll_fn(|context| {
+                if !self.loss_observed {
+                    self.link = None;
+                    self.loss_observed = true;
+                    // One ownership transition, not a readiness polling loop.
+                    context.waker().wake_by_ref();
+                    return Poll::Pending;
+                }
+                let permit = Arc::clone(&self.slots)
+                    .try_acquire_owned()
+                    .expect("obsolete role lease must not block replacement admission");
+                self.link = Some(Arc::new(ChargedLink { _permit: permit }));
+                Poll::Ready(Ok(PathKind::Native))
+            }))
+        }
+
+        fn route(&self) -> Option<Arc<dyn RouteLink>> {
+            self.link.clone()
+        }
+
+        fn close(&mut self) -> Pin<Box<dyn Future<Output = Result<(), DialError>> + '_>> {
+            self.link = None;
+            Box::pin(std::future::ready(Ok(())))
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_loss_releases_only_the_role_lease_and_preserves_worker_ownership() {
+        for worker_holds_old_link in [false, true] {
+            let slots = Arc::new(Semaphore::new(1));
+            let old: Arc<dyn RouteLink> = Arc::new(ChargedLink {
+                _permit: Arc::clone(&slots)
+                    .try_acquire_owned()
+                    .expect("initial session slot"),
+            });
+            let worker = worker_holds_old_link.then(|| Arc::clone(&old));
+            let mut owner = LosingOwner {
+                link: Some(Arc::clone(&old)),
+                slots: Arc::clone(&slots),
+                loss_observed: false,
+            };
+            let mut lease = Some((PathKind::Native, old));
+            {
+                let advanced = follow_releasing_stale_lease(&mut owner, &mut lease);
+                tokio::pin!(advanced);
+                assert!(matches!(futures::poll!(advanced.as_mut()), Poll::Pending));
+                // Drop the borrowed waiter mid-recovery; its retained owners survive.
+            }
+            assert!(
+                lease.is_none(),
+                "the role must release a withdrawn route before Ready"
+            );
+            assert_eq!(
+                slots.available_permits(),
+                usize::from(!worker_holds_old_link)
+            );
+            drop(worker);
+            assert_eq!(slots.available_permits(), 1);
+            let kind = follow_releasing_stale_lease(&mut owner, &mut lease)
+                .await
+                .expect("replacement admission with the production one-slot limit");
+            assert_eq!(kind, PathKind::Native);
+            assert_eq!(slots.available_permits(), 0);
+            owner.close().await.expect("drop replacement link");
+            assert_eq!(slots.available_permits(), 1);
+        }
     }
 }

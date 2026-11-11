@@ -415,10 +415,11 @@ async fn fresh_lookup_bypasses_live_address_cache_but_preserves_replay_watermark
     clock.set_monotonic(1_000_000);
     let unchanged = resolve_fresh(&mut owner, &mut peer, &old)
         .await
-        .expect("same live winner remains usable without renewing it");
+        .expect("same winner remains usable through a real new network receipt");
     assert_eq!(unchanged.addresses(), &[old_address]);
     drop(unchanged);
-    assert_eq!(owner.resolver.cache_deadline(key), Some(30_000_000));
+    // A real GET renews at its new receipt; ordinary cache hits above do not.
+    assert_eq!(owner.resolver.cache_deadline(key), Some(31_000_000));
     let fresh = resolve_fresh(&mut owner, &mut peer, &new)
         .await
         .expect("new signed socket before TTL expiry");
