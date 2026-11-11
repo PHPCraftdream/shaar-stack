@@ -190,6 +190,11 @@ async fn publication(
                 let packet = item.signed_packet();
                 let info = iroh_dns::endpoint_info::EndpointInfo::from_pkarr_signed_packet(&packet)
                     .map_err(|e| e.to_string())?;
+                eprintln!(
+                    "composed signed Server publication: sequence={} addresses={:?}",
+                    item.sequence,
+                    info.ip_addrs().take(4).collect::<Vec<_>>()
+                );
                 if info.ip_addrs().next().is_none() {
                     return Err(
                         "actual signed Server publication has no native addresses".to_owned()

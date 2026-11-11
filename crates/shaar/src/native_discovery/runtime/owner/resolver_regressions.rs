@@ -373,3 +373,67 @@ async fn commit_point_freshness_rejects_a_result_that_ages_out_during_handoff() 
         .await
         .expect("actual joins after commit-point freshness cases");
 }
+
+/// cancel-safe: NO — a timed-out query is terminal for this owned test scenario.
+async fn resolve_fresh(
+    owner: &mut RuntimeOwner,
+    peer: &mut LoopbackPeer,
+    item: &MutableItem,
+) -> Result<crate::native_discovery::runtime::owner::resolver::ResolvedAddresses, RuntimeError> {
+    let key = EndpointId::from_bytes(item.key()).expect("expected key");
+    tokio::time::timeout(Duration::from_secs(15), async {
+        tokio::select! {
+            result = owner.resolve_fresh_until(key, Instant::now() + Duration::from_secs(10)) => result,
+            _ = peer.serve_record(item) => unreachable!("serve until fresh lookup completes"),
+        }
+    }).await.expect("bounded actual fresh query")
+}
+
+#[tokio::test]
+async fn fresh_lookup_bypasses_live_address_cache_but_preserves_replay_watermark() {
+    use super::resolver::ResolveError;
+    use crate::native_discovery::policy::RecordError;
+    let (mut peer, mut owner, clock) = setup().await;
+    let old_address = "127.0.0.1:9001".parse::<SocketAddr>().expect("old socket");
+    let new_address = "127.0.0.1:9002".parse::<SocketAddr>().expect("new socket");
+    let old = record_at(0xb1, WALL, old_address);
+    let new = record_at(0xb1, WALL + 1, new_address);
+    let key = EndpointId::from_bytes(old.key()).expect("record key");
+    let first = resolve(&mut owner, &mut peer, &old)
+        .await
+        .expect("first publication");
+    assert_eq!(first.addresses(), &[old_address]);
+    drop(first);
+    let cached = owner
+        .resolve_until(key, Instant::now() + Duration::from_secs(10))
+        .await
+        .expect("ordinary live cache hit");
+    assert_eq!(cached.addresses(), &[old_address]);
+    drop(cached);
+    assert_eq!(owner.resolver.cache_deadline(key), Some(30_000_000));
+    clock.set_wall(WALL + 1_000_000);
+    clock.set_monotonic(1_000_000);
+    let unchanged = resolve_fresh(&mut owner, &mut peer, &old)
+        .await
+        .expect("same live winner remains usable without renewing it");
+    assert_eq!(unchanged.addresses(), &[old_address]);
+    drop(unchanged);
+    assert_eq!(owner.resolver.cache_deadline(key), Some(30_000_000));
+    let fresh = resolve_fresh(&mut owner, &mut peer, &new)
+        .await
+        .expect("new signed socket before TTL expiry");
+    assert_eq!(fresh.addresses(), &[new_address]);
+    drop(fresh);
+    assert_eq!(owner.resolver.winner_sequence(key), Some(WALL + 1));
+    assert!(matches!(
+        resolve_fresh(&mut owner, &mut peer, &old).await,
+        Err(RuntimeError::Resolve(ResolveError::Policy(
+            RecordError::Replay
+        )))
+    ));
+    assert_eq!(owner.resolver.winner_sequence(key), Some(WALL + 1));
+    owner
+        .close()
+        .await
+        .expect("actual fresh-lookup owner joins");
+}

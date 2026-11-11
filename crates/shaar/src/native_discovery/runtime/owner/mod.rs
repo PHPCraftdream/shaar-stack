@@ -287,16 +287,36 @@ impl RuntimeOwner {
         key: EndpointId,
         deadline: tokio::time::Instant,
     ) -> Result<ResolvedAddresses, RuntimeError> {
+        self.resolve_with_freshness(key, deadline, false).await
+    }
+
+    /// Bypasses address delivery from cache without discarding anti-replay state.
+    /// cancel-safe: NO — a completion may be consumed; the retained owner still owns cleanup.
+    pub(crate) async fn resolve_fresh_until(
+        &mut self,
+        key: EndpointId,
+        deadline: tokio::time::Instant,
+    ) -> Result<ResolvedAddresses, RuntimeError> {
+        self.resolve_with_freshness(key, deadline, true).await
+    }
+
+    async fn resolve_with_freshness(
+        &mut self,
+        key: EndpointId,
+        deadline: tokio::time::Instant,
+        fresh: bool,
+    ) -> Result<ResolvedAddresses, RuntimeError> {
         if let Some(error) = self.clock_fault_error() {
             return Err(error);
         }
         let deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(10));
         let sample = self.sample_until(deadline).await?;
-        if let Some(cached) = self
-            .resolver
-            .begin(key, sample)
-            .map_err(RuntimeError::Resolve)?
-        {
+        let begun = if fresh {
+            self.resolver.begin_fresh(key, sample)
+        } else {
+            self.resolver.begin(key, sample)
+        };
+        if let Some(cached) = begun.map_err(RuntimeError::Resolve)? {
             if tokio::time::Instant::now() >= deadline {
                 return Err(RuntimeError::DeadlineExceeded);
             }

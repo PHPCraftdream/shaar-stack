@@ -47,6 +47,7 @@ pub(crate) struct NativeDialer {
     peer: PublicKey,
     resources: SharedResources,
     candidates: Vec<SocketAddr>,
+    refresh_after_loss: bool,
     /// Retained relay-operations handle of the live-transferred endpoint; the
     /// reserved lease is owned here and released in [`Dialer::close`].
     ops: RelayOperations,
@@ -75,6 +76,7 @@ impl NativeDialer {
             peer,
             resources,
             candidates,
+            refresh_after_loss: false,
             relay_addr,
             ops,
             lease: None,
@@ -91,11 +93,18 @@ impl NativeDialer {
         }
         let key = EndpointId::from_bytes(self.peer.as_bytes()).map_err(|_| DialError)?;
         let budget = deadline.min(Instant::now() + RESOLVE_BUDGET);
-        let resolved: ResolvedAddresses =
-            match timeout_at(budget, self.resources.resolve(key)).await {
-                Ok(result) => result?,
-                Err(_) => return Err(DialError),
-            };
+        let resolved: ResolvedAddresses = match timeout_at(budget, async {
+            if self.refresh_after_loss {
+                self.resources.resolve_fresh(key).await
+            } else {
+                self.resources.resolve(key).await
+            }
+        })
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => return Err(DialError),
+        };
         let mut addresses: Vec<SocketAddr> = resolved
             .addresses()
             .iter()
@@ -103,6 +112,7 @@ impl NativeDialer {
             .copied()
             .collect();
         std::mem::swap(&mut self.candidates, &mut addresses);
+        self.refresh_after_loss = false;
         Ok(())
     }
 
@@ -189,6 +199,9 @@ impl Dialer for NativeDialer {
     /// cancel-safe: yes — each subscription replays the current path snapshot.
     async fn lost(&mut self, link: &Self::Link) {
         link.native_lost().await;
+        // A still-valid record can name the socket of the lost process.
+        self.candidates.clear();
+        self.refresh_after_loss = true;
     }
 
     /// Releases the owned relay lease over the retained ops handle. Tolerates

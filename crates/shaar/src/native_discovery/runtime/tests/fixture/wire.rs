@@ -100,6 +100,7 @@ impl LoopbackPeer {
                     });
                     match current {
                         Some(item) => {
+                            eprintln!("composed KRPC GET served: sequence={}", item.sequence);
                             if let Some(observed) = service_get.take() {
                                 // The parent may have cancelled; this single notification is best effort.
                                 let _ = observed.send(());

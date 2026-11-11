@@ -47,7 +47,7 @@ pub(crate) enum MaintenanceCommand {
         expect(dead_code, reason = "Retained readiness query contract")
     )]
     Status(oneshot::Sender<Option<PublicationStatus>>),
-    Resolve(EndpointId, ResolveReply),
+    Resolve(EndpointId, bool, ResolveReply),
     #[cfg(test)]
     Submit(EndpointAddr, oneshot::Sender<Result<(), RuntimeError>>),
     #[cfg(test)]
@@ -156,10 +156,11 @@ impl Maintenance {
     pub(crate) async fn resolve(
         commands: &mpsc::Sender<MaintenanceCommand>,
         key: EndpointId,
+        fresh: bool,
     ) -> Result<ResolvedAddresses, RuntimeError> {
         let (reply, response) = oneshot::channel();
         commands
-            .send(MaintenanceCommand::Resolve(key, reply))
+            .send(MaintenanceCommand::Resolve(key, fresh, reply))
             .await
             .map_err(|_| RuntimeError::Closed)?;
         response.await.map_err(|_| RuntimeError::Closed)?
@@ -340,7 +341,7 @@ async fn maintain(
                     status_query = status_future(publisher.clone(), None);
                 }
             }
-            Event::Command(Some(MaintenanceCommand::Resolve(key, reply))) => {
+            Event::Command(Some(MaintenanceCommand::Resolve(key, fresh, reply))) => {
                 // The lease move is the only way to obtain the exclusive
                 // reference: while a resolver future is active the slot is
                 // empty, so a concurrent resolve answers ResolveBusy.
@@ -352,7 +353,9 @@ async fn maintain(
                     let leased = owner_lease
                         .take()
                         .expect("lease held while the slot is empty");
-                    resolve = Some(Box::pin(resolve_owned(leased, key, deadline, canceled)));
+                    resolve = Some(Box::pin(resolve_owned(
+                        leased, key, deadline, canceled, fresh,
+                    )));
                     resolve_cancel = Some(cancel);
                     resolve_reply = Some(reply);
                 }
@@ -575,8 +578,15 @@ async fn resolve_owned(
     key: EndpointId,
     deadline: tokio::time::Instant,
     mut canceled: oneshot::Receiver<()>,
+    fresh: bool,
 ) -> (&mut RuntimeOwner, Result<ResolvedAddresses, RuntimeError>) {
-    let mut operation = Box::pin(owner.resolve_until(key, deadline));
+    let mut operation = Box::pin(async {
+        if fresh {
+            owner.resolve_fresh_until(key, deadline).await
+        } else {
+            owner.resolve_until(key, deadline).await
+        }
+    });
     let result = tokio::select! {
         biased;
         _ = &mut canceled => Err(RuntimeError::Closed),

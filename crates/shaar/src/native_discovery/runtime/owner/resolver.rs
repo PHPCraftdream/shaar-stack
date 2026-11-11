@@ -77,6 +77,23 @@ impl ResolverState {
         key: EndpointId,
         sample: ClockSample,
     ) -> Result<Option<ResolvedAddresses>, ResolveError> {
+        self.begin_with_freshness(key, sample, false)
+    }
+
+    pub(super) fn begin_fresh(
+        &mut self,
+        key: EndpointId,
+        sample: ClockSample,
+    ) -> Result<Option<ResolvedAddresses>, ResolveError> {
+        self.begin_with_freshness(key, sample, true)
+    }
+
+    fn begin_with_freshness(
+        &mut self,
+        key: EndpointId,
+        sample: ClockSample,
+        fresh: bool,
+    ) -> Result<Option<ResolvedAddresses>, ResolveError> {
         let now = policy_clock(sample);
         self.policy
             .observe_clock(now)
@@ -84,10 +101,11 @@ impl ResolverState {
         self.policy
             .admit_expected_key(key)
             .map_err(ResolveError::Policy)?;
-        if self
-            .policy
-            .query_required(key, now)
-            .map_err(ResolveError::Policy)?
+        if fresh
+            || self
+                .policy
+                .query_required(key, now)
+                .map_err(ResolveError::Policy)?
         {
             return Ok(None);
         }
