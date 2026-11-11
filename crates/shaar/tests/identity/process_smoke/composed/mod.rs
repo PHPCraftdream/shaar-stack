@@ -11,6 +11,7 @@ mod denial;
 #[allow(dead_code)] // Unit-fixture controls are not all used by the real-process cases.
 #[path = "../../../../src/native_discovery/runtime/tests/fixture/wire.rs"]
 mod mainline_fixture;
+mod outage;
 mod payload;
 #[path = "../../../../src/network/signaling/relay_fixture.rs"]
 mod relay_fixture;
@@ -26,6 +27,7 @@ enum Case {
     Lifecycle(Role),
     Payload,
     Denial,
+    Outage,
 }
 
 #[tokio::test]
@@ -50,6 +52,12 @@ async fn real_composed_key_only_payload_and_server_restart_in_signal_and_standby
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
 async fn real_composed_denied_key_never_reaches_target_in_signal_and_standby() {
     run(Case::Denial).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires CI-built shaar-server and shaar-client executables"]
+async fn real_composed_standby_forwards_when_dht_and_client_relay_are_unavailable() {
+    run(Case::Outage).await.unwrap();
 }
 
 async fn run(case: Case) -> Result<(), String> {
@@ -89,6 +97,7 @@ async fn run(case: Case) -> Result<(), String> {
                 Case::Payload => {
                     payload::scenario(&temp, &mut processes, &mut tasks, &relay.address, &uri).await
                 }
+                Case::Outage => outage::scenario(&temp, &mut processes, &relay.address, &uri).await,
             }
         },
     ))
