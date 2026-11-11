@@ -12,13 +12,18 @@ on:
         required: false
         type: boolean
         default: false
+      controlled_network_preflight:
+        description: Inspect preinstalled network tools without root, product builds or lock generation
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   resolve:
-    if: ${{ !inputs.direct_feedback }}
+    if: ${{ !inputs.direct_feedback && !inputs.controlled_network_preflight }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -44,7 +49,7 @@ jobs:
           if-no-files-found: error
 
   direct-feedback:
-    if: ${{ inputs.direct_feedback }}
+    if: ${{ inputs.direct_feedback && !inputs.controlled_network_preflight }}
     name: Process feedback (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -91,4 +96,40 @@ jobs:
             target/ci-process/
             target/native-graph-preparation-logs/
             target/p2p/graph-receipt.json
+          if-no-files-found: error
+
+  controlled-network-tools:
+    if: ${{ inputs.controlled_network_preflight }}
+    name: Network tools only (unprivileged; not product proof)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Validate exclusive tool preflight and source
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          DIRECT_FEEDBACK: ${{ inputs.direct_feedback }}
+        run: |
+          python3 -I - <<'PYTHON'
+          import os
+          import re
+          if os.environ["DIRECT_FEEDBACK"] != "false":
+              raise SystemExit("tool preflight excludes product and lock modes")
+          if not re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_REVISION"]):
+              raise SystemExit("source_revision must be an exact reviewed 40-hex SHA")
+          PYTHON
+      - name: Checkout tool preflight source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - name: Inspect preinstalled tools without privilege
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: python3 -I .github/probes/nat-topology/quic/product/preflight.py --source "$SOURCE_REVISION"
+      - name: Preserve tool-only preflight report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: controlled-network-tools
+          path: target/controlled-network-tools/report.json
           if-no-files-found: error

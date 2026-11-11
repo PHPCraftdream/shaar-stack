@@ -1,5 +1,6 @@
 """Workflow routing contracts for the repository's fixed layout, not a generic YAML parser."""
 
+import copy
 import hashlib
 import importlib.util
 import os
@@ -9,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -193,7 +195,74 @@ def validate_privileged_nat_routing(text, job_name):
         raise AssertionError("all source checks must precede every legacy privileged step")
 
 
+def network_tool_probe():
+    path = ROOT / ".github/probes/nat-topology/quic/product/preflight.py"
+    spec = importlib.util.spec_from_file_location("controlled_network_tool_probe", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class WorkflowTests(unittest.TestCase):
+    def test_network_tool_preflight_is_owned_exclusive_and_unprivileged(self):
+        text = (ROOT / ".github/workflows/sdk-lock.yml").read_text(encoding="utf-8")
+        jobs = job_blocks(text)
+        self.assertIn("!inputs.controlled_network_preflight", jobs["resolve"])
+        self.assertIn("!inputs.controlled_network_preflight", jobs["direct-feedback"])
+        probe = jobs["controlled-network-tools"]
+        self.assertIn("if: ${{ inputs.controlled_network_preflight }}", probe)
+        self.assertIn("runs-on: ubuntu-latest", probe)
+        self.assertIn("timeout-minutes: 2", probe)
+        self.assertIn("ref: ${{ inputs.source_revision }}", probe)
+        self.assertIn('if os.environ["DIRECT_FEEDBACK"] != "false":', probe)
+        self.assertIn('re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_REVISION"])', probe)
+        self.assertLess(probe.index("Validate exclusive"), probe.index("Checkout tool"))
+        self.assertIn("preflight.py --source", probe)
+        self.assertIn("if: always()", probe)
+        for forbidden in ("sudo", "apt-get", "cargo ", "ip netns"):
+            self.assertNotIn(forbidden, probe)
+        spec = importlib.util.spec_from_file_location("network_probe_policy", ROOT / ".github/ci/policy.py")
+        policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(policy)
+        selected = policy.select([".github/probes/nat-topology/quic/product/preflight.py"])
+        self.assertEqual(selected["suites"], ["ci_policy"])
+        self.assertEqual(selected["targets"], [])
+
+    def test_network_tool_report_cannot_claim_root_kernel_or_product_success(self):
+        probe = network_tool_probe()
+        report = {"schema": 1, "scope": probe.SCOPE, "source_revision": "a" * 40,
+                  "platform": "Linux", "euid": 1001, "errors": [], "status": "ready",
+                  "product_cases_executed": 0, "privileged_commands_executed": 0,
+                  "kernel_namespace_quota_verified": False,
+                  "tools": {name: {"available": True, "required": name in probe.REQUIRED,
+                                   "exit_code": 0} for name in probe.TOOLS}}
+        probe.validate_report(report)
+        for field, value in (("euid", 0), ("source_revision", "develop"), ("scope", "product-proof"),
+                             ("kernel_namespace_quota_verified", True), ("product_cases_executed", 4),
+                             ("privileged_commands_executed", 1), ("platform", "Windows")):
+            changed = copy.deepcopy(report)
+            changed[field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                probe.validate_report(changed)
+        changed = copy.deepcopy(report)
+        changed["tools"]["nft"]["available"] = False
+        with self.assertRaises(ValueError):
+            probe.validate_report(changed)
+        changed["status"] = "blocked"
+        changed["errors"] = ["required tool unavailable: nft"]
+        probe.validate_report(changed)
+
+    @unittest.skipUnless(sys.platform == "linux", "tool subprocess pipes are a Linux-only preflight")
+    def test_network_tool_commands_have_real_output_and_timeout_bounds(self):
+        probe = network_tool_probe()
+        system_python = "/usr/bin/python3"
+        success = probe.bounded_command([system_python, "-I", "-c", "print('version-ok')"], time.monotonic() + 5)
+        self.assertEqual(success, {"exit_code": 0, "output": "version-ok\n"})
+        oversized = probe.bounded_command([system_python, "-I", "-c", "print('x' * 20000)"], time.monotonic() + 5)
+        self.assertIsNone(oversized["exit_code"])
+        expired = probe.bounded_command([system_python, "-I", "-c", "import time; time.sleep(60)"], time.monotonic() + 0.05)
+        self.assertIsNone(expired["exit_code"])
+
     def test_privileged_nat_workflows_are_manual_source_bound_and_owned(self):
         spec = importlib.util.spec_from_file_location("nat_workflow_policy", ROOT / ".github/ci/policy.py")
         policy = importlib.util.module_from_spec(spec)
