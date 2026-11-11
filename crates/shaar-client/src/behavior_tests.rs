@@ -122,17 +122,22 @@ async fn binary_run_reports_an_occupied_local_listener() {
         .collect();
     let key_path = key_path.to_str().unwrap().replace('\\', "/");
     let text = format!(
-        "server: {server_key}\nserver_address: 127.0.0.1:9\nlisten: {address}\nkey_file: \"{key_path}\"\n"
+        "server: {server_key}\nserver_address: 127.0.0.1:9\nlisten: {address}\nkey_file: {key_path}\n"
     );
     std::fs::write(&config_path, text).unwrap();
-    read_config(&config_path).await.unwrap();
+    let parsed = read_config(&config_path).await.unwrap();
+    assert_eq!(parsed.key_file(), std::path::Path::new(&key_path));
+    Identity::load(parsed.key_file()).await.unwrap();
     let result = timeout(Duration::from_secs(10), run(config_path)).await;
     std::fs::remove_dir_all(directory).unwrap();
     let error = result
         .expect("busy listener must fail promptly")
         .unwrap_err();
     assert_eq!(
-        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        error
+            .downcast_ref::<std::io::Error>()
+            .unwrap_or_else(|| panic!("expected listener I/O failure, got: {error}"))
+            .kind(),
         std::io::ErrorKind::AddrInUse
     );
     assert_eq!(occupied.local_addr().unwrap(), address);
