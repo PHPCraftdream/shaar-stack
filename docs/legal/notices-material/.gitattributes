@@ -1,2 +1,4 @@
 # Preserve legal DATA byte-for-byte, including original line endings.
 * -text
+# The acquisition receipt retains its original CRLF bytes and digest.
+registry/raw-sources/receipt.json whitespace=cr-at-eol
