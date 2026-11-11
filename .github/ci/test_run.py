@@ -13,6 +13,12 @@ SPEC.loader.exec_module(RUN)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_only_full_windows_receives_the_bounded_graph_capture_job_budget(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/ci.yml").read_text(encoding="utf-8")
+        job = workflow.split("  checks:\n", 1)[1].split("    steps:\n", 1)[0]
+        timeouts = [line.strip() for line in job.splitlines() if line.strip().startswith("timeout-minutes:")]
+        self.assertEqual(timeouts, ["timeout-minutes: ${{ fromJSON(needs.plan.outputs.selection).full && matrix.os == 'windows-latest' && 120 || 90 }}"])
+
     def test_nested_package_runs_by_manifest_path_and_workspace_members_by_name(self):
         nested = RUN.POLICY.target("shaar-ygg-core")
         self.assertEqual(RUN.package_arguments(nested), ["--manifest-path", "crates/shaar-ygg-core/Cargo.toml"])
@@ -80,6 +86,36 @@ class RunnerTests(unittest.TestCase):
             output = f"running 1 test\ntest {name} ... {state}\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n"
             with self.assertRaises(ValueError):
                 RUN.VERIFY.verify(expected, {"binary": (output, status)}, "")
+
+    def test_slow_progress_requires_selected_unfinished_identity_and_terminal_success(self):
+        listing = {"selected": "fast: test\nslow: test\n"}
+        notice = "test slow has been running for over 60 seconds\n"
+        prefix = "running 2 tests\ntest fast ... ok\n"
+        terminal = "test slow ... ok\n"
+        summary = "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 134.06s\n"
+        output = prefix + notice + terminal + summary
+        for text in (output, output.replace("\n", "\r\n"),
+                     output.replace("test slow ... ok", "test slow - should panic ... ok")):
+            execution = RUN.VERIFY.cargo_execution(text)
+            self.assertEqual(RUN.VERIFY.verify(listing, {"selected": (execution, 0)}, ""), 2)
+        invalid = (
+            prefix + notice + summary,
+            prefix + notice.replace("test slow ", "test other ") + terminal + summary,
+            prefix + notice + notice + terminal + summary,
+            prefix + terminal + notice + summary,
+            prefix + terminal + summary + notice,
+            prefix + notice.replace("over 60", "over 61") + terminal + summary,
+            prefix + notice.replace("has been", "has  been") + terminal + summary,
+            prefix + notice + terminal.replace("... ok", "... FAILED") + summary,
+            prefix + notice + terminal.replace("... ok", "... ignored") + summary,
+            output.replace("2 passed", "1 passed"),
+            output + summary,
+        )
+        for text in invalid:
+            with self.subTest(output=text), self.assertRaises(ValueError):
+                RUN.VERIFY.verify(listing, {"selected": (text, 0)}, "")
+        with self.assertRaises(ValueError):
+            RUN.VERIFY.verify(listing, {"selected": (output, 101)}, "")
 
     def test_verifier_accepts_exact_should_panic_events_and_rejects_near_misses(self):
         ordinary = "network::admission::negotiation_frames::role_frame_oracle_accepts_control_only_stats"

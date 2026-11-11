@@ -74,6 +74,19 @@ impl Drop for YggPump {
     }
 }
 
+async fn writer(shared: Arc<Shared>) -> io::Result<()> {
+    while let Some(outgoing) = shared.next().await? {
+        if let Err(failure) = outgoing
+            .sender
+            .send(&outgoing.bytes, Duration::from_secs(1))
+            .await
+        {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, failure));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,13 +94,8 @@ mod tests {
     use crate::test_support::{BUDGET, start_listener};
     use std::{
         future::{Future, poll_fn},
-        task::{Poll, Wake},
+        task::Poll,
     };
-
-    struct Noop;
-    impl Wake for Noop {
-        fn wake(self: Arc<Self>) {}
-    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn cancelled_close_retains_writer_join_until_repeat_call() {
@@ -128,8 +136,8 @@ mod tests {
         let shared = Arc::new(Shared::new(vec![([0x59; 32], sender.clone())]).unwrap());
         let address = shared.peer_address(&[0x59; 32]).unwrap();
         let mut pump = YggPump::new(Arc::clone(&shared));
-        let waker = std::task::Waker::from(Arc::new(Noop));
-        let mut cx = std::task::Context::from_waker(&waker);
+        let waker = std::task::Waker::noop();
+        let mut cx = std::task::Context::from_waker(waker);
         assert!(matches!(
             shared.poll_send(&mut cx, &address, b"will fail after revoke"),
             std::task::Poll::Ready(Ok(()))
@@ -150,17 +158,4 @@ mod tests {
         );
         bridge.close().await.unwrap();
     }
-}
-
-async fn writer(shared: Arc<Shared>) -> io::Result<()> {
-    while let Some(outgoing) = shared.next().await? {
-        if let Err(failure) = outgoing
-            .sender
-            .send(&outgoing.bytes, Duration::from_secs(1))
-            .await
-        {
-            return Err(io::Error::new(io::ErrorKind::BrokenPipe, failure));
-        }
-    }
-    Ok(())
 }

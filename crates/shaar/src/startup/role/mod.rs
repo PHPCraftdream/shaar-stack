@@ -62,6 +62,8 @@ async fn shutdown_start(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RoleEvent {
     Admitted,
+    /// The server's independently bound native socket, not a client route choice.
+    NativeBound(std::net::SocketAddr),
     ListenerReady(std::net::SocketAddr),
     RouteActive(PathKind),
     SessionAdmitted(PathKind),
@@ -296,3 +298,14 @@ pub(crate) async fn serve_client_with_events(
 
 pub use client::ClientRole;
 pub use server::ServerRole;
+
+#[cfg(test)]
+fn emit_server_admission(parts: &server::ServerParts) {
+    emit(parts.events.as_ref(), RoleEvent::Admitted);
+    if let Some(endpoint) = parts.endpoint.as_ref() {
+        emit(
+            parts.events.as_ref(),
+            RoleEvent::NativeBound(endpoint.local_addr()),
+        );
+    }
+}

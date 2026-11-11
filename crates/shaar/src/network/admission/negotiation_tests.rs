@@ -47,7 +47,7 @@ impl Dialer for NativeDial {
     }
 
     async fn lost(&mut self, link: &Session) {
-        let _ = link.closed().await;
+        link.native_lost().await;
     }
 
     async fn close(&mut self) -> Result<(), DialError> {
@@ -410,4 +410,126 @@ async fn signaling_paths_carry_zero_application_frames_during_native_promotion()
     })
     .await
     .expect("bounded signaling-only rejection");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_loss_is_observed_while_the_same_signaling_connection_stays_alive() {
+    timeout(Duration::from_secs(40), async {
+        let (a, b) = (Identity::generate(), Identity::generate());
+        let client = SignaledEndpoint::bind(
+            &a,
+            loopback(),
+            loopback(),
+            &[b.transport_key().public()],
+            Limits::default(),
+        )
+        .await
+        .expect("client binds");
+        let mut server = SignaledEndpoint::bind(
+            &b,
+            loopback(),
+            loopback(),
+            &[a.transport_key().public()],
+            Limits::default(),
+        )
+        .await
+        .expect("server binds");
+        let native = [client.local_addr(), server.local_addr()];
+        let signaling = [client.signaling_addr(), server.signaling_addr()];
+        let (control, accepted) = tokio::join!(
+            client.connect_signaling(server.id(), server.signaling_addr()),
+            server.accept(),
+        );
+        let (control, accepted) = (
+            control.expect("real control connection"),
+            accepted.expect("control admitted"),
+        );
+        let mut sent = Frames::new(&control);
+        let mut received = Frames::new(&accepted);
+        let gate = client.native_packet_gate();
+        control
+            .connection
+            .ensure_native_path(native[1])
+            .await
+            .expect("native path added to SAME connection");
+        let payload = b"native-path-positive";
+        let send = async {
+            let (mut tx, mut rx) = control
+                .connection
+                .open_bi()
+                .await
+                .expect("native stream opens");
+            tx.write_all(payload).await.expect("native bytes sent");
+            tx.finish().expect("native stream finishes");
+            assert_eq!(rx.read_to_end(32).await.expect("native echo"), payload);
+        };
+        let echo = async {
+            let (mut tx, mut rx) = accepted
+                .connection
+                .accept_bi()
+                .await
+                .expect("native stream accepted");
+            assert_eq!(rx.read_to_end(32).await.expect("native input"), payload);
+            tx.write_all(payload).await.expect("native echo sent");
+            tx.finish().expect("native echo finishes");
+        };
+        tokio::join!(send, echo);
+        require_native_delivery(&mut sent, &mut received, &control, &accepted).await;
+        let custom_pings = |session: &Session| {
+            session
+                .connection
+                .paths()
+                .iter()
+                .filter(|path| matches!(path.remote_addr(), iroh_base::TransportAddr::Custom(_)))
+                .map(|path| path.stats().frame_rx.ping)
+                .sum::<u64>()
+        };
+        let before = custom_pings(&control);
+        tokio::select! {
+            biased;
+            () = control.native_lost() => panic!("healthy Native was reported lost"),
+            () = async {} => {}
+        }
+        let describe = || control.connection.paths().iter().map(|path| {
+            (path.remote_addr().clone(), path.is_selected(), path.rtt(), path.stats().frame_rx.ping)
+        }).collect::<Vec<_>>();
+        eprintln!("P10 control pre-block endpoint_ip_gate=true paths={:?}", describe());
+        assert!(control.connection.paths().iter().any(|path| path.is_ip()), "Native positive requires an open IP path");
+        let allowed = gate.counts();
+        assert!(allowed[0] > 0 && allowed[1] > 0);
+        let blocked_at = Instant::now();
+        gate.set_blocked(true);
+        let loss = timeout(Duration::from_secs(9), control.native_lost()).await;
+        if loss.is_err() {
+            eprintln!("P10 control loss timeout elapsed={:?} endpoint_ip_gate=true close={:?} custom_pings_before={before} after={} paths={:?} counts={:?}",
+                blocked_at.elapsed(), control.connection.close_reason(), custom_pings(&control), describe(), gate.counts());
+        }
+        loss.expect("actual native-path loss is observable without connection closure");
+        assert!(blocked_at.elapsed() <= Duration::from_secs(9));
+        assert!(control.connection.close_reason().is_none());
+        assert!(accepted.connection.close_reason().is_none());
+        assert!(control.connection.paths().iter().all(|path| !path.is_ip()));
+        assert!(
+            custom_pings(&control) > before,
+            "fresh signaling control arrived while Native was blocked"
+        );
+        // Re-entry after loss must immediately observe the current state.
+        timeout(Duration::from_secs(1), control.native_lost())
+            .await
+            .expect("loss is level-triggered");
+        sent.checkpoint(&control);
+        received.checkpoint(&accepted);
+        let counts = gate.counts();
+        assert!(counts[2] > 0 && counts[3] > 0, "real Native packets were dropped in BOTH directions");
+        control.close();
+        accepted.close();
+        let (left, right) = tokio::join!(client.close(), server.close());
+        left.expect("client joins");
+        right.expect("server joins");
+        sent.finish().await;
+        received.finish().await;
+        ports_released(native, signaling).await;
+    })
+    .await
+    .expect("control-alive native-loss regression is bounded");
 }

@@ -83,9 +83,27 @@ pub(super) struct EchoTarget {
     count: Arc<AtomicUsize>,
     stop: watch::Sender<bool>,
     tasks: JoinSet<()>,
+    first_bytes: tokio::sync::mpsc::Receiver<TargetFirstByte>,
+}
+
+/// Observed at the fixed target's first successful read, before its echo write.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct TargetFirstByte {
+    pub(super) connection: usize,
+    pub(super) byte: u8,
+    pub(super) at: tokio::time::Instant,
 }
 
 impl EchoTarget {
+    /// Waits for actual target input, not accept, route readiness or echo RTT.
+    /// cancel-safe: YES — cancelling `recv` does not consume an observation.
+    pub(super) async fn first_byte(&mut self) -> TargetFirstByte {
+        self.first_bytes
+            .recv()
+            .await
+            .expect("target observer remains owned")
+    }
+
     /// Bounded joined close: stops the accept loop, aborts lingering echo
     /// connections and joins every task. A hang here is a leaked task.
     pub(super) async fn close(mut self) {
@@ -111,6 +129,8 @@ pub(super) async fn echo_target() -> (EchoTarget, SocketAddr) {
     let count = Arc::new(AtomicUsize::new(0));
     let (stop, mut stop_rx) = watch::channel(false);
     let mut tasks: JoinSet<()> = JoinSet::new();
+    // Sequential campaigns drain every sample; overflow is a failed oracle.
+    let (first_tx, first_bytes) = tokio::sync::mpsc::channel(64);
     let counter = Arc::clone(&count);
     tasks.spawn(async move {
         // Per-connection echoes live in a nested JoinSet so one slow client
@@ -126,8 +146,19 @@ pub(super) async fn echo_target() -> (EchoTarget, SocketAddr) {
                 }
                 accepted = listener.accept() => match accepted {
                     Ok((mut stream, _)) => {
-                        counter.fetch_add(1, Ordering::SeqCst);
+                        let connection = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                        let first_tx = first_tx.clone();
                         connections.spawn(async move {
+                            let mut byte = [0_u8; 1];
+                            if stream.read(&mut byte).await? == 0 {
+                                return Ok(());
+                            }
+                            first_tx.try_send(TargetFirstByte {
+                                connection,
+                                byte: byte[0],
+                                at: tokio::time::Instant::now(),
+                            }).expect("bounded first-byte observations must be drained");
+                            stream.write_all(&byte).await?;
                             let (mut read, mut write) = stream.split();
                             let _ = tokio::io::copy(&mut read, &mut write).await;
                             let _ = write.shutdown().await;
@@ -141,7 +172,12 @@ pub(super) async fn echo_target() -> (EchoTarget, SocketAddr) {
         connections.abort_all();
         while connections.join_next().await.is_some() {}
     });
-    let target = EchoTarget { count, stop, tasks };
+    let target = EchoTarget {
+        count,
+        stop,
+        tasks,
+        first_bytes,
+    };
     (target, address)
 }
 
@@ -562,4 +598,56 @@ pub(super) fn dead_relay_address() -> SocketAddr {
     format!("127.0.0.1:{}", reserve_tcp_port())
         .parse()
         .expect("dead relay address parses")
+}
+
+#[tokio::test]
+async fn target_first_byte_requires_payload_and_precedes_echo_consumption() {
+    tokio::time::timeout(ROLE_BUDGET, async {
+        let (mut target, address) = echo_target().await;
+        let mut empty = TcpStream::connect(address).await.expect("empty TCP opens");
+        empty.shutdown().await.expect("empty TCP sends EOF");
+        assert_eq!(
+            empty.read(&mut [0_u8; 1]).await.expect("empty EOF returns"),
+            0
+        );
+        let mut stream = TcpStream::connect(address)
+            .await
+            .expect("payload TCP opens");
+        // Cancel an empty observation waiter; no accept or EOF can satisfy it.
+        tokio::select! {
+            biased;
+            event = target.first_byte() => panic!("no payload was sent: {event:?}"),
+            () = async {} => {}
+        }
+        let sent_at = tokio::time::Instant::now();
+        stream.write_all(b"xy").await.expect("probe bytes sent");
+        let first = target.first_byte().await;
+        let observed_at = tokio::time::Instant::now();
+        assert_eq!(
+            first.connection, 2,
+            "EOF-only connection emits no byte event"
+        );
+        assert_eq!(first.byte, b'x');
+        assert!(sent_at <= first.at && first.at <= observed_at);
+        // The observation is already available before consuming any echo.
+        let mut echoed = [0_u8; 2];
+        stream
+            .read_exact(&mut echoed)
+            .await
+            .expect("probe echo arrives");
+        assert_eq!(&echoed, b"xy");
+        assert!(
+            matches!(
+                target.first_bytes.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "only the first byte of a connection is measured"
+        );
+        assert_eq!(target.count(), 2);
+        drop(stream);
+        drop(empty);
+        target.close().await;
+    })
+    .await
+    .expect("first-byte observer regression stays bounded");
 }

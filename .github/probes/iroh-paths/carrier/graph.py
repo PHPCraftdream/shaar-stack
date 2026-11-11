@@ -93,6 +93,8 @@ def derive_lock(product_text, reviewed_text):
     selected = dict(product)
     edges = {key: {resolve(dependency, product) for dependency in package.get("dependencies", [])}
              for key, (package, _) in product.items()}
+    observation = reviewed_observation_closure(reviewed_text)
+    expanded = set()
     overrides = {}
     for name in PATCHED:
         keys = [key for key in product if key[:2] == (name, "1.3.0") and key[2] is None]
@@ -104,6 +106,10 @@ def derive_lock(product_text, reviewed_text):
         if key[0] in overrides and key[1] == "1.3.0":
             return overrides[key[0]]
         if key in selected:
+            if key in observation and key not in expanded:
+                expanded.add(key)
+                edges[key].update(include(resolve(dep, reviewed))
+                                  for dep in reviewed[key][0].get("dependencies", []))
             return key
         if key[:2] in PATH_PREPARED:
             prepared = [other for other in product if other[:2] == key[:2] and other[2] is None]
@@ -113,6 +119,7 @@ def derive_lock(product_text, reviewed_text):
         if key[2] != "registry+https://github.com/rust-lang/crates.io-index":
             raise ValueError("observation graph cannot add a non-crates.io identity")
         selected[key] = (package, block)
+        expanded.add(key)
         edges[key] = set()
         for dependency in package.get("dependencies", []):
             edges[key].add(include(resolve(dependency, reviewed)))
@@ -141,7 +148,7 @@ def derive_lock(product_text, reviewed_text):
             raise ValueError("ambiguous path dependency identity")
         return key[0] + " " + key[1] + " (" + key[2] + ")"
 
-    expected_additions = reviewed_observation_closure(reviewed_text) - set(product)
+    expected_additions = observation - set(product)
     if set(selected) - set(product) != expected_additions:
         raise ValueError("derived observation identities differ from reviewed root closure")
     # Normalize only the disposable derived output. Source lock bytes remain untouched.
@@ -250,10 +257,29 @@ def closure(data):
     return result
 
 
+def shared_observation_growth(key, before, after, reviewed_text):
+    """Admit only the pinned serde_json preserve_order growth needed by qlog."""
+    if key != ("serde_json", "1.0.154", "registry+https://github.com/rust-lang/crates.io-index"):
+        return False
+    _, reviewed = lock_blocks(reviewed_text)
+    dependencies = {resolve(dep, reviewed) for dep in reviewed[key][0].get("dependencies", [])}
+    targets = {target[0]: target for target in dependencies if target[0] in {"foldhash", "indexmap"}}
+    if set(targets) != {"foldhash", "indexmap"}:
+        raise ValueError("reviewed serde_json preserve_order dependencies missing")
+    features, edges = before
+    new_features, new_edges = after
+    expected_edges = {(name, target, None, None) for name, target in targets.items()}
+    if (new_features != features | {"alloc", "indexmap", "preserve_order"}
+            or new_edges != edges | expected_edges):
+        raise ValueError("unreviewed shared serde_json observation growth")
+    return True
+
+
 def verify_reference(repo, product, reference):
     original = {identity(package): package for package in product["packages"]}
     observed = {identity(package): package for package in reference["packages"]}
-    allowed = reviewed_observation_closure((repo / ".github/probes/iroh-paths/Cargo.lock").read_text(encoding="utf-8"))
+    reviewed_text = (repo / ".github/probes/iroh-paths/Cargo.lock").read_text(encoding="utf-8")
+    allowed = reviewed_observation_closure(reviewed_text)
     if not set(original) <= set(observed):
         raise ValueError("observation reference removed or replaced a product identity")
     if set(observed) - set(original) != allowed - set(original):
@@ -263,6 +289,9 @@ def verify_reference(repo, product, reference):
         new_features, new_edges = after[key]
         if not features <= new_features or not edges <= new_edges:
             raise ValueError("observation reference removed a product feature or non-dev edge")
+        if (new_features != features or new_edges != edges) and shared_observation_growth(
+                key, (features, edges), (new_features, new_edges), reviewed_text):
+            continue
         if key[0] not in PATCHED and new_features != features:
             raise ValueError("unrelated product feature changed by qlog reference: " + key[0])
         if key[0] in PATCHED and new_features - features != {"qlog"} - features:

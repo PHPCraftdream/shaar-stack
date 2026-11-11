@@ -11,6 +11,7 @@ use crate::identity::Identity;
 use super::{ALPN, NetworkError, STREAM_LIMIT, Session, session::ACCESS_DENIED};
 
 mod policy;
+pub(super) use policy::native_ip;
 pub use policy::{Allowlist, Limits};
 #[cfg_attr(
     not(test),
@@ -30,6 +31,17 @@ pub(crate) mod negotiation_frames;
 mod negotiation_tests;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+// First post-RX eliciting send can reset idle within the 2 s keepalive.
+// 5 s idle + 2 s keepalive + default 2 s grace leaves payload headroom.
+// The SDK handshake limit stays 10 s; backend idle timeout can expire first.
+const NATIVE_IDLE_TIMEOUT_MS: u32 = 5_000;
+// Retire a silent path before connection idle can kill a usable backup.
+const NATIVE_PATH_IDLE_TIMEOUT: Duration = Duration::from_secs(4);
+const NATIVE_PATH_KEEPALIVE: Duration = Duration::from_secs(2);
+const _: () = assert!(
+    NATIVE_PATH_IDLE_TIMEOUT.as_millis() < NATIVE_IDLE_TIMEOUT_MS as u128,
+    "path idle must precede connection idle"
+);
 
 /// A single native socket and immutable admission policy. Not Clone.
 /// No SDK task is spawned: callers own/poll handshakes and shutdown themselves.
@@ -96,6 +108,9 @@ impl Endpoint {
         Self::validate_bind(address)?;
         let transport = QuicTransportConfig::builder()
             .application_data_filter(|path| policy::native_ip(path.remote().ip()))
+            .max_idle_timeout(Some(VarInt::from_u32(NATIVE_IDLE_TIMEOUT_MS).into()))
+            .default_path_max_idle_timeout(NATIVE_PATH_IDLE_TIMEOUT)
+            .default_path_keep_alive_interval(NATIVE_PATH_KEEPALIVE)
             .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_LIMIT)))
             .max_concurrent_uni_streams(VarInt::from_u32(0))
             .stream_receive_window(VarInt::from_u32(256 * 1024))
@@ -145,6 +160,11 @@ impl Endpoint {
 
     pub fn local_addr(&self) -> SocketAddr {
         self.address
+    }
+
+    #[cfg(test)]
+    pub(crate) fn native_packet_gate(&self) -> Arc<iroh::endpoint::NativePacketGate> {
+        self.inner.native_packet_gate()
     }
 
     pub(crate) fn native_addr_watcher(&self) -> impl iroh::Watcher<Value = EndpointAddr> + use<> {
@@ -258,7 +278,7 @@ impl Endpoint {
         let connection = tokio::time::timeout(HANDSHAKE_TIMEOUT, async { incoming.await })
             .await
             .map_err(|_| NetworkError::Deadline)?
-            .map_err(|error| NetworkError::Handshake(Box::new(error)))?;
+            .map_err(NetworkError::from_handshake)?;
         if !self.allowlist.contains(&connection.remote_id()) {
             connection.close(VarInt::from_u32(ACCESS_DENIED), b"");
             return Err(NetworkError::AccessDenied);

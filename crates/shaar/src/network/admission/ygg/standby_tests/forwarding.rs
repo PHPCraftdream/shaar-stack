@@ -38,6 +38,7 @@ const SLOTS: usize = 4;
 /// Client half of one node: the owner plus the handles needed for proofs.
 struct Client {
     owner: Owner,
+    packet_gate: Arc<iroh::endpoint::NativePacketGate>,
     probe: Probe,
     native_addr: SocketAddr,
     native_dials: Arc<AtomicUsize>,
@@ -66,6 +67,7 @@ async fn client(
     .await
     .expect("client native endpoint binds");
     let native_addr = native.local_addr();
+    let packet_gate = native.native_packet_gate();
     let native_id = native.id();
     let (endpoint, pump) = YggEndpoint::bind(client_id, bridge, allowlist(), limits())
         .await
@@ -86,6 +88,7 @@ async fn client(
     let owner = StandbyOwner::new(dial, fallback, mode, config).expect("owner");
     Client {
         owner,
+        packet_gate,
         probe,
         native_addr,
         native_dials,
@@ -206,6 +209,7 @@ async fn native_ygg_native_new_tcp_follows_policy() {
             native_dials,
             fallback_dials,
             native_dial_ok,
+            ..
         } = client(
             &client_id,
             &server_id,
@@ -403,4 +407,162 @@ async fn signal_mode_negotiates_through_ygg_but_never_forwards_payload_through_i
     })
     .await
     .expect("signal_mode_negotiates_through_ygg_but_never_forwards_payload_through_it deadline");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn silent_native_packet_loss_measures_twenty_first_byte_failovers() {
+    use std::fmt::Write as _;
+
+    timeout(Duration::from_secs(600), async {
+        let (server_id, client_id) = (identity(0x75), identity(0x76));
+        let client_key = client_id.transport_key().public();
+        let (server_bridge, client_bridge, port) = ygg_pair(0x75, 0x76).await;
+        let mut target = Target::start().await;
+        let mut samples = [Duration::MAX; 20];
+        let mut rows = String::with_capacity(8192);
+        rows.push_str("trial,phase,native_available,path,failover_ns\n");
+        for (trial, sample) in samples.iter_mut().enumerate() {
+            let (native_server, server_addr, _) = NativeServer::start(
+                &server_id, "127.0.0.1:0".parse().expect("loopback"), &[client_key], target.addr,
+            ).await;
+            let Client { mut owner, probe, native_addr: client_addr, packet_gate: gate, .. } = client(
+                &client_id, &server_id, server_addr, &client_bridge,
+                Mode::Standby, PolicyConfig::default(),
+            ).await;
+            owner.set_observer(move |event| eprintln!("P10 trial={trial} actual_owner={event:?}"));
+            assert_eq!(owner.follow().await, Ok(PathKind::Native));
+            let native = native_lease(&owner);
+            let (_, (ordinal, byte, _)) = tokio::join!(forward_exact(&native, b"n"), target.first_byte());
+            assert_eq!((ordinal, byte), (trial * 2 + 1, b'n'));
+            // This endpoint has ONLY IP transports. Aggregate counters retain
+            // STREAM evidence even if its carrying path closed before sampling.
+            let stats = native.connection.stats();
+            assert!(stats.frame_tx.stream > 0 && stats.frame_rx.stream > 0);
+            assert!(!native.connection.paths().is_empty(), "healthy lease has no open paths: {:?}", native.connection.close_reason());
+            assert!(native.connection.paths().iter().all(|path| path.is_ip()),
+                "the direct-only fixture must contain only Native IP paths");
+            let allowed = gate.counts();
+            assert!(allowed[0] > 0 && allowed[1] > 0, "real IP traffic crosses both directions before blocking");
+            drop(native);
+            target.wait_closed(trial * 2 + 1).await;
+            writeln!(rows, "{trial},healthy,true,Native,0").expect("String formatting");
+            let ygg_server = ygg_server(&server_id, &client_id, &server_bridge, target.addr).await;
+            // Silent bidirectional packet loss, not an announced endpoint close.
+            let blocked_at = Instant::now();
+            gate.set_blocked(true);
+            let followed = timeout(Duration::from_secs(30), async {
+                loop {
+                    match owner.follow().await {
+                        Ok(PathKind::Native) => {
+                            // Same-kind recovery is legitimate progress, not failover.
+                            // Keep the ORIGINAL block timestamp and outer deadline.
+                            let recovered = native_lease(&owner);
+                            let paths: Vec<_> = recovered.connection.paths().iter()
+                                .map(|path| (path.remote_addr().clone(), path.is_selected(), path.rtt()))
+                                .collect();
+                            eprintln!("P10 trial={trial} intermediate_native elapsed={:?} endpoint_ip_gate=true paths={paths:?}", blocked_at.elapsed());
+                        }
+                        result => break result,
+                    }
+                }
+            }).await;
+            if matches!(followed, Ok(Ok(PathKind::Yggdrasil))) {
+                let ygg = ygg_lease(&owner);
+                let (ordinal, byte, at) = timeout(Duration::from_secs(30), async {
+                    let (_, first) = tokio::join!(forward_exact(&ygg, b"y"), target.first_byte());
+                    first
+                }).await.expect("new Ygg TCP reaches the actual target");
+                assert_eq!((ordinal, byte), (trial * 2 + 2, b'y'));
+                *sample = at.checked_duration_since(blocked_at).expect("same monotonic clock");
+                writeln!(rows, "{trial},blocked,false,Yggdrasil,{}", sample.as_nanos()).expect("String formatting");
+                drop(ygg);
+                target.wait_closed(trial * 2 + 2).await;
+            }
+            let counts = gate.counts();
+            eprintln!("P10 failover trial={trial} silent_drop=true outcome={followed:?} first_target_byte={sample:?} ip_gate_counts={counts:?}");
+            assert!(counts[2] > 0 && counts[3] > 0, "both Native IP directions lost real datagrams before shutdown");
+            owner.close().await.expect("measured owner closes");
+            let native_summary = native_server.stop().await;
+            let ygg_summary = ygg_server.stop().await;
+            native_released(&[server_addr, client_addr]).await;
+            assert!(native_summary.accepted >= 1);
+            assert!(matches!(followed, Ok(Ok(PathKind::Yggdrasil))), "silent loss did not fail over: {followed:?}");
+            assert!(ygg_summary.accepted >= 1);
+            assert_eq!(probe.slots.available_permits(), SLOTS);
+        }
+        target.stop().await;
+        client_bridge.close().await.expect("client bridge joins");
+        server_bridge.close().await.expect("server bridge joins");
+        ygg_released(0x75, port).await;
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors().nth(2).expect("workspace root").join("target/ci-selected");
+        assert!(rows.len() <= 8192);
+        tokio::fs::create_dir_all(&directory).await.expect("receipt directory");
+        tokio::fs::write(directory.join("p10-failover-samples.csv"), rows).await.expect("all phase rows retained");
+        samples.sort_unstable();
+        eprintln!("P10 silent-loss failover samples=20 nearest_rank_p95={:?}", samples[18]);
+        assert!(samples[18] <= Duration::from_secs(10), "silent-loss first-byte p95 exceeds 10 s: {samples:?}");
+    }).await.expect("fixed-size packet-loss campaign stays bounded");
+}
+
+/// A one-address proxy is deliberately NOT an endpoint-wide network block.
+/// The alternate path is validated before loss; this is not cold route discovery.
+/// This functional positive is outside the performance cohort; excluding two
+/// healthy Native forwards cannot inflate the campaign's Native share.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn partial_proxy_loss_preserves_an_independently_reachable_native_address() {
+    timeout(Duration::from_secs(30), async {
+        let server_id = Identity::generate();
+        let client_id = Identity::generate();
+        let server_key = server_id.transport_key().public();
+        let target = Target::start().await;
+        let (server, address, _) = NativeServer::start(
+            &server_id,
+            "127.0.0.1:0".parse().expect("loopback"),
+            &[client_id.transport_key().public()],
+            target.addr,
+        )
+        .await;
+        let client = Endpoint::bind(
+            &client_id,
+            "127.0.0.1:0".parse().expect("loopback"),
+            Allowlist::new(&[server_key]).expect("owned peer"),
+            Limits::new(SLOTS).expect("limits"),
+        )
+        .await
+        .expect("native client binds");
+        let client_address = client.local_addr();
+        let proxy = super::super::NativeGate::start(address).await;
+        let initial = client
+            .connect(server_key, proxy.address)
+            .await
+            .expect("proxied Native authenticates");
+        forward_exact(&initial, b"proxied-native").await;
+        let direct = client
+            .connect(server_key, address)
+            .await
+            .expect("second Native connection authenticates before disruption");
+        // An address hint alone is not a validated alternate path.
+        direct
+            .connection
+            .ensure_native_path(address)
+            .await
+            .expect("independent Native address validates before proxy loss");
+        let _blocked_at = proxy.block();
+        forward_exact(&direct, b"independent-direct-native").await;
+        assert!(direct.connection.paths().iter().any(|path|
+            matches!(path.remote_addr(), iroh_base::TransportAddr::Ip(remote) if *remote == address)
+        ));
+        assert_eq!(target.accepts.load(Ordering::SeqCst), 2);
+        initial.close();
+        direct.close();
+        client.close().await;
+        let summary = server.stop().await;
+        let (allowed, _dropped) = proxy.stop().await;
+        assert!(summary.accepted >= 2 && allowed > 0);
+        target.stop().await;
+        native_released(&[address, client_address]).await;
+    })
+    .await
+    .expect("partial-route positive stays bounded");
 }

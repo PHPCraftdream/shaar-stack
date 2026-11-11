@@ -68,11 +68,19 @@ def prepare(archives, lock_path, destination):
     for root in roots.values():
         manifest = root / "Cargo.toml"
         manifest.write_text(manifest.read_text(encoding="utf-8") + "\n[workspace]\n", encoding="utf-8", newline="\n")
+    gate_preimages = {relative: hashlib.sha256((roots["iroh"] / relative).read_bytes()).hexdigest()
+                     for relative in runtime.NATIVE_GATE_SWAPS}
+    runtime.native_packet_gate(roots["iroh"])
     provenance = {"version": VERSION, "archives": PACKAGES,
                   "patch_sha256": hashlib.sha256(Path(policy.__file__).read_bytes()).hexdigest(),
                   "patch_sources": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                                     for name in ("policy.py", "runtime.py", "ingress_budget.rs", "actor_shutdown.rs")},
-                  "fixture_instrumentation": False,
+                  "fixture_instrumentation": True,
+                  "fixture_feature": runtime.NATIVE_GATE_FEATURE,
+                  "fixture_feature_default_enabled": False,
+                  "fixture_scope": "SDK-test endpoint-wide Native IP loss; production feature off",
+                  "fixture_source_sha256": hashlib.sha256(runtime.NATIVE_GATE_MODULE.encode()).hexdigest(),
+                  "fixture_preimage_sha256": gate_preimages,
                   "completed_native_path_bridge": True,
                   "native_cid_readiness_event": True,
                   "native_path_retention": True,

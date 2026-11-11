@@ -185,10 +185,10 @@ impl Dialer for NativeDialer {
         }
     }
 
-    /// Observes link loss only; the endpoint itself is closed by the role.
-    /// cancel-safe: yes — the observation is level-triggered.
+    /// Observes payload-path loss even while signaling keeps the connection alive.
+    /// cancel-safe: yes — each subscription replays the current path snapshot.
     async fn lost(&mut self, link: &Self::Link) {
-        let _ = link.closed().await;
+        link.native_lost().await;
     }
 
     /// Releases the owned relay lease over the retained ops handle. Tolerates

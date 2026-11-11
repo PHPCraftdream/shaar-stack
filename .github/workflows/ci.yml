@@ -116,7 +116,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # Full Windows retains three isolated graph captures after workspace tests.
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.selection).full && matrix.os == 'windows-latest' && 120 || 90 }}
     env:
       RUSTUP_TOOLCHAIN: "1.99.1"
       CI_TARGETS: ${{ needs.plan.outputs.targets }}
@@ -392,7 +393,7 @@ jobs:
           name: owned-dns-foundation-${{ matrix.os }}
           path: |
             target/owned-dns-graph.json
-            target/owned-dns-baseline/metadata.json
+            target/owned-dns-baseline/*.json
             target/owned-dns-baseline/Cargo.lock
             target/resolver-locking-baseline.json
             ${{ runner.temp }}/shaar-owned-dns.log
@@ -479,6 +480,7 @@ jobs:
           set -euo pipefail
           script=.github/scripts/tests/noq_driver/prepare.py
           if [[ "$RUNNER_OS" == Windows ]]; then host=x86_64-pc-windows-msvc; else host=x86_64-unknown-linux-gnu; fi
+          python -I -m unittest discover -s .github/scripts/tests/noq_driver
           cargo metadata --locked --format-version 1 --filter-platform "$host" > target/noq-driver-baseline.json
           python -I "$script" product --backend target/backend --product-lock Cargo.lock --baseline-metadata target/noq-driver-baseline.json --destination target/noq-driver-product
           # Mirror all resolved driver-closure features, then verify before compilation.

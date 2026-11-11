@@ -1009,6 +1009,539 @@ has no additional functional transition gap to carry into #25.
   notices and release decisions retain their own dependencies and gates. The
   shared-role/binary-wiring evidence does not silently close those stages.
 
+## Measurement acceptance boundary for #25 (2026-11-10)
+
+Advances scenario steps 3–5 after accepted transition audit `f335e98`:
+CI `42846614038` executed all 78 selected cases on each OS, including both
+new private-boundary cases, with identical identities and zero ignored. Exact
+source is delivered; the task branch/worktree and duplicate refs are removed.
+This is not a measured efficiency result or a full P10 pass.
+
+The first bounded slice supplies the missing fixed-target first-byte oracle.
+The echo target records its first successful one-byte read using Tokio's
+monotonic clock, before writing the echo. Each observation includes the actual
+connection ordinal and byte. A 64-entry channel bounds retained observations;
+sequential measurements must consume every event. Overflow or missing events
+cannot establish a successful sample. An EOF-only connection supplies no event,
+additional bytes supply no second event, and cancelling the receiver must not
+consume a later observation. Production transport and policy are unchanged.
+The accompanying regression is written first; local lint does not execute it.
+
+The oracle slice `7456cdd` is executed: CI `42852611880` selected, executed
+and passed 52 identical startup case identities on each OS, including the new
+target-byte regression, with zero ignored. This proves the observer, not latency.
+
+The next startup slice fixes 20 sequential fresh-client observations for each
+of two cohorts, before execution. Its nearest-rank p95 is the nineteenth ordered
+sample. Known-address clients receive the independently bound server socket as
+an optional hint; cold clients have no address hint or shared client cache and
+must emit a service-key GET before the captured signed record is answered.
+Both use default policy. Each timer starts before retained client startup,
+including its initial publication, listener, lookup and handshake, and ends at
+the actual target read. No Native route barrier delays opening the probe. The
+live server socket is independently retained and unblocked for all 40 samples;
+eligibility is not inferred from the selected lease. Non-native forwards remain
+in the direct-latency distribution as `Duration::MAX`; a missing forward fails
+the whole case. Actual leased paths and every sample are printed and retained
+in a bounded `p10-startup-samples.csv` inside the existing selected-test receipt
+artifact; successful libtest stdout alone is not accessible sample evidence.
+Startup-only direct share is reported separately: long-outage availability phases, failover
+and final combined direct-share acceptance remain open, not excluded by this
+slice. Owners are joined before evaluating aggregate thresholds.
+
+Startup evidence is accepted at `e2ba2ce`, CI `42859609959`: 55 identical
+selected = executed = passed product cases per OS, zero ignored, and 40 unique
+CSV rows per OS. Independently recomputed nearest-rank p95: Linux known
+86,105,721 ns / cold 107,289,695 ns; Windows known 100,202,700 ns / cold
+128,831,300 ns. All 40 startup connections on each OS used Native. This is not
+combined campaign or full P10 acceptance. Earlier `cdaca7f` CI failed because
+the verifier rejected libtest's legitimate 60-second progress notice, despite
+54 successful test events per OS. `7307f04` repaired that strict parser, but its
+CSV was crate-local and absent from uploaded evidence; the workspace-path
+regression in `e2ba2ce` closes that custody gap without changing thresholds.
+
+The failover slice schedules 20 trials through the existing real standby
+fixture, with default policy. Its original one-address UDP proxy did not cover
+alternate Native routes; the consolidated repair below replaces that premise
+with an endpoint-wide, SDK-test-feature-only Native IP packet gate. The real
+native handshake and payload first pass; Native IP datagrams in BOTH directions
+are then silently dropped while both endpoints stay open. One endpoint-scoped
+atomic gate covers every native transport sender and IP receive, including
+cached reconnects and discovered alternate addresses. It creates no socket,
+queue or task, and is absent from default production builds. This is not an
+OS/public packet-filter test or an arbitrary relay. Timer origin is activation of silent
+loss, not a later loss callback or Ygg-ready event; completion is the target's
+first successful byte read on a new Ygg TCP forward. Each trial retains its
+healthy Native and blocked Ygg phase, and proves packets actually passed and
+were dropped. Twenty observations use the same nineteenth-order p95, at most
+10 s. Endpoint shutdown alone does not prove this silent-loss criterion.
+Source preflight found the pinned path-idle default is 15 s (connection idle
+30 s), already longer than this budget. The first path-only tuning was not
+sufficient: CI `42864492151` on `97f4971` failed on both OS (101 passed, two
+failed). The new 0xCD/0xCE fixture seeds collided with an existing
+`peer_composition` cancellation fixture, and silent-loss trial zero did not
+return within 30 s. The failed distribution is not accepted. Source inspection
+then found Noq refuses a local idle abandonment of the LAST open path with
+`LastOpenPath`; awaiting connection closure cannot solve both all-silent loss
+and Native-only loss while signaling survives.
+
+The earlier repair set connection AND path idle to 6 s, with a 2 s per-path
+keepalive. The consolidated budget correction below also accounts for first-send
+idle reset, rather than assuming that path-idle alone establishes payload headroom. The SDK
+handshake limit remains an upper bound of 10 s; backend idle may expire earlier,
+and actual backend timeout errors map to the existing typed `Deadline` result.
+Access denial/capacity and other transport failures remain distinct. A private
+Native-loss observer consumes replayed `paths_stream` snapshots, returning when
+all eligible IP payload paths disappear even if the signaling connection is
+still alive; public `Session.closed()` retains its connection-only semantics.
+It is event-driven and cancel-safe, without a polling task or an unbounded log.
+The already-locked `futures 0.3.34` direct edge moves from dev to normal (it was
+already production-transitive through `shaar-p2p`); no package, version, feature
+or lock is changed. Packet-loss identities now use the separately checked
+0x75/0x76 pair. The trade-off is more idle path control packets (2 s rather than
+5 s) and earlier failure of a completely silent peer, bounded per retained path.
+No APP is admitted on signaling.
+
+A real same-connection regression must add a Native path to an authenticated
+custom signaling connection, forward Native bytes, silently block the Native
+route, observe Native loss, and prove the SAME connection still receives fresh
+custom control with zero custom APP. Healthy waiter cancellation and re-entry
+after loss are checked. Kernel and fixture commits remain separate; this
+additional source-review gap is closed only after actual CI execution, not by
+the direct-only fixture or local lint.
+
+CI `42869046520` on `3115cf6` is also failed, not accepted. Each OS selected
+370 cases and verified an initial 120-case batch, then stopped at a failed
+121-case batch: Linux 120 passed / one failed, Windows 119 passed / two failed.
+Across actual execution, Linux has 240 passed / one failed; Windows 239 passed /
+two failed. The remaining 129 selected cases were NOT executed on either OS,
+including the old cancellation fixture. Its seed collision is repaired in source,
+not yet confirmed by execution; an earlier operator claim of its pass was wrong.
+The packet-loss fixture wrongly treated an intermediate same-kind
+Native generation as the final answer; `follow` explicitly permits such recovery.
+It now continues to Ygg under the ORIGINAL block timestamp and outer deadline.
+A direct-only endpoint's connection counters retain APP-positive evidence when
+a live-path snapshot cannot establish that history; there is still no custom
+transport in that fixture. Both initial and recovered Native paths must remain
+inside the controlled gate. The Windows same-connection timeout is not declared
+fixed: the next bounded diagnostic records actual addresses, route generations,
+RTT, control progress and closure state, and rejects an ungated Native path
+instead of assuming that one proxy blocks every possible route. Thresholds,
+sample count and outage duration are not relaxed. Failure streak is two; a third
+failure requires the consolidated-review stop before further CI pushes.
+
+### Consolidated review after three failures (#48)
+
+CI `42874429666` on `5b8a956` is the third consecutive failure. Each OS selected
+370 SDK cases: 239 actual passes, two failures and 129 NOT executed, with only
+the first 120-case batch receipt-verified. No point-fix push or rerun followed.
+Actual traces conclusively show the scope error: a Native retry around eight
+seconds uses the real upstream UDP address, bypassing the proxy. The signaling
+connection also gains a real upstream Native path and continues receiving fresh
+Custom control. Selecting Native or waiting for its loss was correct product
+behavior while that alternate route remained usable. Forcing Ygg or fabricating
+dial refusal would contradict the north star.
+
+The review covers the earlier seed collision, Noq `LastOpenPath` behavior,
+connection-versus-payload liveness, same-kind generation progress, closed-path
+frame evidence, complete batch selection, feature contexts, source provenance,
+formatting and resource bounds together. Noq's packet builder can reset idle
+on the first post-RX ack-eliciting send. A 2 s keepalive plus 6 s idle plus 2 s
+policy grace leaves no payload margin. The consolidated repair therefore uses
+5 s connection/path idle: nominally 2 + 5 + 2 = 9 s before payload, leaving
+headroom inside the unchanged 10 s measured p95. Noq's RFC 3*PTO floor is not
+weakened; actual CI timestamps, not this nominal calculation, remain acceptance.
+The handshake upper bound stays 10 s with typed earlier backend timeout. No
+retry budget, stable hold, controlled outage duration or threshold is reduced.
+Existing before-connect hooks cannot
+simulate packet loss; disabling NAT traversal is neither used nor smuggled into
+the fixture. A one-address proxy cannot establish endpoint-wide unavailability.
+
+The owner explicitly approved one narrow source-contract exception, recorded
+in north-star. The single consolidated repair adds a separate empty
+`shaar-native-gate` feature to the SAME pinned Iroh package and enables it only
+through the SDK dev dependency. Normal product graph checks reject its presence.
+SDK gate accessors exist only under `cfg(test)`. No package, version, lock,
+download budget, root permission, public target or production runtime option
+changes. Source presence is disclosed: backend provenance reports optional test
+instrumentation, the disabled default and the owned module hash, rather than
+continuing to claim an unmodified source.
+
+The gate is endpoint-scoped and shared by all transport sender clones. Filtering
+occurs at final `TransportsSender::poll_send`, after Mixed-address resolution,
+and at typed Native-IP ingress before Noq dispatch. Thus alternative addresses,
+IPv4/IPv6, address discovery and cached reconnects cannot bypass it. Custom and
+Relay transport variants are not filtered; Ygg owns a distinct carrier. The gate
+creates no task, socket, queue or packet log. Feature-off builds contain neither
+its state/allocation nor packet-hot-path branches/atomics. Allowed TX counts
+are attempts, NOT delivery claims. Real Native target bytes before blocking,
+actual drops in BOTH directions before shutdown, new Ygg target bytes, fresh
+Custom control and zero Custom APP remain independent runtime obligations.
+
+Exact-count patch application and reverse application are validated before any
+source write. Four pre-gate source hashes are recorded after existing reviewed
+production transformations. Reversing the gate must recover those hashes;
+previous archive-equality checks remain after removing only the reviewed delta.
+Negative controls cover duplicates, altered/missing feature guards, preexisting
+module preservation, source drift, default feature activation and normal graph
+feature leakage. The first generated source tree and revised preimage-receipt
+draft are preserved separately, never overwritten. All original archive SHA256,
+package identities and licenses are still verified by the existing prepare-only
+entrypoint, with zero network acquisition and no archive-code execution.
+
+Local preparation completed and the four preimages independently match the
+previous prepared Iroh source. Actual compiler artifact receipts distinguish
+normal `cargo clippy --lib` features (`tls-ring`, `unstable-custom-transports`)
+from SDK `--all-targets` test features (the same two plus `shaar-native-gate`).
+Both offline/locked lint contexts and the accepted formatting boundary passed;
+Cargo.lock is unchanged. These are compilation/lint and DATA-integrity proofs,
+NOT execution of Rust or Python tests. The new gate controls, all campaign cases
+and graph/source negative controls still require CI on the repair SHA.
+
+The old proxy is retained only as a separate Native-priority positive control:
+when one proxy is blocked, another independently reachable Native address must
+still authenticate and forward. Its two healthy Native forwards are outside the
+performance cohort; excluding healthy positives cannot inflate Native share.
+The actual 20-trial campaign and same-connection regression now use the complete
+endpoint gate, keeping the original clock, thresholds, sample count, old Ygg
+stream and ordinary retry budget. One personally reviewed consolidated commit
+and an explicit SHA/trade-off report are required BEFORE CI resumes. The failure
+streak remains three until a real green; full P10 is not accepted by this review.
+
+The combined connection ledger is declared before execution: 40 startup
+connections, two existing default-budget long-outage connections, and 40
+failover-phase connections (82 total). Native availability is independently
+true for all startup connections, BOTH long-outage connections (only discovery
+is withheld), and 20 pre-drop Native connections. It is false only for the 20
+explicitly packet-blocked phases, which still remain in the ledger. Thus 62
+connections are eligible; the original Ygg connection during long discovery
+outage remains an adverse eligible sample. Repeated writes on that same held
+stream are not new connections. Accept at least 95% Native among all eligible
+connections only after all three CSV ledgers, real case receipts and joined
+cleanup are verified on the same SHA. None of these next-slice obligations is
+claimed executed yet; long-outage duration and ordinary retry budget are unchanged.
+
+The reviewed gate repair was committed as `303bf62` with parent `5b8a956`,
+reported before the fork push, and tested by CI `42893117913`. Both OS jobs failed
+before SDK execution with `ValueError: ambiguous driver closure seed: rcgen` in
+the existing product driver fixture. The consecutive failure streak is now four,
+not reset by local clippy. The retained targeted selection includes the SDK library
+and native graph witness, but neither target executed; no fresh case inventory,
+failover distribution or three-ledger acceptance was produced.
+
+A joint review of both terminal traces, baseline metadata, selection and driver
+source identifies one shared failure: the fixture selects seeds by globally unique
+package name, while the legitimate product graph contains rcgen 0.13.2 through
+libp2p-tls and 0.14.10 through Yggdrasil. The unchanged pinned Noq archive declares
+rcgen 0.14 for its test suite. The bounded follow-up selects exactly the already
+locked 0.14.10 fixture identity; it does not remove the older package if a normal
+closure edge reaches it, change any lock/version, or weaken identity, feature,
+source-path or dependency-edge equality. Missing or duplicate reviewed identities
+still fail. Five CI-only graph controls cover order independence, both reachable
+versions, missing/changed identity rejection, ambiguity rejection and unreviewed
+source rejection. They run inside the existing backend verification step, not a
+new CI segment. Local checks are syntax plus the accepted fmt and offline locked
+normal/test clippy contexts; Python and Rust tests remain CI-only. One reviewed
+follow-up commit and report must precede another fork push; all runtime obligations
+above remain open.
+
+CI `42894735758` on the reviewed rcgen follow-up `6d5f737` passed the
+previous driver-fixture boundary but failed both OS jobs during the locked native
+graph comparison: `features.AuditError: unapproved dependency edge: shaar -> futures`.
+The failure streak is five. The SDK campaign and its numerical acceptance again
+did not execute. This is not evidence against the failover threshold itself.
+
+The earlier Native-loss observer moved the already locked, production-transitive
+futures 0.3.34 dependency from SDK dev to normal dependencies, but omitted its
+exact direct edge from the metadata AND compiler-unit declarations. Both terminal
+traces and the complete retained metadata/unit deltas were reviewed together.
+Full native graph artifact downloads (1,853,413,977 bytes Linux and 1,682,159,109
+bytes Windows) both ended with `unexpected EOF`; they were not blindly retried.
+Bounded HTTP Range reads recovered only the inert evidence JSON and four needed
+metadata/build JSON entries per OS, with ZIP CRC and retained SHA-256 verification.
+No downloaded code was imported or executed. An own stdlib DATA reader compared
+the complete normal-edge and captured compiler-unit deltas against the literal
+existing declarations, including the established Yggdrasil growth and Base58
+transition. With the exact observer pair declared, it found no other unexplained
+metadata edges, unit edges, unit identities or feature changes on either OS.
+This DATA review is not local execution of the project verifier or CI acceptance.
+
+The bounded repair declares only `shaar 0.1.0 -> futures 0.3.34` in both edge sets.
+Regression controls cover admission of that pair and rejection of another version,
+another owner, unexpected feature growth and removal. Existing checksum, source,
+feature, closure and unit identity guards remain unchanged. There are no new
+packages, versions, locks, Rust behavior changes or CI segments. Syntax checks and
+the accepted formatting/offline locked normal/test clippy boundary passed; the
+Python controls and all runtime obligations still require CI. One reviewed repair
+commit and report are required before resuming fork CI; only a real success resets
+the five-failure streak.
+
+CI `42905449848` on `b9cb3f3` failed both OS graph comparisons with
+`unapproved control-to-candidate package removal`; the streak is six and the SDK
+campaign remains unexecuted. The preceding DATA review was incomplete: it
+compared name/version, features and edges but omitted prepared-source tree/recipe
+identity transitions. Its broad statement that no unexplained changes remained
+must not be treated as full source-identity proof.
+
+Both current evidence JSONs were recovered by bounded inert ZIP ranges. Their
+normal metadata hashes match the previous retained metadata byte-for-byte, and
+all backend bindings match the earlier proofs on each OS. Full source-identity
+comparison identifies three approved source transitions, not package removals:
+Iroh's exact tree/manifest changes and the shared recipe digest change for Iroh,
+Noq and Noq-proto introduced by the owner-approved test gate. Noq/Noq-proto tree,
+manifest, archive and version are unchanged. After mapping only those exact old
+and new source fingerprints for comparison, the remaining package removals are
+exactly the three established emoji-chain packages and registry multibase; the
+additions are the existing declared Yggdrasil closure and prepared multibase.
+
+The bounded source-contract repair freezes both sides' archive, tree, manifest
+and recipe digests in `baseline/backend_sources.py`. It validates the complete
+three-package transition before returning comparison copies for package keys and
+compiler-unit/dependency-owner identities. Original proof bindings and digests
+are never rewritten. A different source/version, missing/partial transition,
+forged binding or normal-context test gate is rejected. Feature equality and all
+other closure/edge/source guards remain active. CI-only synthetic controls cover
+the integrated comparison, non-mutation, drift of each fingerprint on both sides,
+partial transitions, unit-owner drift, feature growth and unchanged graphs. The
+normal/test feature separation and backend exact patch-reversal controls remain
+separate runtime CI obligations; no source is relabeled as unmodified.
+
+This is still a source-contract repair, not P10 acceptance. No Rust behavior,
+package/version/lock, preparation recipe, new download authority or CI segment is
+changed. Python is checked locally only for syntax; tests remain CI-only. The
+accepted fmt and offline locked normal/test clippy boundary must pass, followed
+by one personally reviewed repair commit and report before the next fork push.
+
+CI `42910616786` on `122bc04` passed the source/graph boundary and reached
+SDK execution, but failed both OS jobs in the partial-proxy positive control:
+the second post-drop `connect()` returned `Deadline`. The streak is seven.
+Actual SDK receipts select 371 cases per OS: the first 120 are strictly verified;
+the next 119 executed with 118 passes and one failure, leaving 132 unexecuted.
+Thus observed totals are 238 passed / 1 failed, not 371 executed or accepted.
+The old retained-role cancellation case remains among the unexecuted cases; the
+separately selected native graph witness target also has no execution claim.
+
+The real all-IP silent-loss campaign and same-connection signaling regression
+reported libtest success on both OS. The retained failover CSVs each contain 40
+rows: 20 healthy Native/eligible and 20 blocked Yggdrasil/ineligible, all trial
+IDs present. Recomputed nearest-rank p95 first-target-byte times are Linux
+9,029,807,293 ns and Windows 9,045,538,400 ns. These are authentic observations
+from a failed batch, not accepted receipt counts, current-candidate proof or full
+P10 acceptance. Startup/long-outage ledgers and the combined share remain open.
+
+The positive-control fixture's missing precondition is a validated alternate
+Native path before proxy loss. Its second address was only an endpoint hint;
+Iroh resolves it through a peer-level mapped socket and existing route state,
+so a fresh post-drop handshake is not a proof of preserving an existing healthy
+alternate. The bounded fixture repair authenticates the second connection while
+the proxy is healthy and uses the existing `ensure_native_path` readiness barrier
+to validate/retain the independent real address before blocking only the proxy.
+A new exact TCP forward must then succeed after blocking, with the real address
+still observed, two target accepts, two authenticated sessions and joined cleanup.
+It does not claim fresh-address discovery or a new handshake after blocking.
+Both healthy forwards remain outside the performance cohort. No policy, timeout,
+metric threshold, outage clock, trial count, key/allowlist or backend behavior is
+changed; no forced route selection or all-IP gate bypass is introduced. Both OS
+failures and the complete available receipts were reviewed before this repair.
+Local fmt and offline locked normal/test clippy passed; runtime remains CI-only.
+One reviewed repair commit/report must precede the next fork push.
+
+CI `42915913841` on `c8b6d87` completed with Linux success and Windows
+failure, so the consecutive run failure streak is eight. Linux strict receipts
+confirm 371 SDK and two native graph witness cases passed. All three Linux CSVs
+contain 82 rows, 62 independently Native-eligible and 61 Native. Linux p95 is
+80,876,968 ns known startup, 99,338,821 ns cold startup and 9,029,498,840 ns
+all-IP failover. These are Linux-only historical-SHA observations, not two-OS
+or full P10 acceptance. Windows again selected 371 SDK cases, strictly verified
+the first 120, then executed 118 passes / one failure in the next 119-case batch;
+132 remained unexecuted. Its 40-row failover CSV has p95 9,057,522,300 ns but
+belongs to an unverified failed batch.
+
+The validated alternate-path positive now passed on Linux but Windows failed at
+TCP read with WSAECONNRESET 10054. The old helper did not retain the QUIC close
+reason, so the exact causal chain is not claimed experimentally established.
+Joint source review identifies a concrete transport configuration race consistent
+with that loss: connection idle and path idle are both five seconds. Pinned Noq
+kills the entire connection on ConnTimer::Idle but only abandons a lost path on
+PathTimer::PathIdle. Equal deadlines provide no interval to retire a silent path
+and use a validated backup before the whole connection expires.
+
+The bounded production repair keeps connection idle at five seconds and path
+keepalive at two, but retires a silent path at four seconds. A compile-time
+invariant requires nominal path idle to precede connection idle. The RFC three-PTO
+floor and Noq LastOpenPath behavior are unchanged; full all-IP loss still has the
+same global five-second bound and original outage clock, trial count and payload
+threshold. This does not assert universal behavior under arbitrary RTT/PTO.
+The unchanged partial-proxy regression exercises real alternate-path payload;
+its reset is neither ignored nor retried. The echo helper additionally reports
+the actual QUIC close reason on a read failure without suppressing the error.
+No identity/admission, retry/stable-hold policy, source recipe, package/version/lock
+or CI segment changes. Formatting and offline locked normal/test clippy passed;
+no local Rust tests ran. One reviewed repair commit/report precedes the next fork
+push, and the new mechanism still requires both-OS runtime confirmation.
+
+Targeted CI `42921130515` accepted exact `54e85e2` on both OS: 371 SDK
+cases and two native graph witness cases per OS, with selected inventory minus
+ignored identities exactly equal to executed identities. This includes the old
+retained-role cancellation, alternate-path positive and mixed-signaling loss case.
+All three CSVs contain 82 rows per OS, 62 eligible and 61 Native (98.387%). Linux
+known/cold/failover p95 is 79,873,855 / 99,200,297 / 9,028,880,651 ns; Windows is
+98,668,700 / 129,414,900 / 9,036,649,500 ns. All agreed thresholds pass. The eight
+consecutive failures were reset by this actual two-OS success; repair #48 is closed.
+The P10 bounded resource review links the fixed two-side owner, nonqueued session
+and 16-stream/worker limits, eight commands/results, 64 lifetime resolver keys,
+32-record batch and four-address limit to executed capacity/backpressure/cleanup
+cases. It makes no P14 RSS/CPU benchmark claim.
+
+The subsequent explicit manual-full CI `42925846018` on the SAME unchanged SHA
+failed both OS jobs before the carrier wire case: Cargo refused to update the
+disposable strict fixture lock under `--locked`. This is the first failed run
+since targeted success, not a continuation of the old eight-run streak. Full P10
+is not accepted. Both terminal stderr traces and the strict preparation receipt
+were reviewed together; the root lock and reviewed observation lock are unchanged.
+
+The carrier derivation returns immediately for a registry identity already in
+the product graph. With serde_json 1.0.154 now present through Yggdrasil, this skips
+its reviewed qlog edges to foldhash/indexmap. A local inert-DATA comparison found
+this to be the only missing shared observation-lock edge growth; the verified
+serde_json archive declares preserve_order -> indexmap + alloc + dep:foldhash.
+The bounded repair recursively unions reviewed observation-closure edges even
+for existing identities, preserving every product edge, version and checksum.
+Expansion is visited once, and only the existing reviewed root closure may add
+identities. It never removes `--locked` or asks Cargo to generate a lock locally.
+The corresponding reference guard admits only exact serde_json 1.0.154
+preserve_order/alloc/indexmap feature growth and the two exact reviewed normal,
+untargeted dependency edges, preserving unrelated feature/edge rejection.
+
+Synthetic CI controls cover existing/new observation dependencies, product-only
+edge preservation, LF/CRLF, missing derived edges and unrelated features/owners.
+They run before wire execution inside the existing carrier step; no new CI
+segment or observation framework is introduced. Local Python is syntax-only;
+fmt and offline locked relevant clippy contexts must pass before push. No product
+Rust behavior, root/reviewed lock, package/version, source recipe or acquisition
+budget changes. The reviewed repair requests explicit full scope in its current
+commit; final acceptance must use that new SHA's real execution evidence.
+
+Full CI `42928470520` on `02de25b` passed the repaired carrier boundary
+but failed both OS jobs at the owned-DNS foundation's frozen lock check. Its
+selection receipt confirms full scope via the current commit marker. The retained
+Ubuntu carrier receipts independently confirm six strict and six allow-all
+bootstrap cases passed, not native-loss/reconnect or complete P10 acceptance.
+This is the second failed full run after targeted success. A third consecutive
+failure must stop point-fix pushes until the standing consolidated review is complete.
+
+Both DNS failures are `owned DNS changed lock bytes beyond its one direct edge`.
+The fixture still freezes the pre-Yggdrasil product lock. The new frozen baseline
+is SHA-256 `2085a0ec2e5aca68948173863595eef3b71d2fe3df9862560fc8c9a592409a9a`,
+computed by an own inert-DATA reader from the current targeted-CI-verified product
+lock after removing ONLY the one owned-DNS direct edge. The normalized product
+lock SHA-256 remains `ae186edff0a2fad29ffc4d6f4590a79a975a5ef6112c34606c6d5361be9c0597`.
+No lock file is changed or generated locally. The exact bytes/hash check, exact
+one-edge reversal, all-package identity comparison and unchanged feature unions
+remain mandatory; arbitrary additional bytes still fail.
+
+The same fixture copy predates the SDK's explicit adapter, Yggdrasil-core and
+external witness paths. Joint source review therefore includes those path
+contexts before another run: copied crate-local paths stay in the copied tree;
+prepared-source and witness references are rebased only to the existing caller
+repository, never an external path. Caller sources remain untouched, repository
+escapes fail, and a hashed manifest-rebase receipt is retained in the existing
+artifact. Synthetic controls cover relative/absolute copied-crate paths,
+prepared/witness paths, source preservation and rejected escapes. Existing exact
+lock LF/CRLF and unexpected-byte controls stay in place. These are CI fixture
+corrections, not relaxed dependency provenance or a product behavior change.
+
+Python remains syntax-only locally; the accepted fmt and offline locked relevant
+SDK/P2P clippy contexts must pass before one reviewed commit/report and a single
+full-marker fork push. No dependency/version/root lock, preparation/download
+budget, public-network permission or new CI segment is introduced. Full P10
+and exact-green delivery/cleanup remain pending on the new candidate SHA.
+
+Full CI `42934771483` on `c0b052d` passed the repaired DNS boundary but
+failed both OS jobs at workspace all-target clippy. The three consecutive full
+failures are `42925846018` (carrier observation lock), `42928470520` (DNS frozen
+baseline), and `42934771483` (Ygg bridge lib-test lint). The consolidated-review
+stop is active: no point-fix push or rerun follows this third failure. Targeted
+repair #48 remains historically accepted; full P10 is still not accepted.
+
+Both clippy traces report the same four defects in shaar-ygg: production items
+after inline test modules in bridge/carrier.rs and bridge/carrier_pump.rs, plus
+two manually implemented no-op Wake instances. Earlier SDK/P2P targeted lint
+contexts compiled the Ygg dependency but did not lint its lib-test target. The
+local toolchain is 1.97 while CI is pinned to 1.99.1; no version is changed and
+local success is not represented as CI lint acceptance. Full-context review
+therefore covers all six owned workspace crates with --workspace --all-targets,
+plus the separate shaar-ygg-core manifest rather than another narrow SDK-only
+lint pass. All remains offline/locked and clippy-only locally.
+
+The single bounded repair places the existing production item blocks before
+the test modules and replaces only the two genuinely no-op test wakers with
+std::task::Waker::noop(). Counting/notification wakers remain unchanged. An own
+stdlib structural DATA check retains unchanged production text before rustfmt
+and the exact test identity list. After rustfmt, nonempty production lines and
+all seven carrier/two pump test identities independently match the originals.
+Workspace and isolated-core all-target clippy both passed under local 1.97; the
+generated isolated-core target was preserved under ignored root target after
+clippy terminated. No production behavior or test obligation is removed. No lint suppression, feature narrowing, dependency/version/lock/source
+recipe change or local test execution is permitted. The previous fixture repairs
+retain strict reference checks and passed their respective full-run boundaries;
+formatting, source paths, selection and bounded resource evidence are reviewed
+in the same pass. One personally reviewed consolidated commit and report must
+precede renewed full CI, and only an actual complete success resets this streak.
+
+The consolidated full run `42941884265` on `50298d2` finished Linux
+success (52m21s), but GitHub cancelled Windows after the configured 90-minute
+job limit: the authenticated annotation states "The job has exceeded the maximum
+execution time of 1h30m0s". This is a timeout cancellation, not a new Rust assertion
+failure or a green run. The preceding three-failure stop has not been reset.
+Full job logs and Windows CSVs are retained alongside the Linux receipts.
+
+Both cargo-test steps completed successfully before cancellation. Their reported
+workspace test-summary pass totals are Linux 826 and Windows 843, with zero
+reported failures; these totals count executions across test binaries/doc tests,
+not a deduplicated logical-case inventory. All nine preserved Ygg regression IDs
+are present as passed on both OS. Current-SHA CSV checks retain exactly 82 rows,
+62 eligible and 61 Native per OS. Linux known/cold/failover p95 is
+91,535,807 / 114,531,994 / 9,027,925,665 ns; Windows is
+140,799,000 / 143,371,700 / 9,046,453,200 ns. These prove completed runtime slices,
+not completion of the interrupted Windows native-graph proof or final acceptance.
+
+The Windows native-graph step started 83m32s into the job and was cancelled after
+6m30s. The same proof previously required approximately 16 minutes on Windows;
+this is an insufficient aggregate job budget, not evidence for relaxing an
+application deadline. The bounded follow-up grants 120 minutes ONLY to explicit
+full Windows checks. Linux and all targeted jobs retain 90 minutes. Every test,
+proof, application/failover threshold, sample count, compiler/lock feature context
+and gate remains unchanged. The extra 30 minutes covers the measured isolated
+three-graph capture and remaining receipts/negative controls; execution remains
+bounded and no new CI segment is added. A CI contract pins the exact conditional
+selector and default budget to prevent broadening unrelated jobs.
+
+The renewed consolidated review includes both terminal job timings, the previous
+three failures, the unchanged production/test bodies, completed runtime evidence
+and the interrupted proof. Only workflow budget, its contract and this honest
+record change. Local Python remains syntax-only and the accepted fmt/offline
+workspace all-target clippy boundary must pass before one reviewed commit/report
+and explicit-full fork push. No product test error is suppressed and no source
+is promoted upstream until the entire new-SHA full run is accepted.
+
+The remaining campaign must include all failures and distinguish:
+- known-address startup from a fresh key-only cold service-key GET;
+- the instant the client is given its configuration/key from a later ready route;
+- fixed-target input from listener/route readiness or a whole echoed round trip;
+- the independently controlled native availability phases from the selected lease;
+- a genuinely new TCP connection from another write on an old held Ygg stream.
+
+Use the existing production-role entrypoints, continuously driven owners,
+independent signed-publication barriers, real worker lease events and joined
+cleanup. Keep default-budget long-outage recovery and its old Ygg stream in the
+campaign. The agreed 3 s / 10 s first-byte, 10 s failover and 95% direct-share
+thresholds are unchanged. A target-observer slice or one successful composition
+is not a distribution. Measurement fixtures, their rejection controls, bounded
+resources and the final explicit current-SHA full P10 run remain open until
+actually executed in CI. No new protocol, metrics framework, public peer or
+packet-filter/NAT claim is introduced here.
+
 ## Audit-adjusted delivery passes (approved 2026-11-09)
 
 The user requested: “скорректируй план под аудит, сгруппируй смежные задачи,

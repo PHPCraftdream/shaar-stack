@@ -31,9 +31,18 @@ pub(super) struct Target {
     closed: watch::Receiver<usize>,
     stop: oneshot::Sender<()>,
     task: JoinHandle<()>,
+    first_bytes: tokio::sync::mpsc::Receiver<(usize, u8, tokio::time::Instant)>,
 }
 
 impl Target {
+    /// cancel-safe: YES — receiver cancellation consumes no first-byte event.
+    pub(super) async fn first_byte(&mut self) -> (usize, u8, tokio::time::Instant) {
+        self.first_bytes
+            .recv()
+            .await
+            .expect("target first-byte observer alive")
+    }
+
     /// cancel-safe: yes — the task is spawned only after the bind completes, so a
     /// cancelled start leaves nothing behind.
     pub(super) async fn start() -> Self {
@@ -47,6 +56,7 @@ impl Target {
         let (closed_tx, closed) = watch::channel(0usize);
         let closed_tx = Arc::new(closed_tx);
         let (stop, mut stopped) = oneshot::channel::<()>();
+        let (first_tx, first_bytes) = tokio::sync::mpsc::channel(64);
         let task = tokio::spawn(async move {
             let mut echoes = JoinSet::new();
             loop {
@@ -58,13 +68,14 @@ impl Target {
                     }
                     incoming = listener.accept(), if echoes.len() < MAX_ECHOES => {
                         let (socket, _) = incoming.expect("target accepts");
-                        counter.fetch_add(1, Ordering::SeqCst);
+                        let ordinal = counter.fetch_add(1, Ordering::SeqCst) + 1;
                         accepted_tx.send_modify(|count| *count += 1);
                         let closed_tx = Arc::clone(&closed_tx);
+                        let first_tx = first_tx.clone();
                         echoes.spawn(async move {
                             // A forced path outage may reset a connection; the
                             // application side is the oracle, not this echo.
-                            let _ = echo(socket).await;
+                            let _ = echo(socket, ordinal, first_tx).await;
                             closed_tx.send_modify(|count| *count += 1);
                         });
                     }
@@ -80,6 +91,7 @@ impl Target {
             closed,
             stop,
             task,
+            first_bytes,
         }
     }
 
@@ -161,10 +173,21 @@ async fn echo_input_limit_accepts_boundary_and_rejects_one_extra_byte() {
 }
 
 /// Echoes one connection after the peer half-closes.
-async fn echo(mut socket: TcpStream) -> io::Result<()> {
+async fn echo(
+    mut socket: TcpStream,
+    ordinal: usize,
+    first: tokio::sync::mpsc::Sender<(usize, u8, tokio::time::Instant)>,
+) -> io::Result<()> {
+    let mut byte = [0_u8; 1];
     let mut bytes = Vec::new();
+    if socket.read(&mut byte).await? != 0 {
+        first
+            .try_send((ordinal, byte[0], tokio::time::Instant::now()))
+            .expect("bounded target observations must be consumed");
+        bytes.push(byte[0]);
+    }
     (&mut socket)
-        .take(MAX_ECHO_BYTES + 1)
+        .take(MAX_ECHO_BYTES)
         .read_to_end(&mut bytes)
         .await?;
     if u64::try_from(bytes.len()).expect("bounded echo size") > MAX_ECHO_BYTES {

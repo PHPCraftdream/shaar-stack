@@ -3,8 +3,10 @@
 #![forbid(unsafe_code)]
 //! Real-transport fixture for the standby path owner: a native and a Yggdrasil
 //! route to one server, counted dialers, an echo target and exact-forward helpers.
-//! Seeds of this module stay inside 0xC1..0xC9; every task is owned and joined.
+//! Existing cases use 0xC1..0xC9; the packet-loss campaign owns 0x75/0x76.
+//! Every task is owned and joined.
 
+pub(super) mod block;
 mod denial;
 mod forwarding;
 mod outage;
@@ -91,7 +93,7 @@ impl Dialer for NativeDial {
 
     /// cancel-safe: yes — level-triggered on the session.
     async fn lost(&mut self, link: &Session) {
-        let _ = link.closed().await;
+        link.native_lost().await;
     }
 
     /// cancel-safe: yes — the retained close future resumes on the next call.
@@ -204,7 +206,12 @@ pub(super) async fn forward_exact(session: &Session, payload: &[u8]) -> ForwardS
     };
     let reading = async {
         let mut bytes = Vec::new();
-        read.read_to_end(&mut bytes).await.expect("app reads");
+        read.read_to_end(&mut bytes).await.unwrap_or_else(|error| {
+            panic!(
+                "app reads: {error:?}; connection close={:?}",
+                session.connection.close_reason()
+            )
+        });
         assert_eq!(bytes.as_slice(), payload);
     };
     let (stats, (), ()) = tokio::join!(session.forward(bridge), writing, reading);

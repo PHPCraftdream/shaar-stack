@@ -1,5 +1,6 @@
 use std::fmt;
 
+use futures::Stream;
 use iroh::endpoint::{Connection, ConnectionError, VarInt};
 use iroh_base::PublicKey;
 use tokio::sync::OwnedSemaphorePermit;
@@ -25,6 +26,24 @@ impl Session {
     /// This does not mean protocol Drained; endpoint metadata remains separately capped.
     pub fn close(self) {
         drop(self);
+    }
+
+    /// Observes loss of every eligible Native payload path, not signaling health.
+    /// cancel-safe: YES — a fresh subscription replays current state before waiting.
+    pub(crate) async fn native_lost(&self) {
+        let mut paths = self.connection.paths_stream();
+        while let Some(snapshot) =
+            std::future::poll_fn(|cx| std::pin::Pin::new(&mut paths).poll_next(cx)).await
+        {
+            if !snapshot.iter().any(|path| {
+                matches!(
+                    path.remote_addr(), iroh_base::TransportAddr::Ip(address)
+                        if super::admission::native_ip(address.ip())
+                )
+            }) {
+                return;
+            }
+        }
     }
 
     /// Observes connection closure, not protocol drain.
