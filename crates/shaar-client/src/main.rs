@@ -172,9 +172,11 @@ async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
         // pending rollback in `Starting`, so the production error caller
         // still drives `role.shutdown()` instead of dropping the role into
         // the runtime-exit drop path.
-        let mut primary: Option<shaar::startup::StartupError> = match role.start().await {
-            Ok(()) => role.run(&mut shutdown).await.err(),
-            Err(error) => Some(error),
+        let started = start_until_shutdown(role.start(), &mut shutdown).await;
+        let mut primary: Option<shaar::startup::StartupError> = match started {
+            Some(Ok(())) => role.run(&mut shutdown).await.err(),
+            Some(Err(error)) => Some(error),
+            None => None,
         };
         let secondary = role.shutdown().await.err();
         let role_result: Result<(), String> = match (primary.take(), secondary) {
@@ -338,6 +340,18 @@ async fn coordinate_with_workers<F: std::future::Future<Output = Result<(), std:
     Ok(())
 }
 
+/// cancel-safe: NO — a losing startup waiter is dropped; its owner must join cleanup.
+async fn start_until_shutdown<T>(
+    startup: impl std::future::Future<Output = T>,
+    shutdown: impl std::future::Future<Output = ()>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        () = shutdown => None,
+        result = startup => Some(result),
+    }
+}
+
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let result = match parse_cli(env::args()) {
@@ -352,6 +366,9 @@ async fn main() -> std::process::ExitCode {
         }
     }
 }
+
+#[cfg(test)]
+mod startup_tests;
 
 #[cfg(test)]
 mod task156_tests;
