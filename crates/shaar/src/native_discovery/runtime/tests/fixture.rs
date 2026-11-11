@@ -3,6 +3,8 @@
 #![forbid(unsafe_code)]
 
 // Shared wire behavior stays test-only; production-codec conversion stays here.
+#[path = "fixture/responder_tests.rs"]
+mod responder_tests;
 #[path = "fixture/wire.rs"]
 mod wire;
 

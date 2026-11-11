@@ -97,6 +97,16 @@ class PolicyTests(unittest.TestCase):
                 self.assertFalse(result["selection"]["full"])
                 self.assertFalse(any(result["selection"][key] for key in POLICY.DOMAINS))
 
+    def test_shared_dht_fixture_keeps_the_failed_startup_contract_selected(self):
+        contract = ("startup::tests::role_tests::lifecycle_cases::efficiency::"
+                    "known_and_cold_startup_measure_first_target_bytes_without_ready_route_bias")
+        for suffix in ("fixture.rs", "fixture/wire.rs", "fixture/responder_tests.rs"):
+            with self.subTest(suffix=suffix):
+                result = POLICY.select(["crates/shaar/src/native_discovery/runtime/tests/" + suffix])
+                self.assertEqual(result["targets"], [POLICY.target("shaar", ("native_discovery::", contract))])
+                self.assertEqual(result["suites"], ["native-discovery", "startup-dht-contract"])
+                self.assertFalse(result["selection"]["full"])
+
     def test_native_discovery_sources_select_only_owned_module_cases(self):
         selector = "native_discovery::"
         for filename in ("address.rs", "codec.rs", "state.rs", "ordering_clock.rs", "unowned.rs"):
