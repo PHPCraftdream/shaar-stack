@@ -320,8 +320,10 @@ class ProcessFeedbackTests(unittest.TestCase):
                     seen.append((arguments, extra_env))
                     text, code = outputs[len(seen) - 1]
                     log.write_text(text, encoding="utf-8")
+                    if extra_env:
+                        self.assertIsNotNone(stderr, "child stderr must not enter the harness transcript")
                     if stderr:
-                        stderr.write_text("", encoding="utf-8")
+                        stderr.write_text("shaar-client: child diagnostic\n" if extra_env else "", encoding="utf-8")
                     return text, code
                 with patch.object(RUN, "ROOT", root), \
                      patch.object(RUN, "capture", side_effect=capture), \
@@ -347,6 +349,31 @@ class ProcessFeedbackTests(unittest.TestCase):
                 if fail:
                     self.assertEqual(receipt["exit_code"], 101)
                     self.assertEqual(receipt["unverified_case"], RUN.PROCESS_CASES[0])
+
+    def test_child_stderr_is_preserved_separately_without_weakening_the_verifier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stdout = root / "run.log"
+            stderr = root / "run.stderr.log"
+            case = RUN.PROCESS_CASES[0]
+            transcript = (f"running 1 test\ntest {case} ... ok\n"
+                          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; "
+                          "0 filtered out; finished in 0.01s\n")
+            diagnostics = "shaar-client: child diagnostic\ntest forged ... FAILED\n"
+            def command(arguments, **kwargs):
+                self.assertIsNot(kwargs["stdout"], kwargs["stderr"])
+                kwargs["stdout"].write(transcript.encode())
+                kwargs["stderr"].write(diagnostics.encode())
+                return RUN.subprocess.CompletedProcess(arguments, 0)
+            with patch.object(RUN, "ROOT", root), patch.object(RUN.subprocess, "run", side_effect=command):
+                text, status = RUN.capture(["fixture"], stdout, stderr=stderr)
+            self.assertEqual(stderr.read_text(encoding="utf-8"), diagnostics)
+            self.assertEqual(text, transcript)
+            expected = {"process": case + ": test\n"}
+            self.assertEqual(RUN.VERIFY.verify(expected, {"process": (RUN.VERIFY.cargo_execution(text), status)}, ""), 1)
+            mixed = transcript.replace("running 1 test\n", "running 1 test\n" + diagnostics)
+            with self.assertRaises(ValueError):
+                RUN.VERIFY.verify(expected, {"process": (RUN.VERIFY.cargo_execution(mixed), 0)}, "")
 
     def test_existing_feedback_workflow_is_owned_narrow_and_never_resolves_locks(self):
         selected = RUN.POLICY.select([".github/workflows/sdk-lock.yml"])

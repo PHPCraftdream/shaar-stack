@@ -315,7 +315,8 @@ def process_feedback():
         receipt["unverified_case"] = case
         path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
         output, status = capture(arguments + ["--", "--ignored", "--exact", "--color", "never", case],
-                                 directory / f"run-{index}.log", extra_env=environment)
+                                 directory / f"run-{index}.log", stderr=directory / f"run-{index}.stderr.log",
+                                 extra_env=environment)
         if status:
             receipt.update(status="failed", exit_code=status)
             path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
