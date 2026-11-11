@@ -229,13 +229,16 @@ def lint(targets):
             raise ValueError("selected target lint failed: " + str(status))
 
 
-PROCESS_CASES = tuple(sorted("process_smoke::" + name for name in (
+PROCESS_CASES = tuple(sorted(tuple("process_smoke::" + name for name in (
     "real_server_client_forward_exact_loopback_bytes",
     "real_process_rejects_empty_allowlist_and_wrong_pin",
     "real_process_startup_validation_and_busy_listener",
     "real_process_recovers_after_target_becomes_available",
     "real_process_console_shutdown_rebind_and_server_restart",
     "real_process_client_cancels_active_native_dial",
+)) + (
+    "process_smoke::composed::real_composed_client_console_stop_and_restart_in_signal_and_standby",
+    "process_smoke::composed::real_composed_server_console_stop_and_restart_in_signal_and_standby",
 )))
 
 
@@ -270,9 +273,10 @@ def process_inventory(listing, ignored_listing):
     if not ignored <= inventory:
         raise ValueError("ignored inventory is not a subset of the binary inventory")
     expected = set(PROCESS_CASES)
-    real_process = {name for name in inventory if name.startswith("process_smoke::real_")}
+    real_process = {name for name in inventory
+                    if name.startswith("process_smoke::") and name.rsplit("::", 1)[-1].startswith("real_")}
     if real_process != expected or not expected <= ignored:
-        raise ValueError("compiled ignored process inventory differs from the reviewed six cases")
+        raise ValueError("compiled ignored process inventory differs from the reviewed cases")
     return list(PROCESS_CASES)
 
 
@@ -308,7 +312,7 @@ def process_feedback():
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("process-feedback source revision is not an exact SHA")
-    receipt = {"head": revision, "scope": "direct-only-process-feedback-not-full-P13",
+    receipt = {"head": revision, "scope": "process-lifecycle-feedback-not-full-P13",
                "products": products, "selected": selected, "verified_passed": []}
     path = directory / "receipt.json"
     for index, case in enumerate(selected):
@@ -329,7 +333,7 @@ def process_feedback():
     receipt.pop("unverified_case")
     receipt["status"] = "passed"
     path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
-    print("Verified direct-only process cases:", len(selected))
+    print("Verified reviewed process lifecycle cases:", len(selected))
 
 
 def main():

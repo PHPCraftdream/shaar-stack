@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       direct_feedback:
-        description: Run the six existing direct-process cases instead of resolving a lockfile
+        description: Run the reviewed process lifecycle cases instead of resolving a lockfile
         required: false
         type: boolean
         default: false
@@ -45,7 +45,7 @@ jobs:
 
   direct-feedback:
     if: ${{ inputs.direct_feedback }}
-    name: Direct process feedback (${{ matrix.os }})
+    name: Process feedback (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +80,7 @@ jobs:
           cargo fmt --manifest-path crates/shaar-ygg-core/Cargo.toml -- --check
       - name: Scoped all-target clippy
         run: cargo clippy -p shaar -p shaar-server -p shaar-client --all-targets --locked -- -D warnings
-      - name: Verify the six direct-only process cases and binary provenance
+      - name: Verify reviewed process lifecycle cases and binary provenance
         run: python -I .github/ci/run.py process-feedback
       - name: Preserve direct-process execution and preparation receipts
         if: always()
