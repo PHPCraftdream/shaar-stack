@@ -2,3 +2,6 @@
 * -text
 # The acquisition receipt retains its original CRLF bytes and digest.
 registry/raw-sources/receipt.json whitespace=cr-at-eol
+registry/raw-sources/jni-macro-receipt.json whitespace=cr-at-eol
+# Preserve this authentic Apache file's final blank line and pinned digest.
+registry/raw-sources/jni-sys-macros-0.4.1/LICENSE-APACHE whitespace=-blank-at-eof

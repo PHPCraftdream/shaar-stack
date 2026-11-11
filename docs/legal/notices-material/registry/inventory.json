@@ -502,9 +502,9 @@
     "current_registry_classification_counts": {
       "component-only": 2,
       "missing": 9,
-      "package-complete": 483,
+      "package-complete": 485,
       "preserved_complete_text": 15,
-      "reference-only": 21,
+      "reference-only": 19,
       "reusable_archive_missing_full_text": 1,
       "reusable_archive_missing_full_text_partial_evidence": 2
     },
@@ -512,12 +512,12 @@
     "current_pass_status_counts": {
       "component-only": 2,
       "missing": 9,
-      "package-complete": 483,
-      "reference-only": 21
+      "package-complete": 485,
+      "reference-only": 19
     },
     "current_pass_material_file_count": 894,
     "current_pass_material_bytes": 4421514,
-    "current_pass_complete_text_rows": 483,
+    "current_pass_complete_text_rows": 485,
     "current_pass_missing_evidence_rows": 9
   },
   "extra_local_data_candidates": [
@@ -21095,7 +21095,7 @@
         }
       ],
       "checksum": "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [
         {
@@ -21133,7 +21133,7 @@
       ],
       "archive_member_count": 14,
       "decoded_tar_bytes": 343040,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Both authentic pinned root license alternatives are bound to exact archived package/VCS declarations; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -21146,24 +21146,77 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/jni-macros-0.22.4/LICENSE-MIT",
+                    "sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
+                    "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/jni-macros-0.22.4/LICENSE-APACHE",
+                    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+                    "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10847,
+          "material_path": "raw-sources/jni-macros-0.22.4/LICENSE-APACHE",
+          "material_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1104,
+          "material_path": "raw-sources/jni-macros-0.22.4/LICENSE-MIT",
+          "material_sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "jni-macros-0.22.4/.cargo_vcs_info.json",
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202233333034356131323431303563393339643165326362646362356133396535643836386666613033220a20207d2c0a202022706174685f696e5f766373223a20226372617465732f6a6e692d6d6163726f73220a7d",
+            "sha256": "5b271175fb5d736bf6e71f696a8829f37c6c00391065111526d7e43fdeb537e1"
+          },
+          "Cargo.toml.orig": {
+            "archive_member": "jni-macros-0.22.4/Cargo.toml.orig",
+            "bytes_hex": "5b7061636b6167655d0a6e616d65203d20226a6e692d6d6163726f73220a76657273696f6e203d2022302e32322e34220a6465736372697074696f6e203d202250726f6365647572616c206d6163726f7320666f7220746865206a6e69206372617465220a6b6579776f726473203d205b226a6e69222c20226a617661222c20226a766d222c2022616e64726f6964222c20226e646b225d0a63617465676f72696573203d205b226170692d62696e64696e6773222c2022646576656c6f706d656e742d746f6f6c733a3a70726f6365647572616c2d6d6163726f2d68656c70657273225d0a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6a6e692d72732f6a6e692d7273220a65646974696f6e203d202232303234220a696e636c756465203d205b226275696c642e7273222c20227372632f2a2a222c20226578616d706c65732f2a2a225d0a0a5b6c69625d0a70726f632d6d6163726f203d20747275650a646f6374657374203d2066616c73650a0a5b6275696c642d646570656e64656e636965735d0a72757374635f76657273696f6e203d2022302e34220a0a5b646570656e64656e636965735d0a73796e203d207b2076657273696f6e203d2022322e30222c206665617475726573203d205b2266756c6c225d207d0a71756f7465203d2022312e30220a70726f632d6d6163726f32203d2022312e30220a73696d645f6365737538203d2022312e302e31220a0a5b6465762d646570656e64656e636965735d0a6a617661632e776f726b7370616365203d20747275650a72757374792d666f726b2e776f726b7370616365203d20747275650a7472796275696c64203d202231220a746869736572726f72203d202232220a",
+            "sha256": "cfa3ca54bc23baa582a42df863f397debe8c4312a80ead221e8e049b834f93b5"
+          }
+        },
+        "original_readme": null,
+        "package_path_in_vcs": "crates/jni-macros",
+        "repository": "https://github.com/jni-rs/jni-rs",
+        "review_scope": "Exact locked package declaration and pinned repository root; no legal clearance or license election.",
+        "revision": "33045a124105c939d1e2cbdcb5a39e5d868ffa03"
       }
     },
     {
@@ -21403,7 +21456,7 @@
         }
       ],
       "checksum": "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [],
       "name": "jni-sys-macros",
@@ -21423,7 +21476,7 @@
       ],
       "archive_member_count": 6,
       "decoded_tar_bytes": 15872,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Both authentic pinned root license alternatives are bound to exact archived package/VCS declarations; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -21436,24 +21489,77 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/jni-sys-macros-0.4.1/LICENSE-MIT",
+                    "sha256": "1d85bd754b04ceec93e98e890edd1fa3c6a22e81bcb32135806beeccefa51cd1",
+                    "url": "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/jni-sys-macros-0.4.1/LICENSE-APACHE",
+                    "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+                    "url": "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 11358,
+          "material_path": "raw-sources/jni-sys-macros-0.4.1/LICENSE-APACHE",
+          "material_sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1071,
+          "material_path": "raw-sources/jni-sys-macros-0.4.1/LICENSE-MIT",
+          "material_sha256": "1d85bd754b04ceec93e98e890edd1fa3c6a22e81bcb32135806beeccefa51cd1",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "jni-sys-macros-0.4.1/.cargo_vcs_info.json",
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202236346437376237613566313139643762353562346532633136396134363638303637666635396536220a20207d2c0a202022706174685f696e5f766373223a20226a6e692d7379732d6d6163726f73220a7d",
+            "sha256": "1824b83bc25a1e245bcb97a6503105bfe07078a47cddc924c6b7db91e8852f45"
+          },
+          "Cargo.toml.orig": {
+            "archive_member": "jni-sys-macros-0.4.1/Cargo.toml.orig",
+            "bytes_hex": "5b7061636b6167655d0a6e616d65203d20226a6e692d7379732d6d6163726f73220a76657273696f6e203d2022302e342e31220a617574686f7273203d205b22526f62657274204272616767203c726f626572744073697862796e696e652e6f72673e225d0a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a6465736372697074696f6e203d20224d6163726f7320666f72206a6e692d737973206372617465220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6a6e692d72732f6a6e692d737973220a646f63756d656e746174696f6e203d202268747470733a2f2f646f63732e72732f6a6e692d7379732d6d6163726f73220a726561646d65203d2022524541444d452e6d64220a63617465676f72696573203d205b2265787465726e616c2d6666692d62696e64696e6773225d0a6b6579776f726473203d205b226a617661222c20226a6e69225d0a65646974696f6e203d202232303231220a0a5b6c69625d0a70726f632d6d6163726f203d20747275650a0a5b646570656e64656e636965735d0a73796e203d207b2076657273696f6e203d202232222c206665617475726573203d205b2266756c6c225d207d0a71756f7465203d202231220a",
+            "sha256": "6501ef93eff9b37ab65ec846bd06992d79cc28d8ef1f02f13b0488ff441ed90a"
+          }
+        },
+        "original_readme": "README.md",
+        "package_path_in_vcs": "jni-sys-macros",
+        "repository": "https://github.com/jni-rs/jni-sys",
+        "review_scope": "Exact locked package declaration and pinned repository root; no legal clearance or license election.",
+        "revision": "64d77b7a5f119d7b55b4e2c169a4668067ff59e6"
       }
     },
     {
@@ -55273,12 +55379,15 @@
     "boundary": "Complete MIT text availability, not OR election, legal clearance or distribution permission."
   },
   "raw_source_supplement": {
-    "material_bytes": 14200,
-    "material_count": 4,
+    "material_bytes": 38580,
+    "material_count": 8,
     "no_license_choice_or_legal_clearance": true,
-    "package_count": 3,
+    "package_count": 5,
     "receipt_bytes": 5542,
     "receipt_path": "raw-sources/receipt.json",
-    "receipt_sha256": "d4f45767bba3d21266670faa1ffeacc8076c9768a2da5f23d382aac2ebf8bfd5"
+    "receipt_sha256": "d4f45767bba3d21266670faa1ffeacc8076c9768a2da5f23d382aac2ebf8bfd5",
+    "macro_receipt_path": "raw-sources/jni-macro-receipt.json",
+    "macro_receipt_bytes": 5646,
+    "macro_receipt_sha256": "1a9f927618e812d27bdd1d1850042b9efa21a9f1f42396add47a468eac1aa120"
   }
 }
