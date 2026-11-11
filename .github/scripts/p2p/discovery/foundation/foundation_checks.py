@@ -1,8 +1,12 @@
 """CI-only negative controls for the owned-DNS product graph comparison."""
 import copy
 import importlib.util
+import json
 from pathlib import Path
+import shutil
 import sys
+import tempfile
+import tomllib
 import unittest
 
 sys.dont_write_bytecode = True
@@ -62,6 +66,47 @@ class FoundationGraphChecks(unittest.TestCase):
         after["packages"][0]["dependencies"][0]["uses_default_features"] = True
         with self.assertRaisesRegex(ValueError, "manifest edge"):
             foundation.compare(before, after)
+
+    def test_fixture_paths_keep_copied_crates_and_rebase_prepared_sources_and_witness(self):
+        target = Path(__file__).resolve().parents[5] / "target"
+        target.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="dns-paths-", dir=target) as temporary:
+            repository = Path(temporary) / "caller"
+            sdk, peer = repository / "crates/sdk", repository / "crates/peer"
+            sdk.mkdir(parents=True)
+            peer.mkdir()
+            source = ('[dependencies]\npeer = { path = "../peer" }\n'
+                      'prepared = { path = "../../target/prepared" }\n'
+                      '[dev-dependencies]\nabsolute = { path = ' + json.dumps(peer.as_posix()) + ' }\n'
+                      '[[test]]\nname = "witness"\npath = "../../.github/witness.rs"\n')
+            (sdk / "Cargo.toml").write_text(source, encoding="utf-8")
+            (peer / "Cargo.toml").write_text('[lib]\npath = "src/lib.rs"\n', encoding="utf-8")
+            destination = repository / "target/baseline"
+            shutil.copytree(repository / "crates", destination / "crates")
+            records = foundation.rebase_fixture_paths(repository, destination)
+            manifest = tomllib.loads((destination / "crates/sdk/Cargo.toml").read_text())
+            self.assertEqual(manifest["dependencies"]["peer"]["path"], "../peer")
+            self.assertEqual(Path(manifest["dependencies"]["prepared"]["path"]), repository / "target/prepared")
+            self.assertEqual(Path(manifest["dev-dependencies"]["absolute"]["path"]), destination / "crates/peer")
+            self.assertEqual(Path(manifest["test"][0]["path"]), repository / ".github/witness.rs")
+            self.assertEqual(set(records), {"crates/sdk/Cargo.toml"})
+            self.assertEqual((sdk / "Cargo.toml").read_text(), source)
+            self.assertEqual((destination / "crates/peer/Cargo.toml").read_bytes(), (peer / "Cargo.toml").read_bytes())
+
+    def test_fixture_path_rebase_rejects_escape_without_modifying_the_manifest(self):
+        target = Path(__file__).resolve().parents[5] / "target"
+        target.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="dns-escape-", dir=target) as temporary:
+            repository = Path(temporary) / "caller"
+            destination = repository / "target/baseline"
+            manifest = destination / "crates/sdk/Cargo.toml"
+            manifest.parent.mkdir(parents=True)
+            for value in ("../../../outside", (Path(temporary) / "outside").as_posix()):
+                content = ('[dependencies]\nescape = { path = ' + json.dumps(value) + ' }\n').encode()
+                manifest.write_bytes(content)
+                with self.subTest(value=value), self.assertRaisesRegex(ValueError, "escapes caller repository"):
+                    foundation.rebase_fixture_paths(repository, destination)
+                self.assertEqual(manifest.read_bytes(), content)
 
     def test_exact_product_lock_reverses_only_one_edge(self):
         repository = Path(__file__).resolve().parents[5]

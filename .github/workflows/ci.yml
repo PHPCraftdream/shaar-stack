@@ -392,7 +392,7 @@ jobs:
           name: owned-dns-foundation-${{ matrix.os }}
           path: |
             target/owned-dns-graph.json
-            target/owned-dns-baseline/metadata.json
+            target/owned-dns-baseline/*.json
             target/owned-dns-baseline/Cargo.lock
             target/resolver-locking-baseline.json
             ${{ runner.temp }}/shaar-owned-dns.log

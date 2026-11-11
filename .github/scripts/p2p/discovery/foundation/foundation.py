@@ -3,10 +3,12 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import tomllib
 
-BASELINE_LOCK = "a45113fce8b8216b33f0cda239d7aab9e57309d3420ad9cb58a4b5e628932fc2"
+# Targeted-CI-verified product graph, minus only the explicit owned-DNS edge.
+BASELINE_LOCK = "2085a0ec2e5aca68948173863595eef3b71d2fe3df9862560fc8c9a592409a9a"
 DEPENDENCY = 'hickory-resolver = { version = "=0.26.3", default-features = false, features = ["tokio"] }\n'
 ANCHOR = 'name = "shaar-p2p"\nversion = "0.1.0"\ndependencies = [\n "asynchronous-codec",\n "futures",\n'
 FORBIDDEN = {"__tls", "__https", "__quic", "__h3", "toml", "recursor"}
@@ -22,6 +24,34 @@ def original_lock(current):
     if hashlib.sha256(original).hexdigest() != BASELINE_LOCK:
         raise ValueError("owned DNS changed lock bytes beyond its one direct edge")
     return original
+
+
+def rebase_fixture_paths(repository, destination):
+    """Keep copied crate paths local; share only caller-owned prepared sources/targets."""
+    repository, destination = repository.resolve(), destination.resolve()
+    pattern = re.compile(r"\bpath\s*=\s*(\"[^\"\n]*\"|'[^'\n]*')")
+    records = {}
+    for manifest in sorted((destination / "crates").rglob("Cargo.toml")):
+        relative = manifest.relative_to(destination)
+        origin = repository / relative
+        before = manifest.read_bytes()
+        def replace(match):
+            value = tomllib.loads("value = " + match.group(1))["value"]
+            source = (origin.parent / value).resolve()
+            if not source.is_relative_to(repository):
+                raise ValueError("DNS baseline path escapes caller repository")
+            if source.is_relative_to(repository / "crates"):
+                target = destination / source.relative_to(repository)
+                return "path = " + json.dumps(target.as_posix()) if Path(value).is_absolute() else match.group(0)
+            return "path = " + json.dumps(source.as_posix())
+        after = pattern.sub(replace, before.decode("utf-8")).encode("utf-8")
+        if after != before:
+            manifest.write_bytes(after)
+            records[relative.as_posix()] = {
+                "original_sha256": hashlib.sha256(before).hexdigest(),
+                "rebased_sha256": hashlib.sha256(after).hexdigest(),
+            }
+    return records
 
 
 def baseline(repository, destination):
@@ -43,6 +73,8 @@ def baseline(repository, destination):
     (destination / "Cargo.toml").write_text(manifest, encoding="utf-8", newline="\n")
     (destination / "Cargo.lock").write_bytes(original)
     (destination / "crates/shaar-p2p/Cargo.toml").write_text(p2p.replace(DEPENDENCY, ""), encoding="utf-8", newline="\n")
+    rebases = rebase_fixture_paths(repository, destination)
+    (destination / "path-rebases.json").write_text(json.dumps(rebases, indent=2) + "\n", encoding="utf-8")
 
 
 def graph(metadata):

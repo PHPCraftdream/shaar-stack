@@ -1422,6 +1422,41 @@ Rust behavior, root/reviewed lock, package/version, source recipe or acquisition
 budget changes. The reviewed repair requests explicit full scope in its current
 commit; final acceptance must use that new SHA's real execution evidence.
 
+Full CI `42928470520` on `02de25b` passed the repaired carrier boundary
+but failed both OS jobs at the owned-DNS foundation's frozen lock check. Its
+selection receipt confirms full scope via the current commit marker. The retained
+Ubuntu carrier receipts independently confirm six strict and six allow-all
+bootstrap cases passed, not native-loss/reconnect or complete P10 acceptance.
+This is the second failed full run after targeted success. A third consecutive
+failure must stop point-fix pushes until the standing consolidated review is complete.
+
+Both DNS failures are `owned DNS changed lock bytes beyond its one direct edge`.
+The fixture still freezes the pre-Yggdrasil product lock. The new frozen baseline
+is SHA-256 `2085a0ec2e5aca68948173863595eef3b71d2fe3df9862560fc8c9a592409a9a`,
+computed by an own inert-DATA reader from the current targeted-CI-verified product
+lock after removing ONLY the one owned-DNS direct edge. The normalized product
+lock SHA-256 remains `ae186edff0a2fad29ffc4d6f4590a79a975a5ef6112c34606c6d5361be9c0597`.
+No lock file is changed or generated locally. The exact bytes/hash check, exact
+one-edge reversal, all-package identity comparison and unchanged feature unions
+remain mandatory; arbitrary additional bytes still fail.
+
+The same fixture copy predates the SDK's explicit adapter, Yggdrasil-core and
+external witness paths. Joint source review therefore includes those path
+contexts before another run: copied crate-local paths stay in the copied tree;
+prepared-source and witness references are rebased only to the existing caller
+repository, never an external path. Caller sources remain untouched, repository
+escapes fail, and a hashed manifest-rebase receipt is retained in the existing
+artifact. Synthetic controls cover relative/absolute copied-crate paths,
+prepared/witness paths, source preservation and rejected escapes. Existing exact
+lock LF/CRLF and unexpected-byte controls stay in place. These are CI fixture
+corrections, not relaxed dependency provenance or a product behavior change.
+
+Python remains syntax-only locally; the accepted fmt and offline locked relevant
+SDK/P2P clippy contexts must pass before one reviewed commit/report and a single
+full-marker fork push. No dependency/version/root lock, preparation/download
+budget, public-network permission or new CI segment is introduced. Full P10
+and exact-green delivery/cleanup remain pending on the new candidate SHA.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;
