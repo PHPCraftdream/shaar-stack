@@ -213,7 +213,7 @@ See `notices-source-status.md#nine-pinned-upstream-candidates--2026-11-10` and `
 The two retained r-efi READMEs explicitly name AUTHORS. The later primary-owned recovery in `notices-source-status.md#explicit-authors-terms-recovery--2026-11-10` adds exact full AUTHORS files with operative MIT terms and copyright, not reconstructed text. Canonical inventory SHA-256 is now `623e6284892396da69eadea5706a283c91afe1282676a0fc0fd6dac31792de30` (2,354,190 bytes); prior SHA-256 values describe earlier inputs, including the separate raw-source supplement. New CI-only corpus regressions invoke the existing terms-evidence validator and reject reference-only or missing evidence. They were not run locally. The replay's source/member/lock checks and hard resource limits remain unchanged; only its exact-dataset material totals change to 917 registry rows / 4,505,353 bytes, of which 894 / 4,421,514 belong to the held 515 archives. No new network or legal-policy authority, OR election, full Task13 acceptance or distribution permission is claimed.
 
 
-## Three pinned repository-root bindings (2026-11-11 candidate)
+## Three pinned repository-root bindings (2026-11-11 historical candidate)
 
 The registry inventory distinguishes four `raw_materials` from archive-member
 `materials`: root LICENSE for `dlopen2@0.8.2` and `valuable@0.1.1`, and both
@@ -237,9 +237,46 @@ An independent stdlib DATA comparison found no changes in the other 530 registry
 identities and matched all four raw files and six archived metadata payloads.
 The candidate registry counts are 498 of 533 text-available identities; with the
 unchanged 15 of 17 path identities this is 513 of 550, leaving 37 incomplete.
-The previously accepted baseline remains 510 of 550 until this candidate receives
-exact-SHA CI verification. New contract tests are written, not locally executed.
+This three-package candidate was subsequently accepted and delivered as `00206f6`:
+CI `43040958250` verified 34 notice-evidence tests per OS. The resulting accepted
+baseline is 513 of 550; the macro supplement below is a separate later candidate.
 Both JNI alternatives are retained and neither is elected. No applicability is
 extended to other JNI versions, JNI macros, objc2 or any other package/revision.
 This records authentic-text availability, not legal sufficiency, clearance,
 product artifact inclusion, release permission or completion of Task13/N1.
+
+## Two exact JNI macro root bindings (2026-11-11 candidate)
+
+The user separately authorized four exact pinned candidate GETs in proposal
+`dca3218e59f24108feedbc36fdb416c500792a35c5aee50b48ee1b3fadf457a7`.
+All four returned HTTP 200: 24,380 bytes in 5.39 seconds, without redirects,
+retries, fallback URLs, cloning, execution or imports. That request budget is
+consumed. The original 5,646-byte CRLF receipt is retained verbatim as
+`registry/raw-sources/jni-macro-receipt.json`, SHA-256
+`1a9f927618e812d27bdd1d1850042b9efa21a9f1f42396add47a468eac1aa120`.
+
+The new bindings are `jni-macros@0.22.4` at revision
+`33045a124105c939d1e2cbdcb5a39e5d868ffa03`, path `crates/jni-macros`, and
+`jni-sys-macros@0.4.1` at revision `64d77b7a5f119d7b55b4e2c169a4668067ff59e6`,
+path `jni-sys-macros`. Their actual archived original manifests explicitly declare
+MIT OR Apache-2.0 and the matching repositories. Their original README values
+are respectively absent and `README.md`; no root-relative README is invented.
+The retained archived VCS and original-manifest bytes bind exact checksums,
+clean revisions and package paths to each newly acquired root text. The earlier
+JNI package revision is not automatically reused. Both alternatives are retained.
+
+All four new LICENSE files are separate raw materials, never fabricated `.crate`
+members. Archive evidence remains 917 materials / 4,505,353 bytes; raw evidence
+now has eight files / 38,580 bytes across five exact packages. Replay pins both
+original receipts independently and validates the second acquisition format's
+identity, HTTP outcomes, unique four-file set and time/byte/request budgets before
+adapting its DATA records. The old three bindings keep their original checks.
+
+Independent stdlib DATA comparison confirmed the other 531 registry identities
+unchanged. Candidate inventory: 2,378,290 bytes, SHA-256
+`4392fa5beb114ae9bb1f4797422c43a464b5387e1d4e0d8bc56d67df54d67b92`.
+Text availability is 500/533 registry plus unchanged 15/17 path identities:
+515/550, leaving 35 incomplete. CI verification and delivery are still pending;
+local checks are syntax/DATA only, not project test execution or full archive
+program replay. No broader revision applicability, OR election, legal clearance,
+release authority or completion of N1 is asserted.

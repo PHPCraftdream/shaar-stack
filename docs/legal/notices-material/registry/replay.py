@@ -192,6 +192,10 @@ def validate_terms_evidence(row):
 
 
 RAW_RECEIPT_SHA = "d4f45767bba3d21266670faa1ffeacc8076c9768a2da5f23d382aac2ebf8bfd5"
+MACRO_RECEIPT_SHA = "1a9f927618e812d27bdd1d1850042b9efa21a9f1f42396add47a468eac1aa120"
+MACRO_RECEIPT_BYTES = 5646
+MACRO_PROPOSAL_SHA = "dca3218e59f24108feedbc36fdb416c500792a35c5aee50b48ee1b3fadf457a7"
+MACRO_READMES = {("jni-macros", "0.22.4"): None, ("jni-sys-macros", "0.4.1"): "README.md"}
 RAW_PACKAGES = {
     ("dlopen2", "0.8.2"): (
         "5e2c5bd4158e66d1e215c49b837e11d62f3267b30c92f1d171c4d3105e3dc4d4",
@@ -202,14 +206,66 @@ RAW_PACKAGES = {
     ("jni", "0.22.4"): (
         "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498",
         "5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7", "crates/jni", "jni-rs/jni-rs"),
+    ("jni-macros", "0.22.4"): (
+        "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3",
+        "33045a124105c939d1e2cbdcb5a39e5d868ffa03", "crates/jni-macros", "jni-rs/jni-rs"),
+    ("jni-sys-macros", "0.4.1"): (
+        "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264",
+        "64d77b7a5f119d7b55b4e2c169a4668067ff59e6", "jni-sys-macros", "jni-rs/jni-sys"),
 }
+
+
+def macro_records(document):
+    """Validate the second acquisition format before adapting its separate DATA records."""
+    attempts = document.get("attempts", [])
+    elapsed = document.get("elapsed_seconds")
+    if (document.get("proposal_sha256") != MACRO_PROPOSAL_SHA or document.get("status") != "completed"
+            or len(attempts) != 4 or type(elapsed) not in (int, float) or not 0 <= elapsed <= 300):
+        raise ValueError("Macro acquisition proposal/status/pass budget mismatch")
+    records, seen = [], set()
+    for attempt in attempts:
+        candidate = attempt.get("candidate", {})
+        package = candidate.get("package", {})
+        key = (package.get("name"), package.get("version"))
+        if key not in MACRO_READMES:
+            raise ValueError("Unreviewed macro acquisition package")
+        checksum, revision, package_path, repository = RAW_PACKAGES[key]
+        name = candidate.get("root_candidate_path")
+        url = f"https://raw.githubusercontent.com/{repository}/{revision}/{name}"
+        size, seconds = attempt.get("bytes"), attempt.get("request_seconds")
+        if (name not in {"LICENSE-APACHE", "LICENSE-MIT"} or (key, name) in seen
+                or package.get("checksum") != checksum or candidate.get("revision") != revision
+                or candidate.get("package_path_in_vcs") != package_path
+                or candidate.get("repository") != "https://github.com/" + repository
+                or candidate.get("url") != url or attempt.get("attempt_number_for_url") != 1
+                or attempt.get("status") != "completed" or attempt.get("text_available") is not True
+                or attempt.get("http_status_output") != "200" or attempt.get("curl_exit_code") != 0
+                or type(size) is not int or not 0 < size <= 65536
+                or type(seconds) not in (int, float) or not 0 <= seconds <= 30):
+            raise ValueError("Macro acquisition identity/HTTP/material/request budget mismatch")
+        seen.add((key, name))
+        records.append({"url": url, "status": "fetched", "http_status": 200,
+                        "identities": [f"{key[0]}@{key[1]}"], "revision": revision,
+                        "source_file": name, "bytes": size, "sha256": attempt.get("sha256"),
+                        "acquisition_proposal_sha256": MACRO_PROPOSAL_SHA})
+    expected = {(key, name) for key in MACRO_READMES for name in ("LICENSE-APACHE", "LICENSE-MIT")}
+    total = sum(record["bytes"] for record in records)
+    if seen != expected or document.get("body_bytes_total") != total or total > 262144:
+        raise ValueError("Macro acquisition material set/total budget mismatch")
+    return records
 
 
 def raw_receipt(registry):
     data = bounded_regular(no_link_path(registry, "raw-sources/receipt.json"), 65536)
     if len(data) != 5542 or digest(data) != RAW_RECEIPT_SHA:
         raise ValueError("Pinned raw acquisition receipt mismatch")
-    return json.loads(data)
+    receipt = json.loads(data)
+    data = bounded_regular(no_link_path(registry, "raw-sources/jni-macro-receipt.json"), 65536)
+    if len(data) != MACRO_RECEIPT_BYTES or digest(data) != MACRO_RECEIPT_SHA:
+        raise ValueError("Pinned macro acquisition receipt mismatch")
+    receipt["records"].extend(macro_records(json.loads(data)))
+    receipt["macro_proposal_sha256"] = MACRO_PROPOSAL_SHA
+    return receipt
 
 
 def validate_raw_sources(row, registry, source_members, receipt):
@@ -238,14 +294,20 @@ def validate_raw_sources(row, registry, source_members, receipt):
         decoded[name] = content.decode("utf-8")
     vcs = json.loads(decoded[".cargo_vcs_info.json"])
     original = tomllib.loads(decoded["Cargo.toml.orig"]).get("package", {})
-    readme = "../README.md" if package_path.count("/") == 0 else "../../README.md"
+    readme = MACRO_READMES[key] if key in MACRO_READMES else (
+        "../README.md" if package_path.count("/") == 0 else "../../README.md")
+    if key in MACRO_READMES and (original.get("license") != "MIT OR Apache-2.0"
+            or original.get("repository") != "https://github.com/" + repository
+            or vcs.get("git", {}).get("dirty", False)
+            or receipt.get("macro_proposal_sha256") != MACRO_PROPOSAL_SHA):
+        raise ValueError("Macro archived license/repository/clean revision/proposal scope mismatch")
     if (vcs.get("git", {}).get("sha1") != revision or vcs.get("path_in_vcs") != package_path
             or original.get("readme") != readme or binding.get("original_readme") != readme):
         raise ValueError("Archived VCS/readme scope mismatch")
     if receipt.get("proposal_sha256") != "5a3d9d02e89b33df6c677268a44735c9770a4d7f8d92835718cb21798232dc6b":
         raise ValueError("Raw acquisition proposal mismatch")
     materials = row.get("raw_materials", [])
-    filenames = {"LICENSE-APACHE", "LICENSE-MIT"} if key[0] == "jni" else {"LICENSE"}
+    filenames = {"LICENSE-APACHE", "LICENSE-MIT"} if key[0] == "jni" or key in MACRO_READMES else {"LICENSE"}
     if len(materials) != len(filenames) or {m.get("source_file") for m in materials} != filenames:
         raise ValueError("Reviewed raw material set mismatch")
     total = 0
@@ -256,6 +318,8 @@ def validate_raw_sources(row, registry, source_members, receipt):
         if len(records) != 1:
             raise ValueError("Raw acquisition URL absent or duplicated")
         record = records[0]
+        if key in MACRO_READMES and record.get("acquisition_proposal_sha256") != MACRO_PROPOSAL_SHA:
+            raise ValueError("Macro material acquisition proposal mismatch")
         identity = f"{key[0]}@{key[1]}"
         path = f"raw-sources/{key[0]}-{key[1]}/{name}"
         identifiers = ["Apache-2.0" if name == "LICENSE-APACHE" else "MIT"]
@@ -466,11 +530,14 @@ def main():
             status_counts[row["classification"]] = status_counts.get(row["classification"], 0) + 1
 
     supplement = inventory.get("raw_source_supplement", {})
-    if (raw_count, raw_bytes, raw_packages) != (4, 14200, 3):
+    if (raw_count, raw_bytes, raw_packages) != (8, 38580, 5):
         raise ValueError("Raw supplement replay totals mismatch")
     if (supplement.get("receipt_path") != "raw-sources/receipt.json"
             or supplement.get("receipt_sha256") != RAW_RECEIPT_SHA
             or supplement.get("receipt_bytes") != 5542
+            or supplement.get("macro_receipt_path") != "raw-sources/jni-macro-receipt.json"
+            or supplement.get("macro_receipt_sha256") != MACRO_RECEIPT_SHA
+            or supplement.get("macro_receipt_bytes") != MACRO_RECEIPT_BYTES
             or supplement.get("material_count") != raw_count
             or supplement.get("material_bytes") != raw_bytes
             or supplement.get("package_count") != raw_packages
