@@ -78,6 +78,58 @@ class FrameContracts(unittest.TestCase):
         self.assertTrue(receipt["existing_versions_and_checksums_preserved"])
         self.assertEqual(tomllib.loads(derived)["version"], 4)
 
+    def shared_json_locks(self, dependencies_already_present=False):
+        product, reviewed = locks()
+        product += entry("serde_json", "1.0.154", ("core", "product-only"), "f" * 64)
+        product += entry("product-only", "1.0.0", checksum="7" * 64)
+        added = entry("foldhash", "0.2.0", checksum="8" * 64)
+        added += entry("indexmap", "2.14.0", ("core",), "9" * 64)
+        reviewed = reviewed.replace(entry("serde_json", "1.0.154", ("core",), "f" * 64),
+            entry("serde_json", "1.0.154", ("core", "foldhash", "indexmap"), "f" * 64)) + added
+        if dependencies_already_present:
+            product += added
+        return product, reviewed
+
+    def test_existing_json_merges_reviewed_edges_without_replacing_product_edges(self):
+        for present in (False, True):
+            for newline in ("\n", "\r\n"):
+                with self.subTest(present=present, newline=newline):
+                    product, reviewed = self.shared_json_locks(present)
+                    product, reviewed = product.replace("\n", newline), reviewed.replace("\n", newline)
+                    derived, _ = graph.derive_lock(product, reviewed)
+                    _, packages = graph.lock_blocks(derived)
+                    package = packages[("serde_json", "1.0.154", REGISTRY)][0]
+                    self.assertEqual({graph.resolve(dep, packages)[0] for dep in package["dependencies"]},
+                                     {"core", "product-only", "foldhash", "indexmap"})
+                    graph.validate_derived_lock(product, reviewed, derived)
+                    blocks = derived.split("[[package]]")
+                    index = next(i for i, block in enumerate(blocks) if 'name = "serde_json"' in block)
+                    blocks[index] = blocks[index].replace(' "foldhash",' + newline, "")
+                    with self.assertRaisesRegex(ValueError, "dependencies differ"):
+                        graph.validate_derived_lock(product, reviewed, "[[package]]".join(blocks))
+
+    def test_shared_json_observation_growth_is_exact_and_rejects_other_features_and_edges(self):
+        _, reviewed = self.shared_json_locks()
+        key = ("serde_json", "1.0.154", REGISTRY)
+        core = ("core", ("core", "1.0.0", REGISTRY), None, None)
+        extra = {(name, (name, version, REGISTRY), None, None)
+                 for name, version in (("foldhash", "0.2.0"), ("indexmap", "2.14.0"))}
+        before = ({"std"}, {core})
+        after = ({"std", "alloc", "indexmap", "preserve_order"}, {core} | extra)
+        self.assertTrue(graph.shared_observation_growth(key, before, after, reviewed))
+        for features, edges in ((after[0] | {"unbounded_depth"}, after[1]),
+                                (after[0] - {"preserve_order"}, after[1]),
+                                (after[0], {core}),
+                                (after[0], extra),
+                                (after[0], after[1] | {("evil", ("core", "1.0.0", REGISTRY), None, None)}),
+                                (after[0], {core} | {(name, target, "build", platform)
+                                                    for name, target, _, platform in extra})):
+            with self.subTest(features=features, edges=edges), self.assertRaisesRegex(
+                    ValueError, "unreviewed shared serde_json"):
+                graph.shared_observation_growth(key, before, (features, edges), reviewed)
+        for other in (("serde_json", "1.0.155", REGISTRY), ("unrelated", "1.0.154", REGISTRY)):
+            self.assertFalse(graph.shared_observation_growth(other, before, after, reviewed))
+
     def test_lock_derivation_normalizes_lf_and_crlf_inputs_without_changing_lock_semantics(self):
         product, reviewed = locks()
         outputs = []

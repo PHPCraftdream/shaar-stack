@@ -1380,6 +1380,48 @@ or CI segment changes. Formatting and offline locked normal/test clippy passed;
 no local Rust tests ran. One reviewed repair commit/report precedes the next fork
 push, and the new mechanism still requires both-OS runtime confirmation.
 
+Targeted CI `42921130515` accepted exact `54e85e2` on both OS: 371 SDK
+cases and two native graph witness cases per OS, with selected inventory minus
+ignored identities exactly equal to executed identities. This includes the old
+retained-role cancellation, alternate-path positive and mixed-signaling loss case.
+All three CSVs contain 82 rows per OS, 62 eligible and 61 Native (98.387%). Linux
+known/cold/failover p95 is 79,873,855 / 99,200,297 / 9,028,880,651 ns; Windows is
+98,668,700 / 129,414,900 / 9,036,649,500 ns. All agreed thresholds pass. The eight
+consecutive failures were reset by this actual two-OS success; repair #48 is closed.
+The P10 bounded resource review links the fixed two-side owner, nonqueued session
+and 16-stream/worker limits, eight commands/results, 64 lifetime resolver keys,
+32-record batch and four-address limit to executed capacity/backpressure/cleanup
+cases. It makes no P14 RSS/CPU benchmark claim.
+
+The subsequent explicit manual-full CI `42925846018` on the SAME unchanged SHA
+failed both OS jobs before the carrier wire case: Cargo refused to update the
+disposable strict fixture lock under `--locked`. This is the first failed run
+since targeted success, not a continuation of the old eight-run streak. Full P10
+is not accepted. Both terminal stderr traces and the strict preparation receipt
+were reviewed together; the root lock and reviewed observation lock are unchanged.
+
+The carrier derivation returns immediately for a registry identity already in
+the product graph. With serde_json 1.0.154 now present through Yggdrasil, this skips
+its reviewed qlog edges to foldhash/indexmap. A local inert-DATA comparison found
+this to be the only missing shared observation-lock edge growth; the verified
+serde_json archive declares preserve_order -> indexmap + alloc + dep:foldhash.
+The bounded repair recursively unions reviewed observation-closure edges even
+for existing identities, preserving every product edge, version and checksum.
+Expansion is visited once, and only the existing reviewed root closure may add
+identities. It never removes `--locked` or asks Cargo to generate a lock locally.
+The corresponding reference guard admits only exact serde_json 1.0.154
+preserve_order/alloc/indexmap feature growth and the two exact reviewed normal,
+untargeted dependency edges, preserving unrelated feature/edge rejection.
+
+Synthetic CI controls cover existing/new observation dependencies, product-only
+edge preservation, LF/CRLF, missing derived edges and unrelated features/owners.
+They run before wire execution inside the existing carrier step; no new CI
+segment or observation framework is introduced. Local Python is syntax-only;
+fmt and offline locked relevant clippy contexts must pass before push. No product
+Rust behavior, root/reviewed lock, package/version, source recipe or acquisition
+budget changes. The reviewed repair requests explicit full scope in its current
+commit; final acceptance must use that new SHA's real execution evidence.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;

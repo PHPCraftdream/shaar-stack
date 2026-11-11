@@ -20,6 +20,7 @@ def load(name, path):
 
 
 def wire():
+    subprocess.run([sys.executable, "-I", str(HERE / "checks.py")], cwd=REPO, check=True)
     graph = load("wire_graph", HERE / "graph.py")
     instrument = load("wire_instrument", HERE / "instrument.py")
     runner = load("wire_runner", REPO / ".github/ci/run.py")
