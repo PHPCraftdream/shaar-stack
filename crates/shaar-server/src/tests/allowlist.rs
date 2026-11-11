@@ -64,6 +64,16 @@ fn key_line(seed: u16) -> String {
 }
 
 #[tokio::test]
+async fn empty_and_comment_only_files_produce_an_empty_allowlist() {
+    for text in ["", "\n  \n# no admitted peers\n  # still empty\n"] {
+        let path = file(text);
+        let result = read_allowlist(&path).await;
+        fs::remove_file(path).unwrap();
+        assert!(result.unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
 async fn rejects_malformed_key() {
     let path = file(&format!("{}\n", "zz".repeat(32)));
     assert!(read_allowlist(&path).await.unwrap_err().contains("line 1"));

@@ -129,6 +129,7 @@ async fn abort_workers(
     failure
 }
 
+/// cancel-safe: NO — dropping the binary future can abandon joined cleanup.
 async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
     let config = read_config(&config_path).await?;
     let key_hex = peer_from_config(&config)?;

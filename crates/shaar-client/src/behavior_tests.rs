@@ -102,6 +102,44 @@ async fn coordinator_reports_worker_failure_after_joining_other_workers() {
     .expect("worker failure cleanup deadline");
 }
 
+#[tokio::test]
+async fn binary_run_reports_an_occupied_local_listener() {
+    let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = occupied.local_addr().unwrap();
+    let directory = std::env::temp_dir().join(format!(
+        "shaar-client-busy-{}-{}",
+        std::process::id(),
+        address.port()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    let key_path = directory.join("identity.key");
+    let config_path = directory.join("client.ktav");
+    let identity = Identity::create_new(&key_path).await.unwrap();
+    let server_key: String = identity
+        .public_key_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let key_path = key_path.to_str().unwrap().replace('\\', "/");
+    let text = format!(
+        "server: {server_key}\nserver_address: 127.0.0.1:9\nlisten: {address}\nkey_file: \"{key_path}\"\n"
+    );
+    std::fs::write(&config_path, text).unwrap();
+    read_config(&config_path).await.unwrap();
+    let result = timeout(Duration::from_secs(10), run(config_path)).await;
+    std::fs::remove_dir_all(directory).unwrap();
+    let error = result
+        .expect("busy listener must fail promptly")
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::AddrInUse
+    );
+    assert_eq!(occupied.local_addr().unwrap(), address);
+    drop(occupied);
+    TcpListener::bind(address).await.unwrap();
+}
+
 #[test]
 fn invalid_configuration_text_is_rejected() {
     let result = ClientConfig::from_text_with_endpoint_overrides(
