@@ -500,24 +500,24 @@
     "exact_archive_matched_identities": 533,
     "missing_archive_identities": 0,
     "current_registry_classification_counts": {
-      "package-complete": 480,
-      "missing": 9,
-      "preserved_complete_text": 15,
-      "reference-only": 24,
-      "reusable_archive_missing_full_text_partial_evidence": 2,
       "component-only": 2,
-      "reusable_archive_missing_full_text": 1
+      "missing": 9,
+      "package-complete": 483,
+      "preserved_complete_text": 15,
+      "reference-only": 21,
+      "reusable_archive_missing_full_text": 1,
+      "reusable_archive_missing_full_text_partial_evidence": 2
     },
     "current_pass_archive_count": 515,
     "current_pass_status_counts": {
-      "package-complete": 480,
+      "component-only": 2,
       "missing": 9,
-      "reference-only": 24,
-      "component-only": 2
+      "package-complete": 483,
+      "reference-only": 21
     },
     "current_pass_material_file_count": 894,
     "current_pass_material_bytes": 4421514,
-    "current_pass_complete_text_rows": 480,
+    "current_pass_complete_text_rows": 483,
     "current_pass_missing_evidence_rows": 9
   },
   "extra_local_data_candidates": [
@@ -10921,32 +10921,32 @@
     {
       "archive_data": [
         {
-          "receipt_index": 94,
-          "url": "https://static.crates.io/crates/dlopen2/dlopen2-0.8.2.crate",
-          "path": "notices-registry-authorized-1109/0094.crate",
           "bytes": 27695,
-          "sha256": "5e2c5bd4158e66d1e215c49b837e11d62f3267b30c92f1d171c4d3105e3dc4d4"
+          "path": "notices-registry-authorized-1109/0094.crate",
+          "receipt_index": 94,
+          "sha256": "5e2c5bd4158e66d1e215c49b837e11d62f3267b30c92f1d171c4d3105e3dc4d4",
+          "url": "https://static.crates.io/crates/dlopen2/dlopen2-0.8.2.crate"
         }
       ],
       "checksum": "5e2c5bd4158e66d1e215c49b837e11d62f3267b30c92f1d171c4d3105e3dc4d4",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT",
       "materials": [
         {
+          "archive_index": 94,
           "archive_member": "dlopen2-0.8.2/README.md",
-          "member_bytes": 5053,
-          "member_sha256": "66968e46ce37b520d1afee64f3fa7acb038bf24b6c9f86dcc39e46d3700b9dd0",
           "byte_range": [
             0,
             5053
           ],
-          "material_path": "packages/a-f/registry-supplement/d/range-a-to-u/l/o/p/e/n/2/package/0.8.2/context/README-license-reference.md",
-          "material_bytes": 5053,
-          "material_sha256": "66968e46ce37b520d1afee64f3fa7acb038bf24b6c9f86dcc39e46d3700b9dd0",
-          "slice_sha256": "66968e46ce37b520d1afee64f3fa7acb038bf24b6c9f86dcc39e46d3700b9dd0",
-          "role": "reference_context",
           "kind": "reference_context",
-          "archive_index": 94,
+          "material_bytes": 5053,
+          "material_path": "packages/a-f/registry-supplement/d/range-a-to-u/l/o/p/e/n/2/package/0.8.2/context/README-license-reference.md",
+          "material_sha256": "66968e46ce37b520d1afee64f3fa7acb038bf24b6c9f86dcc39e46d3700b9dd0",
+          "member_bytes": 5053,
+          "member_sha256": "66968e46ce37b520d1afee64f3fa7acb038bf24b6c9f86dcc39e46d3700b9dd0",
+          "role": "reference_context",
+          "slice_sha256": "66968e46ce37b520d1afee64f3fa7acb038bf24b6c9f86dcc39e46d3700b9dd0",
           "source_relative_path": "README.md"
         }
       ],
@@ -10960,35 +10960,72 @@
         {
           "archive_member": "dlopen2-0.8.2/Cargo.toml",
           "bytes": 2652,
-          "sha256": "f6d596541d0293eb91794a2fb9fe75ca3d0d12886027d5fa8de9c8d117453130",
           "license": "MIT",
-          "license_file": null
+          "license_file": null,
+          "sha256": "f6d596541d0293eb91794a2fb9fe75ca3d0d12886027d5fa8de9c8d117453130"
         }
       ],
       "archive_member_count": 43,
       "decoded_tar_bytes": 150528,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Exact archived VCS/package/readme metadata binds the separately acquired pinned repository-root terms. Archive materials remain distinct; no legal choice or clearance.",
       "terms_evidence": {
-        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "component_scoped_text": [],
         "declared_expression": "MIT",
         "groups": [
           {
-            "expression_group": "MIT",
             "alternatives": [
               {
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/dlopen2-0.8.2/LICENSE",
+                    "sha256": "39fa265207450e77c62e90c5594a06c085b655d8374c7ced4bf7894b6bd95dd2",
+                    "url": "https://raw.githubusercontent.com/OpenByteDev/dlopen2/cc80e4a0a90d499b677fdf7743699b4b3a43a989/LICENSE"
+                  }
+                ],
                 "expression": "MIT",
                 "identifiers": [
                   "MIT"
-                ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "expression_group": "MIT",
+            "satisfied_by_available_text": true
           }
         ],
-        "component_scoped_text": []
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination."
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1184,
+          "material_path": "raw-sources/dlopen2-0.8.2/LICENSE",
+          "material_sha256": "39fa265207450e77c62e90c5594a06c085b655d8374c7ced4bf7894b6bd95dd2",
+          "role": "package_terms",
+          "source_file": "LICENSE",
+          "url": "https://raw.githubusercontent.com/OpenByteDev/dlopen2/cc80e4a0a90d499b677fdf7743699b4b3a43a989/LICENSE"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "dlopen2-0.8.2/.cargo_vcs_info.json",
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202263633830653461306139306434393962363737666466373734333639396234623361343361393839220a20207d2c0a202022706174685f696e5f766373223a2022646c6f70656e32220a7d",
+            "sha256": "ed795da0aa7789a000ca4c8708d047c26148b3938d44897c45c9acce4d3ae015"
+          },
+          "Cargo.toml.orig": {
+            "archive_member": "dlopen2-0.8.2/Cargo.toml.orig",
+            "bytes_hex": "5b7061636b6167655d0d0a6e616d65203d2022646c6f70656e32220d0a76657273696f6e203d2022302e382e32220d0a727573742d76657273696f6e203d2022312e3835220d0a617574686f7273203d205b0d0a2020202022537a796d6f6e205769656c6f6368203c737a796d6f6e2e7769656c6f636840676d61696c2e636f6d3e222c0d0a202020202241686d6564204d61737564203c61686d65642e6d61737564407361662e61693e222c0d0a20202020224f70656e42797465203c646576656c6f706d656e742e6f70656e6279746540676d61696c2e636f6d3e225d0d0a6465736372697074696f6e203d20224c69627261727920666f72206f70656e696e6720616e64206f7065726174696e67206f6e2064796e616d6963206c696e6b206c69627261726965732028616c736f206b6e6f776e20617320736861726564206f626a65637473206f7220736861726564206c6962726172696573292e220d0a6b6579776f726473203d205b0d0a2020202022646c6f70656e222c2022646c6c222c2022736f222c202264796c6962222c2022736861726564225d0d0a6c6963656e7365203d20224d4954220d0a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f4f70656e427974654465762f646c6f70656e32220d0a65646974696f6e203d202232303234220d0a726561646d65203d20222e2e2f524541444d452e6d64220d0a0d0a5b646570656e64656e636965735d0d0a646c6f70656e325f646572697665203d207b2070617468203d20222e2e2f646c6f70656e322d646572697665222c2076657273696f6e203d2022302e34222c206f7074696f6e616c203d2074727565207d0d0a6f6e63655f63656c6c203d2022312e3139220d0a0d0a5b7461726765742e276366672877696e646f777329272e646570656e64656e636965735d0d0a77696e617069203d207b2076657273696f6e203d2022302e33222c206665617475726573203d205b2277696e6e74222c20226d696e77696e646566222c202277696e6572726f72222c20226c69626c6f61646572617069222c202265727268616e646c696e67617069222c202264626768656c70222c202270726f6365737374687265616473617069222c202262617365747364225d207d0d0a0d0a5b7461726765742e2763666728756e697829272e646570656e64656e636965735d0d0a6c696263203d2022302e32220d0a0d0a5b6465762d646570656e64656e636965735d0d0a7265676578203d2022312e3130220d0a7365726465203d207b2076657273696f6e203d2022312e30222c206665617475726573203d205b22646572697665225d207d0d0a73657264655f6a736f6e203d2022312e30220d0a6578616d706c655f64796c6962203d207b2070617468203d20222e2e2f6578616d706c652d64796c696222207d0d0a63757272656e745f706c6174666f726d203d2022302e32220d0a0d0a0d0a5b66656174757265735d0d0a64656661756c74203d205b2277726170706572222c202273796d626f72222c2022646572697665225d0d0a77726170706572203d205b5d0d0a73796d626f72203d205b5d0d0a646572697665203d205b22646c6f70656e325f646572697665225d0d0a646f635f636667203d205b5d0d0a0d0a0d0a5b5b6578616d706c655d5d0d0a6e616d65203d2022726177220d0a63726174652d74797065203d205b2262696e225d0d0a0d0a5b5b6578616d706c655d5d0d0a6e616d65203d202273796d626f72220d0a63726174652d74797065203d205b2262696e225d0d0a0d0a5b5b6578616d706c655d5d0d0a6e616d65203d202273796d626f725f617069220d0a63726174652d74797065203d205b2262696e225d0d0a0d0a5b5b6578616d706c655d5d0d0a6e616d65203d2022777261707065725f617069220d0a63726174652d74797065203d205b2262696e225d0d0a0d0a5b5b6578616d706c655d5d0d0a6e616d65203d20227261775f616464725f696e666f220d0a63726174652d74797065203d205b2262696e225d0d0a0d0a5b5b6578616d706c655d5d0d0a6e616d65203d2022777261707065725f6d756c74695f617069220d0a63726174652d74797065203d205b2262696e225d0d0a0d0a0d0a5b7061636b6167652e6d657461646174612e646f63732e72735d0d0a616c6c2d6665617475726573203d20747275650d0a",
+            "sha256": "4db2cb7eef7db93aac79ebab07af14ef27e00cc322ebb9f3744fcc971a1a6b6a"
+          }
+        },
+        "original_readme": "../README.md",
+        "package_path_in_vcs": "dlopen2",
+        "repository": "https://github.com/OpenByteDev/dlopen2",
+        "review_scope": "Exact locked package and pinned repository root; no legal clearance or license election.",
+        "revision": "cc80e4a0a90d499b677fdf7743699b4b3a43a989"
       }
     },
     {
@@ -20915,32 +20952,32 @@
     {
       "archive_data": [
         {
-          "receipt_index": 191,
-          "url": "https://static.crates.io/crates/jni/jni-0.22.4.crate",
-          "path": "notices-registry-authorized-1109/0191.crate",
           "bytes": 199347,
-          "sha256": "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
+          "path": "notices-registry-authorized-1109/0191.crate",
+          "receipt_index": 191,
+          "sha256": "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498",
+          "url": "https://static.crates.io/crates/jni/jni-0.22.4.crate"
         }
       ],
       "checksum": "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [
         {
+          "archive_index": 191,
           "archive_member": "jni-0.22.4/README.md",
-          "member_bytes": 1069,
-          "member_sha256": "1bca3c013019e523686966a36fe6f74d7436331547d202a8f042c5fa4c39226c",
           "byte_range": [
             0,
             1069
           ],
-          "material_path": "packages/j-l/registry-supplement/j/n/i/package/0.22.4/context/README-license-reference.md",
-          "material_bytes": 1069,
-          "material_sha256": "1bca3c013019e523686966a36fe6f74d7436331547d202a8f042c5fa4c39226c",
-          "slice_sha256": "1bca3c013019e523686966a36fe6f74d7436331547d202a8f042c5fa4c39226c",
-          "role": "reference_context",
           "kind": "reference_context",
-          "archive_index": 191,
+          "material_bytes": 1069,
+          "material_path": "packages/j-l/registry-supplement/j/n/i/package/0.22.4/context/README-license-reference.md",
+          "material_sha256": "1bca3c013019e523686966a36fe6f74d7436331547d202a8f042c5fa4c39226c",
+          "member_bytes": 1069,
+          "member_sha256": "1bca3c013019e523686966a36fe6f74d7436331547d202a8f042c5fa4c39226c",
+          "role": "reference_context",
+          "slice_sha256": "1bca3c013019e523686966a36fe6f74d7436331547d202a8f042c5fa4c39226c",
           "source_relative_path": "README.md"
         }
       ],
@@ -20954,44 +20991,97 @@
         {
           "archive_member": "jni-0.22.4/Cargo.toml",
           "bytes": 2402,
-          "sha256": "c49920826559d3b55b635c743ca9b2a463db421541782c6896aad28d43599640",
           "license": "MIT OR Apache-2.0",
-          "license_file": null
+          "license_file": null,
+          "sha256": "c49920826559d3b55b635c743ca9b2a463db421541782c6896aad28d43599640"
         }
       ],
       "archive_member_count": 76,
       "decoded_tar_bytes": 949248,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Exact archived VCS/package/readme metadata binds the separately acquired pinned repository-root terms. Archive materials remain distinct; no legal choice or clearance.",
       "terms_evidence": {
-        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "component_scoped_text": [],
         "declared_expression": "MIT OR Apache-2.0",
         "groups": [
           {
-            "expression_group": "MIT OR Apache-2.0",
             "alternatives": [
               {
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/jni-0.22.4/LICENSE-MIT",
+                    "sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
+                    "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-MIT"
+                  }
+                ],
                 "expression": "MIT",
                 "identifiers": [
                   "MIT"
-                ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                ]
               },
               {
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/jni-0.22.4/LICENSE-APACHE",
+                    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+                    "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-APACHE"
+                  }
+                ],
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
-                ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "expression_group": "MIT OR Apache-2.0",
+            "satisfied_by_available_text": true
           }
         ],
-        "component_scoped_text": []
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination."
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10847,
+          "material_path": "raw-sources/jni-0.22.4/LICENSE-APACHE",
+          "material_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1104,
+          "material_path": "raw-sources/jni-0.22.4/LICENSE-MIT",
+          "material_sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "jni-0.22.4/.cargo_vcs_info.json",
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202235616539343538613465633434633533313866333764646337353639633164346165386136396537220a20207d2c0a202022706174685f696e5f766373223a20226372617465732f6a6e69220a7d",
+            "sha256": "0619bb2725fac7b26a1935d1379d5eea7427eb987731a982500389de5efd5b8b"
+          },
+          "Cargo.toml.orig": {
+            "archive_member": "jni-0.22.4/Cargo.toml.orig",
+            "bytes_hex": "5b7061636b6167655d0a6465736372697074696f6e203d2022527573742062696e64696e677320746f20746865204a4e49220a646f63756d656e746174696f6e203d202268747470733a2f2f646f63732e72732f6a6e69220a726561646d65203d20222e2e2f2e2e2f524541444d452e6d64220a6b6579776f726473203d205b22666669222c20226a6e69222c20226a617661225d0a63617465676f72696573203d205b226170692d62696e64696e6773225d0a6e616d65203d20226a6e69220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6a6e692d72732f6a6e692d7273220a2320c2a15768656e2062756d70696e672076657273696f6e20706c6561736520616c736f2075706461746520697420696e206578616d706c657320616e6420646f63756d656e746174696f6e210a76657273696f6e203d2022302e32322e34220a6578636c756465203d205b222f62656e63686573222c20222f6578616d706c6573222c20222f6d796c69622d6578616d706c65222c20222f7465737473225d0a0a617574686f72732e776f726b7370616365203d20747275650a65646974696f6e2e776f726b7370616365203d20747275650a6c6963656e73652e776f726b7370616365203d20747275650a727573742d76657273696f6e2e776f726b7370616365203d20747275650a0a5b5b62656e63685d5d0a6e616d65203d20226170695f63616c6c73220a6861726e657373203d2066616c73650a0a2320556e666f7274756e6174656c7920436172676f20646f6573206e6f7420737570706f72742073706563696679696e6720666561747572657320666f7220616c6c206578616d706c6573206174206f6e63650a232068747470733a2f2f6769746875622e636f6d2f727573742d6c616e672f636172676f2f6973737565732f363934350a5b5b6578616d706c655d5d0a6e616d65203d202262696e645f6a6176615f747970655f686f6f6b73220a72657175697265642d6665617475726573203d205b22696e766f636174696f6e225d0a5b5b6578616d706c655d5d0a6e616d65203d202262696e645f6a6176615f747970655f69735f696e7374616e63655f6f66220a72657175697265642d6665617475726573203d205b22696e766f636174696f6e225d0a5b5b6578616d706c655d5d0a6e616d65203d202262696e645f6a6176615f747970655f77726170706572220a72657175697265642d6665617475726573203d205b22696e766f636174696f6e225d0a5b5b6578616d706c655d5d0a6e616d65203d202262696e645f6a6176615f74797065220a72657175697265642d6665617475726573203d205b22696e766f636174696f6e225d0a5b5b6578616d706c655d5d0a6e616d65203d20226a6e695f7369675f77726170706572220a72657175697265642d6665617475726573203d205b22696e766f636174696f6e225d0a5b5b6578616d706c655d5d0a6e616d65203d20226a6e695f736967220a72657175697265642d6665617475726573203d205b22696e766f636174696f6e225d0a5b5b6578616d706c655d5d0a6e616d65203d20226a6e695f737472220a72657175697265642d6665617475726573203d205b22696e766f636174696f6e225d0a5b5b6578616d706c655d5d0a6e616d65203d20226e61746976655f6d6574686f645f77726170706572220a72657175697265642d6665617475726573203d205b22696e766f636174696f6e225d0a5b5b6578616d706c655d5d0a6e616d65203d20226e61746976655f6d6574686f64220a72657175697265642d6665617475726573203d205b22696e766f636174696f6e225d0a0a5b646570656e64656e636965735d0a6a6e692d6d6163726f732e776f726b7370616365203d20747275650a6a6e692d7379732e776f726b7370616365203d20747275650a73696d645f63657375382e776f726b7370616365203d20747275650a0a6c6f672e776f726b7370616365203d20747275650a746869736572726f722e776f726b7370616365203d20747275650a0a6366672d6966203d2022312e302e30220a636f6d62696e65203d2022342e312e30220a0a5b7461726765742e276366672877696e646f777329272e646570656e64656e636965735d0a77696e646f77732d6c696e6b203d2022302e32220a0a5b7461726765742e27636667286e6f74287461726765745f6f73203d2022616e64726f6964222929272e646570656e64656e636965735d0a6c69626c6f6164696e67203d207b20776f726b7370616365203d20747275652c206f7074696f6e616c203d2074727565207d0a6a6176612d6c6f6361746f72203d207b20776f726b7370616365203d20747275652c206f7074696f6e616c203d2074727565207d0a0a5b6275696c642d646570656e64656e636965735d0a77616c6b646972203d202232220a0a5b6465762d646570656e64656e636965735d0a72757374792d666f726b2e776f726b7370616365203d20747275650a7472796275696c642e776f726b7370616365203d20747275650a6a617661632e776f726b7370616365203d20747275650a637269746572696f6e203d207b2076657273696f6e203d2022302e37222c206665617475726573203d205b2268746d6c5f7265706f727473225d207d0a6173736572745f6d617463686573203d2022312e352e30220a6c617a795f737461746963203d202231220a7374617469635f617373657274696f6e73203d202231220a0a5b7461726765742e276366672877696e646f777329272e6465762d646570656e64656e636965735d0a627974656d75636b203d2022312e31332e30220a77696e646f77732d737973203d207b2076657273696f6e203d2022302e3631222c206665617475726573203d205b0a202020202257696e33325f53797374656d5f546872656164696e67222c0a202020202257696e33325f466f756e646174696f6e222c0a5d207d0a0a5b66656174757265735d0a696e766f636174696f6e203d205b226465703a6a6176612d6c6f6361746f72222c20226465703a6c69626c6f6164696e67225d0a64656661756c74203d205b5d0a0a232048696464656e206665617475726520666f722074657374696e67206366672061747472696275746520737570706f727420696e2062696e645f6a6176615f74797065206d6163726f0a5f6366675f74657374203d205b5d0a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a6665617475726573203d205b22696e766f636174696f6e225d0a",
+            "sha256": "420d0c6c04c3579946386ceea541bf5dd5f564b6b190e76568cce83bad0b9db3"
+          }
+        },
+        "original_readme": "../../README.md",
+        "package_path_in_vcs": "crates/jni",
+        "repository": "https://github.com/jni-rs/jni-rs",
+        "review_scope": "Exact locked package and pinned repository root; no legal clearance or license election.",
+        "revision": "5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7"
       }
     },
     {
@@ -46395,32 +46485,32 @@
     {
       "archive_data": [
         {
-          "receipt_index": 433,
-          "url": "https://static.crates.io/crates/valuable/valuable-0.1.1.crate",
-          "path": "notices-registry-authorized-1109/0433.crate",
           "bytes": 28679,
-          "sha256": "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+          "path": "notices-registry-authorized-1109/0433.crate",
+          "receipt_index": 433,
+          "sha256": "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65",
+          "url": "https://static.crates.io/crates/valuable/valuable-0.1.1.crate"
         }
       ],
       "checksum": "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT",
       "materials": [
         {
+          "archive_index": 433,
           "archive_member": "valuable-0.1.1/README.md",
-          "member_bytes": 424,
-          "member_sha256": "847f41128733b704280d60b93915a38c1cbfbdbcb12362e11e4119fd5ca8eb38",
           "byte_range": [
             0,
             424
           ],
-          "material_path": "packages/s-z/registry-supplement/range-s-to-x/v/a/l/u/a/b/l/e/package/0.1.1/context/README-license-reference.md",
-          "material_bytes": 424,
-          "material_sha256": "847f41128733b704280d60b93915a38c1cbfbdbcb12362e11e4119fd5ca8eb38",
-          "slice_sha256": "847f41128733b704280d60b93915a38c1cbfbdbcb12362e11e4119fd5ca8eb38",
-          "role": "reference_context",
           "kind": "reference_context",
-          "archive_index": 433,
+          "material_bytes": 424,
+          "material_path": "packages/s-z/registry-supplement/range-s-to-x/v/a/l/u/a/b/l/e/package/0.1.1/context/README-license-reference.md",
+          "material_sha256": "847f41128733b704280d60b93915a38c1cbfbdbcb12362e11e4119fd5ca8eb38",
+          "member_bytes": 424,
+          "member_sha256": "847f41128733b704280d60b93915a38c1cbfbdbcb12362e11e4119fd5ca8eb38",
+          "role": "reference_context",
+          "slice_sha256": "847f41128733b704280d60b93915a38c1cbfbdbcb12362e11e4119fd5ca8eb38",
           "source_relative_path": "README.md"
         }
       ],
@@ -46434,35 +46524,72 @@
         {
           "archive_member": "valuable-0.1.1/Cargo.toml",
           "bytes": 1621,
-          "sha256": "c53c978c9d732571df8431fa37ad9820563b5fb8aeb7d62ada311b1f09a7080b",
           "license": "MIT",
-          "license_file": null
+          "license_file": null,
+          "sha256": "c53c978c9d732571df8431fa37ad9820563b5fb8aeb7d62ada311b1f09a7080b"
         }
       ],
       "archive_member_count": 23,
       "decoded_tar_bytes": 173056,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Exact archived VCS/package/readme metadata binds the separately acquired pinned repository-root terms. Archive materials remain distinct; no legal choice or clearance.",
       "terms_evidence": {
-        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "component_scoped_text": [],
         "declared_expression": "MIT",
         "groups": [
           {
-            "expression_group": "MIT",
             "alternatives": [
               {
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/valuable-0.1.1/LICENSE",
+                    "sha256": "ed60d479b8fd1f64e9cbc3de449a16a53ac1b3d1b6aeb9bf9d190a8e93061b44",
+                    "url": "https://raw.githubusercontent.com/tokio-rs/valuable/9efc29b6e58cef28f6566a47aa7e142a55fead77/LICENSE"
+                  }
+                ],
                 "expression": "MIT",
                 "identifiers": [
                   "MIT"
-                ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "expression_group": "MIT",
+            "satisfied_by_available_text": true
           }
         ],
-        "component_scoped_text": []
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination."
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1065,
+          "material_path": "raw-sources/valuable-0.1.1/LICENSE",
+          "material_sha256": "ed60d479b8fd1f64e9cbc3de449a16a53ac1b3d1b6aeb9bf9d190a8e93061b44",
+          "role": "package_terms",
+          "source_file": "LICENSE",
+          "url": "https://raw.githubusercontent.com/tokio-rs/valuable/9efc29b6e58cef28f6566a47aa7e142a55fead77/LICENSE"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "valuable-0.1.1/.cargo_vcs_info.json",
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202239656663323962366535386365663238663635363661343761613765313432613535666561643737220a20207d2c0a202022706174685f696e5f766373223a202276616c7561626c65220a7d",
+            "sha256": "34111200d67ce91680f8c64c5bfd537fc251f7ed7bb3a4e6110cb9299dacc0b2"
+          },
+          "Cargo.toml.orig": {
+            "archive_member": "valuable-0.1.1/Cargo.toml.orig",
+            "bytes_hex": "5b7061636b6167655d0a6e616d65203d202276616c7561626c65220a76657273696f6e203d2022302e312e31220a65646974696f6e203d202232303231220a6c6963656e7365203d20224d4954220a727573742d76657273696f6e203d2022312e3536220a726561646d65203d20222e2e2f524541444d452e6d64220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f746f6b696f2d72732f76616c7561626c65220a6465736372697074696f6e203d202222220a4f626a6563742d736166652076616c756520696e7370656374696f6e2c207573656420746f207061737320756e2d747970656420737472756374757265642064617461206163726f73732074726169742d6f626a65637420626f756e6461726965732e0a2222220a63617465676f72696573203d205b0a2020202022646576656c6f706d656e742d746f6f6c733a3a646562756767696e67222c0a2020202022656e636f64696e67222c0a5d0a6b6579776f726473203d205b0a202020202276616c7561626c65222c0a202020202273657269616c697a6174696f6e222c0a2020202022646562756767696e67222c0a20202020226e6f5f737464222c0a5d0a0a5b66656174757265735d0a64656661756c74203d205b22737464225d0a0a232050726f76696465206465726976652856616c7561626c6529206d6163726f0a646572697665203d205b2276616c7561626c652d646572697665225d0a0a232050726f7669646520696d706c7320666f7220636f6d6d6f6e207374616e64617264206c696272617279207479706573206c696b65205665633c543e20616e6420486173684d61703c4b2c20563e2e0a737464203d205b22616c6c6f63225d0a0a232050726f7669646520696d707320666f7220747970657320696e205275737427732060616c6c6f6360206c6962726172792e0a616c6c6f63203d205b5d0a0a5b646570656e64656e636965735d0a76616c7561626c652d646572697665203d207b2076657273696f6e203d20223d302e312e31222c206f7074696f6e616c203d20747275652c2070617468203d20222e2e2f76616c7561626c652d64657269766522207d0a0a5b6465762d646570656e64656e636965735d0a637269746572696f6e203d2022302e33220a0a5b5b62656e63685d5d0a6e616d65203d202273747275637461626c65220a6861726e657373203d2066616c73650a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a616c6c2d6665617475726573203d20747275650a72757374646f632d61726773203d205b222d2d636667222c2022646f63737273225d0a",
+            "sha256": "15a6fb7f15c0ea638610e791d6c5c3e5db5c84d73944f36c46c25bebd0001b63"
+          }
+        },
+        "original_readme": "../README.md",
+        "package_path_in_vcs": "valuable",
+        "repository": "https://github.com/tokio-rs/valuable",
+        "review_scope": "Exact locked package and pinned repository root; no legal clearance or license election.",
+        "revision": "9efc29b6e58cef28f6566a47aa7e142a55fead77"
       }
     },
     {
@@ -55144,5 +55271,14 @@
       "LGPL-2.1-or-later"
     ],
     "boundary": "Complete MIT text availability, not OR election, legal clearance or distribution permission."
+  },
+  "raw_source_supplement": {
+    "material_bytes": 14200,
+    "material_count": 4,
+    "no_license_choice_or_legal_clearance": true,
+    "package_count": 3,
+    "receipt_bytes": 5542,
+    "receipt_path": "raw-sources/receipt.json",
+    "receipt_sha256": "d4f45767bba3d21266670faa1ffeacc8076c9768a2da5f23d382aac2ebf8bfd5"
   }
 }

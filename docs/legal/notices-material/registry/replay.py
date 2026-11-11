@@ -150,6 +150,7 @@ def validate_terms_evidence(row):
     if not isinstance(terms, dict) or terms.get("declared_expression") != row.get("declared_license"):
         raise ValueError(f"Missing or mismatched per-row terms evidence: {row['name']}@{row['version']}")
     material_map = {item["material_path"]: item for item in row.get("materials", [])}
+    raw_map = {item["material_path"]: item for item in row.get("raw_materials", [])}
     groups = terms.get("groups")
     if not isinstance(groups, list) or not groups:
         raise ValueError(f"No retained expression groups: {row['name']}@{row['version']}")
@@ -167,6 +168,14 @@ def validate_terms_evidence(row):
                 if not evidence:
                     raise ValueError(f"Available alternative lacks source evidence: {row['name']}@{row['version']}")
                 for item in evidence:
+                    if "raw_material_path" in item:
+                        raw = raw_map.get(item["raw_material_path"])
+                        if (raw is None or raw.get("role") != "package_terms"
+                                or alternative.get("expression") not in raw.get("identifiers", [])
+                                or item.get("sha256") != raw.get("material_sha256")
+                                or item.get("url") != raw.get("url")):
+                            raise ValueError("Alternative does not bind exact raw package terms")
+                        continue
                     material = material_map.get(item.get("material_path"))
                     if material is None or item.get("archive_member") != material["archive_member"] or item.get("sha256") != material["material_sha256"]:
                         raise ValueError(f"Alternative evidence does not bind a retained material: {row['name']}@{row['version']}")
@@ -180,6 +189,90 @@ def validate_terms_evidence(row):
             raise ValueError(f"Expression-group availability summary mismatch: {row['name']}@{row['version']}")
         if row["classification"] == "package-complete" and not satisfied:
             raise ValueError(f"Package-complete classification lacks package-scope text: {row['name']}@{row['version']}")
+
+
+RAW_RECEIPT_SHA = "d4f45767bba3d21266670faa1ffeacc8076c9768a2da5f23d382aac2ebf8bfd5"
+RAW_PACKAGES = {
+    ("dlopen2", "0.8.2"): (
+        "5e2c5bd4158e66d1e215c49b837e11d62f3267b30c92f1d171c4d3105e3dc4d4",
+        "cc80e4a0a90d499b677fdf7743699b4b3a43a989", "dlopen2", "OpenByteDev/dlopen2"),
+    ("valuable", "0.1.1"): (
+        "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65",
+        "9efc29b6e58cef28f6566a47aa7e142a55fead77", "valuable", "tokio-rs/valuable"),
+    ("jni", "0.22.4"): (
+        "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498",
+        "5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7", "crates/jni", "jni-rs/jni-rs"),
+}
+
+
+def raw_receipt(registry):
+    data = bounded_regular(no_link_path(registry, "raw-sources/receipt.json"), 65536)
+    if len(data) != 5542 or digest(data) != RAW_RECEIPT_SHA:
+        raise ValueError("Pinned raw acquisition receipt mismatch")
+    return json.loads(data)
+
+
+def validate_raw_sources(row, registry, source_members, receipt):
+    """Bind separate repository-root DATA to one exact locked archive revision."""
+    key = (row["name"], row["version"])
+    expected = RAW_PACKAGES.get(key)
+    if expected is None or row.get("source") != "registry+https://github.com/rust-lang/crates.io-index":
+        raise ValueError("Unreviewed raw-source package identity")
+    checksum, revision, package_path, repository = expected
+    binding = row.get("raw_source_binding", {})
+    if (row.get("checksum") != checksum or binding.get("revision") != revision
+            or binding.get("package_path_in_vcs") != package_path
+            or binding.get("repository") != "https://github.com/" + repository):
+        raise ValueError("Raw-source archive/revision/repository binding mismatch")
+    metadata = binding.get("archive_metadata", {})
+    if set(metadata) != {".cargo_vcs_info.json", "Cargo.toml.orig"}:
+        raise ValueError("Raw-source archived metadata set mismatch")
+    decoded = {}
+    for name, item in metadata.items():
+        member = f"{row['name']}-{row['version']}/{name}"
+        content = source_members.get(member)
+        if (item.get("archive_member") != member or content is None
+                or len(content) > 65536 or digest(content) != item.get("sha256")
+                or content.hex() != item.get("bytes_hex")):
+            raise ValueError("Raw-source metadata differs from archived bytes")
+        decoded[name] = content.decode("utf-8")
+    vcs = json.loads(decoded[".cargo_vcs_info.json"])
+    original = tomllib.loads(decoded["Cargo.toml.orig"]).get("package", {})
+    readme = "../README.md" if package_path.count("/") == 0 else "../../README.md"
+    if (vcs.get("git", {}).get("sha1") != revision or vcs.get("path_in_vcs") != package_path
+            or original.get("readme") != readme or binding.get("original_readme") != readme):
+        raise ValueError("Archived VCS/readme scope mismatch")
+    if receipt.get("proposal_sha256") != "5a3d9d02e89b33df6c677268a44735c9770a4d7f8d92835718cb21798232dc6b":
+        raise ValueError("Raw acquisition proposal mismatch")
+    materials = row.get("raw_materials", [])
+    filenames = {"LICENSE-APACHE", "LICENSE-MIT"} if key[0] == "jni" else {"LICENSE"}
+    if len(materials) != len(filenames) or {m.get("source_file") for m in materials} != filenames:
+        raise ValueError("Reviewed raw material set mismatch")
+    total = 0
+    for material in materials:
+        name = material["source_file"]
+        url = f"https://raw.githubusercontent.com/{repository}/{revision}/{name}"
+        records = [r for r in receipt.get("records", []) if r.get("url") == url]
+        if len(records) != 1:
+            raise ValueError("Raw acquisition URL absent or duplicated")
+        record = records[0]
+        identity = f"{key[0]}@{key[1]}"
+        path = f"raw-sources/{key[0]}-{key[1]}/{name}"
+        identifiers = ["Apache-2.0" if name == "LICENSE-APACHE" else "MIT"]
+        if (record.get("status") != "fetched" or record.get("http_status") != 200
+                or record.get("identities") != [identity] or record.get("revision") != revision
+                or record.get("source_file") != name or material.get("url") != url
+                or material.get("material_path") != path or material.get("role") != "package_terms"
+                or material.get("identifiers") != identifiers):
+            raise ValueError("Raw material receipt identity/scope mismatch")
+        content = bounded_regular(no_link_path(registry, path), 65536)
+        if (len(content) != record.get("bytes") or len(content) != material.get("material_bytes")
+                or digest(content) != record.get("sha256")
+                or digest(content) != material.get("material_sha256")):
+            raise ValueError("Raw material bytes differ from pinned receipt")
+        total += len(content)
+    return len(materials), total
+
 
 
 def registry_shape(registry):
@@ -263,6 +356,8 @@ def main():
     material_rows = material_bytes = old_material_rows = 0
     material_archive_rows = 0
     classification_counts = {}
+    raw_count = raw_bytes = raw_packages = 0
+    pinned_raw_receipt = raw_receipt(registry)
     status_counts = {}
     for index in range(ARCHIVE_COUNT):
         receipt = receipt_by_index[index]
@@ -309,6 +404,9 @@ def main():
             if material.get("archive_index") != index:
                 raise ValueError(f"New material archive index mismatch: {index}")
             requested.add(material["archive_member"])
+        if row.get("raw_source_binding") or row.get("raw_materials"):
+            for item in row.get("raw_source_binding", {}).get("archive_metadata", {}).values():
+                requested.add(item["archive_member"])
         decoded, actual_members, _, source_members = parse_archive(compressed, identity, row["archive_member_count"], requested, totals)
         if len(decoded) != row["decoded_tar_bytes"]:
             raise ValueError(f"Archive decoded size mismatch: {index}")
@@ -327,6 +425,11 @@ def main():
             raise ValueError(f"Cargo.toml package identity mismatch: {index}")
         if package.get("license") != row["declared_license"] or package.get("license_file") != manifest.get("license_file"):
             raise ValueError(f"Cargo.toml declaration mismatch: {index}")
+        if row.get("raw_source_binding") or row.get("raw_materials"):
+            count, size = validate_raw_sources(row, registry, source_members, pinned_raw_receipt)
+            raw_count += count
+            raw_bytes += size
+            raw_packages += 1
         for material in row.get("materials", []):
             relative_material = material["material_path"]
             material_path_on_disk = no_link_path(registry, relative_material)
@@ -362,6 +465,17 @@ def main():
         if row.get("archive_data") and any("receipt_index" in item for item in row["archive_data"]):
             status_counts[row["classification"]] = status_counts.get(row["classification"], 0) + 1
 
+    supplement = inventory.get("raw_source_supplement", {})
+    if (raw_count, raw_bytes, raw_packages) != (4, 14200, 3):
+        raise ValueError("Raw supplement replay totals mismatch")
+    if (supplement.get("receipt_path") != "raw-sources/receipt.json"
+            or supplement.get("receipt_sha256") != RAW_RECEIPT_SHA
+            or supplement.get("receipt_bytes") != 5542
+            or supplement.get("material_count") != raw_count
+            or supplement.get("material_bytes") != raw_bytes
+            or supplement.get("package_count") != raw_packages
+            or supplement.get("no_license_choice_or_legal_clearance") is not True):
+        raise ValueError("Raw supplement inventory mismatch")
     root_locks = lock_identities(worktree / "Cargo.lock")
     nested_locks = lock_identities(worktree / "crates/shaar-ygg-core/Cargo.lock")
     expected_identities = set(identities_by_key)
@@ -389,6 +503,9 @@ def main():
 
     output = {
         "status": "PASS",
+        "raw_packages": raw_packages,
+        "raw_material_rows": raw_count,
+        "raw_material_bytes": raw_bytes,
         "actual_inventory_sha256": inventory_sha,
         "actual_inventory_bytes": len(inventory_raw),
         "receipt_sha256": digest(receipt_raw),

@@ -211,3 +211,35 @@ See `notices-source-status.md#nine-pinned-upstream-candidates--2026-11-10` and `
 ## Explicit AUTHORS evidence boundary — 2026-11-10
 
 The two retained r-efi READMEs explicitly name AUTHORS. The later primary-owned recovery in `notices-source-status.md#explicit-authors-terms-recovery--2026-11-10` adds exact full AUTHORS files with operative MIT terms and copyright, not reconstructed text. Canonical inventory SHA-256 is now `623e6284892396da69eadea5706a283c91afe1282676a0fc0fd6dac31792de30` (2,354,190 bytes); prior SHA-256 values describe earlier inputs, including the separate raw-source supplement. New CI-only corpus regressions invoke the existing terms-evidence validator and reject reference-only or missing evidence. They were not run locally. The replay's source/member/lock checks and hard resource limits remain unchanged; only its exact-dataset material totals change to 917 registry rows / 4,505,353 bytes, of which 894 / 4,421,514 belong to the held 515 archives. No new network or legal-policy authority, OR election, full Task13 acceptance or distribution permission is claimed.
+
+
+## Three pinned repository-root bindings (2026-11-11 candidate)
+
+The registry inventory distinguishes four `raw_materials` from archive-member
+`materials`: root LICENSE for `dlopen2@0.8.2` and `valuable@0.1.1`, and both
+LICENSE-MIT and LICENSE-APACHE for `jni@0.22.4`. These 14,200 verbatim bytes were
+already acquired by the separately approved nine-URL pass; no new GET was made.
+The retained receipt is `registry/raw-sources/receipt.json` (5,542 bytes,
+SHA-256 `d4f45767bba3d21266670faa1ffeacc8076c9768a2da5f23d382aac2ebf8bfd5`).
+
+Each exact locked archive checksum binds the archived `.cargo_vcs_info.json`
+and `Cargo.toml.orig` bytes, package path, original README scope and pinned
+repository revision to its separately fetched root material. The archived README
+license references and original relative README paths were inspected in the
+preceding offline review. Raw files are never represented as members of the
+published `.crate`. The replay retains its previous 917 archive-material records
+and 4,505,353 bytes; the four raw files and 14,200 bytes are counted separately.
+It verifies the full pinned acquisition receipt and actual source archive metadata
+before accepting these three exact raw bindings. The CI contracts check retained
+bindings and mutation rejection; they do not replace an actual archive replay.
+
+An independent stdlib DATA comparison found no changes in the other 530 registry
+identities and matched all four raw files and six archived metadata payloads.
+The candidate registry counts are 498 of 533 text-available identities; with the
+unchanged 15 of 17 path identities this is 513 of 550, leaving 37 incomplete.
+The previously accepted baseline remains 510 of 550 until this candidate receives
+exact-SHA CI verification. New contract tests are written, not locally executed.
+Both JNI alternatives are retained and neither is elected. No applicability is
+extended to other JNI versions, JNI macros, objc2 or any other package/revision.
+This records authentic-text availability, not legal sufficiency, clearance,
+product artifact inclusion, release permission or completion of Task13/N1.
