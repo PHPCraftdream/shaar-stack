@@ -7,6 +7,10 @@ use serde_bencode::value::Value;
 use shaar_ygg::{YggConfig, YggError, YggTransport};
 use tokio::net::UdpSocket;
 
+mod denial;
+#[allow(dead_code)] // Unit-fixture controls are not all used by the real-process cases.
+#[path = "../../../../src/native_discovery/runtime/tests/fixture/wire.rs"]
+mod mainline_fixture;
 mod payload;
 #[path = "../../../../src/network/signaling/relay_fixture.rs"]
 mod relay_fixture;
@@ -17,25 +21,38 @@ enum Role {
     Server,
 }
 
+#[derive(Clone, Copy)]
+enum Case {
+    Lifecycle(Role),
+    Payload,
+    Denial,
+}
+
 #[tokio::test]
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
 async fn real_composed_client_console_stop_and_restart_in_signal_and_standby() {
-    run(Some(Role::Client)).await.unwrap();
+    run(Case::Lifecycle(Role::Client)).await.unwrap();
 }
 
 #[tokio::test]
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
 async fn real_composed_server_console_stop_and_restart_in_signal_and_standby() {
-    run(Some(Role::Server)).await.unwrap();
+    run(Case::Lifecycle(Role::Server)).await.unwrap();
 }
 
 #[tokio::test]
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
 async fn real_composed_key_only_payload_and_server_restart_in_signal_and_standby() {
-    run(None).await.unwrap();
+    run(Case::Payload).await.unwrap();
 }
 
-async fn run(role: Option<Role>) -> Result<(), String> {
+#[tokio::test]
+#[ignore = "requires CI-built shaar-server and shaar-client executables"]
+async fn real_composed_denied_key_never_reaches_target_in_signal_and_standby() {
+    run(Case::Denial).await.unwrap();
+}
+
+async fn run(case: Case) -> Result<(), String> {
     let temp = Temp::new().map_err(|error| error.to_string())?;
     let relay = timeout(IO_TIMEOUT, relay_fixture::RelayFixture::start())
         .await
@@ -56,11 +73,20 @@ async fn run(role: Option<Role>) -> Result<(), String> {
     let mut processes = Processes::default();
     let mut tasks = JoinSet::new();
     let result = std::panic::AssertUnwindSafe(timeout(
-        Duration::from_secs(if role.is_some() { 120 } else { 240 }),
+        Duration::from_secs(if matches!(case, Case::Lifecycle(_)) {
+            120
+        } else {
+            240
+        }),
         async {
-            match role {
-                Some(role) => scenario(role, &temp, &mut processes, &relay.address, &uri).await,
-                None => {
+            match case {
+                Case::Lifecycle(role) => {
+                    scenario(role, &temp, &mut processes, &relay.address, &uri).await
+                }
+                Case::Denial => {
+                    denial::scenario(&temp, &mut processes, &mut tasks, &relay.address, &uri).await
+                }
+                Case::Payload => {
                     payload::scenario(&temp, &mut processes, &mut tasks, &relay.address, &uri).await
                 }
             }

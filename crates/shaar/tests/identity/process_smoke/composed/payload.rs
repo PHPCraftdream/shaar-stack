@@ -6,10 +6,6 @@ use super::*;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
 
-#[allow(dead_code)] // Shared unit-fixture controls are not all used by this integration case.
-#[path = "../../../../src/native_discovery/runtime/tests/fixture/wire.rs"]
-mod mainline_fixture;
-
 /// cancel-safe: NO — the parent retains children and bounded actor tasks for finalize.
 pub(super) async fn scenario(
     temp: &Temp,
@@ -163,7 +159,7 @@ async fn mode(
     Ok(())
 }
 
-async fn network(
+pub(super) async fn network(
     bootstrap: SocketAddr,
     relay: &shaar_p2p::RelayAddr,
     transit: &str,
@@ -180,7 +176,7 @@ async fn network(
 }
 
 /// cancel-safe: NO — a publication may be consumed before validation; timeout is terminal.
-async fn publication(
+pub(super) async fn publication(
     observed: &mut mpsc::Receiver<Arc<mainline_fixture::CapturedPut>>,
     expected: [u8; 32],
 ) -> Result<Arc<mainline_fixture::CapturedPut>, String> {
@@ -209,7 +205,7 @@ async fn publication(
     .map_err(|_| "actual Server publication deadline".to_owned())?
 }
 
-async fn require_exit(processes: &mut Processes, index: usize) -> Result<(), String> {
+pub(super) async fn require_exit(processes: &mut Processes, index: usize) -> Result<(), String> {
     let status = timeout(IO_TIMEOUT, processes.0[index].child.wait())
         .await
         .map_err(|_| "composed APP process shutdown deadline")?
@@ -221,7 +217,7 @@ async fn require_exit(processes: &mut Processes, index: usize) -> Result<(), Str
 }
 
 /// cancel-safe: NO — partial stream I/O is terminal; owned streams close on cancellation.
-async fn exchange(target: &TcpListener, front: SocketAddr) -> std::io::Result<()> {
+pub(super) async fn exchange(target: &TcpListener, front: SocketAddr) -> std::io::Result<()> {
     const REQUEST: &[u8] = b"composed request across restart";
     const REPLY: &[u8] = b"fixed-target composed reply";
     timeout(Duration::from_secs(40), async {
