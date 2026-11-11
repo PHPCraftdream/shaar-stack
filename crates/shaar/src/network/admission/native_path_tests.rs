@@ -30,6 +30,11 @@ struct Fixture {
 impl Fixture {
     /// cancel-safe: NO — the outer test deadline aborts retained fixture tasks.
     async fn start() -> Self {
+        Self::start_with_native_blocked(false).await
+    }
+
+    /// cancel-safe: NO — fixture startup retains the existing abort-only failure boundary.
+    async fn start_with_native_blocked(blocked: bool) -> Self {
         let a = Identity::generate();
         let b = Identity::generate();
         let pa = a.transport_key().public();
@@ -60,6 +65,7 @@ impl Fixture {
         .await
         .unwrap();
         let native = [client.local_addr(), server.local_addr()];
+        client.native_packet_gate().set_blocked(blocked);
         let remote = peer_id(&pb).unwrap();
         handle
             .connect(remote, server.signaling_addr())
@@ -361,4 +367,51 @@ async fn public_native_handshake_deadline_needs_no_inbound_progress() {
 #[tokio::test(flavor = "current_thread")]
 async fn public_native_handshake_cancel_returns_slot_after_initial() {
     early_handshake(true).await;
+}
+
+#[tokio::test]
+async fn native_readiness_waits_past_a_live_control_connection_until_a_real_ip_path() {
+    tokio::time::timeout(Duration::from_secs(40), async {
+        let fixture = Fixture::start_with_native_blocked(true).await;
+        tokio::time::timeout(Duration::from_secs(10), fixture.control.native_lost())
+            .await
+            .expect("blocked Native has no eligible IP path");
+        fixture.control_is_open().await;
+        {
+            let ready = fixture.control.native_ready();
+            tokio::pin!(ready);
+            assert!(
+                std::future::poll_fn(|context| {
+                    std::task::Poll::Ready(ready.as_mut().poll(context).is_pending())
+                })
+                .await,
+                "a live signaling-only connection must not satisfy Native readiness"
+            );
+            fixture.client.native_packet_gate().set_blocked(false);
+            let (added, observed) = tokio::join!(
+                fixture
+                    .control
+                    .connection
+                    .ensure_native_path(fixture.native[1]),
+                tokio::time::timeout(Duration::from_secs(10), ready.as_mut()),
+            );
+            added.expect("actual owned Native path added");
+            observed
+                .expect("Native readiness observes the IP path")
+                .expect("connection remains open");
+            fixture.control_is_open().await;
+        }
+        fixture.control.connection.close(VarInt::from_u32(0), b"");
+        let _ = fixture.control.closed().await;
+        assert!(
+            matches!(
+                fixture.control.native_ready().await,
+                Err(NetworkError::Closed)
+            ),
+            "a closed connection cannot satisfy Native readiness from retained path metadata"
+        );
+        fixture.close().await;
+    })
+    .await
+    .expect("bounded real Native readiness fixture");
 }

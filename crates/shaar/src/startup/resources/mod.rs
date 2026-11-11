@@ -515,13 +515,28 @@ impl SharedResources {
     }
 
     pub(crate) async fn resolve(&self, key: EndpointId) -> Result<ResolvedAddresses, RuntimeError> {
+        self.resolve_with_freshness(key, false).await
+    }
+
+    pub(crate) async fn resolve_fresh(
+        &self,
+        key: EndpointId,
+    ) -> Result<ResolvedAddresses, RuntimeError> {
+        self.resolve_with_freshness(key, true).await
+    }
+
+    async fn resolve_with_freshness(
+        &self,
+        key: EndpointId,
+        fresh: bool,
+    ) -> Result<ResolvedAddresses, RuntimeError> {
         let commands = slot_lock(&self.shared.slot)
             .resources
             .as_ref()
             .and_then(|resources| resources.maintenance.as_ref())
             .map(|maintenance| maintenance.commands.clone())
             .ok_or(RuntimeError::Closed)?;
-        Maintenance::resolve(&commands, key).await
+        Maintenance::resolve(&commands, key, fresh).await
     }
 
     #[cfg_attr(

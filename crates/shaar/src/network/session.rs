@@ -28,6 +28,26 @@ impl Session {
         drop(self);
     }
 
+    /// Waits for an eligible Native path before a negotiated session is published as Native.
+    /// cancel-safe: YES — the subscription borrows the Session and replays current state.
+    pub(crate) async fn native_ready(&self) -> Result<(), NetworkError> {
+        let mut paths = self.connection.paths_stream();
+        while let Some(snapshot) =
+            std::future::poll_fn(|cx| std::pin::Pin::new(&mut paths).poll_next(cx)).await
+        {
+            if self.connection.close_reason().is_some() {
+                return Err(NetworkError::Closed);
+            }
+            if snapshot.iter().any(|path| {
+                matches!(path.remote_addr(), iroh_base::TransportAddr::Ip(address)
+                    if super::admission::native_ip(address.ip()))
+            }) {
+                return Ok(());
+            }
+        }
+        Err(NetworkError::Closed)
+    }
+
     /// Observes loss of every eligible Native payload path, not signaling health.
     /// cancel-safe: YES — a fresh subscription replays current state before waiting.
     pub(crate) async fn native_lost(&self) {

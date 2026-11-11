@@ -7,7 +7,8 @@ use serde_bencode::value::Value;
 use shaar_ygg::{YggConfig, YggError, YggTransport};
 use tokio::net::UdpSocket;
 
-#[path = "../../../src/network/signaling/relay_fixture.rs"]
+mod payload;
+#[path = "../../../../src/network/signaling/relay_fixture.rs"]
 mod relay_fixture;
 
 #[derive(Clone, Copy)]
@@ -19,16 +20,22 @@ enum Role {
 #[tokio::test]
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
 async fn real_composed_client_console_stop_and_restart_in_signal_and_standby() {
-    run(Role::Client).await.unwrap();
+    run(Some(Role::Client)).await.unwrap();
 }
 
 #[tokio::test]
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
 async fn real_composed_server_console_stop_and_restart_in_signal_and_standby() {
-    run(Role::Server).await.unwrap();
+    run(Some(Role::Server)).await.unwrap();
 }
 
-async fn run(role: Role) -> Result<(), String> {
+#[tokio::test]
+#[ignore = "requires CI-built shaar-server and shaar-client executables"]
+async fn real_composed_key_only_payload_and_server_restart_in_signal_and_standby() {
+    run(None).await.unwrap();
+}
+
+async fn run(role: Option<Role>) -> Result<(), String> {
     let temp = Temp::new().map_err(|error| error.to_string())?;
     let relay = timeout(IO_TIMEOUT, relay_fixture::RelayFixture::start())
         .await
@@ -49,8 +56,15 @@ async fn run(role: Role) -> Result<(), String> {
     let mut processes = Processes::default();
     let mut tasks = JoinSet::new();
     let result = std::panic::AssertUnwindSafe(timeout(
-        Duration::from_secs(120),
-        scenario(role, &temp, &mut processes, &relay.address, &uri),
+        Duration::from_secs(if role.is_some() { 120 } else { 240 }),
+        async {
+            match role {
+                Some(role) => scenario(role, &temp, &mut processes, &relay.address, &uri).await,
+                None => {
+                    payload::scenario(&temp, &mut processes, &mut tasks, &relay.address, &uri).await
+                }
+            }
+        },
     ))
     .catch_unwind()
     .await;
