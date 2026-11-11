@@ -225,7 +225,17 @@ where
     /// deadline during a later call; no duplicate attempt is created.
     /// cancel-safe: yes — all state is retained in the owner and observations are
     /// applied without an await in between.
+    #[cfg(test)]
     pub(crate) async fn follow(&mut self) -> Result<PathKind, StandbyError> {
+        self.follow_observing_route(|_| {}).await
+    }
+
+    /// Observes route withdrawal before replacement work starts.
+    /// cancel-safe: yes — progress stays retained and observation commits synchronously.
+    pub(crate) async fn follow_observing_route(
+        &mut self,
+        mut observe: impl FnMut(bool),
+    ) -> Result<PathKind, StandbyError> {
         if self.closed {
             return Err(StandbyError::Closed);
         }
@@ -234,6 +244,7 @@ where
         let mut event = Event::Tick;
         loop {
             self.step(event)?;
+            observe(self.route_id().is_some());
             if let Some(attempt) = self.start_work(Instant::now()) {
                 event = Event::AttemptFailed { attempt };
                 continue;

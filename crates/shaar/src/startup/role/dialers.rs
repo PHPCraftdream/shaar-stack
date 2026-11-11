@@ -345,9 +345,10 @@ where
 pub(crate) trait ErasedClientOwner {
     /// One policy advance; all state lives in the owner, so this is
     /// cancel-safe.
-    fn follow(
-        &mut self,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PathKind, StandbyError>> + '_>>;
+    fn follow<'a>(
+        &'a mut self,
+        lease: &'a mut Option<(PathKind, Arc<dyn RouteLink>)>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PathKind, StandbyError>> + 'a>>;
     /// A lease on the active route, erased into a shared handle.
     fn route(&self) -> Option<std::sync::Arc<dyn RouteLink>>;
     /// Joined close of both dial sides; the native dialer releases its owned
@@ -357,30 +358,6 @@ pub(crate) trait ErasedClientOwner {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), DialError>> + '_>>;
 }
 
-/// Polls the retained owner while releasing only an obsolete role-owned route lease.
-/// cancel-safe: YES — follow state stays in the owner; workers retain their own Arc leases.
-pub(super) async fn follow_releasing_stale_lease(
-    owner: &mut dyn ErasedClientOwner,
-    lease: &mut Option<(PathKind, Arc<dyn RouteLink>)>,
-) -> Result<PathKind, StandbyError> {
-    std::future::poll_fn(|context| {
-        if owner.route().is_none() {
-            *lease = None;
-        }
-        // The owner contract keeps progress across cancellation of this borrowed waiter.
-        let result = {
-            let mut following = owner.follow();
-            following.as_mut().poll(context)
-        };
-        // A loss can be observed during a Pending poll, before replacement admission.
-        if owner.route().is_none() {
-            *lease = None;
-        }
-        result
-    })
-    .await
-}
-
 impl<D, F> ErasedClientOwner for StandbyOwner<D, F>
 where
     D: Dialer + 'static,
@@ -388,11 +365,17 @@ where
     F: Dialer + 'static,
     F::Link: RouteLink,
 {
-    fn follow(
-        &mut self,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PathKind, StandbyError>> + '_>>
+    fn follow<'a>(
+        &'a mut self,
+        lease: &'a mut Option<(PathKind, Arc<dyn RouteLink>)>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PathKind, StandbyError>> + 'a>>
     {
-        Box::pin(StandbyOwner::follow(self))
+        // Keep the full waiter alive: its owned timers must survive Pending polls.
+        Box::pin(self.follow_observing_route(move |present| {
+            if !present {
+                *lease = None;
+            }
+        }))
     }
 
     fn route(&self) -> Option<std::sync::Arc<dyn RouteLink>> {
@@ -409,10 +392,13 @@ where
 #[cfg(test)]
 mod lease_tests {
     use super::*;
+    use crate::path::{Mode, PolicyConfig};
+    use futures::FutureExt;
+    use futures::task::ArcWake;
     use std::future::Future;
     use std::pin::Pin;
-    use std::task::Poll;
-    use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+    use std::task::{Context, Poll};
+    use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, watch};
 
     struct ChargedLink {
         _permit: OwnedSemaphorePermit,
@@ -427,78 +413,111 @@ mod lease_tests {
         }
     }
 
-    struct LosingOwner {
-        link: Option<Arc<dyn RouteLink>>,
+    struct ChargedDialer {
         slots: Arc<Semaphore>,
-        loss_observed: bool,
+        loss: watch::Receiver<bool>,
     }
 
-    impl ErasedClientOwner for LosingOwner {
-        fn follow(&mut self) -> Pin<Box<dyn Future<Output = Result<PathKind, StandbyError>> + '_>> {
-            Box::pin(std::future::poll_fn(|context| {
-                if !self.loss_observed {
-                    self.link = None;
-                    self.loss_observed = true;
-                    // One ownership transition, not a readiness polling loop.
-                    context.waker().wake_by_ref();
-                    return Poll::Pending;
-                }
-                let permit = Arc::clone(&self.slots)
+    impl Dialer for ChargedDialer {
+        type Link = ChargedLink;
+
+        async fn dial(&mut self, _: Instant) -> Result<Self::Link, DialError> {
+            Ok(ChargedLink {
+                _permit: Arc::clone(&self.slots)
                     .try_acquire_owned()
-                    .expect("obsolete role lease must not block replacement admission");
-                self.link = Some(Arc::new(ChargedLink { _permit: permit }));
-                Poll::Ready(Ok(PathKind::Native))
-            }))
+                    .map_err(|_| DialError)?,
+            })
         }
 
-        fn route(&self) -> Option<Arc<dyn RouteLink>> {
-            self.link.clone()
+        async fn lost(&mut self, _: &Self::Link) {
+            loop {
+                if *self.loss.borrow_and_update() {
+                    return;
+                }
+                self.loss.changed().await.expect("retained loss sender");
+            }
         }
 
-        fn close(&mut self) -> Pin<Box<dyn Future<Output = Result<(), DialError>> + '_>> {
-            self.link = None;
-            Box::pin(std::future::ready(Ok(())))
+        async fn close(&mut self) -> Result<(), DialError> {
+            Ok(())
         }
     }
 
-    #[tokio::test]
-    async fn pending_loss_releases_only_the_role_lease_and_preserves_worker_ownership() {
+    #[derive(Default)]
+    struct WakeProbe {
+        notified: Notify,
+    }
+
+    impl ArcWake for WakeProbe {
+        fn wake_by_ref(probe: &Arc<Self>) {
+            probe.notified.notify_one();
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pending_loss_releases_role_lease_retains_worker_and_keeps_timer_waker() {
         for worker_holds_old_link in [false, true] {
             let slots = Arc::new(Semaphore::new(1));
-            let old: Arc<dyn RouteLink> = Arc::new(ChargedLink {
-                _permit: Arc::clone(&slots)
-                    .try_acquire_owned()
-                    .expect("initial session slot"),
-            });
-            let worker = worker_holds_old_link.then(|| Arc::clone(&old));
-            let mut owner = LosingOwner {
-                link: Some(Arc::clone(&old)),
-                slots: Arc::clone(&slots),
-                loss_observed: false,
-            };
-            let mut lease = Some((PathKind::Native, old));
-            {
-                let advanced = follow_releasing_stale_lease(&mut owner, &mut lease);
-                tokio::pin!(advanced);
-                assert!(matches!(futures::poll!(advanced.as_mut()), Poll::Pending));
-                // Drop the borrowed waiter mid-recovery; its retained owners survive.
-            }
-            assert!(
-                lease.is_none(),
-                "the role must release a withdrawn route before Ready"
-            );
+            let (loss, observed_loss) = watch::channel(false);
+            let config = PolicyConfig::default();
+            let mut owner = StandbyOwner::new(
+                ChargedDialer {
+                    slots: Arc::clone(&slots),
+                    loss: observed_loss,
+                },
+                MissingYggDialer,
+                Mode::Signal,
+                config,
+            )
+            .expect("bounded real policy owner");
+            let mut lease = None;
+            let kind = ErasedClientOwner::follow(&mut owner, &mut lease)
+                .await
+                .expect("initial route");
+            lease = ErasedClientOwner::route(&owner).map(|link| (kind, link));
+            let worker =
+                worker_holds_old_link.then(|| Arc::clone(&lease.as_ref().expect("role lease").1));
+            loss.send(true).expect("actual policy loss");
+            let mut advanced = ErasedClientOwner::follow(&mut owner, &mut lease);
+            let probe = Arc::new(WakeProbe::default());
+            let waker = futures::task::waker_ref(&probe);
+            let mut context = Context::from_waker(&waker);
+            assert!(matches!(
+                advanced.as_mut().poll(&mut context),
+                Poll::Pending
+            ));
             assert_eq!(
                 slots.available_permits(),
                 usize::from(!worker_holds_old_link)
             );
             drop(worker);
             assert_eq!(slots.available_permits(), 1);
-            let kind = follow_releasing_stale_lease(&mut owner, &mut lease)
-                .await
-                .expect("replacement admission with the production one-slot limit");
+            loss.send(false).expect("the replacement path is not lost");
+            // Discard any earlier notification; the next one must come from retained work.
+            let _ = probe.notified.notified().now_or_never();
+            tokio::time::advance(Duration::from_millis(config.loss_grace)).await;
+            tokio::time::timeout(
+                Duration::from_millis(config.attempt_timeout),
+                probe.notified.notified(),
+            )
+            .await
+            .expect("the original grace timer must retain its registered waker");
+            let kind =
+                tokio::time::timeout(Duration::from_millis(config.attempt_timeout), advanced)
+                    .await
+                    .expect("bounded policy progress")
+                    .expect("replacement admission");
             assert_eq!(kind, PathKind::Native);
+            assert!(
+                lease.is_none(),
+                "withdrawn role lease was released during Pending"
+            );
+            lease = ErasedClientOwner::route(&owner).map(|link| (kind, link));
             assert_eq!(slots.available_permits(), 0);
-            owner.close().await.expect("drop replacement link");
+            drop(lease);
+            ErasedClientOwner::close(&mut owner)
+                .await
+                .expect("joined policy close");
             assert_eq!(slots.available_permits(), 1);
         }
     }

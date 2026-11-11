@@ -59,10 +59,7 @@ pub(super) async fn run_parts(
         tokio::select! {
             biased;
             () = &mut *shutdown => break,
-            advanced = super::super::dialers::follow_releasing_stale_lease(
-                parts.owner.as_mut().expect("live parts retain the path owner").as_mut(),
-                &mut parts.lease,
-            ) => match advanced {
+            advanced = parts.owner.as_mut().expect("live parts retain the path owner").follow(&mut parts.lease) => match advanced {
                 Ok(kind) => {
                     // The lease owns its `Arc<Session>`: switching routes never
                     // aborts in-flight forward workers.
