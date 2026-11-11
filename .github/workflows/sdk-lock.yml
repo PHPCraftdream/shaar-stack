@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       direct_feedback:
-        description: Run focused SDK/config/server/client feedback instead of resolving a lockfile
+        description: Run the six existing direct-process cases instead of resolving a lockfile
         required: false
         type: boolean
         default: false
@@ -45,7 +45,7 @@ jobs:
 
   direct-feedback:
     if: ${{ inputs.direct_feedback }}
-    name: Direct feedback (${{ matrix.os }})
+    name: Direct process feedback (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -68,73 +68,27 @@ jobs:
         run: python -I -X utf8 .github/scripts/check_structure.py
       - name: Structural guard tests
         run: python -I -X utf8 -m unittest discover -s .github/scripts/tests
-      - name: Prepare reviewed production backend sources
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/backend-archives/noq target/backend-archives/iroh target/backend-archives/runtime
-          curl --fail --location --max-time 120 https://static.crates.io/crates/noq-proto/noq-proto-1.3.0.crate --output target/backend-archives/noq/noq-proto.crate
-          curl --fail --location --max-time 120 https://static.crates.io/crates/iroh/iroh-1.3.0.crate --output target/backend-archives/iroh/iroh.crate
-          curl --fail --location --max-time 120 https://static.crates.io/crates/noq/noq-1.3.0.crate --output target/backend-archives/runtime/noq.crate
-          python -I .github/scripts/backend/prepare.py --noq-archive target/backend-archives/noq/noq-proto.crate --iroh-archive target/backend-archives/iroh/iroh.crate --runtime-archive target/backend-archives/runtime/noq.crate --lock .github/probes/iroh-paths/Cargo.lock --destination target/backend
-      - name: Prepare reviewed signaling dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/p2p/relay-archive target/p2p/swarm-archive
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-relay/libp2p-relay-0.22.0.crate --output target/p2p/relay-archive/relay.crate
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-swarm/libp2p-swarm-0.48.0.crate --output target/p2p/swarm-archive/swarm.crate
-          python -I .github/scripts/p2p/prepare.py --archive target/p2p/relay-archive/relay.crate --destination target/p2p/relay --swarm-archive target/p2p/swarm-archive/swarm.crate --swarm-destination target/p2p/swarm
-      - name: Prepare reviewed DNS expansion boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/p2p/dns-archive
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-dns/libp2p-dns-0.45.0.crate --output target/p2p/dns-archive/dns.crate
-          python -I .github/scripts/p2p/discovery/dns/prepare.py prepare --archive target/p2p/dns-archive/dns.crate --destination target/p2p/dns
-      - name: Prepare reviewed resolver locking boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/p2p/resolver-archive
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/hickory-resolver/hickory-resolver-0.26.3.crate --output target/p2p/resolver-archive/resolver.crate
-          python -I .github/scripts/p2p/discovery/resolver/prepare.py --archive target/p2p/resolver-archive/resolver.crate --destination target/p2p/resolver
-      - name: Prepare reviewed Kademlia referral retention
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/p2p/kad-archive
-          curl --fail --location --max-time 120 --max-filesize 2097152 https://static.crates.io/crates/libp2p-kad/libp2p-kad-0.49.0.crate --output target/p2p/kad-archive/kad.crate
-          python -I .github/scripts/p2p/discovery/kad/kad.py prepare --archive target/p2p/kad-archive/kad.crate --destination target/p2p/kad
+      - name: Prepare current reviewed product sources without lock generation
+        uses: ./.github/actions/prepare-sources
+        with:
+          selection: '{"relay": false, "dns": false, "resolver": false, "kad": false}'
+          resolve_only: "false"
       - name: cargo fmt
-        run: cargo fmt --all -- --check
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Focused real-process D1 loopback forwarding
         shell: bash
         run: |
-          set -euo pipefail
-          cargo build --locked -p shaar-server -p shaar-client
-          export SHAAR_SERVER_EXE="$PWD/target/debug/shaar-server"
-          export SHAAR_CLIENT_EXE="$PWD/target/debug/shaar-client"
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            export SHAAR_SERVER_EXE="${SHAAR_SERVER_EXE}.exe"
-            export SHAAR_CLIENT_EXE="${SHAAR_CLIENT_EXE}.exe"
-          fi
-          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_server_client_forward_exact_loopback_bytes --nocapture
-          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_rejects_empty_allowlist_and_wrong_pin --nocapture
-          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_startup_validation_and_busy_listener --nocapture
-          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_recovers_after_target_becomes_available --nocapture
-          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_console_shutdown_rebind_and_server_restart --nocapture
-          cargo test --locked -p shaar --test identity -- --ignored --exact process_smoke::real_process_client_cancels_active_native_dial --nocapture
-      - name: Focused SDK, config, server, and client tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          for package in shaar shaar-platform shaar-server shaar-client shaar-p2p; do
-            log="$RUNNER_TEMP/shaar-$package.log"
-            if cargo test -p "$package" --locked >"$log" 2>&1; then status=0; else status=$?; fi
-            python -I -X utf8 .github/scripts/scan_identity_output.py "$log"
-            cat "$log"
-            if [[ "$status" -ne 0 ]]; then exit "$status"; fi
-          done
+          cargo fmt -p shaar -p shaar-ygg -p shaar-p2p -p shaar-server -p shaar-client -p shaar-platform -- --check
+          cargo fmt --manifest-path crates/shaar-ygg-core/Cargo.toml -- --check
+      - name: Scoped all-target clippy
+        run: cargo clippy -p shaar -p shaar-server -p shaar-client --all-targets --locked -- -D warnings
+      - name: Verify the six direct-only process cases and binary provenance
+        run: python -I .github/ci/run.py process-feedback
+      - name: Preserve direct-process execution and preparation receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: direct-process-${{ matrix.os }}
+          path: |
+            target/ci-process/
+            target/native-graph-preparation-logs/
+            target/p2p/graph-receipt.json
+          if-no-files-found: error
