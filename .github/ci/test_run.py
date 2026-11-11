@@ -13,6 +13,12 @@ SPEC.loader.exec_module(RUN)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_only_full_windows_receives_the_bounded_graph_capture_job_budget(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/ci.yml").read_text(encoding="utf-8")
+        job = workflow.split("  checks:\n", 1)[1].split("    steps:\n", 1)[0]
+        timeouts = [line.strip() for line in job.splitlines() if line.strip().startswith("timeout-minutes:")]
+        self.assertEqual(timeouts, ["timeout-minutes: ${{ fromJSON(needs.plan.outputs.selection).full && matrix.os == 'windows-latest' && 120 || 90 }}"])
+
     def test_nested_package_runs_by_manifest_path_and_workspace_members_by_name(self):
         nested = RUN.POLICY.target("shaar-ygg-core")
         self.assertEqual(RUN.package_arguments(nested), ["--manifest-path", "crates/shaar-ygg-core/Cargo.toml"])

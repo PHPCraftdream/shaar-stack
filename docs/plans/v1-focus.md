@@ -1489,6 +1489,42 @@ formatting, source paths, selection and bounded resource evidence are reviewed
 in the same pass. One personally reviewed consolidated commit and report must
 precede renewed full CI, and only an actual complete success resets this streak.
 
+The consolidated full run `42941884265` on `50298d2` finished Linux
+success (52m21s), but GitHub cancelled Windows after the configured 90-minute
+job limit: the authenticated annotation states "The job has exceeded the maximum
+execution time of 1h30m0s". This is a timeout cancellation, not a new Rust assertion
+failure or a green run. The preceding three-failure stop has not been reset.
+Full job logs and Windows CSVs are retained alongside the Linux receipts.
+
+Both cargo-test steps completed successfully before cancellation. Their reported
+workspace test-summary pass totals are Linux 826 and Windows 843, with zero
+reported failures; these totals count executions across test binaries/doc tests,
+not a deduplicated logical-case inventory. All nine preserved Ygg regression IDs
+are present as passed on both OS. Current-SHA CSV checks retain exactly 82 rows,
+62 eligible and 61 Native per OS. Linux known/cold/failover p95 is
+91,535,807 / 114,531,994 / 9,027,925,665 ns; Windows is
+140,799,000 / 143,371,700 / 9,046,453,200 ns. These prove completed runtime slices,
+not completion of the interrupted Windows native-graph proof or final acceptance.
+
+The Windows native-graph step started 83m32s into the job and was cancelled after
+6m30s. The same proof previously required approximately 16 minutes on Windows;
+this is an insufficient aggregate job budget, not evidence for relaxing an
+application deadline. The bounded follow-up grants 120 minutes ONLY to explicit
+full Windows checks. Linux and all targeted jobs retain 90 minutes. Every test,
+proof, application/failover threshold, sample count, compiler/lock feature context
+and gate remains unchanged. The extra 30 minutes covers the measured isolated
+three-graph capture and remaining receipts/negative controls; execution remains
+bounded and no new CI segment is added. A CI contract pins the exact conditional
+selector and default budget to prevent broadening unrelated jobs.
+
+The renewed consolidated review includes both terminal job timings, the previous
+three failures, the unchanged production/test bodies, completed runtime evidence
+and the interrupted proof. Only workflow budget, its contract and this honest
+record change. Local Python remains syntax-only and the accepted fmt/offline
+workspace all-target clippy boundary must pass before one reviewed commit/report
+and explicit-full fork push. No product test error is suppressed and no source
+is promoted upstream until the entire new-SHA full run is accepted.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;

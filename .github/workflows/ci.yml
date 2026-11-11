@@ -116,7 +116,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # Full Windows retains three isolated graph captures after workspace tests.
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.selection).full && matrix.os == 'windows-latest' && 120 || 90 }}
     env:
       RUSTUP_TOOLCHAIN: "1.99.1"
       CI_TARGETS: ${{ needs.plan.outputs.targets }}
