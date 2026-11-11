@@ -24,6 +24,7 @@ use super::ygg_start::RetainedYggStart;
 
 mod close;
 mod maintain;
+mod native;
 mod start;
 #[cfg(test)]
 mod test_access;

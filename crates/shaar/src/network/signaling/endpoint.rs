@@ -113,6 +113,34 @@ impl SignaledEndpoint {
         .await
     }
 
+    #[cfg(test)]
+    pub(crate) fn bound_native_sockets_for_tests(&self) -> Vec<SocketAddr> {
+        self.endpoint.bound_native_sockets()
+    }
+
+    #[cfg(test)]
+    /// Binds the controlled fixture's only native family through the same owner.
+    /// cancel-safe: NO — cancellation does not prove joined destruction.
+    pub(crate) async fn bind_native_for_tests(
+        identity: &Identity,
+        native: SocketAddr,
+        signaling: SocketAddr,
+        peers: &[PublicKey],
+        limits: Limits,
+        slots: Option<std::sync::Arc<Semaphore>>,
+    ) -> Result<Self, NetworkError> {
+        Self::bind_configured(
+            identity,
+            NativeBind::Single(native),
+            signaling,
+            peers,
+            limits,
+            None,
+            slots,
+        )
+        .await
+    }
+
     /// Starts with validated in-memory discovery settings.
     /// cancel-safe: NO — cancellation does not prove joined destruction.
     pub async fn bind_with_discovery(
