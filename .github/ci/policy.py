@@ -195,7 +195,10 @@ def select(paths, *, full=False):
                         break
             if not owned:
                 match = re.fullmatch(r"crates/([^/]+)/tests/([A-Za-z_][A-Za-z0-9_-]*)\.rs", path)
-                if match and match[1] in PACKAGES:
+                if path.startswith("crates/shaar/tests/identity/"):
+                    add(target("shaar", kind="test", name="identity"))
+                    owned = ["integration:identity"]
+                elif match and match[1] in PACKAGES:
                     add(target(match[1], kind="test", name=match[2]))
                     owned = ["integration:" + match[2]]
                 else:

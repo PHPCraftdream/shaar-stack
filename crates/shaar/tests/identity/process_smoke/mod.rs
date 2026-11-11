@@ -2,6 +2,8 @@
 
 #[cfg(any(unix, windows))]
 mod cancellation;
+#[cfg(any(unix, windows))]
+mod composed;
 mod rejection;
 #[cfg(any(unix, windows))]
 mod shutdown;

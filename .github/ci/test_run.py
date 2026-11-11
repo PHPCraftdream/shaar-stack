@@ -263,10 +263,11 @@ class RunnerTests(unittest.TestCase):
 class ProcessFeedbackTests(unittest.TestCase):
     def test_process_inventory_requires_exactly_the_reviewed_ignored_cases(self):
         listing = "".join(name + ": test\n" for name in RUN.PROCESS_CASES)
-        self.assertEqual(len(RUN.PROCESS_CASES), 6)
+        self.assertEqual(len(RUN.PROCESS_CASES), 8)
         self.assertEqual(RUN.process_inventory(listing, listing), list(RUN.PROCESS_CASES))
         for ordinary, ignored in (("", ""), (listing, ""),
                                   (listing + "process_smoke::real_extra: test\n", listing),
+                                  (listing + "process_smoke::composed::real_extra: test\n", listing),
                                   (listing, listing + "missing: test\n"),
                                   (listing + listing, listing)):
             with self.subTest(ordinary=ordinary, ignored=ignored), self.assertRaises(ValueError):
@@ -340,7 +341,7 @@ class ProcessFeedbackTests(unittest.TestCase):
                 self.assertEqual(receipt["selected"], list(RUN.PROCESS_CASES))
                 self.assertEqual(receipt["verified_passed"], [] if fail else list(RUN.PROCESS_CASES))
                 self.assertEqual(receipt["status"], "failed" if fail else "passed")
-                self.assertEqual(len(seen), 5 if fail else 10)
+                self.assertEqual(len(seen), 5 if fail else 4 + len(RUN.PROCESS_CASES))
                 for arguments, environment in seen[4:]:
                     self.assertIn("--ignored", arguments)
                     self.assertIn("--exact", arguments)
@@ -374,6 +375,13 @@ class ProcessFeedbackTests(unittest.TestCase):
             mixed = transcript.replace("running 1 test\n", "running 1 test\n" + diagnostics)
             with self.assertRaises(ValueError):
                 RUN.VERIFY.verify(expected, {"process": (RUN.VERIFY.cargo_execution(mixed), 0)}, "")
+
+    def test_nested_identity_fixture_changes_select_only_the_identity_integration_target(self):
+        selected = RUN.POLICY.select(["crates/shaar/tests/identity/process_smoke/composed.rs"])
+        self.assertEqual(selected["targets"], [RUN.POLICY.target("shaar", kind="test", name="identity")])
+        self.assertFalse(selected["selection"]["full"])
+        with self.assertRaises(ValueError):
+            RUN.POLICY.select(["crates/shaar/tests/unknown/support.rs"])
 
     def test_existing_feedback_workflow_is_owned_narrow_and_never_resolves_locks(self):
         selected = RUN.POLICY.select([".github/workflows/sdk-lock.yml"])
