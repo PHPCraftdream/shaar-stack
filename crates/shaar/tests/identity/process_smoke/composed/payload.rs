@@ -263,7 +263,7 @@ pub(super) async fn exchange(target: &TcpListener, front: SocketAddr) -> std::io
 }
 
 /// cancel-safe: NO — each failed APP stream is terminal; retries create fresh owned streams.
-async fn recover(
+pub(super) async fn recover(
     target: &TcpListener,
     front: SocketAddr,
     processes: &mut Processes,
