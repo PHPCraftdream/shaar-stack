@@ -112,6 +112,7 @@ PROOFS = (
     ("docs/legal/notices-material/", "license"),
     (".github/ci/", "ci_policy"),
     (".github/workflows/ci.yml", "ci_policy"),
+    (".github/workflows/sdk-lock.yml", "ci_policy"),
     (".github/actions/prepare-sources/", "ci_policy"),
     (".github/scripts/tests/", "ci_policy"),
     (".github/scripts/check_structure.py", "ci_policy"),

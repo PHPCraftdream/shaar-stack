@@ -2,6 +2,7 @@
 
 from collections import Counter
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -32,9 +33,10 @@ def safe_text(path):
     return data.decode("utf-8")
 
 
-def capture(arguments, log, *, stderr=None):
+def capture(arguments, log, *, stderr=None, extra_env=None):
     # The workflow timeout owns the Cargo process tree; do not kill only its parent.
     environment = dict(os.environ, CARGO_TARGET_DIR=str(ROOT / "target"))
+    environment.update(extra_env or {})
     with log.open("wb") as output:
         if stderr:
             with stderr.open("wb") as errors:
@@ -227,8 +229,113 @@ def lint(targets):
             raise ValueError("selected target lint failed: " + str(status))
 
 
+PROCESS_CASES = tuple(sorted("process_smoke::" + name for name in (
+    "real_server_client_forward_exact_loopback_bytes",
+    "real_process_rejects_empty_allowlist_and_wrong_pin",
+    "real_process_startup_validation_and_busy_listener",
+    "real_process_recovers_after_target_becomes_available",
+    "real_process_console_shutdown_rebind_and_server_restart",
+    "real_process_client_cancels_active_native_dial",
+)))
+
+
+def product_executable(messages, name):
+    if name not in {"shaar-server", "shaar-client"}:
+        raise ValueError("unknown process-feedback product")
+    source = (ROOT / "crates" / name / "src/main.rs").resolve()
+    found = set()
+    for line in messages.splitlines():
+        item = json.loads(line)
+        target = item.get("target", {})
+        if (item.get("reason") != "compiler-artifact"
+                or item.get("profile", {}).get("test") is not False
+                or target.get("kind") != ["bin"] or target.get("name") != name):
+            continue
+        if Path(target["src_path"]).resolve() != source:
+            continue
+        binary = Path(item["executable"]).resolve()
+        if not binary.is_relative_to((ROOT / "target").resolve()):
+            raise ValueError("product executable escaped the target directory")
+        if not binary.is_file():
+            raise ValueError("compiled product executable is missing")
+        found.add(binary)
+    if len(found) != 1:
+        raise ValueError("Cargo must report exactly one product executable")
+    return found.pop()
+
+
+def process_inventory(listing, ignored_listing):
+    inventory = set(VERIFY.parse_listing(listing, ""))
+    ignored = set(VERIFY.parse_listing(ignored_listing, ""))
+    if not ignored <= inventory:
+        raise ValueError("ignored inventory is not a subset of the binary inventory")
+    expected = set(PROCESS_CASES)
+    real_process = {name for name in inventory if name.startswith("process_smoke::real_")}
+    if real_process != expected or not expected <= ignored:
+        raise ValueError("compiled ignored process inventory differs from the reviewed six cases")
+    return list(PROCESS_CASES)
+
+
+def process_feedback():
+    directory = ROOT / "target/ci-process"
+    directory.mkdir(parents=True, exist_ok=True)
+    build, status = capture(
+        ["cargo", "build", "--locked", "-p", "shaar-server", "-p", "shaar-client", "--message-format=json"],
+        directory / "products.build.jsonl", stderr=directory / "products.build.stderr")
+    if status:
+        raise ValueError("process-feedback product build failed: " + str(status))
+    products = {}
+    environment = {}
+    for name, variable in (("shaar-server", "SHAAR_SERVER_EXE"), ("shaar-client", "SHAAR_CLIENT_EXE")):
+        binary = product_executable(build, name)
+        with binary.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        products[name] = {"executable": str(binary), "sha256": digest, "bytes": binary.stat().st_size}
+        environment[variable] = str(binary)
+    arguments = ["cargo", "test", "--locked", "-p", "shaar", "--test", "identity"]
+    messages, status = capture(arguments + ["--no-run", "--message-format=json"],
+                               directory / "identity.build.jsonl", stderr=directory / "identity.build.stderr")
+    if status:
+        raise ValueError("process-feedback test compilation failed: " + str(status))
+    binary = executable(messages, POLICY.target("shaar", kind="test", name="identity"))
+    listing, status = capture([str(binary), "--list", "--format=terse"], directory / "identity.list.log")
+    if status:
+        raise ValueError("process test inventory failed")
+    ignored, status = capture([str(binary), "--list", "--ignored", "--format=terse"], directory / "identity.ignored.log")
+    if status:
+        raise ValueError("ignored process test inventory failed")
+    selected = process_inventory(listing, ignored)
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("process-feedback source revision is not an exact SHA")
+    receipt = {"head": revision, "scope": "direct-only-process-feedback-not-full-P13",
+               "products": products, "selected": selected, "verified_passed": []}
+    path = directory / "receipt.json"
+    for index, case in enumerate(selected):
+        receipt["unverified_case"] = case
+        path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+        output, status = capture(arguments + ["--", "--ignored", "--exact", "--color", "never", case],
+                                 directory / f"run-{index}.log", extra_env=environment)
+        if status:
+            receipt.update(status="failed", exit_code=status)
+            path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+            raise ValueError("process case failed; Cargo exit code: " + str(status))
+        VERIFY.verify({"process": case + ": test\n"},
+                      {"process": (VERIFY.cargo_execution(output), status)}, "")
+        receipt["verified_passed"].append(case)
+    if Counter(receipt["verified_passed"]) != Counter(selected):
+        raise ValueError("selected and executed process cases differ")
+    receipt.pop("unverified_case")
+    receipt["status"] = "passed"
+    path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    print("Verified direct-only process cases:", len(selected))
+
+
 def main():
     mode = sys.argv[1]
+    if mode == "process-feedback":
+        process_feedback()
+        return
     if mode == "self-test":
         self_test()
         return

@@ -260,5 +260,111 @@ class RunnerTests(unittest.TestCase):
                     RUN.executable("", spec)
 
 
+class ProcessFeedbackTests(unittest.TestCase):
+    def test_process_inventory_requires_exactly_the_reviewed_ignored_cases(self):
+        listing = "".join(name + ": test\n" for name in RUN.PROCESS_CASES)
+        self.assertEqual(len(RUN.PROCESS_CASES), 6)
+        self.assertEqual(RUN.process_inventory(listing, listing), list(RUN.PROCESS_CASES))
+        for ordinary, ignored in (("", ""), (listing, ""),
+                                  (listing + "process_smoke::real_extra: test\n", listing),
+                                  (listing, listing + "missing: test\n"),
+                                  (listing + listing, listing)):
+            with self.subTest(ordinary=ordinary, ignored=ignored), self.assertRaises(ValueError):
+                RUN.process_inventory(ordinary, ignored)
+
+    def test_product_binary_requires_exact_source_profile_and_target_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "target/debug/shaar-server"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"compiled fixture")
+            artifact = {"reason": "compiler-artifact", "profile": {"test": False},
+                        "target": {"kind": ["bin"], "name": "shaar-server",
+                                   "src_path": str(root / "crates/shaar-server/src/main.rs")},
+                        "executable": str(binary)}
+            with patch.object(RUN, "ROOT", root):
+                self.assertEqual(RUN.product_executable(json.dumps(artifact), "shaar-server"), binary)
+                for changed in ({"profile": {"test": True}},
+                                {"executable": str(root / "outside/server")},
+                                {"executable": str(root / "target/missing")},
+                                {"target": {**artifact["target"], "src_path": str(root / "other/main.rs")}}):
+                    with self.subTest(changed=changed), self.assertRaises(ValueError):
+                        RUN.product_executable(json.dumps({**artifact, **changed}), "shaar-server")
+                with self.assertRaises(ValueError):
+                    RUN.product_executable("", "shaar-client")
+                with self.assertRaises(ValueError):
+                    RUN.product_executable(json.dumps(artifact), "unknown")
+                second = root / "target/other-server"
+                second.write_bytes(b"second fixture")
+                with self.assertRaises(ValueError):
+                    RUN.product_executable(json.dumps(artifact) + "\n" +
+                                           json.dumps({**artifact, "executable": str(second)}), "shaar-server")
+
+    def test_process_receipt_preserves_exact_success_or_first_failure(self):
+        for fail in (False, True):
+            with self.subTest(fail=fail), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                products = {name: root / ("target/" + name) for name in ("shaar-server", "shaar-client")}
+                for name, path in products.items():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(name.encode())
+                listing = "".join(name + ": test\n" for name in RUN.PROCESS_CASES)
+                outputs = [("products", 0), ("tests", 0), (listing, 0), (listing, 0)]
+                for case in RUN.PROCESS_CASES:
+                    text = (f"running 1 test\ntest {case} ... ok\n"
+                            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; "
+                            "0 filtered out; finished in 0.01s\n")
+                    outputs.append(("failed batch" if fail else text, 101 if fail else 0))
+                seen = []
+                def capture(arguments, log, *, stderr=None, extra_env=None):
+                    seen.append((arguments, extra_env))
+                    text, code = outputs[len(seen) - 1]
+                    log.write_text(text, encoding="utf-8")
+                    if stderr:
+                        stderr.write_text("", encoding="utf-8")
+                    return text, code
+                with patch.object(RUN, "ROOT", root), \
+                     patch.object(RUN, "capture", side_effect=capture), \
+                     patch.object(RUN, "product_executable", side_effect=lambda _, name: products[name]), \
+                     patch.object(RUN, "executable", return_value=root / "target/identity"), \
+                     patch.object(RUN.subprocess, "check_output", return_value="a" * 40):
+                    if fail:
+                        with self.assertRaisesRegex(ValueError, "Cargo exit code: 101"):
+                            RUN.process_feedback()
+                    else:
+                        RUN.process_feedback()
+                receipt = json.loads((root / "target/ci-process/receipt.json").read_text(encoding="utf-8"))
+                self.assertEqual(receipt["head"], "a" * 40)
+                self.assertEqual(receipt["selected"], list(RUN.PROCESS_CASES))
+                self.assertEqual(receipt["verified_passed"], [] if fail else list(RUN.PROCESS_CASES))
+                self.assertEqual(receipt["status"], "failed" if fail else "passed")
+                self.assertEqual(len(seen), 5 if fail else 10)
+                for arguments, environment in seen[4:]:
+                    self.assertIn("--ignored", arguments)
+                    self.assertIn("--exact", arguments)
+                    self.assertEqual(environment, {"SHAAR_SERVER_EXE": str(products["shaar-server"]),
+                                                   "SHAAR_CLIENT_EXE": str(products["shaar-client"])})
+                if fail:
+                    self.assertEqual(receipt["exit_code"], 101)
+                    self.assertEqual(receipt["unverified_case"], RUN.PROCESS_CASES[0])
+
+    def test_existing_feedback_workflow_is_owned_narrow_and_never_resolves_locks(self):
+        selected = RUN.POLICY.select([".github/workflows/sdk-lock.yml"])
+        self.assertTrue(selected["selection"]["ci_policy"])
+        self.assertFalse(selected["selection"]["rust"])
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/sdk-lock.yml").read_text(encoding="utf-8")
+        resolve, feedback = workflow.split("  direct-feedback:\n", 1)
+        self.assertIn("if: ${{ !inputs.direct_feedback }}", resolve)
+        self.assertIn("cargo generate-lockfile", resolve)
+        self.assertIn("if: ${{ inputs.direct_feedback }}", feedback)
+        self.assertIn("uses: ./.github/actions/prepare-sources", feedback)
+        self.assertIn('resolve_only: "false"', feedback)
+        self.assertIn("cargo fmt --manifest-path crates/shaar-ygg-core/Cargo.toml -- --check", feedback)
+        self.assertIn("python -I .github/ci/run.py process-feedback", feedback)
+        self.assertNotIn("cargo generate-lockfile", feedback)
+        self.assertNotIn("cargo fmt --all", feedback)
+        self.assertNotIn("cargo test -p", feedback)
+
+
 if __name__ == "__main__":
     unittest.main()
