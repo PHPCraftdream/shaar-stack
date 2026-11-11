@@ -46,9 +46,10 @@ pub(crate) struct StageControls {
 }
 
 #[cfg(test)]
-struct StageGates {
-    after_bridge: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
-    after_native_close: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+pub(super) struct StageGates {
+    pub(super) after_bridge: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+    pub(super) after_native_close: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+    pub(super) native_bind: Option<SocketAddr>,
 }
 
 #[cfg(test)]
@@ -160,6 +161,7 @@ impl SharedResourcesStart {
         let gates = StageGates {
             after_bridge: after_bridge_gate,
             after_native_close: after_native_close_gate,
+            native_bind: None,
         };
         let controls = StageControls {
             after_bridge,
@@ -201,13 +203,14 @@ impl SharedResourcesStart {
                 Some(StageGates {
                     after_bridge: after_bridge_gate,
                     after_native_close: None,
+                    native_bind: None,
                 }),
             ),
             controls,
         )
     }
 
-    fn start_seamed(
+    pub(super) fn start_seamed(
         identity: &Identity,
         plan: &ComposedStartupPlan<'_>,
         limits: Limits,
@@ -389,9 +392,14 @@ async fn run_startup(
         shared_admission,
     } = settings;
     #[cfg(test)]
-    let (after_bridge, after_native_close) = controls.map_or((None, None), |gates| {
-        (gates.after_bridge, gates.after_native_close)
-    });
+    let (after_bridge, after_native_close, native_bind) =
+        controls.map_or((None, None, None), |gates| {
+            (
+                gates.after_bridge,
+                gates.after_native_close,
+                gates.native_bind,
+            )
+        });
     #[cfg(test)]
     let (mut after_bridge_entered, mut after_bridge_release) = after_bridge
         .map_or((None, None), |(entered, release)| {
@@ -415,12 +423,14 @@ async fn run_startup(
     } else {
         None
     };
-    let endpoint_result = SignaledEndpoint::bind_composed(
+    let endpoint_result = super::native::bind(
         identity,
         signaling_bind,
         &app_peers,
         limits,
         shared_slots.as_ref().map(Arc::clone),
+        #[cfg(test)]
+        native_bind,
     )
     .await;
     let endpoint = match endpoint_result {
