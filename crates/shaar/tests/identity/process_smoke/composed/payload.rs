@@ -118,7 +118,9 @@ async fn mode(
         .map_err(|_| "service-key GET actor ended")?;
     // NativeDialer resolves this service key only after run_parts binds its listener.
     require_occupied(TcpListener::bind(front_address).await)?;
-    exchange(&target, front_address).await?;
+    exchange(&target, front_address)
+        .await
+        .map_err(|error| format!("initial APP exchange: {error}"))?;
     super::super::shutdown::signal_owned(processes, server).await?;
     require_exit(processes, server).await?;
     let restarted = processes.spawn(&server_exe, &server_config, &temp.0)?;
@@ -136,7 +138,7 @@ async fn mode(
     {
         return Err("Client was not retained across Server-only restart".to_owned());
     }
-    exchange(&target, front_address).await?;
+    recover(&target, front_address, processes, client).await?;
     for index in [client, restarted] {
         super::super::shutdown::signal_owned(processes, index).await?;
         require_exit(processes, index).await?;
@@ -214,7 +216,7 @@ async fn require_exit(processes: &mut Processes, index: usize) -> Result<(), Str
 }
 
 /// cancel-safe: NO — partial stream I/O is terminal; owned streams close on cancellation.
-async fn exchange(target: &TcpListener, front: SocketAddr) -> Result<(), String> {
+async fn exchange(target: &TcpListener, front: SocketAddr) -> std::io::Result<()> {
     const REQUEST: &[u8] = b"composed request across restart";
     const REPLY: &[u8] = b"fixed-target composed reply";
     timeout(Duration::from_secs(40), async {
@@ -248,10 +250,65 @@ async fn exchange(target: &TcpListener, front: SocketAddr) -> Result<(), String>
             stream.shutdown().await?;
             Ok::<(), std::io::Error>(())
         };
-        tokio::try_join!(app, service)
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        tokio::try_join!(app, service).map(|_| ())
     })
     .await
-    .map_err(|_| "composed APP exchange deadline".to_owned())?
+    .map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "composed APP exchange deadline",
+        )
+    })?
+}
+
+/// cancel-safe: NO — each failed APP stream is terminal; retries create fresh owned streams.
+async fn recover(
+    target: &TcpListener,
+    front: SocketAddr,
+    processes: &mut Processes,
+    client: usize,
+) -> Result<(), String> {
+    use std::io::ErrorKind;
+    let operation = async {
+        let mut backoff = Duration::from_millis(200);
+        for attempt in 1..=16 {
+            match exchange(target, front).await {
+                Ok(()) => return Ok(()),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::ConnectionReset
+                            | ErrorKind::ConnectionAborted
+                            | ErrorKind::ConnectionRefused
+                            | ErrorKind::BrokenPipe
+                            | ErrorKind::UnexpectedEof
+                    ) =>
+                {
+                    if processes.0[client]
+                        .child
+                        .try_wait()
+                        .map_err(|e| e.to_string())?
+                        .is_some()
+                    {
+                        return Err(format!("retained Client exited during recovery: {error}"));
+                    }
+                    if attempt == 16 {
+                        return Err(format!("fresh APP connection recovery exhausted: {error}"));
+                    }
+                    eprintln!(
+                        "post-restart APP attempt {attempt} failed: {:?}",
+                        error.kind()
+                    );
+                    // Back off actual failed APP transactions, never poll a readiness flag.
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(Duration::from_secs(2));
+                }
+                Err(error) => return Err(format!("post-restart APP contract failure: {error}")),
+            }
+        }
+        Err("fresh APP connection recovery exhausted".to_owned())
+    };
+    timeout(Duration::from_secs(40), operation)
+        .await
+        .map_err(|_| "fresh APP connection recovery absolute deadline".to_owned())?
 }
