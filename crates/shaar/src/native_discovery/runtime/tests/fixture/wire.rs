@@ -147,6 +147,7 @@ impl LoopbackPeer {
         }
     }
 
+    /// cancel-safe: NO — cancellation may interrupt an ancillary ACK; retain or terminate the waiter.
     pub(crate) async fn capture_get(&mut self, target: n0_mainline::Id) -> (SocketAddr, Vec<u8>) {
         loop {
             let mut packet = [0; MAX_PACKET];
@@ -172,7 +173,18 @@ impl LoopbackPeer {
                 b"get" => ReplyKind::Get,
                 b"find_node" => ReplyKind::FindNode,
                 b"ping" => ReplyKind::Ping,
-                _ => panic!("unexpected method while resolving"),
+                b"put" => {
+                    // Publication retries can already be queued when the initial ACK is sent.
+                    let captured =
+                        CapturedPut::from_arguments(field(&parsed, b"a").expect("PUT arguments"));
+                    let _ = captured.signed_packet();
+                    eprintln!(
+                        "KRPC PUT acknowledged while resolving: sequence={}",
+                        captured.sequence
+                    );
+                    ReplyKind::PutAcknowledgement
+                }
+                other => panic!("unexpected method while resolving: {other:?}"),
             };
             self.socket
                 .send_to(&response(transaction, kind), source)
