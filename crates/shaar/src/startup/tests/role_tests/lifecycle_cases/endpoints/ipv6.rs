@@ -11,7 +11,7 @@ use crate::{
     native_discovery::runtime::owner::LoopbackPeer,
     network::{Allowlist, Limits, RelayFixture},
     path::PathKind,
-    startup::role::{ClientRole, RoleEvent, serve_server_with_events},
+    startup::role::{ClientRole, RoleEvent, ServerRole},
 };
 
 use super::{
@@ -61,6 +61,14 @@ async fn key_only_ipv6_forwards_to_the_fixed_target_in_signal_and_standby() {
             let item = admit_and_capture(
                 &mut service_peer, &mut server, &server_log, ROLE_BUDGET,
             ).await;
+            let bound = match server_log.find(&|event| matches!(event, RoleEvent::NativeBound(_))) {
+                Some(RoleEvent::NativeBound(address)) => address,
+                other => panic!("real server native bind not observed: {other:?}"),
+            };
+            assert_eq!(bound.ip(), std::net::IpAddr::V6(Ipv6Addr::LOCALHOST));
+            let published = published_addresses(&item);
+            assert!(published.contains(&bound),
+                "actual signed PUT must contain fixture's reachable IPv6 bind: {bound}; published={published:?}");
 
             let mut role = ClientRole::with_events_ipv6_only_for_tests(
                 client_config.clone(), &client_identity, Limits::new(2).unwrap(),
@@ -142,16 +150,36 @@ async fn serve_owned_server(
     stopped: oneshot::Receiver<()>,
     events: crate::startup::role::RoleEventLog,
 ) -> Result<(), crate::startup::StartupError> {
-    serve_server_with_events(
-        &config,
+    let mut role = ServerRole::with_events_ipv6_only_for_tests(
+        config,
         &identity,
         Allowlist::new(&[client]).unwrap(),
         Limits::new(2).unwrap(),
         tuned_policy(),
-        async {
-            let _ = stopped.await;
-        },
         events,
-    )
-    .await
+    )?;
+    let mut shutdown = std::pin::pin!(async {
+        let _ = stopped.await;
+    });
+    let outcome = match role.start().await {
+        Ok(()) => role.run(&mut shutdown).await,
+        Err(error) => Err(error),
+    };
+    let close = role.shutdown().await;
+    outcome.and(close)
+}
+
+fn published_addresses(item: &n0_mainline::MutableItem) -> Vec<std::net::SocketAddr> {
+    let mut envelope = Vec::with_capacity(104 + item.value().len());
+    envelope.extend_from_slice(item.key());
+    envelope.extend_from_slice(item.signature());
+    envelope.extend_from_slice(&item.seq().to_be_bytes());
+    envelope.extend_from_slice(item.value());
+    let packet = iroh_dns::pkarr::SignedPacket::from_bytes(&envelope)
+        .expect("the actual captured mutable item signature verifies");
+    iroh_dns::endpoint_info::EndpointInfo::from_pkarr_signed_packet(&packet)
+        .expect("actual publication decodes as endpoint info")
+        .ip_addrs()
+        .copied()
+        .collect()
 }

@@ -22,7 +22,7 @@ impl ClientRole {
             .map_err(|_| StartupError::InvalidPolicy)?;
         let keys = [key];
         let plan = preflight_client(&config, identity, &keys)?;
-        let start = SharedResourcesStart::start_ipv6_only_for_tests(identity, &plan, limits);
+        let start = SharedResourcesStart::start_ipv6_only_for_tests(identity, &plan, limits, false);
         let mut role = Self::with_events(config, identity, limits, options, events)?;
         role.phase = ClientPhase::Starting(start);
         Ok(role)

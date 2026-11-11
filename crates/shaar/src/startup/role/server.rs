@@ -47,6 +47,10 @@ use crate::startup::resources::{SharedResources, SharedResourcesStart};
 use crate::startup::role::{RoleEvent, RoleEventLog, emit, emit_payload_acquired};
 use crate::startup::role::{RoleOptions, server_close};
 
+#[cfg(test)]
+#[path = "server_seams.rs"]
+mod test_seams;
+
 /// Bounded reservation attempts: the carrier caps one record at three
 /// attempts (`attempts >= 3` answers `capacity()`); slack covers cancellations.
 const RELAY_RESERVE_ATTEMPTS: usize = 6;
@@ -244,44 +248,6 @@ impl ServerRole {
             }
             _ => Err(()),
         }
-    }
-
-    /// Builds the real seamed start with shared admission and optional gates.
-    /// Attaches the test observer, leaves the role in `Starting`, and returns
-    /// controls for the armed gate; `start()` resumes construction.
-    #[cfg(test)]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Test seam exposes independent startup gates"
-    )]
-    pub(crate) fn with_events_seamed_for_tests(
-        config: ServerConfig,
-        identity: &Identity,
-        allowlist: Allowlist,
-        limits: Limits,
-        options: RoleOptions,
-        events: RoleEventLog,
-        cleanup_hold: bool,
-        pause_after_bridge: bool,
-    ) -> Result<(Self, crate::startup::resources::StageControls), StartupError> {
-        options.validate()?;
-        let keys: Vec<PublicKey> = allowlist.keys().collect();
-        let plan = preflight_server(&config, identity, &keys)?;
-        let (start, controls) = SharedResourcesStart::start_shared_seamed_for_tests(
-            identity,
-            &plan,
-            limits,
-            true,
-            cleanup_hold,
-            pause_after_bridge,
-        );
-        // Same composition as `with_events` + the seamed starting phase:
-        // `Self::new` validates the options, the role skips `new`'s `New`
-        // phase by entering `Starting` directly; `start()` resumes it.
-        let mut role = Self::new(config, identity, allowlist, limits, options)?;
-        role.events = Some(events);
-        role.phase = ServerPhase::Starting(start);
-        Ok((role, controls))
     }
 
     /// Resumable startup: preflight, composition start, live transfer and

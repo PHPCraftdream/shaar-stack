@@ -37,6 +37,7 @@ impl super::SharedResourcesStart {
         identity: &Identity,
         plan: &crate::startup::preflight::ComposedStartupPlan<'_>,
         limits: Limits,
+        shared_admission: bool,
     ) -> Self {
         Self::start_seamed(
             identity,
@@ -44,7 +45,7 @@ impl super::SharedResourcesStart {
             limits,
             false,
             false,
-            false,
+            shared_admission,
             Some(super::start::StageGates {
                 after_bridge: None,
                 after_native_close: None,
