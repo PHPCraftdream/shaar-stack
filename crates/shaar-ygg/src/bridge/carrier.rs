@@ -194,6 +194,48 @@ impl CustomEndpoint for Bound {
     }
 }
 
+struct Sender(Arc<Shared>, CustomAddr);
+
+impl fmt::Debug for Sender {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("YggCarrierSender(..)")
+    }
+}
+
+impl CustomSender for Sender {
+    fn is_valid_send_addr(&self, address: &CustomAddr) -> bool {
+        self.0.authenticated_peer(address).is_ok()
+    }
+
+    fn poll_send(
+        &self,
+        cx: &mut Context<'_>,
+        dst: &CustomAddr,
+        src: Option<&CustomAddr>,
+        transmit: &Transmit<'_>,
+    ) -> Poll<io::Result<()>> {
+        self.poll_packet(cx, dst, src, transmit.contents, transmit.segment_size)
+    }
+}
+
+impl Sender {
+    fn poll_packet(
+        &self,
+        cx: &mut Context<'_>,
+        dst: &CustomAddr,
+        src: Option<&CustomAddr>,
+        contents: &[u8],
+        segment_size: Option<usize>,
+    ) -> Poll<io::Result<()>> {
+        if src.is_some_and(|source| source != &self.1)
+            || segment_size.is_some_and(|size| size == 0 || size != contents.len())
+        {
+            return Poll::Ready(Err(io::ErrorKind::InvalidInput.into()));
+        }
+        self.0.poll_send(cx, dst, contents)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,11 +530,7 @@ mod tests {
 
     #[tokio::test]
     async fn custom_sender_rejects_invalid_source_segmentation_and_oversize_payload() {
-        use std::task::{Context, Poll, Wake, Waker};
-        struct Noop;
-        impl Wake for Noop {
-            fn wake(self: Arc<Self>) {}
-        }
+        use std::task::{Context, Poll, Waker};
 
         let (transport, _) = start_listener(0xDD).await;
         let bridge = YggBridge::new(transport, []);
@@ -508,8 +546,8 @@ mod tests {
         let destination = carrier.peer_address(&[0x61; 32]).unwrap();
         let local = carrier.local.clone();
         let wrong_local = CustomAddr::from_parts(local.id(), &[0xff; 16]);
-        let waker = Waker::from(Arc::new(Noop));
-        let mut cx = Context::from_waker(&waker);
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
         let payload = [0xA5; 4];
         assert!(matches!(
             sender.poll_packet(&mut cx, &destination, Some(&wrong_local), &payload, None),
@@ -554,47 +592,5 @@ mod tests {
         drop(endpoint);
         assert!(carrier.authenticated_peer(&address).is_err());
         bridge.close().await.unwrap();
-    }
-}
-
-struct Sender(Arc<Shared>, CustomAddr);
-
-impl fmt::Debug for Sender {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("YggCarrierSender(..)")
-    }
-}
-
-impl CustomSender for Sender {
-    fn is_valid_send_addr(&self, address: &CustomAddr) -> bool {
-        self.0.authenticated_peer(address).is_ok()
-    }
-
-    fn poll_send(
-        &self,
-        cx: &mut Context<'_>,
-        dst: &CustomAddr,
-        src: Option<&CustomAddr>,
-        transmit: &Transmit<'_>,
-    ) -> Poll<io::Result<()>> {
-        self.poll_packet(cx, dst, src, transmit.contents, transmit.segment_size)
-    }
-}
-
-impl Sender {
-    fn poll_packet(
-        &self,
-        cx: &mut Context<'_>,
-        dst: &CustomAddr,
-        src: Option<&CustomAddr>,
-        contents: &[u8],
-        segment_size: Option<usize>,
-    ) -> Poll<io::Result<()>> {
-        if src.is_some_and(|source| source != &self.1)
-            || segment_size.is_some_and(|size| size == 0 || size != contents.len())
-        {
-            return Poll::Ready(Err(io::ErrorKind::InvalidInput.into()));
-        }
-        self.0.poll_send(cx, dst, contents)
     }
 }

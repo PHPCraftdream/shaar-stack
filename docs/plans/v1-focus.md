@@ -1457,6 +1457,38 @@ full-marker fork push. No dependency/version/root lock, preparation/download
 budget, public-network permission or new CI segment is introduced. Full P10
 and exact-green delivery/cleanup remain pending on the new candidate SHA.
 
+Full CI `42934771483` on `c0b052d` passed the repaired DNS boundary but
+failed both OS jobs at workspace all-target clippy. The three consecutive full
+failures are `42925846018` (carrier observation lock), `42928470520` (DNS frozen
+baseline), and `42934771483` (Ygg bridge lib-test lint). The consolidated-review
+stop is active: no point-fix push or rerun follows this third failure. Targeted
+repair #48 remains historically accepted; full P10 is still not accepted.
+
+Both clippy traces report the same four defects in shaar-ygg: production items
+after inline test modules in bridge/carrier.rs and bridge/carrier_pump.rs, plus
+two manually implemented no-op Wake instances. Earlier SDK/P2P targeted lint
+contexts compiled the Ygg dependency but did not lint its lib-test target. The
+local toolchain is 1.97 while CI is pinned to 1.99.1; no version is changed and
+local success is not represented as CI lint acceptance. Full-context review
+therefore covers all six owned workspace crates with --workspace --all-targets,
+plus the separate shaar-ygg-core manifest rather than another narrow SDK-only
+lint pass. All remains offline/locked and clippy-only locally.
+
+The single bounded repair places the existing production item blocks before
+the test modules and replaces only the two genuinely no-op test wakers with
+std::task::Waker::noop(). Counting/notification wakers remain unchanged. An own
+stdlib structural DATA check retains unchanged production text before rustfmt
+and the exact test identity list. After rustfmt, nonempty production lines and
+all seven carrier/two pump test identities independently match the originals.
+Workspace and isolated-core all-target clippy both passed under local 1.97; the
+generated isolated-core target was preserved under ignored root target after
+clippy terminated. No production behavior or test obligation is removed. No lint suppression, feature narrowing, dependency/version/lock/source
+recipe change or local test execution is permitted. The previous fixture repairs
+retain strict reference checks and passed their respective full-run boundaries;
+formatting, source paths, selection and bounded resource evidence are reviewed
+in the same pass. One personally reviewed consolidated commit and report must
+precede renewed full CI, and only an actual complete success resets this streak.
+
 The remaining campaign must include all failures and distinguish:
 - known-address startup from a fresh key-only cold service-key GET;
 - the instant the client is given its configuration/key from a later ready route;
