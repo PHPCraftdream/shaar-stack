@@ -184,6 +184,12 @@ impl Dialer for NativeDialer {
         let relay = self.relay_addr;
         match timeout_at(deadline, self.endpoint.connect_via(self.peer, relay)).await {
             Ok(Ok(session)) => {
+                // A Custom negotiation connection is not yet a Native payload route.
+                match timeout_at(deadline, session.native_ready()).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) | Err(_) => return Err(DialError),
+                }
+
                 #[cfg(test)]
                 if let Some(events) = &self.events {
                     events.capture_native(&session);
