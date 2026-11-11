@@ -2,10 +2,12 @@
 
 import hashlib
 import importlib.util
+import os
 import tomllib
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -144,7 +146,117 @@ def validate_plan_control_transport(text):
         raise AssertionError("bounded plan metadata must be available before checkout")
 
 
+def validate_privileged_nat_routing(text, job_name):
+    """Check the two fixed legacy workflow layouts, not arbitrary YAML."""
+    header = text.split("\njobs:\n", 1)[0]
+    if "on:\n  workflow_dispatch:\n    inputs:\n" not in header:
+        raise AssertionError("privileged NAT workflows must declare typed dispatch inputs")
+    events = header.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+    if (re.findall(r"^  ([A-Za-z_][A-Za-z0-9_-]*):", events, re.MULTILINE) != ["workflow_dispatch"]
+            or "permissions:\n  contents: read\n" not in header):
+        raise AssertionError("privileged NAT workflows must be dispatch-only and read-only")
+    revision = re.search(r"^      source_revision:\n((?:        [^\n]*\n)+)", header, re.MULTILINE)
+    opt_in = re.search(r"^      allow_legacy_calibration:\n((?:        [^\n]*\n)+)", header, re.MULTILINE)
+    if (not revision or "        type: string\n" not in revision[1]
+            or "        required: true\n" not in revision[1] or "default:" in revision[1]
+            or not opt_in or "        type: boolean\n" not in opt_in[1]
+            or "        default: false\n" not in opt_in[1]):
+        raise AssertionError("exact revision and default-off calibration inputs are required")
+    job = job_blocks(text).get(job_name, "")
+    if not re.search(r"^    runs-on: ubuntu-latest$", job, re.MULTILINE):
+        raise AssertionError("privileged calibration must stay on a disposable Ubuntu runner")
+    gate = next((line for line in job.splitlines() if line.startswith("    if:")), "")
+    if gate != "    if: github.event_name == 'workflow_dispatch'" or "continue-on-error:" in job:
+        raise AssertionError("manual preflight must run fail-closed, not skip to an empty green")
+    steps = named_steps(job)
+    names = ("Validate reviewed source revision", "Checkout", "Verify checked-out source revision")
+    if any(name not in steps or job.count("- name: " + name) != 1 for name in names):
+        raise AssertionError("source validation/checkout/verification steps must be unique")
+    validation, checkout, verification = (steps[name] for name in names)
+    source_env = "SOURCE_REVISION: ${{ inputs.source_revision }}"
+    if (source_env not in validation or "python3 -I -" not in validation
+            or "ALLOW_LEGACY_CALIBRATION: ${{ inputs.allow_legacy_calibration }}" not in validation
+            or 'if os.environ["ALLOW_LEGACY_CALIBRATION"] != "true":' not in validation
+            or 'revision = os.environ["SOURCE_REVISION"]' not in validation
+            or 'if not re.fullmatch(r"[0-9a-f]{40}", revision):' not in validation
+            or "raise SystemExit(" not in validation):
+        raise AssertionError("revision validation must fail closed before checkout")
+    if ("ref: ${{ inputs.source_revision }}" not in checkout
+            or "persist-credentials: false" not in checkout):
+        raise AssertionError("checkout must use the exact input without retained credentials")
+    run = next((line.strip() for line in verification.splitlines() if line.startswith("        run:")), "")
+    if source_env not in verification or run != 'run: test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"':
+        raise AssertionError("checked-out revision must equal the validated source input")
+    positions = [job.index("- name: " + name) for name in names]
+    privilege = job.find("sudo")
+    if positions != sorted(positions) or privilege < positions[-1]:
+        raise AssertionError("all source checks must precede every legacy privileged step")
+
+
 class WorkflowTests(unittest.TestCase):
+    def test_privileged_nat_workflows_are_manual_source_bound_and_owned(self):
+        spec = importlib.util.spec_from_file_location("nat_workflow_policy", ROOT / ".github/ci/policy.py")
+        policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(policy)
+        for filename, job in (("nat-topology.yml", "fixture"), ("quic-nat.yml", "proof")):
+            with self.subTest(workflow=filename):
+                validate_privileged_nat_routing((ROOT / ".github/workflows" / filename).read_text(encoding="utf-8"), job)
+                selected = policy.select([".github/workflows/" + filename])
+                self.assertEqual(selected["suites"], ["ci_policy"])
+                self.assertEqual(selected["targets"], [])
+                self.assertTrue(selected["selection"]["ci_policy"])
+                self.assertFalse(selected["selection"]["full"])
+                self.assertFalse(selected["selection"]["rust"])
+
+    def test_privileged_nat_routing_rejects_automatic_and_unreviewed_changes(self):
+        gate = "    if: github.event_name == 'workflow_dispatch'"
+        for filename, job in (("nat-topology.yml", "fixture"), ("quic-nat.yml", "proof")):
+            text = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
+            mutations = (
+                text.replace("on:\n  workflow_dispatch:", "on:\n  push:\n  workflow_dispatch:", 1),
+                text.replace("default: false", "default: true", 1),
+                text.replace(gate, "    if: true", 1),
+                text.replace("ref: ${{ inputs.source_revision }}", "ref: develop", 1),
+                text.replace("persist-credentials: false", "persist-credentials: true", 1),
+                text.replace("python3 -I -", "python3 -", 1),
+                text.replace("if not re.fullmatch", "if re.fullmatch", 1),
+                text.replace('run: test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"',
+                             'run: test "$(git rev-parse HEAD)" = "$SOURCE_REVISION" || true', 1),
+                text.replace("  contents: read", "  contents: write", 1),
+                text.replace("runs-on: ubuntu-latest", "runs-on: self-hosted", 1),
+                text.replace('if os.environ["ALLOW_LEGACY_CALIBRATION"] != "true":', 'if False:', 1),
+                text.replace("- name: Validate reviewed source revision\n",
+                             "- name: Validate reviewed source revision\n        continue-on-error: true\n", 1),
+            )
+            for index, changed in enumerate(mutations):
+                with self.subTest(workflow=filename, mutation=index):
+                    self.assertNotEqual(changed, text)
+                    with self.assertRaises(AssertionError):
+                        validate_privileged_nat_routing(changed, job)
+
+    def test_privileged_nat_revision_preflight_executes_without_privilege(self):
+        for filename in ("nat-topology.yml", "quic-nat.yml"):
+            text = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
+            validation = named_steps(text)["Validate reviewed source revision"]
+            body = validation.split("          python3 -I - <<'PYTHON'\n", 1)[1].split("          PYTHON\n", 1)[0]
+            code = "\n".join(line[10:] for line in body.splitlines()) + "\n"
+            for revision in ("a" * 40, "", "develop", "A" * 40, "a" * 39, "a" * 41,
+                             "a" * 39 + "g", "a" * 40 + "\n", "a" * 40 + "; printf injected"):
+                with self.subTest(workflow=filename, revision=repr(revision)):
+                    result = subprocess.run([sys.executable, "-I", "-c", code],
+                                            env={**os.environ, "SOURCE_REVISION": revision,
+                                                 "ALLOW_LEGACY_CALIBRATION": "true"},
+                                            capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, 0 if revision == "a" * 40 else 1, result.stderr)
+            for opt_in in ("false", "", "TRUE", "1"):
+                with self.subTest(workflow=filename, opt_in=opt_in):
+                    result = subprocess.run([sys.executable, "-I", "-c", code],
+                                            env={**os.environ, "SOURCE_REVISION": "a" * 40,
+                                                 "ALLOW_LEGACY_CALIBRATION": opt_in},
+                                            capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("explicit separate authorization", result.stderr)
+
     def test_sdk_publisher_dev_codec_resolution_changes_only_one_existing_edge(self):
         sdk = tomllib.loads((ROOT / "crates/shaar/Cargo.toml").read_text(encoding="utf-8"))
         self.assertNotIn("serde_bencode", sdk["dependencies"])

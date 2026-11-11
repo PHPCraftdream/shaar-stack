@@ -2,19 +2,16 @@ name: QUIC two-NAT proof
 
 on:
   workflow_dispatch:
-  push:
-    branches: [develop]
-    paths:
-      - ".github/probes/nat-topology/**"
-      - ".github/probes/iroh-paths/**"
-      - ".github/scripts/backend/**"
-      - ".github/workflows/quic-nat.yml"
-  pull_request:
-    paths:
-      - ".github/probes/nat-topology/**"
-      - ".github/probes/iroh-paths/**"
-      - ".github/scripts/backend/**"
-      - ".github/workflows/quic-nat.yml"
+    inputs:
+      source_revision:
+        description: Exact reviewed 40-hex commit in this repository
+        type: string
+        required: true
+      allow_legacy_calibration:
+        description: Run historical calibration only with separate authorization
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -25,15 +22,36 @@ concurrency:
 
 jobs:
   proof:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Validate reviewed source revision
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          ALLOW_LEGACY_CALIBRATION: ${{ inputs.allow_legacy_calibration }}
+        run: |
+          python3 -I - <<'PYTHON'
+          import os
+          import re
+          if os.environ["ALLOW_LEGACY_CALIBRATION"] != "true":
+              raise SystemExit("legacy calibration requires explicit separate authorization")
+          revision = os.environ["SOURCE_REVISION"]
+          if not re.fullmatch(r"[0-9a-f]{40}", revision):
+              raise SystemExit("source_revision must be an exact reviewed 40-hex SHA")
+          PYTHON
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          ref: ${{ inputs.source_revision }}
           persist-credentials: false
+      - name: Verify checked-out source revision
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
       - name: Install bounded CI capture dependencies
         run: |
           set -euo pipefail
