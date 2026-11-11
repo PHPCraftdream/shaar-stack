@@ -76,6 +76,43 @@ async fn setup_deadline_resets_stream_and_returns_client_slot() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn server_greeting_deadline_opens_no_target_and_resets_the_stream() {
+    tokio::time::timeout(Duration::from_secs(25), async {
+        let (server, client, accepted, connected) = sessions().await;
+        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = target.local_addr().unwrap();
+        let (mut peer_send, mut peer_recv) = connected.connection.open_bi().await.unwrap();
+        // Make the real stream visible, then consume this fixture-only marker.
+        // The production greeting reader starts with no queued bytes and no FIN.
+        peer_send.write_all(&[0x7f]).await.unwrap();
+        let mut stream = super::pump::Stream::new(
+            accepted.connection.accept_bi().await.unwrap(),
+        );
+        let mut marker = [0];
+        stream.recv.read_exact(&mut marker).await.unwrap();
+        assert_eq!(marker, [0x7f]);
+        let started = tokio::time::Instant::now();
+        let result = tokio::select! {
+            biased;
+            connection = target.accept() => panic!("silent greeting opened the target: {connection:?}"),
+            result = super::protocol::target(&mut stream, address) => result,
+        };
+        assert!(matches!(result, Err(ForwardError::Deadline)));
+        assert!(started.elapsed() >= Duration::from_secs(10));
+        drop(stream);
+        assert!(matches!(
+            peer_recv.read_to_end(16).await,
+            Err(iroh::endpoint::ReadToEndError::Read(ReadError::Reset(code)))
+                if code == VarInt::from_u32(3)
+        ));
+        drop(peer_send);
+        tokio::join!(server.close(), client.close());
+    })
+    .await
+    .expect("server greeting timeout and reset complete within the bound");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn stop_closes_active_tcp_workers_and_joins_their_results() {
     tokio::time::timeout(Duration::from_secs(25), async {
         let (server, client, mut accepted, connected) = sessions().await;
