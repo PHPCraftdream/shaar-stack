@@ -415,29 +415,14 @@ async fn run_startup(
     } else {
         None
     };
-    let endpoint_result = match shared_slots.as_ref() {
-        Some(slots) => {
-            SignaledEndpoint::bind_shared_slots(
-                identity,
-                SocketAddr::from(([0, 0, 0, 0], 0)),
-                signaling_bind,
-                &app_peers,
-                limits,
-                Arc::clone(slots),
-            )
-            .await
-        }
-        None => {
-            SignaledEndpoint::bind(
-                identity,
-                SocketAddr::from(([0, 0, 0, 0], 0)),
-                signaling_bind,
-                &app_peers,
-                limits,
-            )
-            .await
-        }
-    };
+    let endpoint_result = SignaledEndpoint::bind_composed(
+        identity,
+        signaling_bind,
+        &app_peers,
+        limits,
+        shared_slots.as_ref().map(Arc::clone),
+    )
+    .await;
     let endpoint = match endpoint_result {
         Ok(endpoint) => endpoint,
         Err(_) => return finish_fatal(shared, StartupError::NativeBind, owner_requests).await,

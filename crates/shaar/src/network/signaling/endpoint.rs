@@ -65,6 +65,11 @@ impl RelayOperations {
     }
 }
 
+enum NativeBind {
+    Single(SocketAddr),
+    Composed,
+}
+
 impl SignaledEndpoint {
     /// Binds native UDP plus signaling TCP and retains their joined owner.
     /// cancel-safe: NO — cancellation does not prove joined destruction.
@@ -75,29 +80,35 @@ impl SignaledEndpoint {
         peers: &[PublicKey],
         limits: Limits,
     ) -> Result<Self, NetworkError> {
-        Self::bind_configured(identity, native, signaling, peers, limits, None, None).await
-    }
-
-    /// Composed-startup constructor: binds over ONE admission pool shared with
-    /// the Yggdrasil payload endpoint, so live admission is bounded across both
-    /// paths before forwarding. Existing `bind` keeps a fresh per-endpoint pool.
-    /// cancel-safe: NO — cancellation does not prove joined destruction.
-    pub(crate) async fn bind_shared_slots(
-        identity: &Identity,
-        native: SocketAddr,
-        signaling: SocketAddr,
-        peers: &[PublicKey],
-        limits: Limits,
-        slots: std::sync::Arc<Semaphore>,
-    ) -> Result<Self, NetworkError> {
         Self::bind_configured(
             identity,
-            native,
+            NativeBind::Single(native),
             signaling,
             peers,
             limits,
             None,
-            Some(slots),
+            None,
+        )
+        .await
+    }
+
+    /// Binds composed native IPv4 plus optional IPv6, preserving one admission pool.
+    /// cancel-safe: NO — cancellation does not prove joined destruction.
+    pub(crate) async fn bind_composed(
+        identity: &Identity,
+        signaling: SocketAddr,
+        peers: &[PublicKey],
+        limits: Limits,
+        slots: Option<std::sync::Arc<Semaphore>>,
+    ) -> Result<Self, NetworkError> {
+        Self::bind_configured(
+            identity,
+            NativeBind::Composed,
+            signaling,
+            peers,
+            limits,
+            None,
+            slots,
         )
         .await
     }
@@ -114,7 +125,7 @@ impl SignaledEndpoint {
     ) -> Result<Self, NetworkError> {
         Self::bind_configured(
             identity,
-            native,
+            NativeBind::Single(native),
             signaling,
             peers,
             limits,
@@ -127,13 +138,17 @@ impl SignaledEndpoint {
     /// cancel-safe: NO — cancellation does not prove completed backend startup.
     async fn bind_configured(
         identity: &Identity,
-        native: SocketAddr,
+        native: NativeBind,
         signaling: SocketAddr,
         peers: &[PublicKey],
         limits: Limits,
         discovery: Option<DiscoveryConfig>,
         slots: Option<std::sync::Arc<Semaphore>>,
     ) -> Result<Self, NetworkError> {
+        let (native, dual_stack) = match native {
+            NativeBind::Single(address) => (address, false),
+            NativeBind::Composed => (SocketAddr::from(([0, 0, 0, 0], 0)), true),
+        };
         Endpoint::validate_bind(native)?;
         check_peers(peers)?;
         let allowlist = Allowlist::new(peers)?;
@@ -145,30 +160,17 @@ impl SignaledEndpoint {
                 return Err(error);
             }
         };
-        let endpoint_result = match slots {
-            // Some: shared admission pool with the payload endpoint.
-            Some(slots) => {
-                Endpoint::bind_custom_shared(
-                    identity,
-                    native,
-                    allowlist,
-                    limits,
-                    Some(owner.factory.clone()),
-                    slots,
-                )
-                .await
-            }
-            None => {
-                Endpoint::bind_custom(
-                    identity,
-                    native,
-                    allowlist,
-                    limits,
-                    Some(owner.factory.clone()),
-                )
-                .await
-            }
-        };
+        let slots = slots.unwrap_or_else(|| std::sync::Arc::new(Semaphore::new(limits.sessions)));
+        let endpoint_result = Endpoint::bind_custom_shared(
+            identity,
+            native,
+            allowlist,
+            limits,
+            Some(owner.factory.clone()),
+            slots,
+            dual_stack,
+        )
+        .await;
         let endpoint = match endpoint_result {
             Ok(endpoint) => endpoint,
             Err(error) => {
