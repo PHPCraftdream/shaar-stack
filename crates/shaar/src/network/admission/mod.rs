@@ -1,6 +1,8 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use iroh::endpoint::{NetReportConfig, PortmapperConfig, QuicTransportConfig, VarInt, presets};
+use iroh::endpoint::{
+    BindOpts, NetReportConfig, PortmapperConfig, QuicTransportConfig, VarInt, presets,
+};
 use iroh::{EndpointAddr, TransportAddr, endpoint::IncomingAddr};
 use iroh_base::PublicKey;
 use shaar_p2p::SignalingTransport;
@@ -43,7 +45,7 @@ const _: () = assert!(
     "path idle must precede connection idle"
 );
 
-/// A single native socket and immutable admission policy. Not Clone.
+/// Native sockets and immutable admission policy. Not Clone.
 /// No SDK task is spawned: callers own/poll handshakes and shutdown themselves.
 pub struct Endpoint {
     inner: iroh::Endpoint,
@@ -88,6 +90,7 @@ impl Endpoint {
             limits,
             custom,
             Arc::new(Semaphore::new(limits.sessions)),
+            false,
         )
         .await
     }
@@ -104,8 +107,12 @@ impl Endpoint {
         limits: Limits,
         custom: Option<Arc<SignalingTransport>>,
         slots: Arc<Semaphore>,
+        dual_stack: bool,
     ) -> Result<Self, NetworkError> {
         Self::validate_bind(address)?;
+        if dual_stack && address != SocketAddr::from(([0, 0, 0, 0], 0)) {
+            return Err(NetworkError::InvalidAddress);
+        }
         let transport = QuicTransportConfig::builder()
             .application_data_filter(|path| policy::native_ip(path.remote().ip()))
             .max_idle_timeout(Some(VarInt::from_u32(NATIVE_IDLE_TIMEOUT_MS).into()))
@@ -124,7 +131,18 @@ impl Endpoint {
             .alpns(vec![ALPN.to_vec()])
             .clear_ip_transports()
             .bind_addr(address)
-            .map_err(|_| NetworkError::InvalidAddress)?
+            .map_err(|_| NetworkError::InvalidAddress)?;
+        let builder = if dual_stack {
+            builder
+                .bind_addr_with_opts(
+                    SocketAddr::from(([0_u16; 8], 0)),
+                    BindOpts::default().set_is_required(false),
+                )
+                .map_err(|_| NetworkError::InvalidAddress)?
+        } else {
+            builder
+        };
+        let builder = builder
             .portmapper_config(PortmapperConfig::Disabled)
             .net_report_config(NetReportConfig::minimal())
             .incoming_limits(limits.sessions, 16 * 1024, 512 * 1024)
@@ -138,7 +156,11 @@ impl Endpoint {
             .bind()
             .await
             .map_err(|error| NetworkError::Bind(Box::new(error)))?;
-        let address = match inner.bound_sockets().into_iter().next() {
+        let address = match inner
+            .bound_sockets()
+            .into_iter()
+            .find(|bound| !dual_stack || bound.is_ipv4())
+        {
             Some(address) => address,
             None => {
                 inner.close().await;
@@ -160,6 +182,11 @@ impl Endpoint {
 
     pub fn local_addr(&self) -> SocketAddr {
         self.address
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bound_native_sockets(&self) -> Vec<SocketAddr> {
+        self.inner.bound_sockets()
     }
 
     #[cfg(test)]

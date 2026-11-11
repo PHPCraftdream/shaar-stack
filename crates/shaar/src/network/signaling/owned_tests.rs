@@ -38,6 +38,126 @@ fn trace_paths(label: &str, session: &Session) {
     }
 }
 
+#[tokio::test]
+async fn explicit_native_bind_keeps_only_the_requested_socket_family() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        for native in ["127.0.0.1:0", "[::1]:0"] {
+            let endpoint = SignaledEndpoint::bind(
+                &Identity::generate(),
+                native.parse().unwrap(),
+                loopback(),
+                &[],
+                Limits::new(1).unwrap(),
+            )
+            .await
+            .unwrap();
+            let sockets = endpoint.endpoint.bound_native_sockets();
+            assert_eq!(sockets, vec![endpoint.local_addr()]);
+            assert_eq!(sockets[0].is_ipv6(), native.starts_with('['));
+            endpoint.close().await.unwrap();
+            std::net::UdpSocket::bind(sockets[0]).unwrap();
+        }
+    })
+    .await
+    .expect("explicit single-family binds and joined close finish within the bound");
+}
+
+#[tokio::test]
+async fn composed_native_ipv6_carries_app_with_fresh_and_shared_admission() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        for shared in [false, true] {
+            let a = Identity::generate();
+            let b = Identity::generate();
+            let limits = Limits::new(2).unwrap();
+            let slots = std::sync::Arc::new(Semaphore::new(2));
+            // The opposite endpoint is IPv6-only, so IPv4 cannot rescue the test.
+            let client = if shared {
+                SignaledEndpoint::bind(
+                    &a,
+                    "[::1]:0".parse().unwrap(),
+                    loopback(),
+                    &[public(&b)],
+                    limits,
+                )
+                .await
+            } else {
+                SignaledEndpoint::bind_composed(&a, loopback(), &[public(&b)], limits, None).await
+            }
+            .unwrap();
+            let mut server = if shared {
+                SignaledEndpoint::bind_composed(
+                    &b,
+                    loopback(),
+                    &[public(&a)],
+                    limits,
+                    Some(slots.clone()),
+                )
+                .await
+            } else {
+                SignaledEndpoint::bind(
+                    &b,
+                    "[::1]:0".parse().unwrap(),
+                    loopback(),
+                    &[public(&a)],
+                    limits,
+                )
+                .await
+            }
+            .unwrap();
+            let composed = if shared { &server } else { &client };
+            let composed_sockets = composed.endpoint.bound_native_sockets();
+            assert_eq!(composed_sockets.len(), 2);
+            assert!(composed.local_addr().is_ipv4());
+            assert!(composed_sockets.iter().any(SocketAddr::is_ipv6));
+            let server_v6 = server
+                .endpoint
+                .bound_native_sockets()
+                .into_iter()
+                .find(SocketAddr::is_ipv6)
+                .expect("native IPv6 socket bound");
+            let destination =
+                SocketAddr::new(std::net::Ipv6Addr::LOCALHOST.into(), server_v6.port());
+            let (connected, accepted) =
+                tokio::join!(client.connect(server.id(), destination), server.accept(),);
+            let connected = connected.unwrap();
+            let accepted = accepted.unwrap();
+            let payload = b"native IPv6 application bytes";
+            let send = async {
+                let (mut tx, mut rx) = connected.connection.open_bi().await.unwrap();
+                tx.write_all(payload).await.unwrap();
+                tx.finish().unwrap();
+                assert_eq!(rx.read_to_end(128).await.unwrap(), payload);
+            };
+            let echo = async {
+                let (mut tx, mut rx) = accepted.connection.accept_bi().await.unwrap();
+                let bytes = rx.read_to_end(128).await.unwrap();
+                assert_eq!(bytes, payload);
+                tx.write_all(&bytes).await.unwrap();
+                tx.finish().unwrap();
+            };
+            tokio::join!(send, echo);
+            for session in [&connected, &accepted] {
+                assert!(session.connection.paths().iter().any(|path| {
+                    matches!(path.remote_addr(), TransportAddr::Ip(address) if address.is_ipv6())
+                        && path.stats().frame_tx.stream > 0 && path.stats().frame_rx.stream > 0
+                }), "real IPv6 APP transmit and receive must be observed");
+            }
+            drop((connected, accepted));
+            if shared {
+                assert_eq!(slots.available_permits(), 2);
+            }
+            let (a_close, b_close) = tokio::join!(client.close(), server.close());
+            a_close.unwrap();
+            b_close.unwrap();
+            for address in composed_sockets {
+                std::net::UdpSocket::bind(address).unwrap();
+            }
+        }
+    })
+    .await
+    .expect("composed IPv6 APP and joined close finish within the bound");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn native_app_and_both_joined_backends_close_with_sessions_and_factories_retained() {
     let phase = Cell::new("bind endpoints");
