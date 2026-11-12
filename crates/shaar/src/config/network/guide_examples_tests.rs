@@ -27,11 +27,7 @@ const RELAY_ID: &str = "12D3KooWRhxsqdyvN1Cy4HDzPjKtdscPa9XUyqoqJwHSsGY8LQTQ";
 
 /// Windows checkouts may convert line endings; the examples are LF files.
 fn lf(text: &str) -> String {
-    text.replace(
-        "
-", "
-",
-    )
+    text.replace("\r\n", "\n")
 }
 
 fn server(text: &str) -> ServerConfig {
