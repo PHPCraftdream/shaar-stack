@@ -25,27 +25,37 @@ const SERVER_KEY: [u8; 32] = [
 const SERVER_KEY_HEX: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
 const RELAY_ID: &str = "12D3KooWRhxsqdyvN1Cy4HDzPjKtdscPa9XUyqoqJwHSsGY8LQTQ";
 
+/// Windows checkouts may convert line endings; the examples are LF files.
+fn lf(text: &str) -> String {
+    text.replace(
+        "
+", "
+",
+    )
+}
+
 fn server(text: &str) -> ServerConfig {
-    ServerConfig::from_text(text, &ServerOverrides::default()).expect("server example parses")
+    ServerConfig::from_text(&lf(text), &ServerOverrides::default()).expect("server example parses")
 }
 
 fn client(text: &str) -> ClientConfig {
-    ClientConfig::from_text(text, &ClientOverrides::default()).expect("client example parses")
+    ClientConfig::from_text(&lf(text), &ClientOverrides::default()).expect("client example parses")
 }
 
 fn replaced(text: &str, from: &str, to: &str) -> String {
+    let text = lf(text);
     assert!(text.contains(from), "example no longer contains {from:?}");
     text.replacen(from, to, 1)
 }
 
 fn server_error(text: &str) -> String {
-    ServerConfig::from_text(text, &ServerOverrides::default())
+    ServerConfig::from_text(&lf(text), &ServerOverrides::default())
         .unwrap_err()
         .to_string()
 }
 
 fn client_error(text: &str) -> String {
-    ClientConfig::from_text(text, &ClientOverrides::default())
+    ClientConfig::from_text(&lf(text), &ClientOverrides::default())
         .unwrap_err()
         .to_string()
 }
@@ -316,19 +326,20 @@ fn documented_network_validation_messages() {
 
 #[test]
 fn network_sections_are_all_required_and_report_the_first_missing_one() {
-    let signaling_start = SERVER_COMPOSED.find("    signaling: {").unwrap();
-    let ygg_start = SERVER_COMPOSED.find("    ygg: {").unwrap();
-    let end = SERVER_COMPOSED.rfind("}\n").unwrap();
+    let composed = lf(SERVER_COMPOSED);
+    let signaling_start = composed.find("    signaling: {").unwrap();
+    let ygg_start = composed.find("    ygg: {").unwrap();
+    let end = composed.rfind("}\n").unwrap();
     let without_signaling = format!(
         "{}{}}}\n",
-        &SERVER_COMPOSED[..signaling_start],
-        &SERVER_COMPOSED[ygg_start..end]
+        &composed[..signaling_start],
+        &composed[ygg_start..end]
     );
     assert_eq!(
         server_error(&without_signaling),
         invalid("network.signaling", "MissingRequired")
     );
-    let without_ygg = format!("{}}}\n", &SERVER_COMPOSED[..ygg_start]);
+    let without_ygg = format!("{}}}\n", &composed[..ygg_start]);
     assert_eq!(
         server_error(&without_ygg),
         invalid("network.ygg", "MissingRequired")
