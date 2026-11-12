@@ -31,8 +31,7 @@ def evidence(case):
         observations["native_nat_tuple"] = {"orig": {}, "reply": {}}
         routers["rtr_a"]["counters"]["udp_nat"]["packets"] = 4
         routers["rtr_a"]["counters"]["native_snat"]["packets"] = 2
-    identities = {name: {"uid": UID, "capabilities": 0} for name in ("wan", "target", "server", "client")}
-    identities["app"] = {"unsampled": "exited before the receipt was read"}
+    identities = {name: {"uid": UID, "capabilities": 0} for name in contract.IDENTITY_ROLES}
     return {"status": "pass", "case": case, "purpose": "product", "source_revision": SOURCE,
             "config": {"nonce": NONCE, "helper_uid": UID}, "normal_native_gate_enabled": False,
             "case_result": {"quota_calibration": [{"passed": 8, "dropped": 16}, {"passed": 7, "dropped": 17}],

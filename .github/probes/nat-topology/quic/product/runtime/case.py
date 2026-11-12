@@ -215,4 +215,5 @@ class Run:
         ev["client_exit"] = self.stop_all(wan_ready, server, client, target)
         contract.require(self.sup.wait(wan, self.limit(20)) == 0, "WAN helper did not stop gracefully")
         self.verify_kernel(before)
+        contract.require(set(ev["identities"]) == set(contract.IDENTITY_ROLES), "verified identity set differs from the contract")
         return ev

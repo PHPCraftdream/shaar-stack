@@ -70,8 +70,8 @@ def verify_product_case(ev, case, source, nonce):
     contract.require(observed.get("target", {}).get("accepts") == spec["target_accepts"]
                      and result.get("client_exit") == spec["client_exit"], "target accepts or Client exit differ")
     uid = ev["config"]["helper_uid"]
-    contract.require({"wan", "target", "server", "client", "app"} <= set(result.get("identities", {}))
-                     and all(item.get("unsampled") or (item["uid"] == uid and item["capabilities"] == 0) for item in result["identities"].values()),
+    contract.require(set(contract.IDENTITY_ROLES) <= set(result.get("identities", {}))
+                     and all(item["uid"] == uid and item["capabilities"] == 0 for item in result["identities"].values()),
                      "every owned child must have a verified unprivileged identity")
     counters = {router: item["counters"] for router, item in kernel_report.items()}
     if spec["udp_blocked"]:
