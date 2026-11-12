@@ -131,15 +131,17 @@ class NetworkContractTests(unittest.TestCase):
         objects = [{"table": {"family": "inet", "name": table}}]
         for name, kind, hook, priority in (("budget", "filter", "forward", -300),
                                            ("paths", "filter", "forward", -200),
-                                           ("snat", "nat", "postrouting", 100)):
+                                           ("natout", "nat", "postrouting", 100),
+                                           ("seen", "filter", "postrouting", 200)):
             objects.append({"chain": {**base, "name": name, "type": kind, "hook": hook,
                                       "prio": priority, "policy": "accept"}})
         for name in sorted(network.COUNTERS):
             objects.append({"counter": {**base, "name": name, "packets": 0, "bytes": 0}})
         objects.append({"quota": {**base, "name": "phase_budget", "bytes": network.QUOTAS["product"], "used": 0, "inv": True}})
         for comment in ("budget", "no-ipv6", "other-tcp-block", "udp-nat", "tcp-nat",
-                        "native-block", "dht-query", "dht-reply"):
-            chain = "budget" if comment == "budget" else "snat" if comment.endswith("-nat") else "paths"
+                        "native-block", "dht-query", "dht-reply", "snat-seen"):
+            chain = ("budget" if comment == "budget" else "natout" if comment.endswith("-nat")
+                     else "seen" if comment == "snat-seen" else "paths")
             objects.append({"rule": {**base, "chain": chain, "expr": [{"counter": "test_metadata"}], "comment": "p13-" + comment}})
         return {"nftables": objects}
 
@@ -157,6 +159,10 @@ class NetworkContractTests(unittest.TestCase):
                 self.assertIn("quota name phase_budget counter name quota_drop drop", text)
                 self.assertIn("meta nfproto ipv6 counter name ipv6_drop drop", text)
                 self.assertIn("masquerade to :41010-41020", text)
+                import re
+                # nft keywords such as snat/dnat/filter cannot be chain names (real nft rejected "snat").
+                self.assertEqual(re.findall(r"add chain inet \S+ (\w+) ", text), ["budget", "paths", "natout", "seen"])
+                self.assertIn("udp dport != 42001 ct status snat counter name native_snat", text)
                 # Port-range NAT needs an explicit transport match in the rule.
                 self.assertIn("ip protocol udp counter name udp_nat masquerade to :41010-41020", text)
                 self.assertIn("meta l4proto tcp counter name tcp_nat masquerade", text)
@@ -199,16 +205,31 @@ class NetworkContractTests(unittest.TestCase):
         self.object(after, "counter", "native_drop").update(packets=2, bytes=200)
         self.object(after, "counter", "udp_nat").update(packets=1, bytes=100)
         self.object(after, "quota", "phase_budget")["used"] = 300
-        result = network.verify(before, after, "snaabbcc", "product", blocked=True, require_nat=True)
+        result = network.verify(before, after, "snaabbcc", "product", blocked=True)
         self.assertEqual(result["quota_used"], 300)
-        for mutation in ("quota-hit", "drop-hit", "zero-native", "zero-nat", "ipv6", "rollback", "changed-rule", "dirty-start"):
+        natted = copy.deepcopy(after)
+        self.object(natted, "counter", "native_drop").update(packets=0, bytes=0)
+        self.object(natted, "counter", "native_snat").update(packets=3, bytes=300)
+        network.verify(before, natted, "snaabbcc", "product", require_nat=True)
+        for counter in ("udp_nat", "native_snat"):
+            lacking = copy.deepcopy(natted)
+            self.object(lacking, "counter", counter)["packets"] = 0
+            with self.subTest(lacking=counter), self.assertRaises(ValueError):
+                network.verify(before, lacking, "snaabbcc", "product", require_nat=True)
+        escaped = copy.deepcopy(after)
+        self.object(escaped, "counter", "native_snat")["packets"] = 1
+        with self.assertRaises(ValueError):
+            network.verify(before, escaped, "snaabbcc", "product", blocked=True)
+        with self.assertRaises(ValueError):
+            network.verify(before, natted, "snaabbcc", "product", blocked=True, require_nat=True)
+        for mutation in ("quota-hit", "drop-hit", "zero-native", "ipv6", "rollback", "changed-rule", "dirty-start"):
             initial, final = copy.deepcopy(before), copy.deepcopy(after)
             if mutation == "quota-hit":
                 self.object(final, "quota", "phase_budget")["used"] = network.QUOTAS["product"]
             elif mutation == "drop-hit":
                 self.object(final, "counter", "quota_drop")["packets"] = 1
-            elif mutation in ("zero-native", "zero-nat"):
-                self.object(final, "counter", "native_drop" if mutation == "zero-native" else "udp_nat")["packets"] = 0
+            elif mutation == "zero-native":
+                self.object(final, "counter", "native_drop")["packets"] = 0
             elif mutation == "ipv6":
                 self.object(final, "counter", "ipv6_drop")["packets"] = 1
             elif mutation == "rollback":
@@ -218,7 +239,7 @@ class NetworkContractTests(unittest.TestCase):
             else:
                 self.object(initial, "counter", "tcp_nat")["packets"] = 1
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
-                network.verify(initial, final, "snaabbcc", "product", blocked=True, require_nat=True)
+                network.verify(initial, final, "snaabbcc", "product", blocked=True)
 
     def test_server_side_router_needs_no_drop_counter_but_keeps_rule_identity(self):
         before, after = self.evidence(), self.evidence()

@@ -73,10 +73,16 @@ def verify_product_case(ev, case, source, nonce):
     contract.require({"wan", "target", "server", "client", "app"} <= set(result.get("identities", {}))
                      and all(item.get("unsampled") or (item["uid"] == uid and item["capabilities"] == 0) for item in result["identities"].values()),
                      "every owned child must have a verified unprivileged identity")
+    counters = {router: item["counters"] for router, item in kernel_report.items()}
     if spec["udp_blocked"]:
-        contract.require(kernel_report["rtr_a"]["counters"]["native_drop"]["packets"] > 0, "no dropped Native UDP attempt")
+        contract.require(counters["rtr_a"]["native_drop"]["packets"] > 0, "no dropped Native UDP attempt")
+        contract.require(all(item["native_snat"]["packets"] == 0 for item in counters.values()),
+                         "non-DHT UDP escaped the blockade")
     else:
-        contract.require("native_nat_tuple" in observed, "no real Native NAT tuple observed")
+        contract.require(counters["rtr_a"]["udp_nat"]["packets"] > 0 and counters["rtr_a"]["native_snat"]["packets"] > 0,
+                         "no real Native NAT observed by nft counters")
+        contract.require("native_nat_tuple" in observed or "native_nat_tuple_unavailable" in observed,
+                         "conntrack tuple outcome must be recorded either way")
     return {"forwarded_bytes": result["forwarded_bytes"], "active_seconds": result["active_seconds"]}
 
 

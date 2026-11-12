@@ -128,14 +128,21 @@ class Run:
         self.ev["forwarded_bytes"] = sum(item["quota_used"] for item in report.values())
 
     def observe_nat(self, native_ports):
-        """Taken while NAT mappings are fresh: replied Native UDP tuple with fixed-range SNAT."""
+        """Conntrack tuple while mappings are fresh; counters in verify_kernel are the required NAT oracle."""
         if self.spec["udp_blocked"]:
             return
-        lines = kernel.conntrack_lines(self.cfg, self.tools, "rtr_a", self.limit(20))
+        seen = self.ev["observations"]
+        try:
+            lines = kernel.conntrack_lines(self.cfg, self.tools, "rtr_a", self.limit(20))
+        except ValueError as error:
+            seen["native_nat_tuple_unavailable"] = str(error)[:200]
+            return
         (self.root / "conntrack-rtr-a.txt").write_text("\n".join(lines[:512]) + "\n", encoding="utf-8")
         found = kernel.nat_observation(lines, self.cfg["ip"]["host_a"], self.cfg["ip"]["rtr_a_wan"], native_ports)
-        contract.require(found is not None, "no replied Native UDP conntrack entry with fixed-range SNAT to the published address")
-        self.ev["observations"]["native_nat_tuple"] = found
+        if found is None:
+            seen["native_nat_tuple_unavailable"] = f"no matching replied entry among {len(lines)} conntrack entries"
+        else:
+            seen["native_nat_tuple"] = found
 
     def stop_all(self, wan_ready, server, client, target):
         sup = self.sup

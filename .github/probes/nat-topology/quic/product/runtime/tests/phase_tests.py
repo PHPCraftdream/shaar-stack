@@ -29,6 +29,8 @@ def evidence(case):
     observations = {"target": {"accepts": spec["target_accepts"]}, "app": {"denied": False}}
     if not spec["udp_blocked"]:
         observations["native_nat_tuple"] = {"orig": {}, "reply": {}}
+        routers["rtr_a"]["counters"]["udp_nat"]["packets"] = 4
+        routers["rtr_a"]["counters"]["native_snat"]["packets"] = 2
     identities = {name: {"uid": UID, "capabilities": 0} for name in ("wan", "target", "server", "client")}
     identities["app"] = {"unsampled": "exited before the receipt was read"}
     return {"status": "pass", "case": case, "purpose": "product", "source_revision": SOURCE,
@@ -45,6 +47,12 @@ class EvidenceTests(unittest.TestCase):
             good = evidence(case)
             self.assertEqual(phase.verify_product_case(good, case, SOURCE, NONCE), {"forwarded_bytes": 2000, "active_seconds": 12.5})
             blocked = contract.CASES[case]["udp_blocked"]
+            if not blocked:
+                # An unavailable conntrack tuple is recorded, never silently dropped; counters stay mandatory.
+                softer = copy.deepcopy(good)
+                softer["case_result"]["observations"]["native_nat_tuple_unavailable"] = "procfs absent"
+                del softer["case_result"]["observations"]["native_nat_tuple"]
+                phase.verify_product_case(softer, case, SOURCE, NONCE)
 
             def mutate(name, value, good=good):
                 changed = copy.deepcopy(good)
@@ -77,14 +85,21 @@ class EvidenceTests(unittest.TestCase):
                     result["identities"]["wan"]["capabilities"] = 1
                 elif name == "identity":
                     del result["identities"]["client"]
-                elif name == "native" and blocked:
+                elif name == "native_drop":
                     result["kernel"]["rtr_a"]["counters"]["native_drop"]["packets"] = 0
-                elif name == "native":
+                elif name == "escape":
+                    result["kernel"]["rtr_b"]["counters"]["native_snat"]["packets"] = 1
+                elif name == "native_snat":
+                    result["kernel"]["rtr_a"]["counters"]["native_snat"]["packets"] = 0
+                elif name == "udp_nat":
+                    result["kernel"]["rtr_a"]["counters"]["udp_nat"]["packets"] = 0
+                elif name == "tuple":
                     del result["observations"]["native_nat_tuple"]
                 return changed
 
             for name in ("status", "case", "nonce", "source", "purpose", "gate", "calibration", "exhausted", "router",
-                         "accepts", "exit", "uid", "caps", "identity", "native"):
+                         "accepts", "exit", "uid", "caps", "identity",
+                         *(("native_drop", "escape") if blocked else ("native_snat", "udp_nat", "tuple"))):
                 with self.subTest(case=case, mutation=name), self.assertRaises((ValueError, KeyError, TypeError)):
                     phase.verify_product_case(mutate(name, "fail"), case, SOURCE, NONCE)
 
