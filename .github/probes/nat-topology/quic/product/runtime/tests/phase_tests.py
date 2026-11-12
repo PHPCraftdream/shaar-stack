@@ -301,7 +301,7 @@ class PlanTests(unittest.TestCase):
         products = sum(1 for entry in phase.PLAN if entry[1] == "product")
         controls = len(phase.PLAN) - products
         self.assertEqual((products, controls), (12, 3))
-        self.assertEqual(len(contract.CASES), 26)
+        self.assertEqual(len(contract.CASES), 28)
         # The worst case of every case at its ceiling does not fit 20 minutes; admission control refuses a case
         # that cannot finish, and the expected total (about 8 minutes) leaves the margin recorded in the contract.
         self.assertGreater(products * contract.CASE_SECONDS, contract.PHASE_SECONDS)
