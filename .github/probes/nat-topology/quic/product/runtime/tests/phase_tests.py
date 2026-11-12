@@ -44,12 +44,18 @@ def evidence(case):
     if net == "dnat":
         kept, moved = (3, 0) if spec["nat"] == "cone" else (0, 3)
         result_extra["nat_calibration"] = [{"router": router, "flavor": spec["nat"], "kept": kept, "moved": moved} for router in routers]
+        if spec["nat"] == "cone":
+            result_extra["punch_control"] = [{"host": "host_a", "sent": 20, "received": 18, "first": ["203.0.113.2", 40100]},
+                                             {"host": "host_b", "sent": 20, "received": 19, "first": ["203.0.113.1", 40100]}]
         if spec["direct"]:
             for router in routers:
                 routers[router]["counters"]["peer_sent"]["packets"] = 5
                 routers[router]["counters"]["peer_recv"]["packets"] = 6
-        elif spec["mode"] == "standby":
+        elif not spec["ygg_client_blocked"] and spec["mode"] == "standby":
             routers["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 9
+        if spec.get("relay_first"):
+            routers["rtr_a"]["counters"]["dht_drop"]["packets"] = 3
+            routers["rtr_a"]["counters"]["relay_tcp"]["packets"] = 40
     elif net == "relay":
         observations = {"target": {"accepts": 0}, "relay_full": {"server_exit": 1, "seconds": 31.0,
                                                                   "message": "shaar-server: composed startup: relay reservation failed at startup"}}
@@ -184,6 +190,18 @@ def mutate(case, name):
         result["nat_calibration"][0]["kept"] = 1
     elif name == "probe-missing":
         del result["nat_calibration"][1]
+    elif name == "punch-missing":
+        del result["punch_control"]
+    elif name == "punch-failed":
+        result["punch_control"][0]["received"] = 0
+    elif name == "punch-wrong-source":
+        result["punch_control"][1]["first"] = ["203.0.113.2", 40100]
+    elif name == "direct-path":
+        counters["rtr_a"]["counters"]["peer_recv"]["packets"] = 1
+    elif name == "no-relay-negotiation":
+        counters["rtr_a"]["counters"]["relay_tcp"]["packets"] = 0
+    elif name == "no-dht-drop-seen":
+        counters["rtr_a"]["counters"]["dht_drop"]["packets"] = 0
     elif name == "ygg-used":
         counters["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 1
     elif name == "ygg-missing":
@@ -252,7 +270,11 @@ class EvidenceTests(unittest.TestCase):
                 names += ("block-escape",) if spec["mode"] == "signal" else ("slow-failover", "slow-recovery", "no-ygg")
                 names += ("signal-reply",) if spec["mode"] == "signal" else ()
             if spec["net"] == "dnat":
-                names += ("peer-recv", "peer-sent", "ygg-used") if spec["direct"] else ("ygg-missing",) if spec["mode"] == "standby" else ()
+                names += ("peer-recv", "peer-sent", "ygg-used") if spec["direct"] else ("direct-path",)
+                names += ("ygg-missing",) if not spec["ygg_client_blocked"] and spec["mode"] == "standby" else ()
+                names += ("ygg-used",) if spec["ygg_client_blocked"] and not spec["direct"] else ()
+                names += ("punch-missing", "punch-failed", "punch-wrong-source") if spec["nat"] == "cone" else ()
+                names += ("no-relay-negotiation", "no-dht-drop-seen") if spec.get("relay_first") else ()
             names += MUTATIONS.get("flow:" + spec.get("flow", "single"), ())
             if spec.get("flow") == "denied-key":
                 names += ("denied-reply", "control-exit")
@@ -304,7 +326,7 @@ class PlanTests(unittest.TestCase):
                 self.assertEqual({entry[1] for entry in plan} - {"product"}, {"setup-fault", "fixture-fault", "interrupt"})
         self.assertEqual(sorted(covered), sorted(contract.CASES))
         self.assertEqual(len(covered), len(contract.CASES))
-        self.assertEqual(phase.allocated(phase.GROUPS["nat"]), 40 * 1024 * 1024)
+        self.assertEqual(phase.allocated(phase.GROUPS["nat"]), 48 * 1024 * 1024)
         self.assertEqual(phase.allocated(phase.GROUPS["faults"]), 32 * 1024 * 1024)
         # The slowest-by-design cases (outage recovery, typed Server failures) run last in their group.
         self.assertEqual([entry[0] for entry in phase.GROUPS["faults"]][-5:-2], ["recover-standby", "relay-full-signal", "relay-full-standby"])

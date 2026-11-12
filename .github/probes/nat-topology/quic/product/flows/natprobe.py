@@ -3,7 +3,9 @@
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
+import time
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -16,6 +18,22 @@ DEST_PORTS = (9001, 9002, 9003)
 COUNTERS = ("kept", "moved")
 # Same statements as the product rules (network.NAT_FLAVORS) so the probe exercises the exact NAT flavor.
 STATEMENTS = {"cone": "masquerade", "random": "masquerade fully-random"}
+PUNCH_SECONDS = 2.0
+PUNCH = ("import json, select, socket, time\n"
+         "s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((%r, %d)); s.setblocking(False)\n"
+         "end, sent, first, received = time.monotonic() + %r, 0, None, 0\n"
+         "while time.monotonic() < end:\n"
+         "    s.sendto(b'punch', (%r, %d)); sent += 1\n"
+         "    ready = select.select([s], [], [], 0.1)[0]\n"
+         "    while ready:\n"
+         "        try:\n"
+         "            data, address = s.recvfrom(64)\n"
+         "        except BlockingIOError:\n"
+         "            break\n"
+         "        received += 1\n"
+         "        first = first or list(address)\n"
+         "        ready = select.select([s], [], [], 0)[0]\n"
+         "print(json.dumps({'sent': sent, 'received': received, 'first': first}))\n")
 SENDER = ("import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((%r, %d)); "
           "[s.sendto(bytes(8), (%r, p)) for p in %r]")
 
@@ -78,3 +96,45 @@ def calibrate(cfg, tools, router, host, flavor, deadline):
     finally:
         kernel.checked(base + ["delete", "table", "inet", table], deadline, what="NAT probe removal")
     return {"router": router, "flavor": flavor, "source_port": SOURCE_PORT, **found}
+
+
+def check_punch(found):
+    """Both plain sockets received datagrams whose source is the other router's WAN address with the preserved port."""
+    expected = {"host_a": contract.IPS["rtr_b_wan"], "host_b": contract.IPS["rtr_a_wan"]}
+    contract.require(len(found) == 2 and {item.get("host") for item in found} == set(expected), "punch control receipts incomplete")
+    for item in found:
+        contract.require(item["sent"] > 0 and item["received"] > 0 and item["first"] == [expected[item["host"]], SOURCE_PORT],
+                         f"punch control: {item['host']} did not receive from the peer's public endpoint: {item}")
+    return found
+
+
+def punch(cfg, tools, deadline):
+    """Fixture control for the cone NATs: the harness knows both public endpoints, so two plain UDP sockets can punch through.
+
+    It shows that the topology and counters allow a punched path; the products have no source for these endpoints."""
+    pairs = (("host_a", "rtr_a", contract.IPS["rtr_b_wan"]), ("host_b", "rtr_b", contract.IPS["rtr_a_wan"]))
+    table, installed, processes, found = table_name(cfg["prefix"]), [], [], []
+    try:
+        for host, router, _ in pairs:
+            wan_ip = contract.IPS["rtr_a_wan" if router == "rtr_a" else "rtr_b_wan"]
+            kernel.checked(kernel.ns_argv(tools, cfg, router, tools["nft"]) + ["--file", "-"], deadline,
+                           rules(cfg["prefix"], "cone", cfg["ip"][host], wan_ip).encode("ascii"), "punch control NAT install")
+            installed.append(router)
+        for host, _, peer in pairs:
+            code = PUNCH % (cfg["ip"][host], SOURCE_PORT, PUNCH_SECONDS, peer, SOURCE_PORT)
+            argv = kernel.ns_argv(tools, cfg, host, tools["python"], "-I", "-c", code)
+            processes.append((host, subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                                     env=kernel.SAFE_ENV, close_fds=True)))
+        for host, process in processes:
+            out, err = process.communicate(timeout=max(1.0, deadline - time.monotonic()))
+            contract.require(process.returncode == 0 and len(out) <= kernel.MAX_OUTPUT, f"punch control worker failed: {err[:200]!r}")
+            found.append({"host": host, **json.loads(out)})
+    finally:
+        for _, process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+        for router in installed:
+            kernel.checked(kernel.ns_argv(tools, cfg, router, tools["nft"]) + ["delete", "table", "inet", table], deadline,
+                           what="punch control NAT removal")
+    return check_punch(found)

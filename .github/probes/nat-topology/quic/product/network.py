@@ -23,6 +23,8 @@ PROFILES = {
     "outage-standby": {"udp": "blocked", "tcp_a": ()},
     "dnat-cone-signal": {**_DNAT, "tcp_a": ("relay",), "nat": "cone"},
     "dnat-cone-standby": {**_DNAT, "tcp_a": ("relay",), "nat": "cone"},
+    "dnat-cone-relay-signal": {**_DNAT, "tcp_a": ("relay",), "nat": "cone", "dht_drop": True},
+    "dnat-cone-relay-standby": {**_DNAT, "tcp_a": ("relay",), "nat": "cone", "dht_drop": True},
     "dnat-sym-signal": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},
     "dnat-sym-standby": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},
     "hole-signal": {**_NATIVE, "native_new": True, "hole": True}, "hole-standby": {**_NATIVE, "native_new": True, "hole": True},

@@ -55,7 +55,7 @@ def product(name):
 
 # Dispatch groups (selected by --group): the 12 accepted cases, and two groups for the remaining P13 rows. The cases of all
 # groups together would not fit the 20 minute phase, so each dispatch runs one group with the same three cleanup controls.
-NAT_CASES = ("dnat-cone-signal", "dnat-cone-standby", "dnat-sym-signal", "dnat-sym-standby",
+NAT_CASES = ("dnat-cone-signal", "dnat-cone-standby", "dnat-cone-relay-signal", "dnat-cone-relay-standby", "dnat-sym-signal", "dnat-sym-standby",
              "hole-signal", "hole-standby", "switch-signal", "switch-standby")
 FAULT_CASES = ("ipv6-signal", "ipv6-standby", "denied-native-signal", "recover-standby", "relay-full-signal", "relay-full-standby")
 GROUPS = {"base": PLAN,

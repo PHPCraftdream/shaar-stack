@@ -34,9 +34,14 @@ CASES = {
     "dht-drop-signal": {"mode": "signal", "server_ns": "wan", "net": "dht-drop", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
     "outage-standby": {"mode": "standby", "server_ns": "host_b", "net": "blocked", "udp_blocked": True, "ygg_client_blocked": True, "target_accepts": 0, "client_exit": 1},
     # Double NAT with Native UDP allowed (A5 endpoint-independent port-preserving mapping, A6 fully random ports).
-    # "nat" is the mapping flavor, "direct" whether a direct Native path between the routers is expected.
-    "dnat-cone-signal": {**DNAT, "mode": "signal", "nat": "cone", "direct": True, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
-    "dnat-cone-standby": {**DNAT, "mode": "standby", "nat": "cone", "direct": True, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
+    # "nat" is the mapping flavor, "direct" whether a direct Native path between the routers is expected (dispatch 43255837358 showed
+    # it is not: the cone cases first expected a punch and failed; "relay_first" drops the Client's DHT queries so relay negotiation is reached).
+    "dnat-cone-signal": {**DNAT, "mode": "signal", "nat": "cone", "direct": False, "ygg_client_blocked": True, "target_accepts": 0, "client_exit": 1},
+    "dnat-cone-standby": {**DNAT, "mode": "standby", "nat": "cone", "direct": False, "ygg_client_blocked": True, "target_accepts": 0, "client_exit": 1},
+    "dnat-cone-relay-signal": {**DNAT, "mode": "signal", "nat": "cone", "direct": False, "relay_first": True, "ygg_client_blocked": True,
+                               "target_accepts": 0, "client_exit": 1},
+    "dnat-cone-relay-standby": {**DNAT, "mode": "standby", "nat": "cone", "direct": False, "relay_first": True, "ygg_client_blocked": True,
+                                "target_accepts": 0, "client_exit": 1},
     "dnat-sym-signal": {**DNAT, "mode": "signal", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 1},
     "dnat-sym-standby": {**DNAT, "mode": "standby", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
     # Single NAT; APP 1, a runtime perturbation, APP 2 over Native only (Ygg denied on the Client side).

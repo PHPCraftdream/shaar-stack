@@ -471,6 +471,71 @@ class NatProbeTests(unittest.TestCase):
                 self.assertEqual([item[1] for item in calls], [CFG["ns"]["rtr_a"], CFG["ns"]["host_a"], CFG["ns"]["rtr_a"], CFG["ns"]["rtr_a"]])
 
 
+class FakeProcess:
+    def __init__(self, out, code=0):
+        self.out, self.returncode = out, code
+
+    def communicate(self, timeout=None):
+        return self.out, b"boom"
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
+
+
+class PunchControlTests(unittest.TestCase):
+    GOOD = [{"host": "host_a", "sent": 20, "received": 18, "first": ["203.0.113.2", 40100]},
+            {"host": "host_b", "sent": 20, "received": 19, "first": ["203.0.113.1", 40100]}]
+
+    def test_receipts_need_both_sockets_to_hear_the_peer_public_endpoint(self):
+        self.assertEqual(natprobe.check_punch(copy.deepcopy(self.GOOD)), self.GOOD)
+        for index, field, value in ((0, "received", 0), (1, "sent", 0), (0, "first", None), (1, "first", ["203.0.113.2", 40100]),
+                                    (0, "first", ["203.0.113.2", 41011]), (1, "host", "host_a")):
+            changed = copy.deepcopy(self.GOOD)
+            changed[index][field] = value
+            with self.subTest(index=index, field=field), self.assertRaises(ValueError):
+                natprobe.check_punch(changed)
+        with self.assertRaises(ValueError):
+            natprobe.check_punch(self.GOOD[:1])
+
+    def run_punch(self, codes):
+        calls, spawned = [], []
+        outputs = [json.dumps({key: value for key, value in item.items() if key != "host"}).encode() for item in self.GOOD]
+
+        def checked(argv, deadline, data=None, what="x"):
+            calls.append((what, argv[3]))
+            return b""
+
+        def popen(argv, **kwargs):
+            spawned.append(argv)
+            return FakeProcess(outputs[len(spawned) - 1], codes[len(spawned) - 1])
+
+        cfg = dict(CFG, ip=contract.IPS)
+        with mock.patch.object(natprobe.kernel, "checked", checked), mock.patch.object(natprobe.subprocess, "Popen", popen):
+            try:
+                result, error = natprobe.punch(cfg, TOOLS, time.monotonic() + 10), None
+            except ValueError as caught:
+                result, error = None, caught
+        return result, error, calls, spawned
+
+    def test_punch_runs_one_socket_per_host_against_the_peer_router_and_always_removes_both_tables(self):
+        result, error, calls, spawned = self.run_punch((0, 0))
+        self.assertIsNone(error)
+        self.assertEqual(result, self.GOOD)
+        a, b = CFG["ns"]["rtr_a"], CFG["ns"]["rtr_b"]
+        self.assertEqual(calls, [("punch control NAT install", a), ("punch control NAT install", b),
+                                 ("punch control NAT removal", a), ("punch control NAT removal", b)])
+        self.assertEqual([argv[3] for argv in spawned], [CFG["ns"]["host_a"], CFG["ns"]["host_b"]])
+        self.assertIn("'203.0.113.2', 40100", spawned[0][-1].replace('"', "'"))
+        self.assertIn("'203.0.113.1', 40100", spawned[1][-1].replace('"', "'"))
+        self.assertIn("'10.0.1.2', 40100", spawned[0][-1].replace('"', "'"))
+        failed = self.run_punch((0, 1))
+        self.assertIn("punch control worker failed", str(failed[1]))
+        self.assertEqual([item[0] for item in failed[2]][-2:], ["punch control NAT removal"] * 2)
+
+
 class NewVerdictTests(unittest.TestCase):
     def test_v4_dynamic_block_drops_only_segment_ipv4_udp_at_the_output_hook(self):
         text = dynamic.rules(PREFIX, "v4", PORTS)

@@ -146,6 +146,8 @@ class Run:
         if flavor in natprobe.STATEMENTS:
             self.ev["nat_calibration"] = [natprobe.calibrate(self.cfg, self.tools, router, host, flavor, deadline)
                                           for router, host in pairs]
+        if flavor == "cone":
+            self.ev["punch_control"] = natprobe.punch(self.cfg, self.tools, deadline)
         self.ev["rules"] = [kernel.install_rules(self.cfg, self.tools, router, self.case, ports, self.purpose, deadline)
                             for router in ("rtr_a", "rtr_b")]
         return {router: kernel.snapshot(self.cfg, self.tools, router, deadline) for router in ("rtr_a", "rtr_b")}

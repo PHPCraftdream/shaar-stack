@@ -97,16 +97,36 @@ def nat_mapping(result, flavor):
                      f"NAT probe does not show the {flavor} mapping on both routers")
 
 
+def punch_control(result):
+    """The fixture itself can punch through the two cone NATs (harness-known public endpoints), so a missing path is the product's."""
+    found = result.get("punch_control", [])
+    expected = {"host_a": contract.IPS["rtr_b_wan"], "host_b": contract.IPS["rtr_a_wan"]}
+    contract.require(len(found) == 2 and {item.get("host") for item in found} == set(expected)
+                     and all(item["received"] > 0 and item["first"][0] == expected[item["host"]] for item in found),
+                     "fixture hole punch control missing or failed")
+
+
 def dnat(spec, counters, result):
-    """A5/A6: double NAT, Native UDP allowed. Direct data needs translated Native UDP between the routers in both directions."""
+    """A5/A6: double NAT, Native UDP allowed. A direct Native path needs translated Native UDP between the routers both ways."""
     nat_mapping(result, spec["nat"])
+    if spec["nat"] == "cone":
+        punch_control(result)
     if spec["direct"]:
         for router in counters:
             contract.require(packets(counters, router, "peer_sent") > 0 and packets(counters, router, "peer_recv") > 0,
                              f"{router} saw no translated Native UDP both ways between the routers (no hole punching)")
         contract.require(packets(counters, "rtr_a", "ygg_tcp") == 0, "Ygg TCP carried traffic although it was denied")
+        return
+    for router in counters:
+        contract.require(packets(counters, router, "peer_recv") == 0, f"{router} received Native UDP from the other router: a direct path formed")
+    ygg = packets(counters, "rtr_a", "ygg_tcp")
+    if spec["ygg_client_blocked"]:
+        contract.require(ygg == 0, "Ygg TCP carried traffic although it was denied")
     elif spec["mode"] == "standby":
-        contract.require(packets(counters, "rtr_a", "ygg_tcp") > 0, "standby APP succeeded without Ygg TCP traffic on the Client side")
+        contract.require(ygg > 0, "standby APP succeeded without Ygg TCP traffic on the Client side")
+    if spec.get("relay_first"):
+        contract.require(packets(counters, "rtr_a", "dht_drop") > 0 and packets(counters, "rtr_a", "relay_tcp") > 0,
+                         "the Client did not reach relay negotiation with its DHT queries dropped")
 
 
 def recover(result):

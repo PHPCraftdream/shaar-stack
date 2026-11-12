@@ -28,7 +28,8 @@ class ProductContractTests(unittest.TestCase):
         self.assertEqual(list(contract.CASES), [
             "native-signal", "native-standby", "blocked-standby", "blocked-signal", "lan-signal", "lan-standby",
             "relay-denied-signal", "failover-standby", "failover-signal", "denied-blocked-standby", "dht-drop-signal",
-            "outage-standby", "dnat-cone-signal", "dnat-cone-standby", "dnat-sym-signal", "dnat-sym-standby",
+            "outage-standby", "dnat-cone-signal", "dnat-cone-standby", "dnat-cone-relay-signal", "dnat-cone-relay-standby",
+            "dnat-sym-signal", "dnat-sym-standby",
             "hole-signal", "hole-standby", "switch-signal", "switch-standby", "relay-full-signal", "relay-full-standby",
             "ipv6-signal", "ipv6-standby", "denied-native-signal", "recover-standby"])
         self.assertEqual(contract.PHASE_SECONDS, 1200)
@@ -55,8 +56,11 @@ class ProductContractTests(unittest.TestCase):
 
     def test_new_row_cases_declare_their_flows_exits_and_identities(self):
         cases = contract.CASES
-        for name in ("dnat-cone-signal", "dnat-cone-standby"):
-            self.assertEqual((cases[name]["nat"], cases[name]["direct"], cases[name]["target_accepts"]), ("cone", True, 1), name)
+        for name in ("dnat-cone-signal", "dnat-cone-standby", "dnat-cone-relay-signal", "dnat-cone-relay-standby"):
+            self.assertEqual((cases[name]["nat"], cases[name]["direct"], cases[name]["target_accepts"], cases[name]["client_exit"]),
+                             ("cone", False, 0, 1), name)
+            self.assertTrue(cases[name]["ygg_client_blocked"], name)
+            self.assertEqual("relay_first" in cases[name], "relay" in name, name)
         for name in ("dnat-sym-signal", "dnat-sym-standby"):
             self.assertEqual((cases[name]["nat"], cases[name]["direct"]), ("random", False), name)
         self.assertEqual((cases["dnat-sym-signal"]["target_accepts"], cases["dnat-sym-signal"]["client_exit"]), (0, 1))
