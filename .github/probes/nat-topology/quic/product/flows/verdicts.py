@@ -4,8 +4,11 @@ from pathlib import Path
 import sys
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE.parent / "runtime"))
 import contract  # noqa: E402
+import natprobe  # noqa: E402
 
 OBSERVE_NAMES = ("outside_fwd", "outside_out", "udp53", "tcp443")
 
@@ -56,6 +59,73 @@ def dht_drop(counters):
                      "no translated Native UDP although the APP succeeded without the DHT")
 
 
+def segment_hosts(counters, result):
+    """Segment hosts (LAN, IPv6): nothing was forwarded or translated by either router."""
+    for router in counters:
+        contract.require(result["kernel"][router]["quota_used"] == 0, f"{router} forwarded traffic in a segment case")
+        for name in ("udp_nat", "tcp_nat", "native_snat", "native_drop"):
+            contract.require(packets(counters, router, name) == 0, f"{router} {name} is nonzero in a segment case")
+
+
+def ipv6(counters, result):
+    """A2b: IPv6 Native UDP crossed the segment in both directions on both hosts; the Server record lists its IPv6 address."""
+    segment_hosts(counters, result)
+    for router in counters:
+        contract.require(packets(counters, router, "lan6_native") > 0 and packets(counters, router, "lan6_sent") > 0,
+                         f"{router} sent or saw no IPv6 Native UDP on the segment")
+    published = [item.rpartition(":")[0].strip("[]") for item in result["publication"]["native_addresses"]]
+    contract.require(contract.V6["rtr_b"] in published, f"signed record lacks the Server's IPv6 address: {published}")
+
+
+def perturb(result):
+    """D2, D4, A2b: APP 2 recovered within the bound and the change was visible in the counters."""
+    obs = result.get("observations", {}).get("perturb", {})
+    contract.require(0 <= obs.get("recovery_seconds", -1) <= contract.RECOVERY_SECONDS and obs.get("app2", {}).get("reply_bytes", 0) > 0,
+                     "recovery bound or APP 2 reply missing")
+    if obs.get("kind") == "segment-ipv4-loss":
+        contract.require(obs["v4_block_drops"]["rtr_a"]["packets"] > 0, "IPv4 block never observed a Native UDP attempt")
+    else:
+        contract.require(obs["growth"]["native_new"] > 0, "no new Native NAT mapping after the change")
+
+
+def nat_mapping(result, flavor):
+    """The live probe showed the intended mapping flavor on both routers (kept = source port preserved)."""
+    total = len(natprobe.DEST_PORTS)
+    kept, moved = (total, 0) if flavor == "cone" else (0, total)
+    found = result.get("nat_calibration", [])
+    contract.require(len(found) == 2 and all(item["flavor"] == flavor and item["kept"] == kept and item["moved"] == moved for item in found),
+                     f"NAT probe does not show the {flavor} mapping on both routers")
+
+
+def dnat(spec, counters, result):
+    """A5/A6: double NAT, Native UDP allowed. Direct data needs translated Native UDP between the routers in both directions."""
+    nat_mapping(result, spec["nat"])
+    if spec["direct"]:
+        for router in counters:
+            contract.require(packets(counters, router, "peer_sent") > 0 and packets(counters, router, "peer_recv") > 0,
+                             f"{router} saw no translated Native UDP both ways between the routers (no hole punching)")
+        contract.require(packets(counters, "rtr_a", "ygg_tcp") == 0, "Ygg TCP carried traffic although it was denied")
+    elif spec["mode"] == "standby":
+        contract.require(packets(counters, "rtr_a", "ygg_tcp") > 0, "standby APP succeeded without Ygg TCP traffic on the Client side")
+
+
+def recover(result):
+    """C7: the outage failed closed and ended the Client; a fresh Client succeeded after the blocks were lifted."""
+    obs = result.get("observations", {}).get("outage", {})
+    contract.require(obs.get("client1_exit") == 1 and obs.get("app_outage", {}).get("denied") is True
+                     and obs["app_outage"]["reply_bytes"] == 0, "outage did not fail closed")
+    contract.require(0 <= obs.get("recovery_seconds", -1) <= contract.RECOVERY_SECONDS and obs.get("app2", {}).get("reply_bytes", 0) > 0,
+                     "recovery bound or APP 2 reply missing after the outage")
+
+
+def relay_full(result):
+    """C5: the Server ended by itself with the typed reservation error within the bound; no Client or APP existed."""
+    obs = result.get("observations", {}).get("relay_full", {})
+    contract.require(obs.get("server_exit") == 1 and contract.RESERVE_FAIL.decode("ascii") in obs.get("message", ""),
+                     "Server did not end with the typed relay reservation failure")
+    contract.require("app" not in result.get("observations", {}), "an APP ran although the Server never started")
+
+
 def failover(spec, result, counters):
     contract.require(packets(counters, "rtr_a", "udp_nat") > 0 and packets(counters, "rtr_a", "native_snat") > 0,
                      "no real Native NAT observed by nft counters before the block")
@@ -92,7 +162,17 @@ def verify_class(spec, result, counters):
         dht_drop(counters)
     elif net == "failover":
         failover(spec, result, counters)
+    elif net == "ipv6":
+        ipv6(counters, result)
+    elif net == "dnat":
+        dnat(spec, counters, result)
+    elif net == "relay":
+        relay_full(result)
+    elif net == "recover":
+        recover(result)
     else:
         raise ValueError("unreviewed case class")
+    if spec.get("flow") in ("hole", "switch", "ipv6"):
+        perturb(result)
     if spec.get("flow") == "denied-key":
         denied_key(result)

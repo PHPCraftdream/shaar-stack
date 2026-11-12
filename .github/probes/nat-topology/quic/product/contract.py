@@ -9,8 +9,14 @@ import re
 import stat
 
 # "net" selects the kernel-side expectation class; "flow" selects the controller flow (default: one APP campaign).
+# Optional keys: "client_bind" (Client DHT/signaling bind address), "fillers" (extra Servers that hold relay reservations),
+# "server_exit" (expected Server exit status, default 0), "client2_exit" (exit status of a replacement Client).
+NETS = ("nat", "blocked", "lan", "dht-drop", "failover", "dnat", "ipv6", "relay", "recover")
+SEGMENT_NETS = ("lan", "ipv6")
 LAN = {"client_ns": "rtr_a", "server_ns": "rtr_b", "net": "lan", "udp_blocked": False, "ygg_client_blocked": True,
        "target_accepts": 1, "client_exit": 0}
+NATIVE = {"server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0}
+DNAT = {"server_ns": "host_b", "net": "dnat", "udp_blocked": False}
 CASES = {
     "native-signal": {"mode": "signal", "server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
     "native-standby": {"mode": "standby", "server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
@@ -25,6 +31,27 @@ CASES = {
     "denied-blocked-standby": {"mode": "standby", "server_ns": "host_b", "net": "blocked", "flow": "denied-key", "udp_blocked": True, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0, "client2_exit": 1},
     "dht-drop-signal": {"mode": "signal", "server_ns": "wan", "net": "dht-drop", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
     "outage-standby": {"mode": "standby", "server_ns": "host_b", "net": "blocked", "udp_blocked": True, "ygg_client_blocked": True, "target_accepts": 0, "client_exit": 1},
+    # Double NAT with Native UDP allowed (A5 endpoint-independent port-preserving mapping, A6 fully random ports).
+    # "nat" is the mapping flavor, "direct" whether a direct Native path between the routers is expected.
+    "dnat-cone-signal": {**DNAT, "mode": "signal", "nat": "cone", "direct": True, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
+    "dnat-cone-standby": {**DNAT, "mode": "standby", "nat": "cone", "direct": True, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
+    "dnat-sym-signal": {**DNAT, "mode": "signal", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 1},
+    "dnat-sym-standby": {**DNAT, "mode": "standby", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
+    # Single NAT; APP 1, a runtime perturbation, APP 2 over Native only (Ygg denied on the Client side).
+    "hole-signal": {**NATIVE, "mode": "signal", "flow": "hole", "target_accepts": 2},
+    "hole-standby": {**NATIVE, "mode": "standby", "flow": "hole", "target_accepts": 2},
+    "switch-signal": {**NATIVE, "mode": "signal", "flow": "switch", "client_bind": "0.0.0.0", "target_accepts": 2},
+    "switch-standby": {**NATIVE, "mode": "standby", "flow": "switch", "client_bind": "0.0.0.0", "target_accepts": 2},
+    # The relay fixture allows two reservations; two extra Servers hold them, so the real Server cannot start.
+    "relay-full-signal": {"mode": "signal", "server_ns": "wan", "net": "relay", "flow": "relay-full", "udp_blocked": False, "ygg_client_blocked": False,
+                          "target_accepts": 0, "client_exit": None, "fillers": 2, "server_exit": 1},
+    "relay-full-standby": {"mode": "standby", "server_ns": "wan", "net": "relay", "flow": "relay-full", "udp_blocked": False, "ygg_client_blocked": False,
+                           "target_accepts": 0, "client_exit": None, "fillers": 2, "server_exit": 1},
+    "ipv6-signal": {**LAN, "mode": "signal", "net": "ipv6", "flow": "ipv6", "target_accepts": 2},
+    "ipv6-standby": {**LAN, "mode": "standby", "net": "ipv6", "flow": "ipv6", "target_accepts": 2},
+    "denied-native-signal": {**NATIVE, "mode": "signal", "flow": "denied-key", "client2_exit": 1},
+    "recover-standby": {"mode": "standby", "server_ns": "wan", "net": "recover", "flow": "outage-recovery", "udp_blocked": False, "ygg_client_blocked": False,
+                        "target_accepts": 1, "client_exit": 1, "client2_exit": 0},
 }
 IPS = {"wan": "203.0.113.10", "rtr_a_wan": "203.0.113.1", "rtr_b_wan": "203.0.113.2",
        "rtr_off_wan": "203.0.113.3", "host_a": "10.0.1.2", "host_b": "10.0.2.2", "host_off": "10.0.3.2"}
@@ -46,9 +73,11 @@ PHASE_SECONDS = 1200
 CLEANUP_RESERVE = 45
 FRONT_PORT = 48001
 TARGET_PORT = 48002
-# Per router and case: 12 product cases x 2 routers x 2 MiB + 2 live controls x 2 routers x 2 MiB = 56 MiB of the 64 MiB phase budget.
+# Per router and case and traffic class: every dispatch group allocates at most 56 MiB (base: 12 cases + 2 live controls) of the 64 MiB phase budget.
 PRODUCT_QUOTA = 2 * 1024 * 1024
 FAULT_QUOTA = 2 * 1024 * 1024
+# Typed Server startup error when the relay has no reservation left (StartupError::RelayReserve in crates/shaar).
+RESERVE_FAIL = b"relay reservation failed at startup"
 REQUEST_PREFIX = b"shaar-controlled-request:"
 REPLY_PREFIX = b"shaar-fixed-target-reply:"
 
@@ -67,13 +96,26 @@ def client_ns(spec):
     return spec.get("client_ns", "host_a")
 
 
+def client_bind(spec):
+    """DHT/signaling bind address of the Client: its namespace address unless the case needs a wildcard socket."""
+    return spec.get("client_bind") or ip_for(client_ns(spec))
+
+
+def server_fails(spec):
+    """True when the Server is expected to end on its own during startup (typed failure)."""
+    return spec.get("server_exit", 0) != 0
+
+
 def final_client_exit(spec):
     """Exit status of the Client that is alive at shutdown (the second Client when a case replaces it)."""
     return spec.get("client2_exit", spec["client_exit"])
 
 
 def identity_roles(spec):
-    return IDENTITY_ROLES + (("client2",) if spec.get("flow") == "denied-key" else ())
+    roles = [role for role in IDENTITY_ROLES if role != "client" or spec["client_exit"] is not None]
+    if spec.get("flow") in ("denied-key", "outage-recovery"):
+        roles.append("client2")
+    return tuple(roles) + tuple(f"filler{index}" for index in range(1, spec.get("fillers", 0) + 1))
 
 
 def hex_value(value, size):

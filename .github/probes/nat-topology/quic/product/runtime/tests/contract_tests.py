@@ -28,7 +28,9 @@ class ProductContractTests(unittest.TestCase):
         self.assertEqual(list(contract.CASES), [
             "native-signal", "native-standby", "blocked-standby", "blocked-signal", "lan-signal", "lan-standby",
             "relay-denied-signal", "failover-standby", "failover-signal", "denied-blocked-standby", "dht-drop-signal",
-            "outage-standby"])
+            "outage-standby", "dnat-cone-signal", "dnat-cone-standby", "dnat-sym-signal", "dnat-sym-standby",
+            "hole-signal", "hole-standby", "switch-signal", "switch-standby", "relay-full-signal", "relay-full-standby",
+            "ipv6-signal", "ipv6-standby", "denied-native-signal", "recover-standby"])
         self.assertEqual(contract.PHASE_SECONDS, 1200)
         self.assertEqual(contract.CASE_SECONDS, 150)
         self.assertEqual(contract.MAX_CHILDREN, 16)
@@ -37,7 +39,7 @@ class ProductContractTests(unittest.TestCase):
         # 12 product cases and 2 live controls, each with two per-router quotas, leave headroom under 64 MiB.
         self.assertEqual(12 * 2 * contract.PRODUCT_QUOTA + 2 * 2 * contract.FAULT_QUOTA, 56 * 1024 * 1024)
         for name, spec in contract.CASES.items():
-            self.assertIn(spec["net"], ("nat", "blocked", "lan", "dht-drop", "failover"), name)
+            self.assertIn(spec["net"], contract.NETS, name)
             self.assertEqual(spec["udp_blocked"], spec["net"] == "blocked", name)
             self.assertIn(contract.client_ns(spec), ("host_a", "rtr_a"), name)
             self.assertIn(contract.ip_for(spec["server_ns"]), contract.IPS.values(), name)
@@ -50,6 +52,36 @@ class ProductContractTests(unittest.TestCase):
         self.assertEqual(contract.CASES["blocked-signal"]["client_exit"], 1)
         self.assertFalse(contract.CASES["native-standby"]["udp_blocked"])
         self.assertTrue(contract.CASES["blocked-standby"]["udp_blocked"])
+
+    def test_new_row_cases_declare_their_flows_exits_and_identities(self):
+        cases = contract.CASES
+        for name in ("dnat-cone-signal", "dnat-cone-standby"):
+            self.assertEqual((cases[name]["nat"], cases[name]["direct"], cases[name]["target_accepts"]), ("cone", True, 1), name)
+        for name in ("dnat-sym-signal", "dnat-sym-standby"):
+            self.assertEqual((cases[name]["nat"], cases[name]["direct"]), ("random", False), name)
+        self.assertEqual((cases["dnat-sym-signal"]["target_accepts"], cases["dnat-sym-signal"]["client_exit"]), (0, 1))
+        self.assertEqual((cases["dnat-sym-standby"]["target_accepts"], cases["dnat-sym-standby"]["client_exit"]), (1, 0))
+        for name in ("dnat-cone-signal", "dnat-sym-standby"):
+            self.assertEqual(cases[name]["server_ns"], "host_b")
+        for name in ("hole-signal", "hole-standby", "switch-signal", "switch-standby"):
+            self.assertEqual((cases[name]["net"], cases[name]["target_accepts"], cases[name]["ygg_client_blocked"]), ("nat", 2, True), name)
+        self.assertEqual(contract.client_bind(cases["switch-signal"]), "0.0.0.0")
+        self.assertEqual(contract.client_bind(cases["native-signal"]), "10.0.1.2")
+        self.assertEqual(contract.client_bind(cases["lan-signal"]), "203.0.113.1")
+        full = cases["relay-full-standby"]
+        self.assertTrue(contract.server_fails(full))
+        self.assertFalse(contract.server_fails(cases["native-signal"]))
+        self.assertEqual((full["fillers"], full["server_exit"], full["client_exit"], full["target_accepts"]), (2, 1, None, 0))
+        self.assertEqual(contract.identity_roles(full), ("wan", "target", "server", "filler1", "filler2"))
+        self.assertEqual(contract.identity_roles(cases["recover-standby"])[-1], "client2")
+        self.assertEqual(contract.final_client_exit(cases["recover-standby"]), 0)
+        self.assertEqual(contract.final_client_exit(full), None)
+        for name in ("ipv6-signal", "ipv6-standby"):
+            self.assertEqual((cases[name]["net"], cases[name]["client_ns"], cases[name]["server_ns"]), ("ipv6", "rtr_a", "rtr_b"), name)
+        self.assertEqual(contract.SEGMENT_NETS, ("lan", "ipv6"))
+        self.assertEqual(cases["denied-native-signal"]["net"], "nat")
+        for spec in cases.values():
+            self.assertIn(spec.get("flow", "single"), ("single", "failover", "denied-key", "hole", "switch", "ipv6", "outage-recovery", "relay-full"))
 
     def test_namespace_targets_cannot_escape_or_acquire_root_products(self):
         allowed = Path(contract.__file__).resolve().parents[2] / "out"
@@ -178,13 +210,14 @@ class NetworkContractTests(unittest.TestCase):
                 self.assertIn(f"over {contract.PRODUCT_QUOTA} bytes", text)
                 self.assertIn("quota name phase_budget counter name quota_drop drop", text)
                 self.assertIn("meta nfproto ipv6 counter name ipv6_drop drop", text)
-                self.assertIn("masquerade to :41010-41020", text)
+                flavor = network.NAT_FLAVORS[profile.get("nat", "range")]
+                self.assertIn(flavor, text)
                 # nft keywords such as snat/dnat/filter cannot be chain names (real nft rejected "snat").
                 self.assertEqual(re.findall(r"add chain inet \S+ (\w+) ", text),
                                  ["budget", "paths", "lanin", "lanout", "natout", "seen"])
                 self.assertIn("udp dport != 42001 ct status snat counter name native_snat", text)
                 # Port-range NAT needs an explicit transport match in the rule.
-                self.assertIn("ip protocol udp counter name udp_nat masquerade to :41010-41020", text)
+                self.assertIn(f"ip protocol udp counter name udp_nat {flavor} comment", text)
                 self.assertIn("meta l4proto tcp counter name tcp_nat masquerade", text)
                 self.assertNotIn("ct state", text)
                 self.assertNotIn("flush ruleset", text)
@@ -224,6 +257,38 @@ class NetworkContractTests(unittest.TestCase):
         self.assertIn("lanout ip saddr 203.0.113.1 ip daddr 203.0.113.2 meta l4proto udp counter name lan_sent", lan)
         self.assertIn("lanout ip saddr 203.0.113.2 ip daddr 203.0.113.1 meta l4proto udp counter name lan_sent",
                       network.rules("snaabbcc", "rtr_b", "lan-signal", ports))
+
+    def test_new_row_profiles_add_only_their_own_observations(self):
+        ports = {"dht": 42001, "relay": 42002, "transit": 42003}
+        rules = lambda router, case: network.rules("snaabbcc", router, case, ports)
+        cone, sym_b = rules("rtr_a", "dnat-cone-signal"), rules("rtr_b", "dnat-sym-standby")
+        self.assertIn("natout ip saddr 10.0.1.2 ip protocol udp counter name udp_nat masquerade comment", cone)
+        self.assertIn("seen ip saddr 203.0.113.1 ip daddr 203.0.113.2 meta l4proto udp ct status snat counter name peer_sent", cone)
+        self.assertIn("paths ip saddr 203.0.113.2 ip daddr 10.0.1.2 meta l4proto udp counter name peer_recv", cone)
+        self.assertIn("seen ip saddr 203.0.113.1 meta l4proto udp udp dport != 42001 ct status snat counter name native_out", cone)
+        self.assertIn("natout ip saddr 10.0.2.2 ip protocol udp counter name udp_nat masquerade fully-random comment", sym_b)
+        self.assertIn("seen ip saddr 203.0.113.2 ip daddr 203.0.113.1 meta l4proto udp ct status snat counter name peer_sent", sym_b)
+        self.assertNotIn("tcp dport 42003 counter name ygg_tcp accept", cone)
+        self.assertIn("tcp dport 42003 counter name ygg_tcp accept", rules("rtr_a", "dnat-sym-signal"))
+        self.assertNotIn("p13-native-block", cone)
+        hole, switch = rules("rtr_a", "hole-signal"), rules("rtr_a", "switch-standby")
+        self.assertIn("lanin ip daddr 203.0.113.1 meta l4proto udp counter name hole_in", hole)
+        self.assertIn("natout ip saddr 10.0.1.2 ip protocol udp udp dport != 42001 counter name native_new", hole)
+        self.assertLess(hole.index("counter name native_new"), hole.index("counter name udp_nat"))
+        self.assertIn("natout ip saddr 10.0.1.0/24 ip protocol udp counter name udp_nat masquerade to :41010-41020 comment", switch)
+        self.assertIn("natout ip saddr 10.0.1.0/24 meta l4proto tcp counter name tcp_nat masquerade comment", switch)
+        self.assertNotIn("counter name hole_in", switch)
+        v6a, v6b = rules("rtr_a", "ipv6-signal"), rules("rtr_b", "ipv6-standby")
+        self.assertIn("lanin ip6 saddr 2001:db8:13::2 ip6 daddr 2001:db8:13::1 meta l4proto udp counter name lan6_native", v6a)
+        self.assertIn("lanout ip6 saddr 2001:db8:13::1 ip6 daddr 2001:db8:13::2 meta l4proto udp counter name lan6_sent", v6a)
+        self.assertIn("lanin ip6 saddr 2001:db8:13::1 ip6 daddr 2001:db8:13::2 meta l4proto udp counter name lan6_native", v6b)
+        self.assertIn("meta nfproto ipv6 counter name ipv6_drop drop", v6a)
+        self.assertEqual(network.V6, {"rtr_a": "2001:db8:13::1", "rtr_b": "2001:db8:13::2"})
+        for name in ("peer_sent", "peer_recv", "native_out", "native_new", "hole_in", "lan6_native", "lan6_sent"):
+            self.assertIn(name, network.COUNTERS)
+            self.assertNotIn(f"counter name {name}", rules("rtr_a", "native-signal"), name)
+        for case in ("denied-native-signal", "relay-full-signal", "recover-standby"):
+            self.assertIn(case, network.PROFILES)
 
     def test_network_commands_cannot_change_the_host_or_foreign_namespaces(self):
         cfg = {"prefix": "snaabbcc", "ns": {"rtr_a": "snaabbcc-rtr-a", "rtr_b": "snaabbcc-rtr-b"}}

@@ -16,8 +16,8 @@ import network  # noqa: E402
 import phase  # noqa: E402
 
 NONCE, SOURCE, UID = "d" * 32, "a" * 40, 1001
-# 12 cases x 2 routers x {product, fault}, 2 calibration tables, the observation table and 2 dynamic blocks.
-TOTAL_RULESETS = 12 * 2 * 2 + 2 + 1 + 2
+# Every case x 2 routers x {product, fault}, 2 calibration tables, 2 NAT probes, the observation table and 3 dynamic blocks.
+TOTAL_RULESETS = len(contract.CASES) * 2 * 2 + 2 + 2 + 1 + 3
 
 
 def zero_counters():
@@ -40,6 +40,28 @@ def evidence(case):
                for router in ("rtr_a", "rtr_b")}
     observations = {"target": {"accepts": spec["target_accepts"]}, "app": {"denied": False}}
     publication = {"native_addresses": [contract.ip_for(spec["server_ns"]) + ":40000"]}
+    result_extra = {}
+    if net == "dnat":
+        kept, moved = (3, 0) if spec["nat"] == "cone" else (0, 3)
+        result_extra["nat_calibration"] = [{"router": router, "flavor": spec["nat"], "kept": kept, "moved": moved} for router in routers]
+        if spec["direct"]:
+            for router in routers:
+                routers[router]["counters"]["peer_sent"]["packets"] = 5
+                routers[router]["counters"]["peer_recv"]["packets"] = 6
+        elif spec["mode"] == "standby":
+            routers["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 9
+    elif net == "relay":
+        observations = {"target": {"accepts": 0}, "relay_full": {"server_exit": 1, "seconds": 31.0,
+                                                                  "message": "shaar-server: composed startup: relay reservation failed at startup"}}
+    elif net == "recover":
+        observations["outage"] = {"client1_exit": 1, "app_outage": {"denied": True, "reply_bytes": 0, "terminal": "reset"},
+                                  "recovery_seconds": 6.5, "app2": {"denied": False, "reply_bytes": 61}}
+    elif net == "ipv6":
+        for router in routers:
+            routers[router]["quota_used"] = 0
+            routers[router]["counters"]["lan6_native"]["packets"] = 7
+            routers[router]["counters"]["lan6_sent"]["packets"] = 7
+        publication = {"native_addresses": ["203.0.113.2:40000", "[2001:db8:13::2]:40001"]}
     if net == "blocked":
         routers["rtr_a"]["counters"]["native_drop"]["packets"] = 3
     elif net in ("nat", "failover"):
@@ -54,10 +76,17 @@ def evidence(case):
             routers[router]["quota_used"] = 0
             routers[router]["counters"]["lan_native"]["packets"] = 7
             routers[router]["counters"]["lan_sent"]["packets"] = 7
-    else:
+    elif net == "dht-drop":
         routers["rtr_a"]["counters"]["dht_drop"]["packets"] = 3
         routers["rtr_a"]["counters"]["udp_nat"]["packets"] = 4
         routers["rtr_a"]["counters"]["native_snat"]["packets"] = 2
+    if spec.get("flow") in ("hole", "switch"):
+        observations["perturb"] = {"kind": "nat-state-flush", "recovery_seconds": 8.0, "app2": {"denied": False, "reply_bytes": 61},
+                                   "growth": {"native_new": 2, "native_snat": 5}}
+    elif spec.get("flow") == "ipv6":
+        observations["perturb"] = {"kind": "segment-ipv4-loss", "recovery_seconds": 9.0, "app2": {"denied": False, "reply_bytes": 61},
+                                   "v4_block_drops": {"rtr_a": {"packets": 4, "bytes": 400}, "rtr_b": {"packets": 3, "bytes": 300}},
+                                   "growth": {"lan6_native": 3, "lan6_sent": 3}}
     if spec.get("flow") == "denied-key":
         observations.update(client1_exit=0, denied_app={"denied": True, "reply_bytes": 0})
     identities = {name: {"uid": UID, "capabilities": 0} for name in contract.identity_roles(spec)}
@@ -66,7 +95,7 @@ def evidence(case):
             "config": {"nonce": NONCE, "helper_uid": UID}, "normal_native_gate_enabled": False,
             "case_result": {"quota_calibration": [{"passed": 8, "dropped": 16}, {"passed": 7, "dropped": 17}],
                             "kernel": routers, "observations": observations, "publication": publication,
-                            "client_exit": contract.final_client_exit(spec), "identities": identities,
+                            "client_exit": contract.final_client_exit(spec), "identities": identities, **result_extra,
                             "observe": {router: {name: 0 for name in detector} for router in routers},
                             "observe_calibration": [{"router": router, "detected": dict(detector)} for router in routers],
                             "forwarded_bytes": 2000, "active_seconds": 12.5}}
@@ -98,13 +127,13 @@ def mutate(case, name):
     elif name == "accepts":
         result["observations"]["target"]["accepts"] = spec["target_accepts"] + 1
     elif name == "exit":
-        result["client_exit"] = 1 - contract.final_client_exit(spec)
+        result["client_exit"] = 1 - (contract.final_client_exit(spec) or 0)
     elif name == "uid":
         result["identities"]["server"]["uid"] = 0
     elif name == "caps":
         result["identities"]["wan"]["capabilities"] = 1
     elif name == "identity":
-        del result["identities"]["client"]
+        del result["identities"]["server"]
     elif name == "outside":
         result["observe"]["rtr_a"]["outside_out"] = 1
     elif name == "outside-fwd":
@@ -147,6 +176,44 @@ def mutate(case, name):
         result["observations"]["denied_app"]["reply_bytes"] = 5
     elif name == "control-exit":
         result["observations"]["client1_exit"] = 1
+    elif name == "peer-recv":
+        counters["rtr_b"]["counters"]["peer_recv"]["packets"] = 0
+    elif name == "peer-sent":
+        counters["rtr_a"]["counters"]["peer_sent"]["packets"] = 0
+    elif name == "probe-flavor":
+        result["nat_calibration"][0]["kept"] = 1
+    elif name == "probe-missing":
+        del result["nat_calibration"][1]
+    elif name == "ygg-used":
+        counters["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 1
+    elif name == "ygg-missing":
+        counters["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 0
+    elif name == "no-v6-traffic":
+        counters["rtr_b"]["counters"]["lan6_native"]["packets"] = 0
+    elif name == "no-v6-address":
+        result["publication"]["native_addresses"] = ["203.0.113.2:40000"]
+    elif name == "slow-perturb":
+        result["observations"]["perturb"]["recovery_seconds"] = contract.RECOVERY_SECONDS + 0.1
+    elif name == "no-new-mapping":
+        result["observations"]["perturb"]["growth"]["native_new"] = 0
+    elif name == "perturb-no-reply":
+        result["observations"]["perturb"]["app2"]["reply_bytes"] = 0
+    elif name == "no-v4-drop":
+        result["observations"]["perturb"]["v4_block_drops"]["rtr_a"]["packets"] = 0
+    elif name == "server-survived":
+        result["observations"]["relay_full"]["server_exit"] = 0
+    elif name == "untyped-failure":
+        result["observations"]["relay_full"]["message"] = "shaar-server: some other error"
+    elif name == "app-ran":
+        result["observations"]["app"] = {"denied": False}
+    elif name == "client-survived":
+        result["observations"]["outage"]["client1_exit"] = 0
+    elif name == "outage-reply":
+        result["observations"]["outage"]["app_outage"]["reply_bytes"] = 5
+    elif name == "slow-outage-recovery":
+        result["observations"]["outage"]["recovery_seconds"] = contract.RECOVERY_SECONDS + 0.1
+    elif name == "no-outage-recovery":
+        result["observations"]["outage"]["app2"]["reply_bytes"] = 0
     return changed
 
 
@@ -158,7 +225,14 @@ MUTATIONS = {
     "lan": ("forwarded", "nat-hit", "no-lan-traffic", "wrong-address"),
     "dht-drop": ("no-dht-drop", "native_snat", "udp_nat"),
     "failover": ("native_snat", "udp_nat", "block-escape", "no-block-drop"),
+    "dnat": ("probe-flavor", "probe-missing"),
+    "ipv6": ("forwarded", "no-v6-traffic", "no-v6-address"),
+    "relay": ("server-survived", "untyped-failure", "app-ran"),
+    "recover": ("client-survived", "outage-reply", "slow-outage-recovery", "no-outage-recovery"),
+    "flow:hole": ("slow-perturb", "no-new-mapping", "perturb-no-reply"),
+    "flow:ipv6": ("slow-perturb", "perturb-no-reply", "no-v4-drop"),
 }
+MUTATIONS["flow:switch"] = MUTATIONS["flow:hole"]
 
 
 class EvidenceTests(unittest.TestCase):
@@ -177,6 +251,9 @@ class EvidenceTests(unittest.TestCase):
             if spec["net"] == "failover":
                 names += ("block-escape",) if spec["mode"] == "signal" else ("slow-failover", "slow-recovery", "no-ygg")
                 names += ("signal-reply",) if spec["mode"] == "signal" else ()
+            if spec["net"] == "dnat":
+                names += ("peer-recv", "peer-sent", "ygg-used") if spec["direct"] else ("ygg-missing",) if spec["mode"] == "standby" else ()
+            names += MUTATIONS.get("flow:" + spec.get("flow", "single"), ())
             if spec.get("flow") == "denied-key":
                 names += ("denied-reply", "control-exit")
             for name in names:
@@ -198,10 +275,11 @@ class PlanTests(unittest.TestCase):
                           "lan-signal", "lan-standby", "relay-denied-signal", "failover-standby", "failover-signal",
                           "denied-blocked-standby", "dht-drop-signal", "outage-standby", "live-failure", "interruption"])
         self.assertEqual({entry[1] for entry in phase.PLAN}, {"setup-fault", "product", "fixture-fault", "interrupt"})
-        self.assertEqual([entry[2] for entry in phase.PLAN if entry[1] == "product"], list(contract.CASES))
+        self.assertEqual([entry[2] for entry in phase.PLAN if entry[1] == "product"], list(contract.CASES)[:12])
         products = sum(1 for entry in phase.PLAN if entry[1] == "product")
         controls = len(phase.PLAN) - products
         self.assertEqual((products, controls), (12, 3))
+        self.assertEqual(len(contract.CASES), 26)
         # The worst case of every case at its ceiling does not fit 20 minutes; admission control refuses a case
         # that cannot finish, and the expected total (about 8 minutes) leaves the margin recorded in the contract.
         self.assertGreater(products * contract.CASE_SECONDS, contract.PHASE_SECONDS)
@@ -212,6 +290,24 @@ class PlanTests(unittest.TestCase):
         flags = {entry[0]: entry[3] for entry in phase.PLAN}
         self.assertEqual(flags["setup-failure"], ("--fault-inject-setup",))
         self.assertEqual(flags["live-failure"], ("--fault-inject-fixture",))
+
+    def test_groups_cover_every_case_once_and_each_fits_the_privileged_budgets(self):
+        self.assertEqual(set(phase.GROUPS), {"base", "nat", "faults"})
+        self.assertIs(phase.GROUPS["base"], phase.PLAN)
+        covered = []
+        for group, plan in phase.GROUPS.items():
+            with self.subTest(group=group):
+                covered += [entry[2] for entry in plan if entry[1] == "product"]
+                self.assertEqual((plan[0], plan[-2:]), (phase.PLAN[0], phase.PLAN[-2:]))
+                self.assertEqual(len({entry[0] for entry in plan}), len(plan))
+                self.assertLessEqual(phase.allocated(plan), 64 * 1024 * 1024)
+                self.assertEqual({entry[1] for entry in plan} - {"product"}, {"setup-fault", "fixture-fault", "interrupt"})
+        self.assertEqual(sorted(covered), sorted(contract.CASES))
+        self.assertEqual(len(covered), len(contract.CASES))
+        self.assertEqual(phase.allocated(phase.GROUPS["nat"]), 40 * 1024 * 1024)
+        self.assertEqual(phase.allocated(phase.GROUPS["faults"]), 32 * 1024 * 1024)
+        # The slowest-by-design cases (outage recovery, typed Server failures) run last in their group.
+        self.assertEqual([entry[0] for entry in phase.GROUPS["faults"]][-5:-2], ["recover-standby", "relay-full-signal", "relay-full-standby"])
 
     def test_artifact_accounting_counts_regular_files_only(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -231,7 +327,8 @@ class PrecheckTests(unittest.TestCase):
         self.assertEqual(len(set(names)), TOTAL_RULESETS)
         self.assertEqual(sum(name.startswith("calibration/") for name in names), 2)
         self.assertIn("observation", names)
-        self.assertEqual(sum(name.startswith("dynamic/") for name in names), 2)
+        self.assertEqual(sum(name.startswith("dynamic/") for name in names), 3)
+        self.assertEqual(sorted(name for name in names if name.startswith("natprobe/")), ["natprobe/cone", "natprobe/random"])
         for case in contract.CASES:
             for router in ("rtr_a", "rtr_b"):
                 for purpose in ("product", "fault"):

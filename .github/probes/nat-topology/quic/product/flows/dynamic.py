@@ -1,4 +1,4 @@
-"""Runtime path controls: a Native UDP block or a Ygg TCP block inserted and removed as separate owned tables."""
+"""Runtime path controls: a Native UDP, Ygg TCP or segment IPv4 UDP block inserted and removed as separate owned tables."""
 
 import json
 from pathlib import Path
@@ -12,7 +12,7 @@ sys.path.insert(0, str(HERE.parent / "runtime"))
 import contract  # noqa: E402
 import kernel  # noqa: E402
 
-KINDS = ("native", "ygg")
+KINDS = ("native", "ygg", "v4")
 ROUTERS = ("rtr_a", "rtr_b")
 
 
@@ -29,11 +29,14 @@ def rules(prefix, kind, ports):
                      and all(type(ports[key]) is int and 1024 <= ports[key] <= 65535 for key in ("dht", "transit")),
                      "invalid owned fixture port")
     lines = [f"add table inet {table}", f"add counter inet {table} dyn_drop",
-             f"add chain inet {table} dynblk {{ type filter hook forward priority -250; policy accept; }}"]
+             f"add chain inet {table} dynblk {{ type filter hook {'output' if kind == 'v4' else 'forward'} priority -250; policy accept; }}"]
     if kind == "native":
         lines += [f"add rule inet {table} dynblk ip daddr 203.0.113.10 udp dport {ports['dht']} accept comment \"p13-dyn-dht-query\"",
                   f"add rule inet {table} dynblk ip saddr 203.0.113.10 udp sport {ports['dht']} accept comment \"p13-dyn-dht-reply\"",
                   f"add rule inet {table} dynblk meta l4proto udp counter name dyn_drop drop comment \"p13-dyn-native-block\""]
+    elif kind == "v4":
+        # Segment hosts only: each namespace sends Native UDP to the other host's IPv4 address; IPv6 stays open.
+        lines.append(f"add rule inet {table} dynblk ip daddr {{ 203.0.113.1, 203.0.113.2 }} meta l4proto udp counter name dyn_drop drop comment \"p13-dyn-v4-block\"")
     else:
         lines += [f"add rule inet {table} dynblk ip daddr 203.0.113.10 tcp dport {ports['transit']} counter name dyn_drop drop comment \"p13-dyn-ygg-block\"",
                   f"add rule inet {table} dynblk ip saddr 203.0.113.10 tcp sport {ports['transit']} counter name dyn_drop drop comment \"p13-dyn-ygg-block\""]

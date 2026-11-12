@@ -11,6 +11,7 @@ sys.path.insert(0, str(HERE.parent / "runtime"))
 import configs  # noqa: E402
 import contract  # noqa: E402
 import dynamic  # noqa: E402
+import perturb  # noqa: E402
 import worker  # noqa: E402
 
 # Per-campaign transaction caps; the failover case sums to the contract maximum of 16 fresh APP transactions.
@@ -120,4 +121,5 @@ def denied_key(run):
     ev["observations"]["denied_app"] = denied
 
 
-FLOWS = {"single": single, "failover": failover, "denied-key": denied_key}
+FLOWS = {"single": single, "failover": failover, "denied-key": denied_key, "hole": perturb.hole, "switch": perturb.switch,
+         "ipv6": perturb.ipv6, "outage-recovery": perturb.outage_recovery, "relay-full": perturb.relay_full}

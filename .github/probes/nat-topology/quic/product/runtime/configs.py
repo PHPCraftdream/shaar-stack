@@ -9,6 +9,7 @@ sys.path.insert(0, str(HERE.parent))
 import contract  # noqa: E402
 
 PATH_PATTERN = r"/[A-Za-z0-9_./-]{1,200}"
+WILDCARD = "0.0.0.0"
 
 
 def owned_path(value):
@@ -21,7 +22,7 @@ def owned_path(value):
 def network_text(bind_ip, ports, relay_peer):
     """Shared network object: owned DHT, relay and Ygg transit on the WAN address only."""
     wan = contract.IPS["wan"]
-    contract.require(bind_ip in contract.IPS.values(), "bind address outside the owned plan")
+    contract.require(bind_ip in contract.IPS.values() or bind_ip == WILDCARD, "bind address outside the owned plan")
     contract.require(type(ports) is dict and set(ports) >= {"dht", "relay", "transit"}
                      and all(type(ports[key]) is int and 1024 <= ports[key] <= 65535 for key in ("dht", "relay", "transit")),
                      "owned WAN fixture ports invalid")
@@ -38,9 +39,10 @@ def mode_value(mode):
     return mode
 
 
-def server_text(case, key_file, allowlist_file, ports, relay_peer):
+def server_text(case, key_file, allowlist_file, ports, relay_peer, ns=None):
+    """ns: namespace the Server runs in when it differs from the case's Server namespace (relay filler Servers)."""
     spec = contract.CASES[case]
-    bind_ip = contract.ip_for(spec["server_ns"])
+    bind_ip = contract.ip_for(ns or spec["server_ns"])
     head = [f"target: 127.0.0.1:{contract.TARGET_PORT}", f"allowlist_path:: {owned_path(allowlist_file)}",
             f"key_file:: {owned_path(key_file)}", f"fallback: {mode_value(spec['mode'])}"]
     return "\n".join(head) + "\n" + network_text(bind_ip, ports, relay_peer)
@@ -52,7 +54,7 @@ def client_text(case, server_key, key_file, ports, relay_peer):
     contract.require(contract.hex_value(server_key, 64), "Server key must be 64 lowercase hex characters")
     head = [f"server: {server_key}", f"listen: 127.0.0.1:{contract.FRONT_PORT}",
             f"key_file:: {owned_path(key_file)}", f"fallback: {mode_value(spec['mode'])}"]
-    return "\n".join(head) + "\n" + network_text(contract.ip_for(contract.client_ns(spec)), ports, relay_peer)
+    return "\n".join(head) + "\n" + network_text(contract.client_bind(spec), ports, relay_peer)
 
 
 def allowlist_text(client_key):

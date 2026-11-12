@@ -8,6 +8,10 @@ import re
 _NATIVE = {"udp": "open", "tcp_a": ("relay",)}
 _BLOCKED = {"udp": "blocked", "tcp_a": ("transit",)}
 _FAILOVER = {"udp": "runtime", "tcp_a": ("relay", "transit")}
+# Optional profile keys: "nat" ("range" default, "cone" = port-preserving, "random" = fully random ports), "peer" (count translated
+# Native UDP between the two routers), "subnet" (NAT the whole LAN /24), "native_new" (count new Native UDP flows), "hole"
+# (count UDP that reaches the router itself), "lan" (hosts share the WAN segment), "v6" (also count IPv6 on the segment).
+_DNAT = {"udp": "open", "peer": True}
 PROFILES = {
     "native-signal": _NATIVE, "native-standby": _NATIVE,
     "blocked-standby": _BLOCKED, "blocked-signal": _BLOCKED,
@@ -17,10 +21,24 @@ PROFILES = {
     "denied-blocked-standby": _BLOCKED,
     "dht-drop-signal": {"udp": "open", "tcp_a": ("relay", "transit"), "dht_drop": True},
     "outage-standby": {"udp": "blocked", "tcp_a": ()},
+    "dnat-cone-signal": {**_DNAT, "tcp_a": ("relay",), "nat": "cone"},
+    "dnat-cone-standby": {**_DNAT, "tcp_a": ("relay",), "nat": "cone"},
+    "dnat-sym-signal": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},
+    "dnat-sym-standby": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},
+    "hole-signal": {**_NATIVE, "native_new": True, "hole": True}, "hole-standby": {**_NATIVE, "native_new": True, "hole": True},
+    "switch-signal": {**_NATIVE, "native_new": True, "subnet": True},
+    "switch-standby": {**_NATIVE, "native_new": True, "subnet": True},
+    "relay-full-signal": _NATIVE, "relay-full-standby": _NATIVE,
+    "ipv6-signal": {**_NATIVE, "lan": True, "v6": True}, "ipv6-standby": {**_NATIVE, "lan": True, "v6": True},
+    "denied-native-signal": _NATIVE,
+    "recover-standby": _FAILOVER,
 }
 CASES = set(PROFILES)
 COUNTERS = {"quota_drop", "ipv6_drop", "native_drop", "tcp_drop", "udp_nat", "tcp_nat", "native_snat",
-            "ygg_tcp", "relay_tcp", "dht_drop", "lan_native", "lan_sent"}
+            "ygg_tcp", "relay_tcp", "dht_drop", "lan_native", "lan_sent", "peer_sent", "peer_recv", "native_out",
+            "native_new", "hole_in", "lan6_native", "lan6_sent"}
+NAT_FLAVORS = {"range": "masquerade to :41010-41020", "cone": "masquerade", "random": "masquerade fully-random"}
+V6 = {"rtr_a": "2001:db8:13::1", "rtr_b": "2001:db8:13::2"}
 QUOTAS = {"product": 2 * 1024 * 1024, "fault": 2 * 1024 * 1024}
 CHAINS = {"budget": ("filter", "forward", -300), "paths": ("filter", "forward", -200),
           "natout": ("nat", "postrouting", 100), "seen": ("filter", "postrouting", 200),
@@ -49,7 +67,11 @@ def rules(prefix, router, case, ports, purpose="product"):
     require(ports["relay"] != ports["transit"], "TCP fixture listeners overlap")
     host = "10.0.1.2" if router == "rtr_a" else "10.0.2.2"
     wan_ip = "203.0.113.1" if router == "rtr_a" else "203.0.113.2"
+    peer_wan = "203.0.113.2" if router == "rtr_a" else "203.0.113.1"
     profile = PROFILES[case]
+    # Source match of the NAT rules: one host, or its whole /24 when the case changes the host address at runtime.
+    nat_source = host.rpartition(".")[0] + ".0/24" if profile.get("subnet") else host
+    nat_udp = NAT_FLAVORS[profile.get("nat", "range")]
     blocked = profile["udp"] == "blocked"
     lines = [f"add table inet {table}"]
     for name in sorted(COUNTERS):
@@ -76,12 +98,22 @@ def rules(prefix, router, case, ports, purpose="product"):
                       f"add rule inet {table} paths ip saddr 203.0.113.10 tcp sport {port} counter name {counter} accept comment \"p13-owned-tcp-reply\""]
     lines += [f"add rule inet {table} paths meta l4proto tcp counter name tcp_drop drop comment \"p13-other-tcp-block\"",
               f"add chain inet {table} natout {{ type nat hook postrouting priority 100; policy accept; }}",
-              f"add rule inet {table} natout ip saddr {host} ip protocol udp counter name udp_nat masquerade to :41010-41020 comment \"p13-udp-nat\"",
-              f"add rule inet {table} natout ip saddr {host} meta l4proto tcp counter name tcp_nat masquerade comment \"p13-tcp-nat\"",
+              *([f"add rule inet {table} natout ip saddr {nat_source} ip protocol udp udp dport != {ports['dht']} counter name native_new comment \"p13-native-new\""]
+                if profile.get("native_new") else []),
+              f"add rule inet {table} natout ip saddr {nat_source} ip protocol udp counter name udp_nat {nat_udp} comment \"p13-udp-nat\"",
+              f"add rule inet {table} natout ip saddr {nat_source} meta l4proto tcp counter name tcp_nat masquerade comment \"p13-tcp-nat\"",
               # Independent packet-level observation after NAT: translated non-DHT UDP toward the WAN host.
               f"add chain inet {table} seen {{ type filter hook postrouting priority 200; policy accept; }}",
               f"add rule inet {table} seen ip saddr {wan_ip} ip daddr 203.0.113.10 udp sport 41010-41020 udp dport != {ports['dht']} "
               f"ct status snat counter name native_snat comment \"p13-snat-seen\""]
+    if profile.get("peer"):
+        # Native UDP between the two routers: translated on the way out (any non-DHT port) and de-translated on the way in.
+        lines += [f"add rule inet {table} seen ip saddr {wan_ip} meta l4proto udp udp dport != {ports['dht']} ct status snat counter name native_out comment \"p13-native-out\"",
+                  f"add rule inet {table} seen ip saddr {wan_ip} ip daddr {peer_wan} meta l4proto udp ct status snat counter name peer_sent comment \"p13-peer-sent\"",
+                  f"add rule inet {table} paths ip saddr {peer_wan} ip daddr {host} meta l4proto udp counter name peer_recv comment \"p13-peer-recv\""]
+    if profile.get("hole"):
+        # UDP addressed to the router itself: a reply that no longer matches a NAT entry (the hole is gone).
+        lines.append(f"add rule inet {table} lanin ip daddr {wan_ip} meta l4proto udp counter name hole_in comment \"p13-hole-in\"")
     if profile.get("lan"):
         # LAN: Client (rtr_a ns) and Server (rtr_b ns) share one segment; count it on input, block the Client's Ygg dial on output.
         source, target = ("203.0.113.2", "203.0.113.1") if router == "rtr_a" else ("203.0.113.1", "203.0.113.2")
@@ -90,6 +122,10 @@ def rules(prefix, router, case, ports, purpose="product"):
         lines.append(f"add rule inet {table} lanout ip saddr {target} ip daddr {source} meta l4proto udp counter name lan_sent comment \"p13-lan-sent\"")
         if router == "rtr_a":
             lines.append(f"add rule inet {table} lanout ip daddr 203.0.113.10 tcp dport {ports['transit']} counter name tcp_drop drop comment \"p13-lan-ygg-block\"")
+        if profile.get("v6"):
+            mine, theirs = V6[router], V6["rtr_b" if router == "rtr_a" else "rtr_a"]
+            lines += [f"add rule inet {table} lanin ip6 saddr {theirs} ip6 daddr {mine} meta l4proto udp counter name lan6_native comment \"p13-lan6-native\"",
+                      f"add rule inet {table} lanout ip6 saddr {mine} ip6 daddr {theirs} meta l4proto udp counter name lan6_sent comment \"p13-lan6-sent\""]
     return "\n".join(lines) + "\n"
 
 
@@ -114,7 +150,7 @@ def snapshot(document, prefix, purpose):
     table = table_name(prefix)
     require(purpose in QUOTAS and type(document) is dict, "unreviewed quota snapshot")
     entries = document.get("nftables")
-    require(type(entries) is list and 1 <= len(entries) <= 64, "unbounded nft object inventory")
+    require(type(entries) is list and 1 <= len(entries) <= 96, "unbounded nft object inventory")
     counters, quotas, immutable, comments = {}, [], [], []
     for entry in entries:
         require(type(entry) is dict and len(entry) == 1, "malformed nft object")

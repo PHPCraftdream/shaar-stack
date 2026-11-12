@@ -1,4 +1,4 @@
-"""Root driver for the bounded privileged phase: four product cases plus three cleanup controls."""
+"""Root driver for the bounded privileged phase: one dispatch group of product cases plus three cleanup controls."""
 
 import argparse
 import json
@@ -22,6 +22,7 @@ import childman  # noqa: E402
 import contract  # noqa: E402
 import dynamic  # noqa: E402
 import kernel  # noqa: E402
+import natprobe  # noqa: E402
 import network  # noqa: E402
 import observe  # noqa: E402
 import preflight  # noqa: E402
@@ -46,10 +47,31 @@ PLAN = (
     ("live-failure", "fixture-fault", "native-signal", ("--fault-inject-fixture",)),
     ("interruption", "interrupt", "native-signal", ()),
 )
-# Each product case and each live-traffic control gets its own pair of per-router kernel quotas.
+
+
+def product(name):
+    return (name, "product", name, ())
+
+
+# Dispatch groups (selected by --group): the 12 accepted cases, and two groups for the remaining P13 rows. The cases of all
+# groups together would not fit the 20 minute phase, so each dispatch runs one group with the same three cleanup controls.
+NAT_CASES = ("dnat-cone-signal", "dnat-cone-standby", "dnat-sym-signal", "dnat-sym-standby",
+             "hole-signal", "hole-standby", "switch-signal", "switch-standby")
+FAULT_CASES = ("ipv6-signal", "ipv6-standby", "denied-native-signal", "recover-standby", "relay-full-signal", "relay-full-standby")
+GROUPS = {"base": PLAN,
+          "nat": (PLAN[0], *map(product, NAT_CASES), *PLAN[-2:]),
+          "faults": (PLAN[0], *map(product, FAULT_CASES), *PLAN[-2:])}
+
+
+def allocated(plan):
+    """Each product case and each live-traffic control gets its own pair of per-router kernel quotas."""
+    products = sum(1 for entry in plan if entry[1] == "product")
+    live = sum(1 for entry in plan if entry[1] in ("fixture-fault", "interrupt"))
+    return products * 2 * contract.PRODUCT_QUOTA + live * 2 * contract.FAULT_QUOTA
+
+
 PRODUCTS = sum(1 for entry in PLAN if entry[1] == "product")
-LIVE_CONTROLS = sum(1 for entry in PLAN if entry[1] in ("fixture-fault", "interrupt"))
-ALLOCATED_BYTES = PRODUCTS * 2 * contract.PRODUCT_QUOTA + LIVE_CONTROLS * 2 * contract.FAULT_QUOTA
+ALLOCATED_BYTES = allocated(PLAN)
 BASE_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 
 
@@ -179,11 +201,13 @@ def namespaces(tools):
 
 
 def precheck_rulesets(prefix):
-    """Every generated ruleset: cases x 2 routers x {product, fault}, both calibration tables, observation and dynamic blocks."""
+    """Every generated ruleset: cases x 2 routers x {product, fault}, both calibration tables, NAT probes, observation and dynamic blocks."""
     ports = {"dht": 42001, "relay": 42002, "transit": 42003}
     found = [(f"{case}/{router}/{purpose}", network.rules(prefix, router, case, ports, purpose))
              for case in sorted(contract.CASES) for router in ("rtr_a", "rtr_b") for purpose in ("product", "fault")]
     found += [(f"calibration/{host}", kernel.probe_rules(prefix, contract.IPS[host])[1]) for host in ("host_a", "host_b")]
+    found += [(f"natprobe/{flavor}", natprobe.rules(prefix, flavor, contract.IPS["host_a"], contract.IPS["rtr_a_wan"]))
+              for flavor in sorted(natprobe.STATEMENTS)]
     found.append(("observation", observe.rules(prefix)))
     found += [(f"dynamic/{kind}", dynamic.rules(prefix, kind, ports)) for kind in dynamic.KINDS]
     return found
@@ -220,9 +244,10 @@ def run_precheck(summary, tools):
     return summary["syntax_precheck"]["status"] == "pass"
 
 
-def phase(source, manifest_path, out):
+def phase(source, manifest_path, out, group="base"):
     started = time.monotonic()
     end = started + contract.PHASE_SECONDS
+    plan = GROUPS[group]
     manifest = contract.bounded_json(manifest_path)
     products = contract.validate_manifest(manifest, source)
     ip = preflight.trusted_tool("ip")
@@ -236,11 +261,11 @@ def phase(source, manifest_path, out):
            "FIXTURE_PRODUCT_SOURCE": source, "FIXTURE_PRODUCT_MANIFEST": str(Path(manifest_path).resolve())}
     out.mkdir(exist_ok=True)
     summary = {"schema": 1, "scope": "controlled-product-matrix-phase", "source_revision": source,
-               "runner_image": os.environ.get("ImageVersion", "unknown")[:200], "allocated_forward_bytes": ALLOCATED_BYTES,
+               "runner_image": os.environ.get("ImageVersion", "unknown")[:200], "group": group, "allocated_forward_bytes": allocated(plan),
                "products": {name: item["sha256"] for name, item in products.items()}, "invocations": [], "status": "fail"}
     summary["namespaces_before"] = namespaces(tools)
     try:
-        for entry in PLAN if run_precheck(summary, tools) else ():
+        for entry in plan if run_precheck(summary, tools) else ():
             budget = CONTROL_SECONDS if entry[1] != "product" else contract.CASE_SECONDS
             remaining = end - time.monotonic() - contract.CLEANUP_RESERVE
             if remaining < budget:
@@ -255,7 +280,7 @@ def phase(source, manifest_path, out):
         summary["artifact_bytes"] = tree_bytes(out)
         summary["elapsed_seconds"] = time.monotonic() - started
         summary["forwarded_bytes_observed"] = sum(item.get("verified", {}).get("forwarded_bytes", 0) for item in summary["invocations"])
-        complete = [item["name"] for item in summary["invocations"]] == [entry[0] for entry in PLAN]
+        complete = [item["name"] for item in summary["invocations"]] == [entry[0] for entry in plan]
         summary["status"] = "pass" if (complete and summary.get("syntax_precheck", {}).get("status") == "pass" and all(item["status"] == "pass" for item in summary["invocations"])
                                        and summary["namespaces_before"] == summary["namespaces_after"]
                                        and summary["artifact_bytes"] <= ARTIFACT_BYTES
@@ -268,11 +293,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True)
     parser.add_argument("--manifest", required=True)
+    parser.add_argument("--group", choices=sorted(GROUPS), default="base")
     arguments = parser.parse_args()
     contract.require(contract.hex_value(arguments.source, 40), "source must be the exact reviewed commit SHA")
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, interrupted)
-    summary = phase(arguments.source, arguments.manifest, TOPOLOGY / "out")
+    summary = phase(arguments.source, arguments.manifest, TOPOLOGY / "out", arguments.group)
     print(json.dumps({"status": summary["status"], "invocations": {item["name"]: item["status"] for item in summary["invocations"]}}))
     return 0 if summary["status"] == "pass" else 1
 

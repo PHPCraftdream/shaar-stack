@@ -42,12 +42,26 @@ class ConfigTests(unittest.TestCase):
                 self.assertIn(f"fallback: {spec['mode']}\n", client)
                 self.assertNotIn("server_address", client)
                 self.assertNotIn("target", client)
-                self.assertIn(f"bind: {contract.ip_for(contract.client_ns(spec))}:0\n", client)
+                self.assertIn(f"bind: {contract.client_bind(spec)}:0\n", client)
                 for text in (server, client):
                     self.assertIn(f"203.0.113.10:{PORTS['dht']}\n", text)
                     self.assertIn(f"relay: {RELAY}\nrelay_address: 203.0.113.10:{PORTS['relay']}\n", text)
                     self.assertIn(f"tcp://203.0.113.10:{PORTS['transit']}\n", text)
                     self.assertTrue(text.endswith("}\n"))
+
+    def test_wildcard_client_bind_and_filler_namespace_follow_the_case_only(self):
+        switch = configs.client_text("switch-standby", KEY, "/w/keys/client.key", PORTS, RELAY)
+        self.assertEqual(switch.count("bind: 0.0.0.0:0\n"), 2)
+        self.assertNotIn("bind: 10.0.1.2", switch)
+        filler = configs.server_text("relay-full-signal", "/w/keys/filler1.key", "/w/allow.txt", PORTS, RELAY, ns="wan")
+        self.assertEqual(filler.count("bind: 203.0.113.10:0\n"), 2)
+        self.assertIn("fallback: signal\n", filler)
+        self.assertIn("key_file:: /w/keys/filler1.key\n", filler)
+        default = configs.server_text("dnat-cone-signal", "/w/keys/server.key", "/w/allow.txt", PORTS, RELAY)
+        self.assertEqual(default.count("bind: 10.0.2.2:0\n"), 2)
+        self.assertEqual(configs.client_text("lan-signal", KEY, "/w/keys/client.key", PORTS, RELAY).count("bind: 203.0.113.1:0\n"), 2)
+        with self.assertRaises(ValueError):
+            configs.network_text("198.51.100.7", PORTS, RELAY)
 
     def test_untrusted_paths_keys_peers_and_ports_cannot_reshape_the_config(self):
         for path in ("relative/key", "/w/key file", "/w/../key", "/w/key\nfallback: x", "", 7):
@@ -159,6 +173,29 @@ class KernelTests(unittest.TestCase):
         self.assertEqual([argv for argv, _ in calls], [
             ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-a", "/usr/sbin/ip", "addr", "flush", "dev", "snaabbccra1"],
             ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-b", "/usr/sbin/ip", "addr", "flush", "dev", "snaabbccrb1"]])
+
+    def test_new_row_setup_commands_stay_inside_owned_namespaces_and_interfaces(self):
+        cfg = {"prefix": "snaabbcc", "ip": contract.IPS, "ns": {key: "snaabbcc-" + value for key, value in contract.SUFFIXES.items()}}
+        tools = {"ip": "/usr/sbin/ip", "nft": "/usr/sbin/nft"}
+        calls = []
+        stub = lambda argv, deadline, data=None, what="x": calls.append((argv, what)) or b""
+        with mock.patch.object(kernel, "checked", stub):
+            kernel.add_segment_v6(cfg, tools, 0)
+            flushed_at = kernel.flap_wan(cfg, tools, "rtr_b", 0)
+            switched_at = kernel.switch_client_address(cfg, tools, 0)
+        self.assertGreater(switched_at, 0)
+        self.assertLessEqual(flushed_at, switched_at)
+        self.assertEqual([argv for argv, _ in calls], [
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-a", "/usr/sbin/ip", "-6", "addr", "add", "2001:db8:13::1/64", "dev", "snaabbccra0", "nodad"],
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-b", "/usr/sbin/ip", "-6", "addr", "add", "2001:db8:13::2/64", "dev", "snaabbccrb0", "nodad"],
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-b", "/usr/sbin/ip", "link", "set", "dev", "snaabbccrb0", "down"],
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-b", "/usr/sbin/ip", "link", "set", "dev", "snaabbccrb0", "up"],
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-b", "/usr/sbin/ip", "route", "replace", "default", "via", "203.0.113.10", "dev", "snaabbccrb0"],
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-host-a", "/usr/sbin/ip", "addr", "del", "10.0.1.2/24", "dev", "snaabbccha"],
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-host-a", "/usr/sbin/ip", "addr", "add", "10.0.1.3/24", "dev", "snaabbccha"],
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-host-a", "/usr/sbin/ip", "route", "replace", "default", "via", "10.0.1.1", "dev", "snaabbccha"]])
+        with self.assertRaises(KeyError):
+            kernel.flap_wan(cfg, tools, "wan", 0)
 
     def test_nat_observation_requires_a_replied_published_native_tuple_in_the_fixed_range(self):
         ports = kernel.native_candidates(["203.0.113.10:40123", "203.0.113.10:42001", "10.0.2.2:40123", "127.0.0.1:9", "bad"], 42001)
@@ -274,6 +311,18 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(len(errors), 1, bad)
         _, errors = controller.child_report(self.children(("server", -15, ["TERM"])), spec, False)
         self.assertEqual(errors, [])
+
+    def test_child_report_expects_the_typed_server_failure_and_the_recovery_client_pair(self):
+        spec = contract.CASES["relay-full-signal"]
+        ok = self.children(("wan", 0, []), ("filler1", 0, []), ("filler2", 0, []), ("server", 1, []))
+        self.assertEqual(controller.child_report(ok, spec, True)[1], [])
+        self.assertEqual(len(controller.child_report(self.children(("server", 0, [])), spec, True)[1]), 1)
+        self.assertEqual(len(controller.child_report(self.children(("filler1", 1, [])), spec, True)[1]), 1)
+        recover = contract.CASES["recover-standby"]
+        fine = self.children(("client", 1, []), ("client2", 0, []), ("server", 0, []))
+        self.assertEqual(controller.child_report(fine, recover, True)[1], [])
+        swapped = self.children(("client", 0, []), ("client2", 1, []))
+        self.assertEqual(len(controller.child_report(swapped, recover, True)[1]), 2)
 
     def test_fault_and_hold_hooks_are_inert_unless_requested(self):
         controller.make_hook(False, False)()

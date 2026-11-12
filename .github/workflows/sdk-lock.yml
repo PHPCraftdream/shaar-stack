@@ -18,10 +18,19 @@ on:
         type: boolean
         default: false
       controlled_network_matrix:
-        description: Run the four bounded privileged product cases and cleanup controls on this disposable runner
+        description: Run one group of bounded privileged product cases and the cleanup controls on this disposable runner
         required: false
         type: boolean
         default: false
+      controlled_network_group:
+        description: Case group of the privileged matrix (base, nat or faults); used only with controlled_network_matrix
+        required: false
+        type: choice
+        options:
+          - base
+          - nat
+          - faults
+        default: base
 
 permissions:
   contents: read
@@ -190,11 +199,12 @@ jobs:
         timeout-minutes: 22
         env:
           SOURCE_REVISION: ${{ inputs.source_revision }}
+          MATRIX_GROUP: ${{ inputs.controlled_network_group }}
         run: |
           set -euo pipefail
           sudo -n true
           sudo -n -E env PATH="$PATH" "$(command -v python)" -I .github/probes/nat-topology/quic/product/runtime/phase.py \
-            --source "$SOURCE_REVISION" --manifest "$PWD/target/ci-product/manifest.json"
+            --source "$SOURCE_REVISION" --manifest "$PWD/target/ci-product/manifest.json" --group "$MATRIX_GROUP"
       - name: Preserve controlled-network evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -79,7 +79,8 @@ def make_hook(fault, hold):
 def child_report(supervisor, spec, passed):
     entries, errors = [], []
     for child in supervisor.children:
-        expected = {"client": spec["client_exit"], "client2": spec.get("client2_exit", 0)}.get(child.name, 0)
+        expected = {"client": spec["client_exit"], "client2": spec.get("client2_exit", 0),
+                    "server": spec.get("server_exit", 0)}.get(child.name, 0)
         failure = None
         if passed and (child.returncode != expected or child.signals):
             failure = f"unexpected exit {child.returncode} or escalation {child.signals}"
