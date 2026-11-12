@@ -32,11 +32,14 @@ def privilege_evidence(text, pid, uid, gid):
     return {"pid": pid, "uid": uid, "gid": gid, "capabilities": 0, "no_new_privileges": True}
 
 
-def namespace_command(config, namespace, executable, arguments, ip, setpriv):
+def namespace_command(config, namespace, executable, arguments, ip, setpriv, lan=False):
     prefix = config.get("prefix", "")
     if re.fullmatch(r"sn[0-9a-f]{6}", prefix) is None:
         raise ValueError("invalid owned namespace prefix")
     suffixes = {"wan": "wan", "host_a": "host-a", "host_b": "host-b"}
+    if lan:
+        # LAN cases run the unprivileged products as hosts on the router namespaces' shared segment.
+        suffixes.update(rtr_a="rtr-a", rtr_b="rtr-b")
     if namespace not in suffixes or config.get("ns", {}).get(namespace) != prefix + "-" + suffixes[namespace]:
         raise ValueError("ordinary child namespace is not an owned product role")
     uid, gid = config.get("helper_uid"), config.get("helper_gid")

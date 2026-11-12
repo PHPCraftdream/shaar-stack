@@ -11,7 +11,7 @@ import time
 import types
 import unittest
 
-spec = importlib.util.spec_from_file_location("shaar_product_processes", Path(__file__).with_name("processes.py"))
+spec = importlib.util.spec_from_file_location("shaar_product_processes", Path(__file__).resolve().parents[2] / "processes.py")
 processes = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = processes
 spec.loader.exec_module(processes)
@@ -52,6 +52,15 @@ class PrivilegeTests(unittest.TestCase):
                 command(changed)
         with self.assertRaises(ValueError):
             command(config, role="rtr_a")
+        lan = {**config, "ns": {"rtr_a": "snaabbcc-rtr-a", "rtr_b": "snaabbcc-rtr-b", "rtr_off": "snaabbcc-rtr-off"}}
+        for role in ("rtr_a", "rtr_b"):
+            argv = processes.namespace_command(lan, role, "/reviewed/client", [], "/usr/sbin/ip", "/usr/bin/setpriv", lan=True)
+            self.assertEqual(argv[:4], ["/usr/sbin/ip", "netns", "exec", lan["ns"][role]])
+            self.assertIn("--no-new-privs", argv)
+            with self.assertRaises(ValueError):
+                processes.namespace_command(lan, role, "/reviewed/client", [], "/usr/sbin/ip", "/usr/bin/setpriv")
+        with self.assertRaises(ValueError):
+            processes.namespace_command(lan, "rtr_off", "/reviewed/client", [], "/usr/sbin/ip", "/usr/bin/setpriv", lan=True)
         with self.assertRaises(ValueError):
             command(config, product="relative-client")
 

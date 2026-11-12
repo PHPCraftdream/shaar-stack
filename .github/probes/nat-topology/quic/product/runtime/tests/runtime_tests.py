@@ -36,13 +36,13 @@ class ConfigTests(unittest.TestCase):
                 client = configs.client_text(case, KEY, "/w/keys/client.key", PORTS, RELAY)
                 self.assertIn(f"target: 127.0.0.1:{contract.TARGET_PORT}\n", server)
                 self.assertIn(f"fallback: {spec['mode']}\n", server)
-                self.assertIn(f"bind: {contract.IPS[spec['server_ns']]}:0\n", server)
+                self.assertIn(f"bind: {contract.ip_for(spec['server_ns'])}:0\n", server)
                 self.assertIn("allowlist_path:: /w/allow.txt\n", server)
                 self.assertIn(f"server: {KEY}\nlisten: 127.0.0.1:{contract.FRONT_PORT}\n", client)
                 self.assertIn(f"fallback: {spec['mode']}\n", client)
                 self.assertNotIn("server_address", client)
                 self.assertNotIn("target", client)
-                self.assertIn(f"bind: {contract.IPS['host_a']}:0\n", client)
+                self.assertIn(f"bind: {contract.ip_for(contract.client_ns(spec))}:0\n", client)
                 for text in (server, client):
                     self.assertIn(f"203.0.113.10:{PORTS['dht']}\n", text)
                     self.assertIn(f"relay: {RELAY}\nrelay_address: 203.0.113.10:{PORTS['relay']}\n", text)
@@ -150,6 +150,16 @@ class KernelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             kernel.ns_argv(tools, {**cfg, "ns": {**cfg["ns"], "rtr_a": "default"}}, "rtr_a", "/bin/true")
 
+    def test_lan_isolation_flushes_only_the_router_lan_side_interfaces(self):
+        cfg = {"prefix": "snaabbcc", "ns": {key: "snaabbcc-" + value for key, value in contract.SUFFIXES.items()}}
+        tools = {"ip": "/usr/sbin/ip", "nft": "/usr/sbin/nft"}
+        calls = []
+        with mock.patch.object(kernel, "checked", lambda argv, deadline, data=None, what="x": calls.append((argv, what)) or b""):
+            kernel.isolate_segment(cfg, tools, 0)
+        self.assertEqual([argv for argv, _ in calls], [
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-a", "/usr/sbin/ip", "addr", "flush", "dev", "snaabbccra1"],
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-b", "/usr/sbin/ip", "addr", "flush", "dev", "snaabbccrb1"]])
+
     def test_nat_observation_requires_a_replied_published_native_tuple_in_the_fixed_range(self):
         ports = kernel.native_candidates(["203.0.113.10:40123", "203.0.113.10:42001", "10.0.2.2:40123", "127.0.0.1:9", "bad"], 42001)
         self.assertEqual(ports, [40123])
@@ -194,12 +204,22 @@ class CaseTests(unittest.TestCase):
                 runcase.app_expectation(contract.CASES["native-signal"], {**ok, field: value})
         closed = {"nonce": NONCE, "denied": True, "reply_bytes": 0, "terminal": "eof"}
         runcase.app_expectation(contract.CASES["blocked-signal"], closed)
+        # The failover case accepts 1 stream in signal mode, yet its post-block APP must fail closed.
+        runcase.app_expectation(contract.CASES["failover-signal"], closed, ok=False)
+        runcase.app_expectation(contract.CASES["failover-signal"], ok, ok=True)
+        with self.assertRaises(ValueError):
+            runcase.app_expectation(contract.CASES["failover-signal"], ok, ok=False)
         for field, value in (("denied", False), ("reply_bytes", 1), ("terminal", "timeout")):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 runcase.app_expectation(contract.CASES["blocked-signal"], {**closed, field: value})
         receipt = {"accepts": 1, "request_bytes": len(request), "reply_bytes": len(reply)}
         runcase.target_expectation(contract.CASES["blocked-standby"], NONCE, receipt)
         runcase.target_expectation(contract.CASES["blocked-signal"], NONCE, {"accepts": 0, "request_bytes": 0, "reply_bytes": 0})
+        triple = {"accepts": 3, "request_bytes": 3 * len(request), "reply_bytes": 3 * len(reply)}
+        runcase.target_expectation(contract.CASES["failover-standby"], NONCE, triple)
+        for changed in ({"accepts": 2}, {"request_bytes": len(request)}, {"reply_bytes": 0}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                runcase.target_expectation(contract.CASES["failover-standby"], NONCE, {**triple, **changed})
         for spec, changed in (("blocked-standby", {"accepts": 2}), ("blocked-standby", {"reply_bytes": 0}),
                               ("blocked-signal", {"accepts": 1}), ("blocked-signal", {"request_bytes": 1})):
             base = receipt if spec == "blocked-standby" else {"accepts": 0, "request_bytes": 0, "reply_bytes": 0}
@@ -241,6 +261,13 @@ class ControllerTests(unittest.TestCase):
         entries, errors = controller.child_report(ok, spec, True)
         self.assertEqual((len(entries), errors), (3, []))
         self.assertTrue(all(item["error"] is None for item in entries))
+        second = contract.CASES["denied-blocked-standby"]
+        fine = self.children(("client", 0, []), ("client2", 1, []), ("app2", 0, []), ("server", 0, []))
+        self.assertEqual(controller.child_report(fine, second, True)[1], [])
+        for name, code in (("client", 1), ("client2", 0)):
+            changed = self.children(("client", 0, []), ("client2", 1, []))
+            changed.children[0 if name == "client" else 1].returncode = code
+            self.assertEqual(len(controller.child_report(changed, second, True)[1]), 1, name)
         for bad in (("client", 0, []), ("server", 1, []), ("wan", 0, ["TERM"]), ("wan", -15, ["TERM"])):
             changed = self.children(("client", 1, []), bad)
             _, errors = controller.child_report(changed, spec, True)

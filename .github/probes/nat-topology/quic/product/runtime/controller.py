@@ -79,7 +79,7 @@ def make_hook(fault, hold):
 def child_report(supervisor, spec, passed):
     entries, errors = [], []
     for child in supervisor.children:
-        expected = spec["client_exit"] if child.name == "client" else 0
+        expected = {"client": spec["client_exit"], "client2": spec.get("client2_exit", 0)}.get(child.name, 0)
         failure = None
         if passed and (child.returncode != expected or child.signals):
             failure = f"unexpected exit {child.returncode} or escalation {child.signals}"
@@ -97,6 +97,9 @@ def diagnostics(cfg, tools, root):
         try:
             text = json.dumps(kernel.snapshot(cfg, tools, router, deadline))
             (root / f"failure-nft-{router}.json").write_text(text[:contract.MAX_REPORT], encoding="utf-8")
+            for name, argv in (("neigh", ["neigh", "show"]), ("link", ["-s", "-o", "link", "show"])):
+                out = kernel.checked([tools["ip"], "-n", cfg["ns"][router], *argv], deadline, what="diagnostic " + name)
+                (root / f"failure-{name}-{router}.txt").write_bytes(out[:contract.MAX_REPORT])
             lines = kernel.conntrack_lines(cfg, tools, router, deadline)
             (root / f"failure-conntrack-{router}.txt").write_text("\n".join(lines[:256]) + "\n", encoding="utf-8")
         except Exception as error:  # noqa: BLE001 - diagnostics must not mask the original failure

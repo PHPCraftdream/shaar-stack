@@ -15,26 +15,41 @@ HERE = Path(__file__).resolve().parent
 TOPOLOGY = HERE.parents[2]
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE.parent / "flows"))
 sys.path.insert(0, str(TOPOLOGY))
+import verdicts  # noqa: E402
 import childman  # noqa: E402
 import contract  # noqa: E402
+import dynamic  # noqa: E402
 import kernel  # noqa: E402
 import network  # noqa: E402
+import observe  # noqa: E402
 import preflight  # noqa: E402
 
 ARTIFACT_BYTES = 64 * 1024 * 1024
 CONTROL_SECONDS = 60
-ALLOCATED_BYTES = 4 * 2 * contract.PRODUCT_QUOTA + 2 * 2 * contract.FAULT_QUOTA
-# (name, kind, case, run.sh flags); order keeps cheap cleanup proof ahead of product traffic.
+# (name, kind, case, run.sh flags); order keeps cheap cleanup proof ahead of product traffic and the slowest cases last.
 PLAN = (
     ("setup-failure", "setup-fault", "native-signal", ("--fault-inject-setup",)),
     ("native-signal", "product", "native-signal", ()),
     ("native-standby", "product", "native-standby", ()),
     ("blocked-standby", "product", "blocked-standby", ()),
     ("blocked-signal", "product", "blocked-signal", ()),
+    ("lan-signal", "product", "lan-signal", ()),
+    ("lan-standby", "product", "lan-standby", ()),
+    ("relay-denied-signal", "product", "relay-denied-signal", ()),
+    ("failover-standby", "product", "failover-standby", ()),
+    ("failover-signal", "product", "failover-signal", ()),
+    ("denied-blocked-standby", "product", "denied-blocked-standby", ()),
+    ("dht-drop-signal", "product", "dht-drop-signal", ()),
+    ("outage-standby", "product", "outage-standby", ()),
     ("live-failure", "fixture-fault", "native-signal", ("--fault-inject-fixture",)),
     ("interruption", "interrupt", "native-signal", ()),
 )
+# Each product case and each live-traffic control gets its own pair of per-router kernel quotas.
+PRODUCTS = sum(1 for entry in PLAN if entry[1] == "product")
+LIVE_CONTROLS = sum(1 for entry in PLAN if entry[1] in ("fixture-fault", "interrupt"))
+ALLOCATED_BYTES = PRODUCTS * 2 * contract.PRODUCT_QUOTA + LIVE_CONTROLS * 2 * contract.FAULT_QUOTA
 BASE_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 
 
@@ -68,21 +83,13 @@ def verify_product_case(ev, case, source, nonce):
                      "router quota receipts missing or exhausted")
     observed = result.get("observations", {})
     contract.require(observed.get("target", {}).get("accepts") == spec["target_accepts"]
-                     and result.get("client_exit") == spec["client_exit"], "target accepts or Client exit differ")
+                     and result.get("client_exit") == contract.final_client_exit(spec), "target accepts or Client exit differ")
     uid = ev["config"]["helper_uid"]
-    contract.require(set(contract.IDENTITY_ROLES) <= set(result.get("identities", {}))
+    contract.require(set(contract.identity_roles(spec)) <= set(result.get("identities", {}))
                      and all(item["uid"] == uid and item["capabilities"] == 0 for item in result["identities"].values()),
                      "every owned child must have a verified unprivileged identity")
     counters = {router: item["counters"] for router, item in kernel_report.items()}
-    if spec["udp_blocked"]:
-        contract.require(counters["rtr_a"]["native_drop"]["packets"] > 0, "no dropped Native UDP attempt")
-        contract.require(all(item["native_snat"]["packets"] == 0 for item in counters.values()),
-                         "non-DHT UDP escaped the blockade")
-    else:
-        contract.require(counters["rtr_a"]["udp_nat"]["packets"] > 0 and counters["rtr_a"]["native_snat"]["packets"] > 0,
-                         "no real Native NAT observed by nft counters")
-        contract.require("native_nat_tuple" in observed or "native_nat_tuple_unavailable" in observed,
-                         "conntrack tuple outcome must be recorded either way")
+    verdicts.verify_class(spec, result, counters)
     return {"forwarded_bytes": result["forwarded_bytes"], "active_seconds": result["active_seconds"]}
 
 
@@ -172,11 +179,13 @@ def namespaces(tools):
 
 
 def precheck_rulesets(prefix):
-    """All 18 generated rulesets: 4 cases x 2 routers x {product, fault} plus both calibration tables."""
+    """Every generated ruleset: cases x 2 routers x {product, fault}, both calibration tables, observation and dynamic blocks."""
     ports = {"dht": 42001, "relay": 42002, "transit": 42003}
     found = [(f"{case}/{router}/{purpose}", network.rules(prefix, router, case, ports, purpose))
              for case in sorted(contract.CASES) for router in ("rtr_a", "rtr_b") for purpose in ("product", "fault")]
     found += [(f"calibration/{host}", kernel.probe_rules(prefix, contract.IPS[host])[1]) for host in ("host_a", "host_b")]
+    found.append(("observation", observe.rules(prefix)))
+    found += [(f"dynamic/{kind}", dynamic.rules(prefix, kind, ports)) for kind in dynamic.KINDS]
     return found
 
 

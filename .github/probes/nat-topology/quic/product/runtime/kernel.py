@@ -118,6 +118,13 @@ def install_rules(cfg, tools, router, case, ports, purpose, deadline):
     return {"router": router, "forwarding": readback, "rules_bytes": len(text)}
 
 
+def isolate_segment(cfg, tools, deadline):
+    """LAN cases: leave each router-namespace host with only its WAN-segment address (no unreachable LAN-side candidate)."""
+    for router, suffix in (("rtr_a", "ra1"), ("rtr_b", "rb1")):
+        checked(ns_argv(tools, cfg, router, tools["ip"], "addr", "flush", "dev", cfg["prefix"] + suffix), deadline,
+                what="LAN-side address flush " + router)
+
+
 def snapshot(cfg, tools, router, deadline):
     plan = network.commands(cfg, router, tools["nft"], tools["ip"])
     return json.loads(checked(plan["snapshot"], deadline, what="nft snapshot"))
