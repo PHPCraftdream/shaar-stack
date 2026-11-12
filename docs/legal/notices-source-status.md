@@ -298,8 +298,8 @@ The 515-archive tranche now preserves 894 materials / 4,421,514 bytes; including
 
 ## N2 notices assembly pointer — 2026-11-12
 
-Per-target notices assembly, the applicable sets (403 third-party identities on
-`x86_64-unknown-linux-gnu`, 404 on `x86_64-pc-windows-msvc`), the 13 gaps classified not
-distributed and the 5 remaining distributed blockers (`base45`, `enum-assoc`,
-`futures-bounded`, `if-watch`, `ring`) are recorded in `notice-evidence.md` under
-"Deterministic notices assembly and check". The corpus itself is unchanged.
+Per-target notices assembly, the applicable sets (372 third-party identities on each of
+`x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`, per Cargo's own tree), the 13 gaps
+classified not distributed and the 5 remaining distributed blockers (`base45`,
+`enum-assoc`, `futures-bounded`, `if-watch`, `ring`) are recorded in `notice-evidence.md`
+under "Deterministic notices assembly and check". The corpus itself is unchanged.

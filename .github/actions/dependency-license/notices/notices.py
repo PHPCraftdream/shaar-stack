@@ -1,7 +1,7 @@
 """Generate and check per-target THIRD-PARTY-NOTICES for the shipped binaries.
 
     notices.py generate --root . --metadata M --lock Cargo.lock --out DIR [--manifest-only]
-    notices.py check    --root . --metadata M --lock Cargo.lock --out DIR [--tree TARGET=FILE] [--release]
+    notices.py check    --root . --metadata M --lock Cargo.lock --out DIR [--tree TARGET=FILE] [--evaluator-only] [--release]
 
 Stdlib only; run with `python -I -X utf8`. Never touches the network.
 """
@@ -56,11 +56,10 @@ def check_gap_policy(policy, entries):
                           % (sorted(missing - reviewed), sorted(reviewed - missing)))
 
 
-def resolve_rows(sets, entries, lock, first_party):
+def resolve_entries(linked, entries, lock, first_party):
     """Map linked package keys to corpus entries; unknown identities fail closed."""
-    rows, excluded = [], 0
-    union = set().union(*sets.values())
-    for key in sorted(union, key=lambda k: (k[0], k[1], k[2] or "")):
+    found, excluded = [], 0
+    for key in sorted(linked, key=lambda k: (k[0], k[1], k[2] or "")):
         name, version, source = key
         if source is None and (name, version) in first_party:
             excluded += 1
@@ -72,39 +71,53 @@ def resolve_rows(sets, entries, lock, first_party):
             raise NoticeError("linked package %s %s has no corpus identity" % (name, version))
         if source is not None and lock.get(key) != entry.checksum:
             raise NoticeError("lock checksum differs from the corpus for %s %s" % (name, version))
-        rows.append((entry, tuple(sorted(p for p, s in sets.items() if key in s))))
-    return rows, excluded
+        found.append(entry)
+    return found, excluded
 
 
-def build_target(ctx, target):
+def linked_set(ctx, target, cfgs, tree):
+    """Cargo's own tree is authoritative; cfg evaluation is its superset (features are not modelled)."""
+    products = ctx["policy"]["products"]
+    evaluated = set().union(*graph.closure(ctx["metadata"], products, target, cfgs).values())
+    if tree is None:
+        return evaluated, "cfg-evaluation"
+    linked = graph.tree_keys(ctx["metadata"], graph.tree_identities(tree))
+    if not set(products) <= {key[0] for key in linked}:
+        raise NoticeError("cargo tree for %s does not contain every product" % target)
+    extra = linked - evaluated
+    if extra:
+        raise NoticeError("cargo tree links packages the cfg evaluation excluded for %s: %s" % (
+            target, sorted((k[0], k[1]) for k in extra)[:20]))
+    return linked, "cargo-tree"
+
+
+def build_target(ctx, target, tree=None):
     policy, root = ctx["policy"], ctx["root"]
     cfgs = cfg.parse_rustc_cfg(policy["targets"][target]["cfg"])
     products = policy["products"]
-    sets = graph.closure(ctx["metadata"], products, target, cfgs)
+    linked, source = linked_set(ctx, target, cfgs, tree)
     first_party = {tuple(x.split(" ")) for x in policy["first_party"]}
-    rows, excluded = resolve_rows(sets, ctx["entries"], ctx["lock"], first_party)
+    found, excluded = resolve_entries(linked, ctx["entries"], ctx["lock"], first_party)
     reasons = policy["gap_table"]
     blockers = [{"name": e.name, "version": e.version, "reason": reasons[(e.name, e.version)]}
-                for e, _ in rows if not e.complete]
-    linked = set().union(*sets.values())
-    present = {(e.name, e.version) for e, _ in rows}
+                for e in found if not e.complete]
+    present = {(e.name, e.version) for e in found}
     outside = [{"name": n, "version": v, "reason": reasons[(n, v)],
-                "boundary": [list(r) for r in graph.boundary(ctx["metadata"], (n, v), linked)]}
+                "boundary": [list(r) for r in graph.boundary(ctx["metadata"], (n, v), linked, target, cfgs)]}
                for (n, v) in sorted(reasons) if (n, v) not in present]
-    text, order = render.render_notices(root, target, products, rows, ctx["digests"], blockers)
+    text, order = render.render_notices(root, target, products, found, ctx["digests"], blockers)
     name = "THIRD-PARTY-NOTICES-%s.txt" % target
     fields = {
         "schema": 1, "generator": render.GENERATOR, "target": target, "products": products,
-        "inventories": ctx["digests"], "release_ready": not blockers,
-        "counts": {"third_party": len(rows), "complete": len(rows) - len(blockers), "blockers": len(blockers),
-                   "registry": sum(1 for e, _ in rows if e.kind == "registry"),
-                   "path": sum(1 for e, _ in rows if e.kind == "path"), "first_party_excluded": excluded,
-                   "per_product": {p: sum(1 for _, b in rows if p in b) for p in products}},
+        "inventories": ctx["digests"], "linked_source": source, "release_ready": not blockers,
+        "counts": {"third_party": len(found), "complete": len(found) - len(blockers), "blockers": len(blockers),
+                   "registry": sum(1 for e in found if e.kind == "registry"),
+                   "path": sum(1 for e in found if e.kind == "path"), "first_party_excluded": excluded},
         "blockers": blockers, "not_distributed": outside,
         "notices": {"file": name, "sha256": render.sha256(text), "bytes": len(text), "texts": len(order)},
     }
-    return {"name": name, "text": text, "manifest": render.render_manifest(fields, rows), "blockers": blockers,
-            "linked": {(k[0], k[1]) for k in linked}, "outside": outside, "count": len(rows)}
+    return {"name": name, "text": text, "manifest": render.render_manifest(fields, found), "blockers": blockers,
+            "linked": {(k[0], k[1]) for k in linked}, "outside": outside, "count": len(found)}
 
 
 def write_atomic(path, data):
@@ -118,14 +131,6 @@ def write_atomic(path, data):
         if os.path.exists(temporary):
             os.unlink(temporary)
         raise
-
-
-def compare_tree(result, tree_path):
-    """The evaluator's linked set must equal Cargo's own `cargo tree -e normal` for the target."""
-    expected = graph.tree_identities(read_input(tree_path).decode("utf-8"))
-    if expected != result["linked"]:
-        raise NoticeError("evaluated linked set differs from cargo tree: only-evaluated=%s only-cargo=%s" % (
-            sorted(result["linked"] - expected)[:20], sorted(expected - result["linked"])[:20]))
 
 
 def compare_record(root, target, result):
@@ -145,6 +150,8 @@ def main(argv=None):
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--manifest-only", action="store_true")
     parser.add_argument("--tree", action="append", default=[], metavar="TARGET=FILE")
+    parser.add_argument("--evaluator-only", action="store_true",
+                        help="check targets without a cargo tree using the cfg-evaluation superset")
     parser.add_argument("--release", action="store_true", help="also fail while distributed blockers remain")
     args = parser.parse_args(argv)
     root = args.root.resolve()
@@ -157,21 +164,26 @@ def main(argv=None):
         trees = dict(item.split("=", 1) for item in args.tree)
         if not set(trees) <= set(policy["targets"]):
             raise NoticeError("--tree names a target outside the policy")
-        failed = False
+        failed, verified = False, 0
         for target in sorted(policy["targets"]):
-            result = build_target(ctx, target)
+            if args.command == "check" and target not in trees and not args.evaluator_only:
+                print("%s: skipped (no cargo tree supplied; verified by the job running on that host)" % target)
+                continue
+            tree = read_input(trees[target]).decode("utf-8") if target in trees else None
+            result = build_target(ctx, target, tree)
             if not args.manifest_only:
                 write_atomic(args.out / result["name"], result["text"])
             write_atomic(args.out / ("manifest-%s.json" % target), result["manifest"])
             if args.command == "check":
                 compare_record(root, target, result)
-                if target in trees:
-                    compare_tree(result, trees[target])
+                verified += 1
             print("%s: %d third-party packages linked, %d release blockers, %d reviewed gaps not distributed" % (
                 target, result["count"], len(result["blockers"]), len(result["outside"])))
             for blocker in result["blockers"]:
                 print("  RELEASE BLOCKER %s %s: %s" % (blocker["name"], blocker["version"], blocker["reason"]))
             failed = failed or (args.release and bool(result["blockers"]))
+        if args.command == "check" and not verified:
+            raise NoticeError("no target was verified")
         return 1 if failed else 0
     except (NoticeError, corpus.CorpusError, graph.GraphError, cfg.CfgError, OSError, KeyError, ValueError) as error:
         print("notices: FAIL: %s" % error, file=sys.stderr)

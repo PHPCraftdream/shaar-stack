@@ -246,15 +246,32 @@ class GraphTests(unittest.TestCase):
             cfgs = notice_cfg.parse_rustc_cfg(env.policy()["targets"][LINUX]["cfg"])
             sets = notice_graph.closure(env.metadata(), self.PRODUCTS, LINUX, cfgs)
             linked = set().union(*sets.values())
-            rows = notice_graph.boundary(env.metadata(), ("gapmac", "1.0.0"), linked)
-        self.assertEqual(rows, [("shaar-server", "0.1.0", "gapmac", "1.0.0", "normal", 'cfg(target_os = "macos")')])
+            rows = notice_graph.boundary(env.metadata(), ("gapmac", "1.0.0"), linked, LINUX, cfgs)
+            self.assertEqual(rows, [("shaar-server", "0.1.0", "gapmac", "1.0.0", "normal",
+                                     'cfg(target_os = "macos")', False)])
+            # An edge the cfg allows but Cargo did not link is reported as feature-gated.
+            narrowed = {key for key in linked if key[0] != "pathcrate"}
+            rows = notice_graph.boundary(env.metadata(), ("pathcrate", "2.0.0"), narrowed, LINUX, cfgs)
+            self.assertEqual(rows, [("shaar-server", "0.1.0", "pathcrate", "2.0.0", "normal", "", True)])
 
     def test_cargo_tree_output_is_parsed_and_rejects_garbage(self):
-        text = "shaar-server v0.1.0 (/w/crates/x)\nalpha v1.0.0\nmacro v2.0.0 (proc-macro) (*)\n\n"
+        text = ("shaar-server v0.1.0 (/w/crates/x)\nalpha v1.0.0\nmacro v2.0.0 (proc-macro) (*)\n"
+                "patched v3.0.0 (/w/target/p) (*)\n" + r"winpath v1.0.0 (D:\a\x)" + "\n\n")
         self.assertEqual(notice_graph.tree_identities(text),
-                         {("shaar-server", "0.1.0"), ("alpha", "1.0.0"), ("macro", "2.0.0")})
-        with self.assertRaises(notice_graph.GraphError):
-            notice_graph.tree_identities("garbage\n")
+                         {("shaar-server", "0.1.0", True), ("alpha", "1.0.0", False), ("macro", "2.0.0", False),
+                          ("patched", "3.0.0", True), ("winpath", "1.0.0", True)})
+        for bad in ("garbage\n", "v1.0.0\n", "name v\n"):
+            with self.subTest(bad), self.assertRaises(notice_graph.GraphError):
+                notice_graph.tree_identities(bad)
+
+    def test_tree_identities_map_to_unique_metadata_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = Env(tmp).metadata()
+        keys = notice_graph.tree_keys(meta, {("alpha", "1.0.0", False), ("pathcrate", "2.0.0", True)})
+        self.assertEqual(keys, {("alpha", "1.0.0", SRC), ("pathcrate", "2.0.0", None)})
+        for shape in (("alpha", "1.0.0", True), ("ghost", "1.0.0", False), ("alpha", "9.9.9", False)):
+            with self.subTest(shape), self.assertRaises(notice_graph.GraphError):
+                notice_graph.tree_keys(meta, {shape})
 
     def test_lock_requires_unique_identities(self):
         with self.assertRaises(notice_graph.GraphError):
@@ -392,11 +409,9 @@ class GeneratorTests(unittest.TestCase):
         names = lambda m: {i["name"] for i in m["identities"]}  # noqa: E731
         self.assertEqual(names(linux), {"alpha", "pathcrate"})
         self.assertEqual(names(windows), {"alpha", "pathcrate", "beta", "gapw"})
-        self.assertEqual(linux["counts"]["per_product"], {"shaar-client": 1, "shaar-server": 2})
-        self.assertEqual(windows["counts"]["per_product"], {"shaar-client": 1, "shaar-server": 4})
+        self.assertEqual((linux["counts"]["third_party"], windows["counts"]["third_party"]), (2, 4))
         self.assertEqual(linux["counts"]["first_party_excluded"], 2)
-        alpha = next(i for i in linux["identities"] if i["name"] == "alpha")
-        self.assertEqual(alpha["products"], ["shaar-client", "shaar-server"])
+        self.assertEqual(linux["linked_source"], "cfg-evaluation")
         self.assertEqual([i["kind"] for i in linux["identities"]], ["registry", "path"])
         self.assertTrue(linux["release_ready"])
         self.assertFalse(windows["release_ready"])
@@ -410,11 +425,11 @@ class GeneratorTests(unittest.TestCase):
         outside = {o["name"]: o for o in linux["not_distributed"]}
         self.assertEqual(set(outside), {"gapw", "gapmac"})
         self.assertEqual(outside["gapw"]["boundary"],
-                         [["shaar-server", "0.1.0", "gapw", "1.0.0", "normal", "cfg(windows)"]])
+                         [["shaar-server", "0.1.0", "gapw", "1.0.0", "normal", "cfg(windows)", False]])
         self.assertEqual([o["name"] for o in windows["not_distributed"]], ["gapmac"])
         notice = (self.env.tmp / "out" / ("THIRD-PARTY-NOTICES-%s.txt" % WINDOWS)).read_text("utf-8")
         self.assertIn("RELEASE BLOCKERS", notice)
-        self.assertIn("gapw 1.0.0 | MIT | registry | shaar-server INCOMPLETE | -", notice)
+        self.assertIn("gapw 1.0.0 | MIT | registry INCOMPLETE | -", notice)
 
     def test_unlinked_identities_never_reach_the_output(self):
         out = self.generate()
@@ -431,7 +446,7 @@ class CheckTests(unittest.TestCase):
         self.env.record()
 
     def check(self, *extra):
-        return run(*self.env.args("check", "checked", *extra))
+        return run(*self.env.args("check", "checked", "--evaluator-only", *extra))
 
     def test_matching_record_passes_and_reports_blockers_without_failing(self):
         code, out, err = self.check()
@@ -506,24 +521,85 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("unsupported package source", err)
 
-    def test_cargo_tree_cross_check(self):
-        good = "shaar-server v0.1.0 (/w)\nalpha v1.0.0\npathcrate v2.0.0 (/w/p)\nshaar-client v0.1.0 (/w)\nalpha v1.0.0 (*)\n"
-        tree = self.env.tmp / "tree.txt"
-        tree.write_text(good, "utf-8")
-        self.assertEqual(self.check("--tree", "%s=%s" % (LINUX, tree))[0], 0)
-        tree.write_text(good + "extra v1.0.0\n", "utf-8")
-        code, _, err = self.check("--tree", "%s=%s" % (LINUX, tree))
-        self.assertEqual(code, 1)
-        self.assertIn("differs from cargo tree", err)
-        missing = "".join(line + "\n" for line in good.splitlines() if not line.startswith("alpha"))
-        tree.write_text(missing, "utf-8")
-        self.assertEqual(self.check("--tree", "%s=%s" % (LINUX, tree))[0], 1)
-        self.assertEqual(self.check("--tree", "aarch64-apple-darwin=%s" % tree)[0], 1)
-
     def test_stale_inventory_digest_invalidates_the_record(self):
         inventory = self.env.base / "registry/inventory.json"
         inventory.write_text(inventory.read_text("utf-8") + " ", "utf-8")
         self.assertEqual(self.check()[0], 1)
+
+
+class TreeTests(unittest.TestCase):
+    """Cargo's own tree is the authoritative linked set; the cfg evaluation is only its superset."""
+
+    LINUX_TREE = ("shaar-server v0.1.0 (/w/s)\nalpha v1.0.0\npathcrate v2.0.0 (/w/p)\n"
+                  "shaar-client v0.1.0 (/w/c)\nalpha v1.0.0 (*)\n")
+    WINDOWS_TREE = LINUX_TREE + "beta v1.0.0\ngapw v1.0.0\n"
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.env = Env(self.dir.name)
+        self.env.write()
+        self.trees = {LINUX: self.tree("linux.txt", self.LINUX_TREE), WINDOWS: self.tree("windows.txt", self.WINDOWS_TREE)}
+
+    def tree(self, name, text):
+        path = self.env.tmp / name
+        path.write_text(text, "utf-8")
+        return path
+
+    def flags(self, trees=None):
+        return [arg for target, path in (self.trees if trees is None else trees).items() for arg in ("--tree", "%s=%s" % (target, path))]
+
+    def record(self, trees=None):
+        code, _, err = run(*self.env.args("generate", "records", "--manifest-only", *self.flags(trees)))
+        self.assertEqual(code, 0, err)
+        for path in (self.env.tmp / "records").glob("manifest-*.json"):
+            (self.env.base / "release" / path.name).write_bytes(path.read_bytes())
+
+    def check(self, trees=None, *extra):
+        return run(*self.env.args("check", "checked", *self.flags(trees), *extra))
+
+    def test_record_from_trees_verifies_and_is_marked_authoritative(self):
+        self.record()
+        code, out, err = self.check()
+        self.assertEqual((code, err), (0, ""))
+        self.assertNotIn("skipped", out)
+        manifest = self.env.manifest("checked", LINUX)
+        self.assertEqual(manifest["linked_source"], "cargo-tree")
+        self.assertEqual({i["name"] for i in manifest["identities"]}, {"alpha", "pathcrate"})
+
+    def test_tree_narrower_than_the_evaluation_defines_the_notices(self):
+        narrow = self.tree("narrow.txt", self.LINUX_TREE.replace("pathcrate v2.0.0 (/w/p)\n", ""))
+        self.record({LINUX: narrow, WINDOWS: self.trees[WINDOWS]})
+        self.assertEqual({i["name"] for i in self.env.manifest("records", LINUX)["identities"]}, {"alpha"})
+        code, _, err = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("differs from the regenerated one", err)
+
+    def test_tree_linking_what_the_cfg_excludes_fails(self):
+        wrong = self.tree("wrong.txt", self.LINUX_TREE + "beta v1.0.0\n")
+        code, _, err = self.check({LINUX: wrong})
+        self.assertEqual(code, 1)
+        self.assertIn("excluded for %s: [('beta', '1.0.0')]" % LINUX, err)
+
+    def test_tree_without_the_products_or_with_unknown_packages_fails(self):
+        for name, text, message in (("empty.txt", "alpha v1.0.0\n", "every product"),
+                                    ("ghost.txt", self.LINUX_TREE + "ghost v1.0.0\n", "not a unique metadata package")):
+            with self.subTest(name):
+                code, _, err = self.check({LINUX: self.tree(name, text)})
+                self.assertEqual(code, 1)
+                self.assertIn(message, err)
+
+    def test_check_verifies_only_targets_with_a_tree_and_needs_at_least_one(self):
+        self.record()
+        code, out, _ = self.check({LINUX: self.trees[LINUX]})
+        self.assertEqual(code, 0)
+        self.assertIn("%s: skipped" % WINDOWS, out)
+        code, _, err = self.check({})
+        self.assertEqual(code, 1)
+        self.assertIn("no target was verified", err)
+        code, _, err = self.check({"aarch64-apple-darwin": self.trees[LINUX]})
+        self.assertEqual(code, 1)
+        self.assertIn("outside the policy", err)
 
 
 class RepositoryContractTests(unittest.TestCase):
@@ -568,20 +644,21 @@ class RepositoryContractTests(unittest.TestCase):
                 outside = {(o["name"], o["version"]) for o in manifest["not_distributed"]}
                 self.assertEqual(gaps | outside, set(self.policy["gap_table"]))
                 self.assertFalse(gaps & outside)
+                self.assertEqual(manifest["linked_source"], "cargo-tree")
                 for item in manifest["not_distributed"]:
-                    self.assertTrue(item["boundary"] or item["name"] == "ring", item["name"])
+                    self.assertTrue(item["boundary"], item["name"])
+                    self.assertFalse(any(row[6] for row in item["boundary"]), item["name"])
 
     def test_committed_notices_hash_is_reproduced_from_the_manifest_identities(self):
         for target in self.policy["targets"]:
             with self.subTest(target):
                 manifest = self.manifest(target)
-                rows = []
+                found = []
                 for item in manifest["identities"]:
-                    entry = next(e for e in self.entries.values()
-                                 if (e.name, e.version, e.kind) == (item["name"], item["version"], item["kind"]))
-                    rows.append((entry, tuple(item["products"])))
+                    found.append(next(e for e in self.entries.values()
+                                      if (e.name, e.version, e.kind) == (item["name"], item["version"], item["kind"])))
                 text, order = notice_render.render_notices(
-                    REPO, target, manifest["products"], rows, manifest["inventories"], manifest["blockers"])
+                    REPO, target, manifest["products"], found, manifest["inventories"], manifest["blockers"])
                 self.assertEqual(len(text), manifest["notices"]["bytes"])
                 self.assertEqual(sha(text), manifest["notices"]["sha256"])
                 self.assertEqual(len(order), manifest["notices"]["texts"])

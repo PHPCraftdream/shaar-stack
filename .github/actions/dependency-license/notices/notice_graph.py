@@ -73,8 +73,11 @@ def closure(metadata, roots, triple=None, cfgs=None):
     return out
 
 
-def boundary(metadata, target_name, linked):
-    """Edges from linked packages into the unlinked region above `target_name` (exact exclusion evidence)."""
+def boundary(metadata, target_name, linked, triple, cfgs):
+    """Edges from linked packages into the unlinked region above `target_name` (exact exclusion evidence).
+
+    The last column is true when a normal edge is allowed by the target cfg and was excluded by feature selection.
+    """
     packages, nodes, _ = index(metadata)
     ids = [i for i, key in packages.items() if key[:2] == target_name]
     parents = {}
@@ -94,19 +97,44 @@ def boundary(metadata, target_name, linked):
         for dep in deps:
             if dep["pkg"] in above and packages[dep["pkg"]] not in linked:
                 for kind in dep["dep_kinds"]:
+                    feature_gated = kind["kind"] is None and cfg.matches(kind["target"], triple, cfgs)
                     rows.add((packages[parent][0], packages[parent][1], packages[dep["pkg"]][0],
-                              packages[dep["pkg"]][1], kind["kind"] or "normal", kind["target"] or ""))
+                              packages[dep["pkg"]][1], kind["kind"] or "normal", kind["target"] or "", feature_gated))
     return sorted(rows)
 
 
 def tree_identities(text):
-    """Parse `cargo tree --prefix none --format '{p}'` output into a set of (name, version)."""
+    """Parse `cargo tree --prefix none --format '{p}'` into a set of (name, version, is_path)."""
     out = set()
-    for line in text.splitlines():
-        parts = line.split()
-        if not parts:
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
             continue
-        if len(parts) < 2 or not parts[1].startswith("v"):
-            raise GraphError("unexpected cargo tree line: %r" % line[:80])
-        out.add((parts[0], parts[1][1:]))
+        while True:
+            for suffix in (" (*)", " (proc-macro)"):
+                if line.endswith(suffix):
+                    line = line[: -len(suffix)]
+                    break
+            else:
+                break
+        name, separator, rest = line.partition(" v")
+        version, _, marker = rest.partition(" ")
+        if not separator or not name or not version or " " in name:
+            raise GraphError("unexpected cargo tree line: %r" % raw[:80])
+        out.add((name, version, bool(marker)))
+    return out
+
+
+def tree_keys(metadata, tree):
+    """Map cargo tree identities to metadata package keys (name, version, source)."""
+    packages, _, _ = index(metadata)
+    by_shape = {}
+    for key in packages.values():
+        by_shape.setdefault((key[0], key[1], key[2] is None), []).append(key)
+    out = set()
+    for shape in tree:
+        keys = by_shape.get(shape)
+        if not keys or len(keys) != 1:
+            raise GraphError("cargo tree package %s %s is not a unique metadata package" % shape[:2])
+        out.add(keys[0])
     return out

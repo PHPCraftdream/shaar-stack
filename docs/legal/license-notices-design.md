@@ -71,8 +71,8 @@ A later implementation should add a design-aligned generator/validator and CI-on
 The generator and check described above now exist for the two shipped binaries and two
 supported targets: `.github/actions/dependency-license/notices/` with a reviewed record in
 `docs/legal/notices-material/release/`, wired into the existing `dependency-license`
-action. Implemented: graph-derived per-target applicability (normal edges, target cfg
-evaluation, cross-check against `cargo tree`), byte-exact verbatim texts with size/hash
+action. Implemented: per-target applicability from Cargo's own normal-edge tree for each
+CI host, guarded by a target-cfg superset over the metadata graph, byte-exact verbatim texts with size/hash
 verification, stable ordering and hashes, fail-closed gap review, atomic output and
 tampering detection. Not implemented, still future work: packaging the notices next to a
 real distribution artifact, archive-to-prepared-tree binding at assembly time, SPDX
