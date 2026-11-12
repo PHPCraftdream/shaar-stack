@@ -398,3 +398,92 @@ Product findings worth keeping:
   types, and the likely cause of A5 is source-derived. The A2b proof uses an explicit hint.
 - Retained component results (E1) were not revalidated on a fresh SHA; a targeted
   pass is not full-sprint acceptance.
+
+## 11. P14 resources, complexity and performance (2026-11-12)
+
+Status: static review written; two defects fixed (compiled and tested only by CI,
+see the run list in the delivery report); **no measurement has been executed**.
+Budgets below are proposals awaiting the user's approval. Nothing here claims
+optimal complexity or lock-freedom.
+
+Step advanced: end-to-end step 6 (server forwards to the fixed target) and the
+efficiency criterion "bounded resource use per connection and per resolver".
+
+### 11.1 Static review findings
+
+Reviewed: native admission and forwarding, the composed server/client role loops,
+the signaling bridge and owner, the Yggdrasil carrier, the executor and the
+discovery publisher loop. Positive structure: every queue, map and task set found is
+fixed-size (admission pool at most 32 slots; 16 streams per session; JoinSet worker
+sets gated by `len() <` the limit; Ygg send queue 32, receive queue 16 per peer and
+16 peers; p2p bridge queue 32; executor 64 tasks; allowlist 256 keys; policy map keyed
+by allowlisted keys only), pumps are caller-driven, shutdown joins its tasks, and
+timers are event-driven (no polling loops; the only periodic work is the 60 s
+publication refresh and the 1 s retry of a pending close).
+
+| # | Severity | Location | Finding | State |
+|---|---|---|---|---|
+| 1 | High | `crates/shaar/src/network/admission/mod.rs:295-318`, `startup/role/server.rs:586` | `Endpoint::accept` awaits the whole inbound handshake (up to 10 s) before the next `Incoming` is taken, and charges a shared admission slot before authentication. One unvalidated or silent Initial stalls every new connection for up to 10 s (`admission/tests.rs:179` shows the 10 s deadline); a few packets per second keep it stalled or exhaust the 32-slot pool. Pre-auth availability, not a data leak. | reported |
+| 2 | Medium | `startup/role/client/run_loop.rs` local accept arm | A failing local `accept` (descriptor exhaustion fails again at once) re-entered the loop with no pause: busy loop plus a log line per iteration. | fixed: 10 ms doubling to 1 s, reset on success, shutdown stays responsive; unit tests `accept_backoff_tests` |
+| 3 | Medium | `network/forwarding/pump.rs` (`pump`) | Forwarded TCP sockets kept Nagle enabled, adding delayed-ACK latency to small interactive writes in both directions. | fixed: `set_nodelay(true)` on both the client-accepted and the server-connected socket; test `tuning_tests` (the helper contract; wiring by review) |
+| 4 | Medium | `crates/shaar-ygg/src/bridge/carrier_pump.rs:77-88` | One writer task serves all peers; a 1 s send timeout for one peer ends the writer and closes the whole carrier (`shared.close()`), so one stuck peer takes down the Yggdrasil path for all. Peers are allowlisted, so availability only. | reported |
+| 5 | Low | `startup/role/server.rs:253-322` | The loop rebuilds the native `accept()` each iteration; when another arm wins (Ygg accept, pump end) an in-flight native handshake is dropped (documented cancel-unsafe contract). Fix belongs with finding 1. | reported |
+| 6 | Low | `startup/role/server.rs:611,619,622,648,650`; `crates/shaar-server/src/main.rs:284` | One blocking `eprintln!` per failed or rejected handshake on an executor thread, unbounded rate under a handshake flood. | reported |
+| 7 | Low | `shaar-ygg/src/bridge/carrier_state.rs:226`, `shaar-p2p/src/bridge/state.rs:260` | `next()` rebuilds the 64-slot waiter array (about 1 KiB write) and scans it for every dequeued datagram even with no waiters: O(64) per packet. Candidate: waiter counter; measure first. | reported |
+| 8 | Low | `carrier_state.rs:193`, `datagrams.rs:102,305`, `shaar-p2p/src/bridge/state.rs:226` | One heap copy per datagram at queue admission, one for the carrier envelope and one at delivery (about three per Ygg datagram); bounded by the queues above, standby path only. | reported |
+| 9 | Low | `shaar-ygg/src/bridge/mod.rs:137` | The single reader answers an allowed peer's ping inline for up to 500 ms, delaying datagram reads. | reported |
+| 10 | Low | `crates/shaar-client/src/main.rs:318` | The legacy coordinator dials inside its select arm (up to attempts times 10 s), so worker reaping and session-loss detection pause meanwhile; shutdown is still observed. | reported |
+| 11 | Info | `network/forwarding/pump.rs`, `protocol.rs` | Per stream two 8 KiB `tokio::io::copy` buffers; setup is bounded to 10 s, an established stream has no idle deadline (bounded by 16 streams per session and the 5 s native QUIC idle timeout). | accepted |
+
+Hot-path complexity: per forwarded byte the SDK adds no per-packet work on Native
+(copy loop and QUIC only); admission and allowlist lookups are O(log n) with n at
+most 256; per-session state is O(1). Worst-case memory is bounded by transport
+windows: per session 1 MiB receive plus 1 MiB send, per stream 256 KiB receive
+window, 16 streams, so at most 32 sessions times 2 MiB = 64 MiB of QUIC window plus
+about 8 MiB of copy buffers and the Ygg queues (at most 32 datagrams sending and
+256 receiving, each up to the carrier MTU). These are bounds, not measurements.
+
+### 11.2 Proposed budgets (to be approved before any run)
+
+Environment: one GitHub-hosted `ubuntu-latest` runner, release build, loopback
+only, `/proc` sampling, 20 warm-up exchanges first. Idle window 30 s (direct) or 65 s
+(composed standby, to include a 60 s refresh). The first run is calibration; budgets
+are ceilings with roughly 2x margin and will be tightened from recorded values.
+
+| Budget | Direct | Composed standby |
+|---|---|---|
+| Steady RSS per process | at most 48 MiB | at most 96 MiB |
+| Peak RSS (VmHWM) after 64 MiB echo | at most 96 MiB | at most 160 MiB |
+| Idle CPU per process (one core) | at most 1.0% | at most 2.0% |
+| Server RSS added by the first session | at most 4 MiB | at most 4 MiB |
+| RSS per concurrent stream (16 held) | at most 512 KiB | at most 512 KiB |
+| New-connection round trip p95 (200 sequential) | at most 100 ms | at most 100 ms |
+| Bulk echo throughput (64 MiB) | at least 20 MiB/s | at least 20 MiB/s |
+| Back-pressure: bytes accepted by a never-reading target | at most 32 MiB | at most 32 MiB |
+| RSS growth during that stall | at most 12 MiB per process | at most 12 MiB per process |
+| Leak check after 15 (direct) or 6 (composed) client restarts | server fds at most +2, threads at most +2, RSS at most +max(4 MiB, 10%) | same |
+| Server stop to exit | at most 5 s | at most 5 s |
+
+Task count is observed through threads and descriptors only (a tokio task count is
+not visible from outside the process).
+
+### 11.3 Harness (not yet dispatched)
+
+`crates/shaar/tests/identity/process_smoke/composed/resources/` holds two ignored
+tests, `measure_resource_budget_direct` (legacy direct config) and
+`measure_resource_budget_composed` (standby over the owned relay, Mainline fixture
+and Yggdrasil transit, reusing the P13 composed fixtures), plus `/proc` sampling and
+traffic helpers with their own unit tests. They run only through
+`.github/ci/run.py resource-build` / `resource-run`, selected by the default-off
+`resource_measurement` input of `.github/workflows/sdk-lock.yml` (exclusive with the
+other modes; ubuntu only; unprivileged, no public network, no lock generation). Hard
+caps: 300 s and 540 s test deadlines, 16 minute step timeout, 64 MiB bulk, 96 MiB
+stall cap, loopback addresses only. Each case writes `<mode>.json`; the job fails if
+any row violates its budget or a report is empty, and uploads `target/ci-resources/`.
+
+### 11.4 Non-claims
+
+No RSS, CPU, latency or leak figure has been measured; the budgets are proposals.
+Signal-mode composed, Yggdrasil-carried payload throughput, IPv6 and long-duration
+(hours) behavior are not covered by the proposed run. Findings 1, 4 and 5 to 10 are
+open.

@@ -405,7 +405,7 @@ class ProcessFeedbackTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1] / "workflows/sdk-lock.yml").read_text(encoding="utf-8")
         resolve, rest = workflow.split("  direct-feedback:\n", 1)
         feedback, _ = rest.split("  controlled-network-tools:\n", 1)
-        self.assertIn("if: ${{ !inputs.direct_feedback && !inputs.controlled_network_preflight && !inputs.controlled_network_matrix }}", resolve)
+        self.assertIn("if: ${{ !inputs.direct_feedback && !inputs.controlled_network_preflight && !inputs.controlled_network_matrix && !inputs.resource_measurement }}", resolve)
         self.assertIn("cargo generate-lockfile", resolve)
         self.assertIn("if: ${{ inputs.direct_feedback && !inputs.controlled_network_preflight && !inputs.controlled_network_matrix }}", feedback)
         self.assertIn("uses: ./.github/actions/prepare-sources", feedback)
@@ -415,6 +415,41 @@ class ProcessFeedbackTests(unittest.TestCase):
         self.assertNotIn("cargo generate-lockfile", feedback)
         self.assertNotIn("cargo fmt --all", feedback)
         self.assertNotIn("cargo test -p", feedback)
+
+
+class ResourceBudgetTests(unittest.TestCase):
+    def test_report_requires_rows_and_every_budget_to_pass(self):
+        good = json.dumps({"rows": [{"name": "a", "ok": True}, {"name": "b", "ok": True}]})
+        self.assertEqual(RUN.check_resource_report(good), 2)
+        for report in ({"rows": []}, {}, {"rows": [{"name": "a", "ok": True}, {"name": "b", "ok": False}]},
+                       {"rows": [{"name": "a"}]}):
+            with self.subTest(report=report), self.assertRaises(ValueError):
+                RUN.check_resource_report(json.dumps(report))
+
+    def test_measurement_cases_are_ignored_by_the_process_inventory(self):
+        for case in RUN.RESOURCE_CASES:
+            self.assertFalse(case.rsplit("::", 1)[-1].startswith("real_"))
+            self.assertNotIn(case, RUN.PROCESS_CASES)
+
+    def test_measurement_mode_is_default_off_exclusive_and_loopback_only(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/sdk-lock.yml").read_text(encoding="utf-8")
+        header = workflow.split("\njobs:\n", 1)[0]
+        block = header.split("      resource_measurement:\n", 1)[1].split("\n\npermissions:", 1)[0]
+        self.assertIn("        type: boolean\n", block + "\n")
+        self.assertIn("        default: false", block)
+        job = workflow.split("\n  resource-budget:\n", 1)[1]
+        gate = next(line for line in job.splitlines() if line.startswith("    if:"))
+        for term in ("inputs.resource_measurement", "!inputs.direct_feedback",
+                     "!inputs.controlled_network_preflight", "!inputs.controlled_network_matrix"):
+            self.assertIn(term, gate)
+        self.assertIn("runs-on: ubuntu-latest", job)
+        self.assertIn("ref: ${{ inputs.source_revision }}", job)
+        self.assertIn("timeout-minutes: 16", job)
+        self.assertIn("run.py resource-build", job)
+        self.assertIn("run.py resource-run", job)
+        for forbidden in ("sudo", "continue-on-error", "curl ", "ip netns"):
+            self.assertNotIn(forbidden, job)
+
 
 
 if __name__ == "__main__":
