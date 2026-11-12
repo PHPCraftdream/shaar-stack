@@ -608,11 +608,12 @@ class WorkflowTests(unittest.TestCase):
 
 
 def load_tests(loader, tests, pattern):
-    path = ROOT / ".github/probes/nat-topology/quic/product/tests.py"
-    spec = importlib.util.spec_from_file_location("product_contract_tests", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    tests.addTests(loader.loadTestsFromModule(module))
+    for filename in ("tests.py", "process_tests.py"):
+        path = ROOT / ".github/probes/nat-topology/quic/product" / filename
+        spec = importlib.util.spec_from_file_location("product_" + path.stem, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        tests.addTests(loader.loadTestsFromModule(module))
     return tests
 
 
