@@ -54,6 +54,14 @@ pub(crate) struct LoopbackPeer {
     socket: UdpSocket,
     pub(crate) address: SocketAddr,
     pending_puts: Vec<(SocketAddr, Vec<u8>)>,
+    namespace_sources: bool,
+}
+
+pub(super) fn source_allowed(ip: std::net::IpAddr, namespace: bool) -> bool {
+    ip.is_loopback()
+        || (namespace
+            && matches!(ip, std::net::IpAddr::V4(ip)
+            if matches!(ip.octets(), [203, 0, 113, 1 | 2 | 10])))
 }
 
 impl LoopbackPeer {
@@ -72,7 +80,10 @@ impl LoopbackPeer {
                 .recv_from(&mut packet)
                 .await
                 .expect("owned KRPC receive");
-            assert!(source.ip().is_loopback(), "owned loopback query source");
+            assert!(
+                source_allowed(source.ip(), self.namespace_sources),
+                "owned fixture query source"
+            );
             let parsed: Value = serde_bencode::from_bytes(&packet[..length]).expect("bounded KRPC");
             assert_eq!(bytes_field(&parsed, b"y"), Some(b"q".as_slice()));
             let transaction = bytes_field(&parsed, b"t").expect("transaction");
@@ -136,14 +147,24 @@ impl LoopbackPeer {
     }
 
     pub(crate) async fn bind() -> Self {
-        let socket = UdpSocket::bind("127.0.0.1:0")
+        Self::bind_at("127.0.0.1:0", false).await
+    }
+
+    #[allow(dead_code)] // Used only by the explicitly ignored namespace integration helper.
+    pub(crate) async fn bind_namespace() -> Self {
+        Self::bind_at("203.0.113.10:0", true).await
+    }
+
+    async fn bind_at(address: &str, namespace_sources: bool) -> Self {
+        let socket = UdpSocket::bind(address)
             .await
-            .expect("bind owned loopback peer");
+            .expect("bind owned fixture peer");
         let address = socket.local_addr().expect("peer local address");
         Self {
             socket,
             address,
             pending_puts: Vec::new(),
+            namespace_sources,
         }
     }
 
