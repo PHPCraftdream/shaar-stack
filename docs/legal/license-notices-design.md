@@ -65,3 +65,16 @@ These tests verify software contracts and evidence wiring only. Human review of 
 ## Implementation boundary
 
 A later implementation should add a design-aligned generator/validator and CI-only tests in appropriate existing source directories, then separately wire it into CI and distribution packaging. That change must respect `CLAUDE.md`, retain the existing dependency versions and licenses, and avoid claiming coverage for artifact types not actually mapped and tested.
+
+## Implementation status (2026-11-12)
+
+The generator and check described above now exist for the two shipped binaries and two
+supported targets: `.github/actions/dependency-license/notices/` with a reviewed record in
+`docs/legal/notices-material/release/`, wired into the existing `dependency-license`
+action. Implemented: per-target applicability from Cargo's own normal-edge tree for each
+CI host, guarded by a target-cfg superset over the metadata graph, byte-exact verbatim texts with size/hash
+verification, stable ordering and hashes, fail-closed gap review, atomic output and
+tampering detection. Not implemented, still future work: packaging the notices next to a
+real distribution artifact, archive-to-prepared-tree binding at assembly time, SPDX
+expression parsing beyond the corpus' recorded alternatives, and a source-file inventory
+per artifact. Distributed blockers are listed in `notice-evidence.md`.

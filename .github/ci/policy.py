@@ -123,6 +123,8 @@ PROOFS = (
     (".github/actions/dependency-license/", "license"),
     (".github/scripts/dependency_licenses.py", "license"),
     (".github/deny.toml", "license"),
+    # The license action runs the notices generator tests directly.
+    (".github/scripts/tests/test_notices", "license"),
     # Preserved third-party legal material; owned by the license domain like root LICENSE-*.
     ("docs/legal/notices-material/", "license"),
     (".github/ci/", "ci_policy"),

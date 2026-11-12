@@ -361,3 +361,135 @@ Remaining 18 gaps, each documented rather than filled:
   and has no package-level Apache-2.0 text, so nothing new can be bound.
 - `winapi-i686-pc-windows-gnu@0.4.0`, `winapi-x86_64-pc-windows-gnu@0.4.0`: the
   archives carry no VCS info, so there is no pinned revision to bind.
+
+## Deterministic notices assembly and check (N2, 2026-11-12 candidate)
+
+Acceptance criterion: for each supported release target, a stdlib-only generator
+reproducibly assembles one `THIRD-PARTY-NOTICES-<target>.txt` for `shaar-server` and
+`shaar-client` from the accepted corpus, and a CI check regenerates it, compares it to
+the committed manifest and fails on any linked identity without authentic text that is
+not in the reviewed gap list. Non-goals: legal clearance, OR-alternative election,
+release permission, packaging of an actual artifact, and any new text acquisition.
+
+Code lives in `.github/actions/dependency-license/notices/` (`notices.py` entry point;
+`notice_cfg.py`, `notice_graph.py`, `notice_corpus.py`, `notice_render.py`), tests in
+`.github/scripts/tests/test_notices.py`, and the reviewed record in
+`docs/legal/notices-material/release/` (`policy.json`, `manifest-<target>.json`). The
+existing `dependency-license` composite action runs the tests and the check
+(`notices.py check`) on both CI runners and uploads the generated files as the
+`third-party-notices-<OS>` artifact; no new workflow exists. `.github/ci/policy.py` already
+mapped the generator and corpus paths to the `license` domain and now also maps
+`test_notices*` there, because the action runs those tests directly.
+
+### Supported targets and applicability rule
+
+Supported release targets are the two CI hosts, `x86_64-unknown-linux-gnu` and
+`x86_64-pc-windows-msvc` (`release/policy.json`; the Go/MinGW sketch in
+`docs/architecture/contracts.md` is superseded). A package is linked when Cargo's own
+`cargo tree --locked -p shaar-server -p shaar-client -e normal --target <host>` lists it:
+normal edges only, so build-only and dev-only crates are excluded and proc-macro crates
+are included. Each OS job produces the tree for its own host, so Cargo itself decides
+feature and platform selection for both release targets. A pure cfg evaluation of the
+unfiltered `cargo metadata` JSON that CI already produces (`target/p2p/metadata.json`) is
+kept as a superset guard: the first CI run showed it over-approximates (it links 409 and
+411 packages against Cargo's 378 and 379, because it cannot model feature selection, for
+example `attohttpc`, `aws-lc-rs`, `libp2p-quic`), so the check fails if Cargo links anything
+the evaluation excluded, and the evaluation alone is never used for a committed record.
+Every linked identity must map to exactly one corpus identity (registry by name, version,
+source and lock checksum; path by name and version; first-party packages are excluded by
+name in the policy). A job verifies only the target whose tree it supplies and skips the
+other with a message; at least one target must be verified.
+
+### Applicable sets (550 third-party identities)
+
+| Target | Cargo tree | Third-party | Registry | Path | Complete text | Distributed blockers | Reviewed gaps not distributed |
+|---|---|---|---|---|---|---|---|
+| `x86_64-unknown-linux-gnu` | 378 | 372 | 355 | 17 | 367 | 5 | 13 |
+| `x86_64-pc-windows-msvc` | 379 | 372 | 355 | 17 | 367 | 5 | 13 |
+
+The two third-party sets differ (20 identities are linux-only, such as `netlink-*`,
+`rtnetlink` and `nix`; 20 are Windows-only, such as `windows-*`, `ipconfig` and `wmi`), so
+392 identities are distributed on at least one target and 158 of 550 on neither: 20
+registry identities appear only in the nested `shaar-ygg-core` lock; of the 530 root-graph
+identities, 16 are reachable only through build edges (`autocfg`, `cc`, `cfg_aliases`, `cmake`, `dunce`,
+`find-msvc-tools`, `fs_extra`, `jobserver`, `pkg-config`, `rustc_version`, `same-file`,
+`semver`, `shlex`, `version_check`, `walkdir`, `winapi-util`; all hold authentic text and
+none is a gap) and the rest are platform- or feature-gated away from the target. The
+manifests were generated from the metadata and tree artifacts of CI run `43243902226`
+(identical output from the Linux and the Windows metadata); the committed record is
+re-verified by each CI job against its own host tree.
+
+### Gaps not distributed (13), with evidence
+
+Each manifest lists, per gap, every edge from a linked package into the unlinked region
+above the gap (`not_distributed[].boundary`: parent, version, child, version, edge kind,
+predicate, and a flag that is true only when the cfg allows the edge and feature selection
+removed it). All 13 gaps are excluded by target predicates alone (the flag is false in
+every row; a contract test pins this).
+
+- Ten objc2-family crates (`block2`, `dispatch2`, `objc2`, `objc2-core-foundation`,
+  `objc2-core-wlan`, `objc2-encode`, `objc2-foundation`, `objc2-security`,
+  `objc2-security-foundation`, `objc2-system-configuration`): reached only through
+  `netdev` 0.45.1/0.46.3 and `netwatch` 0.19.3 edges gated by
+  `cfg(target_os = "ios")`, `cfg(target_os = "macos")` or
+  `cfg(any(target_os = "macos", target_os = "ios"))`, or by the `netwatch` to `netdev`
+  edge version that is itself platform-gated. They would become blockers if an Apple
+  target were added (a local cfg evaluation, superset and not CI-verified, reports 7
+  additional linked gaps for `aarch64-apple-darwin`).
+- `pharos` 0.5.3: only `iroh-relay` 1.3.0 to `ws_stream_wasm` 0.7.5, gated by
+  `cfg(all(target_family = "wasm", target_os = "unknown"))`.
+- `winapi-i686-pc-windows-gnu`, `winapi-x86_64-pc-windows-gnu`: only through
+  `dlopen2` 0.8.2, gated by `cfg(target_os = "android")` (and the gated `netdev`
+  versions); the evaluation also excludes them on `x86_64-pc-windows-gnu`.
+
+### Remaining distributed blockers (5, both targets; confirmed by Cargo's own tree)
+
+Not filled; the generated bundle lists them under `RELEASE BLOCKERS` and
+`notices.py check --release` fails while any remain.
+
+| Package | Declared | Reason (reviewed in `release/policy.json`) |
+|---|---|---|
+| `base45` 3.2.0 | MIT | pinned revision holds no license file at root or package path; archived VCS state dirty |
+| `enum-assoc` 1.4.1 | MIT OR Apache-2.0 | no license file at the pinned revision |
+| `futures-bounded` 0.3.0 | MIT | no license file at the pinned revision |
+| `if-watch` 3.2.2 | MIT OR Apache-2.0 | no license file at the pinned revision |
+| `ring` 0.17.14 | Apache-2.0 AND ISC | component texts retained; no package-level Apache-2.0 text at the dirty pinned revision |
+
+### Generated files
+
+Notices are generated, not committed; the byte count and SHA-256 are pinned in the
+committed manifest, which a CI regeneration must reproduce exactly:
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `THIRD-PARTY-NOTICES-x86_64-unknown-linux-gnu.txt` (279 distinct texts) | 927,944 | `897505d51b49a31099f3a501f4f3f66945178065d49d588fe0fd385dc3d22717` |
+| `THIRD-PARTY-NOTICES-x86_64-pc-windows-msvc.txt` (282 distinct texts) | 972,734 | `bcb1e8e810fbd4e3397561e0c624da44db0bd96708cb92af943771933ddfa0bb` |
+
+Manifests: `manifest-x86_64-unknown-linux-gnu.json` 129,773 bytes
+(`cbbcb53678ec47928da40051e25f5cc31ee32771f73f1ee2429b4bb8428b3dd3`),
+`manifest-x86_64-pc-windows-msvc.json` 131,297 bytes
+(`c76a90dce60d7066b05a5a221232a7a12bfc6491eb2644ced79350741683a061`); policy 5,282 bytes
+(`771a7af6daf7a2b49a2647ddb3626fd9f6509ccfbb0c5902a5dd89b4c43363e5`).
+
+Each text is printed once, verbatim, framed by BEGIN/END lines carrying its byte count
+and SHA-256; packages are sorted by name, version and source; all alternatives of an OR
+expression are printed and none is elected; reference-only files (README mentions) are
+not terms and are omitted. Reading verifies recorded size and SHA-256 and rejects links,
+traversal, empty and oversized files. The check fails on: a linked identity without a
+corpus record or with a different lock checksum, a reviewed gap list that differs from
+the corpus (unreviewed or stale), a changed text or inventory byte, a differing committed
+manifest, a Cargo tree outside the cfg superset or without the products, and no verified
+target. Regenerate the record after a corpus or graph change with
+`notices.py generate --manifest-only --out <dir> --tree <target>=<cargo tree file>` for
+both targets, using the CI metadata and the `third-party-notices-<OS>` tree artifacts, and
+copy the manifests into `release/`.
+
+Status: written and CI-executed. Run `43243902226` (first design) executed the new test
+module (39 tests, all passing) and its check step failed on both runners only on the
+superset guard above, which led to the Cargo-tree-authoritative design recorded here.
+Run `43245627450` is green on Ubuntu and Windows: `test_notices.py` executed 44 tests on
+each runner, the structural guard discovery ran 181 tests including them, and each runner's
+check verified its own host manifest against Cargo's tree (the other target skipped by
+design) and reported the five blockers. Generation from the CI artifacts is local,
+read-only and offline. This establishes packaging determinism and text availability, not
+legal sufficiency, clearance, election or release permission.
