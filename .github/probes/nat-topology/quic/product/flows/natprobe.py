@@ -18,21 +18,20 @@ DEST_PORTS = (9001, 9002, 9003)
 COUNTERS = ("kept", "moved")
 # Same statements as the product rules (network.NAT_FLAVORS) so the probe exercises the exact NAT flavor.
 STATEMENTS = {"cone": "masquerade", "random": "masquerade fully-random"}
-PUNCH_SECONDS = 2.0
-PUNCH = ("import json, select, socket, time\n"
-         "s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((%r, %d)); s.setblocking(False)\n"
-         "end, sent, first, received = time.monotonic() + %r, 0, None, 0\n"
-         "while time.monotonic() < end:\n"
+# Exactly this many datagrams per side, 0.1 s apart (each side only listens between sends): a bounded control, not a load loop.
+PUNCH_SENDS = 20
+PUNCH = ("import json, socket\n"
+         "s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((%r, %d)); s.settimeout(0.1)\n"
+         "sent, received, first = 0, 0, None\n"
+         "for _ in range(%d):\n"
          "    s.sendto(b'punch', (%r, %d)); sent += 1\n"
-         "    ready = select.select([s], [], [], 0.1)[0]\n"
-         "    while ready:\n"
-         "        try:\n"
+         "    try:\n"
+         "        while True:\n"
          "            data, address = s.recvfrom(64)\n"
-         "        except BlockingIOError:\n"
-         "            break\n"
-         "        received += 1\n"
-         "        first = first or list(address)\n"
-         "        ready = select.select([s], [], [], 0)[0]\n"
+         "            received += 1\n"
+         "            first = first or list(address)\n"
+         "    except socket.timeout:\n"
+         "        pass\n"
          "print(json.dumps({'sent': sent, 'received': received, 'first': first}))\n")
 SENDER = ("import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((%r, %d)); "
           "[s.sendto(bytes(8), (%r, p)) for p in %r]")
@@ -103,7 +102,7 @@ def check_punch(found):
     expected = {"host_a": contract.IPS["rtr_b_wan"], "host_b": contract.IPS["rtr_a_wan"]}
     contract.require(len(found) == 2 and {item.get("host") for item in found} == set(expected), "punch control receipts incomplete")
     for item in found:
-        contract.require(item["sent"] > 0 and item["received"] > 0 and item["first"] == [expected[item["host"]], SOURCE_PORT],
+        contract.require(item["sent"] == PUNCH_SENDS and 0 < item["received"] <= PUNCH_SENDS and item["first"] == [expected[item["host"]], SOURCE_PORT],
                          f"punch control: {item['host']} did not receive from the peer's public endpoint: {item}")
     return found
 
@@ -121,7 +120,7 @@ def punch(cfg, tools, deadline):
                            rules(cfg["prefix"], "cone", cfg["ip"][host], wan_ip).encode("ascii"), "punch control NAT install")
             installed.append(router)
         for host, _, peer in pairs:
-            code = PUNCH % (cfg["ip"][host], SOURCE_PORT, PUNCH_SECONDS, peer, SOURCE_PORT)
+            code = PUNCH % (cfg["ip"][host], SOURCE_PORT, PUNCH_SENDS, peer, SOURCE_PORT)
             argv = kernel.ns_argv(tools, cfg, host, tools["python"], "-I", "-c", code)
             processes.append((host, subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                                      env=kernel.SAFE_ENV, close_fds=True)))

@@ -63,6 +63,34 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             configs.network_text("198.51.100.7", PORTS, RELAY)
 
+    def test_ipv6_hint_is_a_validated_literal_and_absent_otherwise(self):
+        hint = "[2001:db8:13::2]:40001"
+        text = configs.client_text("ipv6-signal", KEY, "/w/keys/client.key", PORTS, RELAY, hint)
+        self.assertIn(f"server_address:: {hint}\n", text)
+        self.assertIn(f"server: {KEY}\n", text)
+        self.assertNotIn("server_address", configs.client_text("ipv6-signal", KEY, "/w/keys/client.key", PORTS, RELAY))
+        for bad in ("203.0.113.2:40001", "[2001:db8:13::2]", "[2001:DB8::2]:1", "[::1]:99999999", "[2001:db8::2]:1\nfallback: x", 7):
+            with self.subTest(hint=bad), self.assertRaises(ValueError):
+                configs.client_text("ipv6-signal", KEY, "/w/keys/client.key", PORTS, RELAY, bad)
+
+    def test_client_hint_picks_the_published_ipv6_candidate_and_drops_ipv4_for_the_whole_case(self):
+        run = object.__new__(runcase.Run)
+        run.cfg, run.tools, run.ports, run.ev = {"prefix": "snaabbcc"}, {}, PORTS, {"observations": {}}
+        run.limit = lambda seconds: seconds
+        run.spec = contract.CASES["ipv6-standby"]
+        run.publication = {"native_addresses": ["203.0.113.2:40000", "[2001:db8:13::2]:40001"]}
+        installs = []
+        with mock.patch.object(runcase.dynamic, "install", lambda cfg, tools, kind, ports, deadline: installs.append(kind) or 1.0):
+            self.assertEqual(run.client_hint(), "[2001:db8:13::2]:40001")
+            self.assertEqual((installs, run.ev["observations"]["ipv6"]), (["v4"], {"hint": "[2001:db8:13::2]:40001"}))
+            for addresses in (["203.0.113.2:40000"], ["[2001:db8:13::9]:40001"], ["[2001:db8:13::2]:1", "[2001:db8:13::2]:2"]):
+                run.publication = {"native_addresses": addresses}
+                with self.assertRaises(ValueError):
+                    run.client_hint()
+            run.spec = contract.CASES["native-signal"]
+            self.assertIsNone(run.client_hint())
+        self.assertEqual(installs, ["v4"])
+
     def test_untrusted_paths_keys_peers_and_ports_cannot_reshape_the_config(self):
         for path in ("relative/key", "/w/key file", "/w/../key", "/w/key\nfallback: x", "", 7):
             with self.subTest(path=path), self.assertRaises(ValueError):

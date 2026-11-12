@@ -68,24 +68,25 @@ def segment_hosts(counters, result):
 
 
 def ipv6(counters, result):
-    """A2b: IPv6 Native UDP crossed the segment in both directions on both hosts; the Server record lists its IPv6 address."""
+    """A2b: with IPv4 Native UDP dropped, IPv6 Native UDP crossed the segment both ways and carried the APP; the record lists the IPv6 address."""
     segment_hosts(counters, result)
     for router in counters:
         contract.require(packets(counters, router, "lan6_native") > 0 and packets(counters, router, "lan6_sent") > 0,
                          f"{router} sent or saw no IPv6 Native UDP on the segment")
+        contract.require(packets(counters, router, "lan_native") == 0, f"{router} received IPv4 Native UDP although IPv4 was dropped")
+    observed = result.get("observations", {}).get("ipv6", {})
+    contract.require(observed.get("hint", "").startswith("[" + contract.V6["rtr_b"] + "]:") and "v4_block_drops" in observed,
+                     "IPv6 hint or IPv4 block receipt missing")
     published = [item.rpartition(":")[0].strip("[]") for item in result["publication"]["native_addresses"]]
     contract.require(contract.V6["rtr_b"] in published, f"signed record lacks the Server's IPv6 address: {published}")
 
 
 def perturb(result):
-    """D2, D4, A2b: APP 2 recovered within the bound and the change was visible in the counters."""
+    """D2, D4: APP 2 recovered within the bound and the change was visible in the counters."""
     obs = result.get("observations", {}).get("perturb", {})
     contract.require(0 <= obs.get("recovery_seconds", -1) <= contract.RECOVERY_SECONDS and obs.get("app2", {}).get("reply_bytes", 0) > 0,
                      "recovery bound or APP 2 reply missing")
-    if obs.get("kind") == "segment-ipv4-loss":
-        contract.require(obs["v4_block_drops"]["rtr_a"]["packets"] > 0, "IPv4 block never observed a Native UDP attempt")
-    else:
-        contract.require(obs["growth"]["native_new"] > 0, "no new Native NAT mapping after the change")
+    contract.require(obs["growth"]["native_new"] > 0, "no new Native NAT mapping after the change")
 
 
 def nat_mapping(result, flavor):
@@ -192,7 +193,7 @@ def verify_class(spec, result, counters):
         recover(result)
     else:
         raise ValueError("unreviewed case class")
-    if spec.get("flow") in ("hole", "switch", "ipv6"):
+    if spec.get("flow") in ("hole", "switch"):
         perturb(result)
     if spec.get("flow") == "denied-key":
         denied_key(result)

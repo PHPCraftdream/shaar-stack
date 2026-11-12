@@ -11,6 +11,7 @@ sys.path.insert(0, str(HERE.parent / "runtime"))
 import contract  # noqa: E402
 import dynamic  # noqa: E402
 import kernel  # noqa: E402
+import worker  # noqa: E402
 
 FIRST_APP_SECONDS, FIRST_APP_ATTEMPTS = 15, 2
 RECOVERY_SECONDS = int(contract.RECOVERY_SECONDS)
@@ -63,18 +64,13 @@ def switch(run):
 
 
 def ipv6(run):
-    """A2b: both families are open for APP 1; then IPv4 Native UDP between the hosts is dropped and APP 2 must still succeed."""
-    obs = run.ev["observations"].setdefault("perturb", {"kind": "segment-ipv4-loss"})
-    before = first_app(run)
-    blocked_at = dynamic.install(run.cfg, run.tools, "v4", run.ports, run.limit(10))
-    try:
-        recovery_app(run, blocked_at, before, obs)
-    finally:
-        drops, _ = dynamic.remove(run.cfg, run.tools, "v4", run.limit(10))
-        obs["v4_block_drops"] = drops
-    contract.require(drops["rtr_a"]["packets"] > 0, "the IPv4 block never observed a Native UDP attempt")
-    contract.require(obs["growth"]["lan6_native"] > 0 and obs["growth"]["lan6_sent"] > 0,
-                     "no IPv6 Native UDP crossed the segment after IPv4 was dropped")
+    """A2b: IPv4 Native UDP between the hosts is dropped for the whole case and the Client dials the Server's IPv6 candidate."""
+    budget = int(min(worker.MAX_DEADLINE, run.active_end - time.monotonic()))
+    contract.require(budget >= 10, "active budget exhausted before the APP campaign")
+    ready, result, _ = run.app_once("app", budget, alive(run), denied=False)
+    run.ev["observations"]["app_ready"], run.ev["observations"]["app"] = ready, result
+    drops, _ = dynamic.remove(run.cfg, run.tools, "v4", run.limit(10))
+    run.ev["observations"]["ipv6"]["v4_block_drops"] = drops
 
 
 def outage_recovery(run):

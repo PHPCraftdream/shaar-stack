@@ -82,6 +82,7 @@ class ProductContractTests(unittest.TestCase):
         self.assertEqual(contract.final_client_exit(full), None)
         for name in ("ipv6-signal", "ipv6-standby"):
             self.assertEqual((cases[name]["net"], cases[name]["client_ns"], cases[name]["server_ns"]), ("ipv6", "rtr_a", "rtr_b"), name)
+            self.assertEqual((cases[name]["hint"], cases[name]["flow"], cases[name]["target_accepts"]), ("v6", "ipv6", 1), name)
         self.assertEqual(contract.SEGMENT_NETS, ("lan", "ipv6"))
         self.assertEqual(cases["denied-native-signal"]["net"], "nat")
         for spec in cases.values():

@@ -48,12 +48,15 @@ def server_text(case, key_file, allowlist_file, ports, relay_peer, ns=None):
     return "\n".join(head) + "\n" + network_text(bind_ip, ports, relay_peer)
 
 
-def client_text(case, server_key, key_file, ports, relay_peer):
-    """The Client names only the Server public key: no server_address hint exists here."""
+def client_text(case, server_key, key_file, ports, relay_peer, hint=None):
+    """The Client names only the Server public key; hint (an IPv6 socket address) is the optional direct-address hint of the IPv6 cases."""
     spec = contract.CASES[case]
     contract.require(contract.hex_value(server_key, 64), "Server key must be 64 lowercase hex characters")
     head = [f"server: {server_key}", f"listen: 127.0.0.1:{contract.FRONT_PORT}",
             f"key_file:: {owned_path(key_file)}", f"fallback: {mode_value(spec['mode'])}"]
+    if hint is not None:
+        contract.require(type(hint) is str and re.fullmatch(r"\[[0-9a-f:]{2,39}\]:[0-9]{1,5}", hint) is not None, "invalid IPv6 direct-address hint")
+        head.append(f"server_address:: {hint}")
     return "\n".join(head) + "\n" + network_text(contract.client_bind(spec), ports, relay_peer)
 
 

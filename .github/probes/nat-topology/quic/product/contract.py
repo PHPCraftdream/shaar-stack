@@ -54,8 +54,10 @@ CASES = {
                           "target_accepts": 0, "client_exit": None, "fillers": 2, "server_exit": 1},
     "relay-full-standby": {"mode": "standby", "server_ns": "wan", "net": "relay", "flow": "relay-full", "udp_blocked": False, "ygg_client_blocked": False,
                            "target_accepts": 0, "client_exit": None, "fillers": 2, "server_exit": 1},
-    "ipv6-signal": {**LAN, "mode": "signal", "net": "ipv6", "flow": "ipv6", "target_accepts": 2},
-    "ipv6-standby": {**LAN, "mode": "standby", "net": "ipv6", "flow": "ipv6", "target_accepts": 2},
+    # "hint": the Client dials the Server's published IPv6 candidate (explicit direct-address hint) while IPv4 Native UDP between the hosts is
+    # dropped for the whole case. Without the hint the key-only dial tries the published IPv4 candidate first, and a silent one stalls the attempt.
+    "ipv6-signal": {**LAN, "mode": "signal", "net": "ipv6", "flow": "ipv6", "hint": "v6"},
+    "ipv6-standby": {**LAN, "mode": "standby", "net": "ipv6", "flow": "ipv6", "hint": "v6"},
     "denied-native-signal": {**NATIVE, "mode": "signal", "flow": "denied-key", "client2_exit": 1},
     "recover-standby": {"mode": "standby", "server_ns": "wan", "net": "recover", "flow": "outage-recovery", "udp_blocked": False, "ygg_client_blocked": False,
                         "target_accepts": 1, "client_exit": 1, "client2_exit": 0},

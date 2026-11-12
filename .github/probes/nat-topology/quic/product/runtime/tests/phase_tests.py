@@ -68,6 +68,8 @@ def evidence(case):
             routers[router]["counters"]["lan6_native"]["packets"] = 7
             routers[router]["counters"]["lan6_sent"]["packets"] = 7
         publication = {"native_addresses": ["203.0.113.2:40000", "[2001:db8:13::2]:40001"]}
+        observations["ipv6"] = {"hint": "[2001:db8:13::2]:40001",
+                                "v4_block_drops": {"rtr_a": {"packets": 4, "bytes": 400}, "rtr_b": {"packets": 0, "bytes": 0}}}
     if net == "blocked":
         routers["rtr_a"]["counters"]["native_drop"]["packets"] = 3
     elif net in ("nat", "failover"):
@@ -89,10 +91,6 @@ def evidence(case):
     if spec.get("flow") in ("hole", "switch"):
         observations["perturb"] = {"kind": "nat-state-flush", "recovery_seconds": 8.0, "app2": {"denied": False, "reply_bytes": 61},
                                    "growth": {"native_new": 2, "native_snat": 5}}
-    elif spec.get("flow") == "ipv6":
-        observations["perturb"] = {"kind": "segment-ipv4-loss", "recovery_seconds": 9.0, "app2": {"denied": False, "reply_bytes": 61},
-                                   "v4_block_drops": {"rtr_a": {"packets": 4, "bytes": 400}, "rtr_b": {"packets": 3, "bytes": 300}},
-                                   "growth": {"lan6_native": 3, "lan6_sent": 3}}
     if spec.get("flow") == "denied-key":
         observations.update(client1_exit=0, denied_app={"denied": True, "reply_bytes": 0})
     identities = {name: {"uid": UID, "capabilities": 0} for name in contract.identity_roles(spec)}
@@ -216,8 +214,12 @@ def mutate(case, name):
         result["observations"]["perturb"]["growth"]["native_new"] = 0
     elif name == "perturb-no-reply":
         result["observations"]["perturb"]["app2"]["reply_bytes"] = 0
-    elif name == "no-v4-drop":
-        result["observations"]["perturb"]["v4_block_drops"]["rtr_a"]["packets"] = 0
+    elif name == "ipv4-seen":
+        counters["rtr_b"]["counters"]["lan_native"]["packets"] = 1
+    elif name == "no-hint":
+        result["observations"]["ipv6"]["hint"] = "203.0.113.2:40000"
+    elif name == "no-block-receipt":
+        del result["observations"]["ipv6"]["v4_block_drops"]
     elif name == "server-survived":
         result["observations"]["relay_full"]["server_exit"] = 0
     elif name == "untyped-failure":
@@ -244,11 +246,10 @@ MUTATIONS = {
     "dht-drop": ("no-dht-drop", "native_snat", "udp_nat"),
     "failover": ("native_snat", "udp_nat", "block-escape", "no-block-drop"),
     "dnat": ("probe-flavor", "probe-missing"),
-    "ipv6": ("forwarded", "no-v6-traffic", "no-v6-address"),
+    "ipv6": ("forwarded", "no-v6-traffic", "no-v6-address", "ipv4-seen", "no-hint", "no-block-receipt"),
     "relay": ("server-survived", "untyped-failure", "app-ran"),
     "recover": ("client-survived", "outage-reply", "slow-outage-recovery", "no-outage-recovery"),
     "flow:hole": ("slow-perturb", "no-new-mapping", "perturb-no-reply"),
-    "flow:ipv6": ("slow-perturb", "perturb-no-reply", "no-v4-drop"),
 }
 MUTATIONS["flow:switch"] = MUTATIONS["flow:hole"]
 

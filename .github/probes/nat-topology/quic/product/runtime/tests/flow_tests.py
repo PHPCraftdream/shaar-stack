@@ -365,22 +365,22 @@ class PerturbTests(unittest.TestCase):
         stale = self.run_flow("switch-signal", perturb.switch, [self.BEFORE, dict(after, native_new=2)], [10.0, 22.0])[3]
         self.assertIn("created no new Native NAT mapping", str(stale))
 
-    def test_segment_ipv4_loss_needs_drops_and_ipv6_traffic_and_always_removes_the_block(self):
-        before, after = full(lan6_native=2, lan6_sent=2), full(lan6_native=9, lan6_sent=8)
-        run, installs, removals, error = self.run_flow("ipv6-standby", perturb.ipv6, [before, after], [10.0, 16.0])
-        self.assertIsNone(error)
-        self.assertEqual((installs, removals), (["v4"], ["v4"]))
-        obs = run.ev["observations"]["perturb"]
-        self.assertEqual((obs["kind"], obs["growth"]["lan6_native"], obs["recovery_seconds"]), ("segment-ipv4-loss", 7, 4.0))
-        quiet = self.run_flow("ipv6-standby", perturb.ipv6, [before, dict(after, lan6_sent=2)], [10.0, 16.0])
-        self.assertIn("no IPv6 Native UDP", str(quiet[3]))
-        idle = ({"rtr_a": {"packets": 0, "bytes": 0}, "rtr_b": {"packets": 0, "bytes": 0}}, 120.0)
-        silent = self.run_flow("ipv6-standby", perturb.ipv6, [before, after], [10.0, 16.0], drops=idle)
-        self.assertIn("never observed", str(silent[3]))
-        self.assertEqual(silent[2], ["v4"])
-        slow = self.run_flow("ipv6-standby", perturb.ipv6, [before, after], [10.0, 150.0])
-        self.assertEqual(slow[2], ["v4"])
-        self.assertIn("above the 40.0 s bound", str(slow[3]))
+    def test_ipv6_only_case_runs_one_campaign_and_reads_the_block_that_was_active_the_whole_case(self):
+        run = FakeRun("ipv6-signal")
+        run.ev["observations"]["ipv6"] = {"hint": "[2001:db8:13::2]:40001"}
+        removals = []
+        with mock.patch.object(perturb.dynamic, "remove", lambda cfg, tools, kind, deadline: removals.append(kind) or DROPS):
+            perturb.ipv6(run)
+        self.assertEqual(removals, ["v4"])
+        self.assertEqual([(item[0], item[3], item[2]) for item in run.apps], [("app", False, ("server", "client"))])
+        self.assertTrue(10 <= run.apps[0][1] <= worker.MAX_DEADLINE)
+        observed = run.ev["observations"]
+        self.assertEqual(observed["ipv6"]["v4_block_drops"], DROPS[0])
+        self.assertEqual(set(observed), {"ipv6", "app_ready", "app"})
+        exhausted = FakeRun("ipv6-standby")
+        exhausted.active_end = time.monotonic() + 1
+        with self.assertRaisesRegex(ValueError, "active budget exhausted"):
+            perturb.ipv6(exhausted)
 
     def test_outage_recovery_needs_a_failed_closed_client_then_a_fresh_client_after_both_blocks_lift(self):
         lifted = (DROPS[0], 55.0)
@@ -489,10 +489,19 @@ class PunchControlTests(unittest.TestCase):
     GOOD = [{"host": "host_a", "sent": 20, "received": 18, "first": ["203.0.113.2", 40100]},
             {"host": "host_b", "sent": 20, "received": 19, "first": ["203.0.113.1", 40100]}]
 
+    def test_the_worker_sends_a_fixed_small_number_of_datagrams_and_never_echoes(self):
+        code = natprobe.PUNCH % ("10.0.1.2", 40100, natprobe.PUNCH_SENDS, "203.0.113.2", 40100)
+        self.assertEqual(natprobe.PUNCH_SENDS, 20)
+        self.assertEqual(code.count("sendto"), 1)
+        self.assertIn("for _ in range(20):", code)
+        self.assertIn("s.settimeout(0.1)", code)
+        self.assertNotIn("while time", code)
+        compile(code, "punch-worker", "exec")
+
     def test_receipts_need_both_sockets_to_hear_the_peer_public_endpoint(self):
         self.assertEqual(natprobe.check_punch(copy.deepcopy(self.GOOD)), self.GOOD)
-        for index, field, value in ((0, "received", 0), (1, "sent", 0), (0, "first", None), (1, "first", ["203.0.113.2", 40100]),
-                                    (0, "first", ["203.0.113.2", 41011]), (1, "host", "host_a")):
+        for index, field, value in ((0, "received", 0), (1, "sent", 0), (1, "sent", 50000), (0, "received", 50000), (0, "first", None),
+                                    (1, "first", ["203.0.113.2", 40100]), (0, "first", ["203.0.113.2", 41011]), (1, "host", "host_a")):
             changed = copy.deepcopy(self.GOOD)
             changed[index][field] = value
             with self.subTest(index=index, field=field), self.assertRaises(ValueError):

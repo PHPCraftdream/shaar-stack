@@ -13,6 +13,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE.parent / "flows"))
 import configs  # noqa: E402
 import contract  # noqa: E402
+import dynamic  # noqa: E402
 import scenarios  # noqa: E402
 import kernel  # noqa: E402
 import natprobe  # noqa: E402
@@ -256,6 +257,17 @@ class Run:
             except TimeoutError:
                 break
 
+    def client_hint(self):
+        """IPv6 cases: the published IPv6 candidate as the Client's direct-address hint, with IPv4 Native UDP between the hosts dropped."""
+        if self.spec.get("hint") != "v6":
+            return None
+        found = [item for item in self.publication["native_addresses"] if item.startswith("[")]
+        contract.require(len(found) == 1 and found[0].startswith("[" + contract.V6["rtr_b"] + "]:"),
+                         f"signed Server record lacks its IPv6 candidate: {self.publication['native_addresses']}")
+        dynamic.install(self.cfg, self.tools, "v4", self.ports, self.limit(10))
+        self.ev["observations"]["ipv6"] = {"hint": found[0]}
+        return found[0]
+
     def bring_up(self, after_live):
         spec, ev = self.spec, self.ev
         keys, ready = self.helper("keys", "wan", "keys", verify=False, SHAAR_NAT_DIRECTORY=str(self.work / "keys"))
@@ -285,8 +297,6 @@ class Run:
         allow = self.owned_file("allowlist.txt", configs.allowlist_text(client_key))
         server_cfg = self.owned_file("server.ktav", configs.server_text(
             self.case, str(self.work / "keys/server.key"), allow, self.ports, self.relay))
-        client_cfg = self.owned_file("client.ktav", configs.client_text(
-            self.case, self.server_key, str(self.work / "keys/client.key"), self.ports, self.relay))
         for index in range(1, spec.get("fillers", 0) + 1):
             self.fillers.append(self.fill_relay(index, allow))
         if self.fillers:
@@ -303,8 +313,12 @@ class Run:
         contract.require(any(item.rpartition(":")[0] == server_ip for item in self.publication["native_addresses"]),
                          "signed Server record lacks its namespace Native address")
         ev["publication"] = self.publication
+        hint = self.client_hint()
+        client_cfg = self.owned_file("client.ktav", configs.client_text(
+            self.case, self.server_key, str(self.work / "keys/client.key"), self.ports, self.relay, hint))
         self.client = self.product("client", self.client_ns, client_cfg)
-        contract.require("server_address=none" in ev["markers"]["client"], "Client must be configured with the Server key only")
+        contract.require(("server_address=" + (hint or "none")) in ev["markers"]["client"],
+                         "Client must be configured with the Server key only (plus the IPv6 hint of the IPv6 cases)")
         live = {"wan": self.wan, "target": self.target, "server": self.server, "client": self.client}
         atomic(self.root / "records/children_started", {"nonce": self.nonce, "pids": {k: v.process.pid for k, v in live.items()}})
         after_live()
