@@ -158,12 +158,15 @@ class SupervisorTests(unittest.TestCase):
     def test_markers_console_interrupt_and_terminal_control_frame_use_owned_handles(self):
         with tempfile.TemporaryDirectory() as directory:
             owner = self.create(directory)
+            # SIGINT stays pending until sigwait; signal.pause() could lose an early signal.
             code = "; ".join((
                 "import signal, sys",
-                "signal.signal(signal.SIGINT, lambda *_: (print('stopped', flush=True), sys.exit(0)))",
+                "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})",
                 "print('composed startup: ready', flush=True)",
                 "sys.stdin.readline()",
-                "signal.pause()"))
+                "signal.sigwait({signal.SIGINT})",
+                "print('stopped', flush=True)",
+                "sys.exit(0)"))
             child = owner.spawn("marked", [sys.executable, "-I", "-c", code], {}, markers=[b"composed startup:"])
             self.assertIn("composed startup", owner.mark(child, b"composed startup:", owner.deadline))
             with self.assertRaises(ValueError):
