@@ -157,6 +157,8 @@ class NetworkContractTests(unittest.TestCase):
                 self.assertIn("quota name phase_budget counter name quota_drop drop", text)
                 self.assertIn("meta nfproto ipv6 counter name ipv6_drop drop", text)
                 self.assertIn("masquerade to :41010-41020", text)
+                # Port-range NAT needs an explicit transport match in the rule.
+                self.assertIn("ip protocol udp counter name udp_nat masquerade to :41010-41020", text)
                 self.assertIn("meta l4proto tcp counter name tcp_nat masquerade", text)
                 self.assertNotIn("ct state", text)
                 self.assertNotIn("flush ruleset", text)

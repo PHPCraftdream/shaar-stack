@@ -51,7 +51,7 @@ def rules(prefix, router, case, ports, purpose="product"):
                   f"add rule inet {table} paths ip saddr 203.0.113.10 tcp sport {port} accept comment \"p13-owned-tcp-reply\""]
     lines += [f"add rule inet {table} paths meta l4proto tcp counter name tcp_drop drop comment \"p13-other-tcp-block\"",
               f"add chain inet {table} snat {{ type nat hook postrouting priority 100; policy accept; }}",
-              f"add rule inet {table} snat ip saddr {host} meta l4proto udp counter name udp_nat masquerade to :41010-41020 comment \"p13-udp-nat\"",
+              f"add rule inet {table} snat ip saddr {host} ip protocol udp counter name udp_nat masquerade to :41010-41020 comment \"p13-udp-nat\"",
               f"add rule inet {table} snat ip saddr {host} meta l4proto tcp counter name tcp_nat masquerade comment \"p13-tcp-nat\""]
     return "\n".join(lines) + "\n"
 
