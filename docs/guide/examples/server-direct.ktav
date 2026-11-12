@@ -1,0 +1,9 @@
+## Direct-only Server (no network object): see docs/guide/configuration.md.
+## Forward accepted client streams only to this loopback TCP service.
+target: 127.0.0.1:8080
+## Direct QUIC endpoint; port 0 lets the OS choose.
+bind: 0.0.0.0:0
+## Paths are relative to the process working directory, not to this file.
+key_file:: server.key
+allowlist_path:: allowed.txt
+fallback: signal

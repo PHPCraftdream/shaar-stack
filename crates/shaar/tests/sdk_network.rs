@@ -3,7 +3,7 @@
 
 use iroh_base::PublicKey;
 use shaar::{
-    identity::Identity,
+    identity::{Identity, IdentityError},
     network::{Allowlist, Endpoint, ForwardError, ForwardStats, Limits, NetworkError, Session},
 };
 use std::{sync::Arc, time::Duration};
@@ -13,6 +13,11 @@ use tokio::{
     sync::oneshot,
     task::JoinSet,
 };
+
+// The documented key-creation example, compiled verbatim (docs/guide/).
+#[allow(dead_code)]
+#[path = "../../../docs/guide/examples/keygen.rs"]
+mod keygen;
 
 fn identity(seed: u8) -> Identity {
     Identity::from_seed([seed; 32])
@@ -240,4 +245,66 @@ async fn all_sixteen_stream_slots_are_bounded_and_joined_before_resource_release
     })
     .await
     .expect("public sixteen-stream resource deadline");
+}
+
+fn scratch_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("shaar-guide-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[tokio::test]
+async fn guide_keygen_creates_shows_and_never_overwrites_a_key() {
+    let dir = scratch_dir("keygen-create");
+    let path = dir.join("example.key");
+    let path_text = path.to_str().unwrap();
+
+    let created = keygen::create_key(path_text).await.unwrap();
+    assert_eq!(created.len(), 64);
+    assert!(
+        created
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    );
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().len(),
+        32,
+        "32 raw seed bytes"
+    );
+
+    let loaded = Identity::load(&path).await.unwrap();
+    let expected: String = loaded
+        .public_key_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(created, expected);
+    assert_eq!(keygen::show_key(path_text).await.unwrap(), created);
+
+    let before = std::fs::read(&path).unwrap();
+    let error = keygen::create_key(path_text).await.unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<IdentityError>(),
+        Some(IdentityError::AlreadyExists)
+    ));
+    assert_eq!(std::fs::read(&path).unwrap(), before, "key left untouched");
+
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_dir(&dir).unwrap();
+}
+
+#[tokio::test]
+async fn guide_keygen_show_rejects_missing_and_malformed_files() {
+    let dir = scratch_dir("keygen-show");
+    let missing = dir.join("missing.key");
+    assert!(keygen::show_key(missing.to_str().unwrap()).await.is_err());
+    assert!(!missing.exists(), "show never creates a key");
+
+    let short = dir.join("short.key");
+    std::fs::write(&short, [7_u8; 31]).unwrap();
+    let error = keygen::show_key(short.to_str().unwrap()).await.unwrap_err();
+    assert!(error.downcast_ref::<IdentityError>().is_some());
+
+    std::fs::remove_file(&short).unwrap();
+    std::fs::remove_dir(&dir).unwrap();
 }

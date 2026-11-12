@@ -383,6 +383,21 @@ class ProcessFeedbackTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RUN.POLICY.select(["crates/shaar/tests/unknown/support.rs"])
 
+    def test_guide_examples_select_only_the_tests_that_parse_them(self):
+        cases = {
+            "docs/guide/examples/server-direct.ktav": [RUN.POLICY.target("shaar", ("config::",))],
+            "docs/guide/examples/client-composed.ktav": [RUN.POLICY.target("shaar", ("config::",))],
+            "docs/guide/examples/allowlist.txt": [RUN.POLICY.target("shaar-server", ("tests::allowlist::",))],
+            "docs/guide/examples/keygen.rs": [RUN.POLICY.target("shaar", kind="test", name="sdk_network")],
+        }
+        for path, targets in cases.items():
+            with self.subTest(path=path):
+                selected = RUN.POLICY.select([path])
+                self.assertEqual(selected["targets"], targets)
+                self.assertFalse(selected["selection"]["full"])
+        with self.assertRaises(ValueError):
+            RUN.POLICY.select(["docs/guide/examples/unowned.bin"])
+
     def test_existing_feedback_workflow_is_owned_narrow_and_never_resolves_locks(self):
         selected = RUN.POLICY.select([".github/workflows/sdk-lock.yml"])
         self.assertTrue(selected["selection"]["ci_policy"])

@@ -1,0 +1,6 @@
+# One client public key per line: exactly 64 hexadecimal characters.
+# Blank lines and lines starting with # are ignored.
+3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c
+
+# Upper- and lowercase hexadecimal are both accepted.
+D04AB232742BB4AB3A1368BD4615E4E6D0224AB71A016BAF8520A332C9778737

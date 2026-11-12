@@ -438,3 +438,6 @@ mod tests;
 
 #[cfg(test)]
 mod uri_tests;
+
+#[cfg(test)]
+mod guide_examples_tests;
