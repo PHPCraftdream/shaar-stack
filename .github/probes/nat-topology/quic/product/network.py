@@ -20,7 +20,7 @@ PROFILES = {
 }
 CASES = set(PROFILES)
 COUNTERS = {"quota_drop", "ipv6_drop", "native_drop", "tcp_drop", "udp_nat", "tcp_nat", "native_snat",
-            "ygg_tcp", "relay_tcp", "dht_drop", "lan_native"}
+            "ygg_tcp", "relay_tcp", "dht_drop", "lan_native", "lan_sent"}
 QUOTAS = {"product": 2 * 1024 * 1024, "fault": 2 * 1024 * 1024}
 CHAINS = {"budget": ("filter", "forward", -300), "paths": ("filter", "forward", -200),
           "natout": ("nat", "postrouting", 100), "seen": ("filter", "postrouting", 200),
@@ -86,6 +86,8 @@ def rules(prefix, router, case, ports, purpose="product"):
         # LAN: Client (rtr_a ns) and Server (rtr_b ns) share one segment; count it on input, block the Client's Ygg dial on output.
         source, target = ("203.0.113.2", "203.0.113.1") if router == "rtr_a" else ("203.0.113.1", "203.0.113.2")
         lines.append(f"add rule inet {table} lanin ip saddr {source} ip daddr {target} meta l4proto udp counter name lan_native comment \"p13-lan-native\"")
+        # Sender side of the same traffic: separates "never sent" from "sent but not delivered".
+        lines.append(f"add rule inet {table} lanout ip saddr {target} ip daddr {source} meta l4proto udp counter name lan_sent comment \"p13-lan-sent\"")
         if router == "rtr_a":
             lines.append(f"add rule inet {table} lanout ip daddr 203.0.113.10 tcp dport {ports['transit']} counter name tcp_drop drop comment \"p13-lan-ygg-block\"")
     return "\n".join(lines) + "\n"

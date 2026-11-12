@@ -221,6 +221,9 @@ class NetworkContractTests(unittest.TestCase):
         lan = network.rules("snaabbcc", "rtr_a", "lan-standby", ports)
         self.assertIn("lanin ip saddr 203.0.113.2 ip daddr 203.0.113.1 meta l4proto udp counter name lan_native", lan)
         self.assertIn("lanout ip daddr 203.0.113.10 tcp dport 42003 counter name tcp_drop drop", lan)
+        self.assertIn("lanout ip saddr 203.0.113.1 ip daddr 203.0.113.2 meta l4proto udp counter name lan_sent", lan)
+        self.assertIn("lanout ip saddr 203.0.113.2 ip daddr 203.0.113.1 meta l4proto udp counter name lan_sent",
+                      network.rules("snaabbcc", "rtr_b", "lan-signal", ports))
 
     def test_network_commands_cannot_change_the_host_or_foreign_namespaces(self):
         cfg = {"prefix": "snaabbcc", "ns": {"rtr_a": "snaabbcc-rtr-a", "rtr_b": "snaabbcc-rtr-b"}}

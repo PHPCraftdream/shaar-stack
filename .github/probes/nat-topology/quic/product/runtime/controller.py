@@ -97,6 +97,9 @@ def diagnostics(cfg, tools, root):
         try:
             text = json.dumps(kernel.snapshot(cfg, tools, router, deadline))
             (root / f"failure-nft-{router}.json").write_text(text[:contract.MAX_REPORT], encoding="utf-8")
+            for name, argv in (("neigh", ["neigh", "show"]), ("link", ["-s", "-o", "link", "show"])):
+                out = kernel.checked([tools["ip"], "-n", cfg["ns"][router], *argv], deadline, what="diagnostic " + name)
+                (root / f"failure-{name}-{router}.txt").write_bytes(out[:contract.MAX_REPORT])
             lines = kernel.conntrack_lines(cfg, tools, router, deadline)
             (root / f"failure-conntrack-{router}.txt").write_text("\n".join(lines[:256]) + "\n", encoding="utf-8")
         except Exception as error:  # noqa: BLE001 - diagnostics must not mask the original failure
