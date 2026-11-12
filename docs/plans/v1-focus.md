@@ -1753,6 +1753,149 @@ come from those answers, not from scope restoration or an automated notification
 current P09 is accepted and their applicable gates are satisfied. Local execution,
 TUN/root/routes, legal clearance and release permissions are not granted.
 
+## Public live smoke contract (D2, scenarios E3, task #12): proposed, not executed
+
+Status: **written and unit-tested only; no public contact has happened and none is
+authorized.** The user's 2026-11-04 and 2026-11-09 decisions authorize a smoke in
+principle; exact targets and budgets must be approved before any contact. This
+section is that proposal. The machine-readable form is
+`.github/probes/public-smoke/contract.json`; an approval binds its exact bytes
+through the SHA-256 given at dispatch.
+
+**Scenario steps advanced:** 1–3 (signed record in the public Mainline DHT, key-only
+Client resolves), 5 (Yggdrasil standby over public peers) and 6 (allowlist check and
+one fixed-target request/reply). Step 4 is covered only on the Server side: the
+composed Server must reserve a slot on a libp2p relay to start at all.
+
+**Acceptance (one observable criterion):** in one dispatch, the normal CI-built
+`shaar-server` on runner A and `shaar-client` on runner B (two separate GitHub-hosted
+Ubuntu runners, so the path is genuinely over the Internet) complete exactly one
+request/reply of fixed APP bytes in `standby` mode with a Client configured with the
+Server key only, within every budget below. Anything else is a fail, reported as is.
+
+**Non-goals:** no `signal`-mode live run (its outcome depends on NAT behaviour between
+two cloud NATs, which P13 already covers in a controlled network), no load or
+efficiency measurement, no scanning, no Windows run, no real devices, no release or
+legal claim, no retry or rerun, no product change.
+
+### Exact targets
+
+| Network | Target | Operator and why using it is lawful |
+|---|---|---|
+| Mainline DHT | `dht.libtorrent.org:25401` | Default of libtorrent's documented `dht_bootstrap_nodes` setting; run by the libtorrent project for exactly this purpose (libtorrent blog, 2016-09 "DHT bootstrap node"). |
+| Mainline DHT | `router.bittorrent.com:6881` | BitTorrent, Inc. router named in BEP 5 and listed as a bootstrap node in the libtorrent settings reference. |
+| Yggdrasil | `tcp://ygg-pa.incognet.io:8883` | IncogNET, Allentown PA. Listed by its operator in the official `yggdrasil-network/public-peers` repository (`north-america/united-states.md`). |
+| Yggdrasil | `tcp://mo.us.ygg.triplebit.org:9000` | Triplebit, Kansas City MO. Same list and same basis. |
+| libp2p relay | **none proposed** | See the blocker below. |
+
+Honest limits of the legal basis: the public-peers list states no formal terms of use
+and no uptime guarantee; its purpose is that anyone may peer with the listed nodes
+and its README advises two or three peers. The DHT bootstrap hosts publish no terms
+either; they are documented default entry points. The two bootstrap hostnames are
+resolved once by the harness (the product accepts only numeric IPv4); every address
+must be globally routable or the run aborts before any contact. Beyond the bootstrap
+hosts, joining the DHT means exchanging UDP packets with arbitrary volunteer nodes and
+asking about 8 of them to store one signed record of at most 1000 bytes; this is
+inherent in the protocol and is bounded only by the byte caps below. The record
+contains the runner's own interface addresses (the products do not filter private
+ones), which are ephemeral.
+
+**Blocker, libp2p relay:** the composed Server stops with `relay reservation failed at
+startup` unless a pinned libp2p circuit-relay v2 node accepts its reservation, so a
+public relay is mandatory. No relay with operator-published terms of use was found:
+libp2p publishes no list of open relays, and Amino bootstrap or IPFS nodes are not
+documented as relays for third parties. A relay hosted by one of the two jobs would
+be unreachable (runners accept no inbound connections). Therefore `libp2p_relay` is
+`null` in the contract and the harness refuses to run. The user must supply or
+approve one relay (PeerId `12D3KooW...` and a public IPv4 address with port) whose
+operator permits the use; the smoke uses it only for one reservation by the Server.
+The Client is given an owned silent loopback listener as its relay, so it negotiates
+nothing and carries no libp2p traffic.
+
+### How Native is blocked without root
+
+No sudo, firewall rule or namespace is used. Native QUIC cannot connect because the
+Server runs on a cloud NAT: its published addresses are private ones, and the Client
+has no relay negotiation (silent loopback relay), so no hole punching starts. The
+harness refuses to start if a runner has any globally routable local address. The
+route is therefore established by exclusion, not observed directly (see evidence).
+
+### Enforced budgets (per dispatch: one run, zero retries, two runners)
+
+All numbers are the contract file's; the harness also embeds ceilings, so editing the
+JSON can only tighten them. They restate the 2026-11-04 conditional bounds.
+
+| Budget | Value | Enforcement |
+|---|---|---|
+| Runs | 1 per dispatch, Linux only; rerun refused (`GITHUB_RUN_ATTEMPT` must be 1) | Inline check in the plan job and in the harness |
+| Product window | at most 120 s per process: Server T0 to T0+105 plus 15 s stop grace, Client T0+20 to at most T0+95 plus grace | Absolute epoch deadlines from one shared origin; SIGINT then kill of the owned PID |
+| Job | 5 min step limit, 12 min job limit | GitHub `timeout-minutes` |
+| Yggdrasil TCP connections | at most 2 per job (4 per run) | Metered per socket; a third connection is a violation |
+| Relay TCP connections | at most 2 (Server only) | Metered per socket |
+| Bytes per job | NIC rx+tx at most 5 MiB (10 MiB per run); Yggdrasil TCP 3 MiB; relay TCP 256 KiB; DHT/UDP (NIC minus TCP) 1.5 MiB | Metered every 500 ms; a breach kills the product |
+| TCP peers | only the resolved addresses of the allowed hosts | Any other non-loopback TCP peer is a violation |
+| APP payload | one exchange, 128 B request and 128 B reply (64 KiB ceiling) | The fixture accepts exactly one connection and one exact request |
+
+Metering uses `/proc/net/dev` (all non-loopback interfaces) and `ss -tine` for sockets
+owned by the product PID (inode match). It needs no privilege. It is conservative:
+counters are runner-wide, so background traffic counts against the caps and the meter
+can over-count but not under-count; sampling is every 500 ms, so an overshoot is at
+most one interval; very short failed connection attempts can be missed (the cap on
+established connections is what is enforced). UDP bytes are derived, not read per
+socket. If `ss` or the counters cannot be read the run is refused (fail closed). A
+violation, a meter failure or a crash is a fail: no automatic rerun.
+
+### Dispatch (default off)
+
+The mode lives in `sdk-lock.yml` as input `public_smoke` (default `false`) beside the
+existing modes and is exclusive with them. Jobs: `public-smoke-plan` (inputs and
+contract validation, harness unit tests, no network), `public-smoke-build` (normal
+products with the native packet gate OFF through the existing `product-manifest`
+recipe, staged as an artifact kept one day), then `public-smoke-server` and
+`public-smoke-client` in parallel on separate runners. Validation order: the 40-hex
+revision, attempt number, mode exclusivity and digest shape are checked inline before
+the checkout; then the contract schema and ceilings, the recorded approval, the relay
+target and the meter availability. The two roles check the product digests against
+the manifest and the window origin before any contact.
+
+After approval the contract is updated in one commit with `approval` (date, the
+user's words, decision-log reference) and `libp2p_relay`; its new digest is
+`sha256sum .github/probes/public-smoke/contract.json`. Then:
+
+```text
+gh workflow run "SDK lockfile preparation" --repo <repo> --ref <branch> \
+  -f source_revision=<40-hex SHA of that commit> -f public_smoke=true \
+  -f public_smoke_contract_sha256=<that digest>
+```
+
+Digest of the proposal as committed here (not runnable: approval and relay are
+`null`): see the delivery report; any edit of the contract changes it.
+
+### Evidence recorded
+
+Per role, `evidence.json` (artifact kept 14 days; never keys, seeds or configs):
+revision, run id, contract digest, product digests, native gate off, public keys,
+resolved bootstrap and peer addresses, runner addresses, established Yggdrasil and
+relay connections with first-seen time, the metered totals against each cap, product
+exit code, stderr tail (redacted if key bytes appear), and the APP result. Claim
+levels:
+
+- **Observed:** Yggdrasil peer connections, relay connection (Server), APP bytes and
+  match, the target seeing exactly one valid authorized exchange, byte and connection
+  totals, product exit codes.
+- **Inferred, not observed:** the route (Yggdrasil standby, by exclusion) and that the
+  Client resolved the DHT record. The products log nothing about either, and the
+  harness has no privilege to see UDP destinations. A pass therefore proves that a
+  key-only Client reached the Server end to end while Native was excluded, not that
+  the DHT lookup itself was seen. Closing that gap needs a product-side status line
+  or a privileged capture, both out of scope here.
+- **Not claimed:** libp2p negotiation across the public relay (Server reservation
+  only), hole punching, efficiency, behaviour under a different NAT, Windows.
+
+Identities are disposable: seeds are derived from the run id and attempt, so they
+protect nothing and are never uploaded; the allowlist admits one such client key and
+the only target is a local echo fixture bound to loopback.
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.

@@ -261,7 +261,7 @@ Process case ids below are the ignored test functions under
 |---|---|---|---|---|
 | E1 | LAN: both sides on one L2 segment, no router | both | accepted (owned documentation-range segment; not a real LAN) | E8 cases `lan-signal`, `lan-standby`: Client and Server are single-interface hosts on the `203.0.113.0/24` segment with the DHT/relay/Ygg fixtures; signed record lists exactly `203.0.113.2`; APP 61/61, accepts 1, exit 0 in both modes; both routers forwarded 0 bytes and `udp_nat`, `tcp_nat`, `native_snat` 0; Native UDP sent and received on the segment (rtr_a/rtr_b `lan_sent` 22/19 and `lan_native` 19/22 in signal; `lan_sent` 24/21 and `lan_native` 21/24 in standby). Does not cover RFC 1918 addresses, multicast discovery, Wi-Fi or devices |
 | E2 | Real home, mobile, cafe networks and devices | both | gated | Needs separate user permission and device access; no NAT claims are made |
-| E3 | Public Yggdrasil/relay interoperability and live smoke (task D2) | both | gated | Authorized in principle on 2026-11-09; exact lawful peers and enforceable budgets are still required |
+| E3 | Public Yggdrasil/relay interoperability and live smoke (task D2) | both | gated | Authorized in principle on 2026-11-09; exact lawful peers and enforceable budgets are still required. A target and budget proposal with a default-off dispatch mode is written and unit-tested (`docs/plans/v1-focus.md`, section "Public live smoke contract"); it has not been approved or executed, and it still lacks a libp2p relay target |
 
 **F. No n0**
 

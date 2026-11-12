@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "scope": "public-smoke-v1",
+  "approval": null,
+  "targets": {
+    "mainline_bootstrap": [
+      {
+        "host": "dht.libtorrent.org",
+        "port": 25401,
+        "operator": "libtorrent project (Arvid Norberg)",
+        "basis": "Default value of the documented libtorrent setting dht_bootstrap_nodes; the operator runs it for exactly this purpose and describes it in the libtorrent blog post 'DHT bootstrap node' (2016-09)."
+      },
+      {
+        "host": "router.bittorrent.com",
+        "port": 6881,
+        "operator": "BitTorrent, Inc.",
+        "basis": "Router node named in BEP 5 and listed as a bootstrap node in the libtorrent settings reference; a long-standing public entry point of the Mainline DHT."
+      }
+    ],
+    "ygg_peers": [
+      {
+        "uri": "tcp://ygg-pa.incognet.io:8883",
+        "operator": "IncogNET (Allentown, PA; 5 Gbps)",
+        "basis": "Listed by its operator in the official yggdrasil-network/public-peers repository (north-america/united-states.md); that list exists so that anyone may peer with the listed nodes. The list publishes no further terms and no uptime guarantee."
+      },
+      {
+        "uri": "tcp://mo.us.ygg.triplebit.org:9000",
+        "operator": "Triplebit (Kansas City, MO; 10 Gbps)",
+        "basis": "Listed by its operator in the official yggdrasil-network/public-peers repository (north-america/united-states.md); same terms and caveats as above."
+      }
+    ],
+    "libp2p_relay": null
+  },
+  "budgets": {
+    "runs_per_dispatch": 1,
+    "retries": 0,
+    "runners": 2,
+    "job_seconds": 300,
+    "timeline": {
+      "server_launch_deadline_s": 10,
+      "client_start_offset_s": 20,
+      "client_ready_wait_s": 25,
+      "client_exchange_s": 50,
+      "shutdown_grace_s": 15,
+      "server_end_offset_s": 105
+    },
+    "per_job": {
+      "nic_bytes": 5242880,
+      "ygg_tcp_bytes": 3145728,
+      "relay_tcp_bytes": 262144,
+      "dht_udp_bytes": 1572864,
+      "ygg_connections": 2,
+      "relay_connections": 2
+    },
+    "app": {
+      "exchanges": 1,
+      "request_bytes_max": 128,
+      "reply_bytes_max": 128,
+      "payload_bytes_max": 65536
+    },
+    "sample_interval_ms": 500
+  }
+}
