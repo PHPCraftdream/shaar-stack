@@ -1,6 +1,10 @@
 # P13 controlled NAT and UDP-blockade execution contract
 
-Status: reviewed execution boundary to implement; **not executed and not P13 acceptance**.
+Status: **executed and accepted for the four product cases and the three cleanup
+controls** — fork workflow_dispatch run 43229756778 on `ca6c04a` (2026-11-12),
+phase status `pass`; see [Execution record](#execution-record-2026-11-12). This is
+not full P13 acceptance: the open and gated rows are listed in the P13 report,
+`docs/verification/scenarios.md` section 10.
 
 ## Authorization and fixed scope
 
@@ -170,3 +174,32 @@ Preserve failed runs. Three consecutive leaf CI failures require one joint revie
 and one reported reviewed repair before more CI. Verify in fork; upstream receives
 only the exact reviewed green SHA, then custody transfer and branch/worktree
 cleanup. No skipped or permission-blocked applicable P13 row counts as passed.
+
+## Execution record (2026-11-12)
+
+- **Accepted:** fork workflow_dispatch run 43229756778 on `ca6c04a`, runner image
+  20261101.186.1. All four product cases (`native-signal`, `native-standby`,
+  `blocked-standby`, `blocked-signal`) and the three cleanup controls
+  (`setup-failure`, `live-failure`, `interruption`) passed. Zero leftover
+  namespaces, processes and interfaces; host firewall and `ip_forward` unchanged.
+  Forwarded 160,332 B of the 64 MiB allocation; privileged phase 53.6 s of 20 min.
+  The later `6e730b1` (merged to main as `1844247`; upstream develop CI 43231417573
+  green) changes only the supervisor interrupt wait and was not re-dispatched.
+- **Oracle deviation:** the runner has no conntrack procfs table or CLI (tool
+  preflight run 43118324828). Native NAT admission is therefore established by
+  named nftables counters (`udp_nat`, `native_snat`, `native_drop`) with exact rule
+  identities, not by NAT/conntrack tuples as the mandatory-evidence section
+  requested. No tuple is claimed. Case 3 stays a fallback result, not hole punching.
+- **Amendments recorded on 2026-11-12** (decision log): the dispatch cap is raised
+  to six, and nft syntax is checked inside the dispatch (all 18 generated rulesets
+  in one throwaway owned namespace before any case) because the runner restricts
+  unprivileged user namespaces, so ordinary CI cannot run `nft`.
+- **Earlier failed dispatches (kept as evidence):** 43218411816 on `c265050` — the
+  controller could not find the `cat` tool; 43220370261 on `9225dcc` — nft rejected a
+  chain named `snat` (reserved word); 43227388578 on `0800aa4` — the product cases
+  passed their functional oracles but strict verification demanded an identity for
+  a short-lived APP child that is never sampled. Each was repaired in the following
+  commit; none was retried blindly.
+- **Not covered by this contract or its run:** LAN, network change, IPv6 NAT,
+  other NAT types, direct double-NAT punching, observed zero n0 contact, public and
+  device scenarios. They stay open or gated in `docs/verification/scenarios.md`.
