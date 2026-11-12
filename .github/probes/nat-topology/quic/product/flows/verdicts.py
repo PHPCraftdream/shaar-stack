@@ -99,12 +99,9 @@ def nat_mapping(result, flavor):
 
 
 def punch_control(result):
-    """The fixture itself can punch through the two cone NATs (harness-known public endpoints), so a missing path is the product's."""
-    found = result.get("punch_control", [])
-    expected = {"host_a": contract.IPS["rtr_b_wan"], "host_b": contract.IPS["rtr_a_wan"]}
-    contract.require(len(found) == 2 and {item.get("host") for item in found} == set(expected)
-                     and all(item["received"] > 0 and item["first"][0] == expected[item["host"]] for item in found),
-                     "fixture hole punch control missing or failed")
+    """The fixture punch control ran and recorded its outcome (supporting evidence; a recorded miss does not decide the product verdict)."""
+    found = result.get("punch_control") or {}
+    contract.require(found.get("status") in ("pass", "fail") and len(found.get("receipts", [])) == 2, "fixture hole punch control was not recorded")
 
 
 def dnat(spec, counters, result):

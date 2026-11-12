@@ -7,6 +7,8 @@ c9a54f1587bb133a06072596484c972a336db0d2); Go/cgo is removed. Revised:
 column of every table was updated from the accepted evidence recorded in this
 repository. Revised again on 2026-11-12 — section 10 rows E1, F1, G2, C2, C4b,
 C7 (typed failure) and D3 were closed, and D2 narrowed, by the extension run E8.
+Revised on 2026-11-12 (third time) — rows A2b, A5, A6, C5, C7, D2, D4 and G2 were closed or
+recorded as findings by the remaining-row runs E9 (section 10.8).
 
 Caveat: at the P01 stage nothing was run; the original statuses were all
 "planned". The status column now reads `accepted`, `open` or `gated`, each with
@@ -188,6 +190,7 @@ only in GitHub CI. Real devices, LAN and public networks were not used.
 | E4 | `ca6c04a` | fork workflow_dispatch 43229756778 (privileged namespace matrix); fork ordinary 43228164983 | Four namespace NAT product cases plus three cleanup controls, all pass; details in 10.4 |
 | E5 | `6e730b1` (merged to main as `1844247`) | fork push CI 43231113518; upstream develop CI 43231417573 | Only the supervisor interrupt wait changed after E4 (test code); ordinary CI green. The namespace matrix was not re-dispatched on this SHA |
 | E7 | `17b711c` | fork ordinary 43245072242 (plan job 173 Python tests, structure job 132 guard tests, all green) | Ordinary CI of the exact source that E8 executed |
+| E9 | `1d36cd5`, `6f7c0ce`, `31fd921` | fork workflow_dispatch, six dispatches of the three groups (section 10.8): nat 43255837358, 43258223283, 43262313789; faults 43257222340, 43262304898; base 43262321962; fork ordinary CI of each SHA (the last one 43259704035 after a re-run of its cancelled Windows leg) | Sixteen further namespace product cases in two new groups next to the unchanged base group; details in 10.8 |
 | E8 | `17b711c` | fork workflow_dispatch 43245366525 (privileged namespace matrix, extension); earlier failed dispatches 43241277233 (`72db069`) and 43243607361 (`7f89780`) | Twelve namespace product cases plus three cleanup controls, all pass; details in 10.7 |
 | E6 | `d380641` | fork ordinary 43117747747; manual 43118324828; upstream 43119078680 | Runner tool preflight: `ip`, `nft`, `setpriv`, `tcpdump` present; conntrack CLI and the conntrack procfs table absent |
 
@@ -215,11 +218,11 @@ Process case ids below are the ignored test functions under
 |---|---|---|---|---|---|---|
 | A1 | Direct IPv4, key-only discovery, exact APP request/reply, half-close/EOF | signal, standby | accepted | E1: `real_composed_key_only_payload_and_server_restart_in_signal_and_standby` | Native QUIC on owned loopback; path exclusion, no child route counters | normal-process loopback |
 | A2a | Direct IPv6, key-only, fixed target | signal, standby | accepted (in-process) | E1 identity `...ipv6::key_only_ipv6_forwards_to_the_fixed_target_in_signal_and_standby`; constructor/role leaves `8ca352e`, `e6b1f10` | Native QUIC over IPv6 in one process | in-process role |
-| A2b | Direct IPv6 with normal binaries or namespaces | both | open | None. The namespace matrix denies IPv6 forwarding by design and claims no IPv6 NAT | - | - |
+| A2b | Direct IPv6 with normal binaries or namespaces | both | accepted for IPv6-only Native data between owned segment hosts (with an explicit IPv6 hint); key-only dial order not accepted | E9 `ipv6-signal`/`ipv6-standby` (faults group, dispatch 43262304898, `31fd921`): Client and Server are hosts on the owned segment (no NAT, no forwarding) with documentation-prefix addresses `2001:db8:13::1` and `::2`; the signed record lists the Server's IPv6 candidate; IPv4 Native UDP between the two hosts is dropped for the whole case (3 and 2 dropped probes), the Client dials the published IPv6 candidate as its `server_address` hint; APP 61/61, accepts 1, exit 0 in both modes; `lan6_native` 19/24 and `lan6_sent` 24/19, `lan_native` (IPv4) 0 on both hosts, forwarded bytes 0, `ipv6_drop` 0, router IPv6 forwarding stays 0. Findings from the first dispatch (43257222340, `1d36cd5`): with both families open and no hint, the path in use differs between runs (the standby run moved to IPv6 in 0.06 s after the IPv4 drop, the signal run did not recover within 40 s: `forwarding setup deadline exceeded`), and the key-only dial tries the published IPv4 candidate first, where a silent candidate consumes the whole attempt (see A5). The hint run is not a key-only discovery proof | Native QUIC over IPv6 (IPv4 UDP dropped, Ygg denied on the Client side) | namespace segment |
 | A3 | Single NAT (Client behind Router A, Server on WAN), Native positive control, Ygg transit denied | signal | accepted | E4 case `native-signal`: APP 61/61 bytes, target accepts 1, Client exit 0; Router A `native_snat` 22 pkts / 10,799 B, `udp_nat` 2 pkts, `native_drop` 0, `tcp_drop` 1 pkt (denied Ygg transit); Server published `203.0.113.10:44346` | Native QUIC through Router A masquerade; relay/Ygg APP excluded by rules | namespace NAT |
 | A4 | Single NAT, Native positive control, Ygg unavailable | standby | accepted | E4 case `native-standby`: APP 61/61, accepts 1, exit 0; `native_snat` 23 pkts / 10,853 B, `tcp_drop` 4 pkts / 240 B | Native QUIC through Router A masquerade; fallback unavailable yet APP succeeds | namespace NAT |
-| A5 | Direct Native hole punching through double NAT | both | open | None at product level. E4 case 3 is fallback, not punching (contract). Experimental fixture only: P03 run 39860587690 at `77c8ab6` | - | P03 fixture only |
-| A6 | NAT type variety (symmetric, full cone, others) | both | open | The fixture has one MASQUERADE type with translated ports 41010-41020 | - | - |
+| A5 | Direct Native hole punching through double NAT | both | tested, **negative finding: no direct path** (not accepted as punching) | E9 `dnat-cone-*` and `dnat-cone-relay-*` (nat group, dispatches 43258223283 at `6f7c0ce` and 43262313789 at `31fd921`; the first dispatch 43255837358 at `1d36cd5` expected a punch and failed, preserved): both routers use a port-preserving cone NAT (live probe: 3 of 3 datagrams keep the source port on each router). The normal products do not punch: the signed record lists only the Server's private address (`10.0.2.2:<port>`), the Client ends with "no usable path remained within the attempt budget" (exit 1, 32.6 s), target accepts 0, and `peer_sent`/`peer_recv` (translated Native UDP between the two routers) are 0 on both routers, in both modes with Ygg denied. Direct-first: Client-side `relay_tcp` 0, because the silent private first candidate consumes the 3 s attempt, so relay negotiation is never reached (source `crates/shaar/src/startup/role/dialers.rs`). Relay-first (Client DHT queries dropped, `dht_drop` 13): relay signaling does happen (`relay_tcp` about 290 and 300 on the two routers) and still no direct path (`native_out` 7 and 8: translated Native UDP left both routers, none reached the other). Likely cause (source-derived, not separately proven): no source of reflexive addresses (Minimal preset, no STUN/QAD, observed addresses ignored), so neither side learns the other's mapped endpoint. Supporting fixture control (recorded, never decisive): two plain UDP sockets with harness-known public endpoints exchanged datagrams through both routers in 4 of 4 cases of 43258223283 (with an unbounded loop, since bounded) and in 2 of 4 cases of 43262313789 (bounded; the other two missed, cause not established, so the control is now recorded without deciding a verdict). Earlier fixture-only evidence: P03 run 39860587690 at `77c8ab6` with configured public candidates | None: no Native path and no APP | namespace NAT |
+| A6 | NAT type variety (symmetric, full cone, others) | both | tested for two types (port-preserving cone, fully random ports); other types open | E9 `dnat-sym-*` (dispatch 43258223283): both routers use `masquerade fully-random` (live probe: 0 of 3 datagrams keep the port). `signal`: fail closed (terminal reset, 0 reply bytes, target accepts 0, Client exit 1, 32.6 s) although Ygg TCP was reachable (`ygg_tcp` present, unused for APP). `standby`: exact APP 61/61 through Yggdrasil in 1.2 s (accepts 1, exit 0, Client-side `ygg_tcp` 126 pkts); `peer_*` 0 on both routers. The cone cases of A5 end the same way, so symmetric mapping did not change the outcome | Yggdrasil in `standby` (by counters and by the signal-mode fail-closed control); none in `signal` | namespace NAT |
 
 **B. Blocked native UDP**
 
@@ -237,9 +240,9 @@ Process case ids below are the ignored test functions under
 | C3 | Late Native recovery after outage with held streams | standby | accepted (in-process) | E1 identity `...idle_policy_progress_restores_native_without_disturbing_active_streams` | Native restored, held streams undisturbed | in-process role |
 | C4 | Client relay unavailable | standby; signal | accepted (standby; signal combined with B2) | Standby: C1 and B1 (Router A allows only transit TCP). Signal: B2 fails closed | As C1/B1/B2 | normal-process loopback; namespace NAT |
 | C4b | Relay unavailable alone while Native is available | signal | accepted | E8 case `relay-denied-signal`: Client-side router allows only Ygg transit TCP, UDP open; APP 61/61, accepts 1, exit 0, `udp_nat` 2, `native_snat` 20, `ygg_tcp` 41 pkts, `tcp_drop` 0 (the product did not try the relay) | Native QUIC (signal mode: Ygg and relay cannot carry APP) | namespace NAT |
-| C5 | Exhausted relay (reservation/circuit limits) | both | open for composed runs | Policy and in-process only: E1 `...signal_and_unusable_fallback_keep_finite_typed_exhaustion` (policy), `...cross_path_capacity_refuses_while_one_shared_slot_is_held` | Finite typed failure; no real relay limit hit | policy; in-process role |
+| C5 | Exhausted relay (reservation/circuit limits) | both | accepted for reservation exhaustion at Server startup; circuit exhaustion and Client-side exhaustion not separately run | E9 `relay-full-*` (faults group, dispatch 43257222340, `1d36cd5`): the owned relay allows two reservations; two filler Servers (other identities, same binary) hold them, then the real Server exits by itself with status 1 and `relay reservation failed at startup` after 23.1 s (bounded retries; both modes), fillers alive until stopped, target accepts 0, zero forwarded bytes. The Client reserves only after every direct candidate failed, so Client-side exhaustion ends as in C4, C4b, B1 and B2. Policy and in-process results remain as before: E1 `...signal_and_unusable_fallback_keep_finite_typed_exhaustion` (policy), `...cross_path_capacity_refuses_while_one_shared_slot_is_held` | Finite typed failure; no application route | namespace; policy; in-process role |
 | C6 | Unavailable Yggdrasil while Native is available | signal, standby | accepted | A3, A4 (Ygg transit denied; `tcp_drop` counters) | Native QUIC | namespace NAT |
-| C7 | Total outage (Native and Ygg both unavailable), typed failure and recovery | standby | accepted for typed failure; recovery open for composed runs | E8 case `outage-standby`: UDP blocked (`native_drop` 24 pkts) and Client relay and Ygg TCP denied (`tcp_drop` 19 pkts): local admission, terminal reset, 0 reply bytes, target accepts 0, Client exit 1 on its own, active 32.6 s. Recovery after a total outage remains policy only: E1 `...a_total_outage_is_unavailable_and_a_recovering_fallback_ends_it` | No application route | namespace NAT; policy |
+| C7 | Total outage (Native and Ygg both unavailable), typed failure and recovery | standby | accepted (typed failure and recovery) | E8 case `outage-standby`: UDP blocked (`native_drop` 24 pkts) and Client relay and Ygg TCP denied (`tcp_drop` 19 pkts): local admission, terminal reset, 0 reply bytes, target accepts 0, Client exit 1 on its own, active 32.6 s. E9 `recover-standby` (dispatch 43257222340): runtime blocks of Native UDP (24 dropped pkts) and Ygg TCP (36 dropped pkts) before the first APP; APP 1 failed closed, the Client ended with status 1; both blocks removed, a fresh Client started and APP 2 succeeded exact 61/61 **0.083 s** after the removal (fixture bound 40 s; includes the Client start); final Client exit 0, target accepts 1. In-process: E1 `...a_total_outage_is_unavailable_and_a_recovering_fallback_ends_it` | No application route during the outage; Native after recovery | namespace NAT; policy |
 | C8 | libp2p carries no APP data | both | accepted (in-process) | E1 identity `...pinned_relay_negotiation_carries_native_payload_with_zero_relay_payload`: Native STREAM, zero Custom/relay APP | Native QUIC after relay negotiation | in-process role |
 | C9 | Signal mode never carries APP over Ygg | signal | accepted | E1 identity `...signal_mode_negotiates_but_ygg_never_carries_application_payload`; B2 (zero target accepts with Ygg reachable) | None over Ygg | in-process role; namespace NAT |
 
@@ -248,9 +251,9 @@ Process case ids below are the ignored test functions under
 | ID | Scenario | Mode | Status | Evidence | Data route | Level |
 |---|---|---|---|---|---|---|
 | D1 | Console stop/restart of Client and of Server; Server-only restart with the Client retained; fresh-connection recovery | signal, standby | accepted | E1: `real_composed_client_console_stop_and_restart_in_signal_and_standby`, `real_composed_server_console_stop_and_restart_in_signal_and_standby` (lifecycle `ed6fed1`), `real_composed_key_only_payload_and_server_restart_in_signal_and_standby`; process smoke `real_process_console_shutdown_rebind_and_server_restart`. Limits: no transparent old-TCP reconnect; bounded fresh-connection recovery only | Native QUIC to the restarted Server's newly published port | normal-process loopback |
-| D2 | Network change (interface/address switch, NAT rebinding) mid-session with recovery | both | partial: Native path loss and recovery accepted; interface or address switch and NAT rebinding open | E8 cases `failover-standby`, `failover-signal` model the loss and return of the Native path with a runtime block table (no interface or address change). Standby: APP 2 over Ygg, then Native back (D3). Signal: after the block APP 2 fails closed (reset, 0 reply bytes, 5.1 s), `native_snat` growth 0, 28 dropped Native pkts (dispatch 3), target accepts stay 1, the Client stays alive and stops with exit 0 | Signal: no application route after the block | namespace NAT |
+| D2 | Network change (interface/address switch, NAT rebinding) mid-session with recovery | both | accepted for Native path loss and recovery, Client address switch and NAT state loss with new mapping; no dedicated external-port-range change | E8 `failover-*` model loss and return of the Native path with a runtime block table (signal: after the block APP 2 fails closed, reset, 0 reply bytes, 5.1 s, `native_snat` growth 0, 28 dropped pkts, target accepts stay 1, the Client stays alive and stops with exit 0). E9 `switch-signal`/`switch-standby` (nat group, dispatch 43258223283): APP 1, the Client host moves from 10.0.1.2 to 10.0.1.3 on the same interface, APP 2 succeeded exact 61/61 **1.43 s** (signal) and **0.70 s** (standby) later (bound 40 s), `native_new` +1 (a new NAT mapping from the new address), `native_snat` +31 and +19, accepts 2; Ygg denied on the Client side, so Native carried both APPs. NAT rebinding is covered by D4 (the mapping is recreated; whether the external port changed is not asserted) | Native QUIC (Ygg denied) | namespace NAT |
 | D3 | Failover to Yggdrasil within 10 s after Native loss mid-session | standby | accepted (single run; no p95 claim) | E8 case `failover-standby`: APP 1 with Native up (`native_snat` 20 pkts; Ygg was open, so Native carriage of APP 1 is policy plus counters, not exclusion); runtime Native UDP block, APP 2 succeeded exact 61/61 **7.017 s** after block insertion (limit 10 s; run 2: 7.085 s), `native_snat` growth 0 during the block, 32 dropped Native pkts, Ygg TCP +98 pkts; block lifted and Ygg TCP blocked, APP 3 succeeded exact 61/61 **13.061 s** after the lift (fixture bound 40 s), `native_snat` +30 pkts; target accepts 3, 183/183 bytes | APP 2: Yggdrasil by path exclusion (UDP blocked); APP 3: Native by path exclusion (Ygg blocked) | namespace NAT |
-| D4 | NAT keepalive; recovery after losing the NAT hole | both | open at product level | P03 fixture only: run 39867392149 at `7a628e5` (iroh-paths.md section 13) | - | P03 fixture only |
+| D4 | NAT keepalive; recovery after losing the NAT hole | both | accepted for loss of the NAT mapping and recovery (single NAT); long-period keepalive on real devices open | E9 `hole-signal`/`hole-standby` (dispatch 43258223283): APP 1, then Router A's WAN link is cycled down and up (masquerade drops every entry bound to that interface), APP 2 succeeded exact 61/61 **0.058 s** later in both modes (bound 40 s), `native_new` +1 (the old mapping was gone and a new one was created), `native_snat` +11 and +8, `hole_in` 0 and 1 (UDP reaching the router itself after the flush), accepts 2; Ygg denied, so Native carried both. The fast recovery reflects an idle connection with sub-millisecond RTT in the fixture; it is not a keepalive-interval or NAT-timeout measurement. Earlier fixture-only: P03 run 39867392149 at `7a628e5` | Native QUIC (Ygg denied) | namespace NAT |
 
 **E. LAN, devices, public networks**
 
@@ -271,7 +274,7 @@ Process case ids below are the ignored test functions under
 | ID | Scenario | Mode | Status | Evidence | Level |
 |---|---|---|---|---|---|
 | G1 | Unauthorized key causes zero target connections | signal, standby | accepted | E2: `real_composed_denied_key_never_reaches_target_in_signal_and_standby` (authorized control passes first; the denied Client binds locally, gets no APP bytes, ends with terminal EOF/reset and CLI exit 1; Server stays alive and stops cleanly; target accepts are monitored from before the denied start through reaping and the backlog is inspected). In-process: E1 `...disallowed_key_causes_zero_target_connections_and_allowed_key_succeeds` | normal-process loopback; in-process role |
-| G2 | Unauthorized key under namespace NAT or over the Ygg fallback path | both | accepted for standby over Ygg; signal over Native open | E8 case `denied-blocked-standby` (Native UDP blocked, Ygg only): authorized control first (APP 61/61, accepts 1, exit 0), then a second Client with a different valid key: terminal reset, 0 reply bytes, target accepts still 1, second Client exit 1, Server stops cleanly. In signal mode over a NAT-ed Native path the denial is covered only by E2 at loopback | namespace NAT |
+| G2 | Unauthorized key under namespace NAT or over the Ygg fallback path | both | accepted | E8 case `denied-blocked-standby` (Native UDP blocked, Ygg only): authorized control first (APP 61/61, accepts 1, exit 0), then a second Client with a different valid key: terminal reset, 0 reply bytes, target accepts still 1, second Client exit 1, Server stops cleanly. E9 `denied-native-signal` (faults group, dispatch 43257222340): single NAT, Server in WAN, Native over the NAT, Ygg denied: authorized control first (APP exact, accepts 1, exit 0, `native_snat` 95 pkts), then the second Client with a different key got terminal reset, 0 reply bytes, accepts stayed 1, exit 1, Server stopped cleanly | namespace NAT |
 
 ### 10.3 Denial results
 
@@ -313,10 +316,13 @@ Normal CI-built products with `shaar-native-gate` off. Phase status `pass`.
 
 ### 10.5 Open and gated rows
 
-Open: A2b, A5, A6, C5 (composed), C7 (composed recovery after a total outage), D2
-(interface/address switch and NAT rebinding), D4 (product), G2 (signal over a
-NAT-ed Native path). Closed by E8: E1 (owned segment), F1 (observed), C2, C4b, D3,
-C7 (typed failure), G2 (standby over Ygg). Gated: E2, E3.
+Closed by E8: E1 (owned segment), F1 (observed), C2, C4b, D3, C7 (typed failure), G2
+(standby over Ygg). Closed by E9: A2b (IPv6-only Native data with an explicit hint), C5
+(reservation exhaustion), C7 (recovery), D2 (Client address switch), D4 (NAT state loss),
+G2 (signal over a NAT-ed Native path), A6 (two NAT types). Recorded as a negative finding
+by E9: A5 (no direct path through double NAT). Still open inside closed rows: key-only
+IPv6 discovery (A2b), circuit and Client-side relay exhaustion (C5), other NAT types (A6),
+long-period NAT keepalive and real-device rebinding (D2, D4). Gated: E2, E3.
 
 ### 10.7 Extension matrix run (E8)
 
@@ -340,6 +346,42 @@ Findings worth keeping: after a Native path is lost mid-session in signal mode t
 Client stays alive and fails new streams closed within about 5 s; with the DHT
 unreachable the signal-mode Client still connects (relay signaling, then Native).
 
+### 10.8 Remaining-row matrix runs (E9)
+
+Contract: [p13-controlled-network.md](../plans/p13-controlled-network.md) (remaining-row
+section). Runner image 20261101.186.1. Every dispatch ran on a SHA whose ordinary fork CI was
+green (the last CI, 43259704035, needed a re-run of its Windows leg that the platform had
+cancelled while queued) and started with `nft --check` of all generated rulesets (112, then
+120 after the NAT probes; all passed). The six dispatches of the cap:
+
+| Dispatch | Run | Source | Group | Result |
+|---|---|---|---|---|
+| 1 | 43255837358 | `1d36cd5` | nat | fail: `dnat-cone-signal` and `dnat-cone-standby` expected a punch and failed (the A5 finding); the other six cases and three controls passed |
+| 2 | 43257222340 | `1d36cd5` | faults | fail: only `ipv6-*` (family race, see A2b); `denied-native-signal`, `recover-standby`, `relay-full-*` and the controls passed |
+| 3 | 43258223283 | `6f7c0ce` | nat | pass: 10 cases and 3 controls (the cone cases now expect fail closed; relay-first cases added; the fixture punch control looped without a bound: about 50,000 datagrams per side in 2 s, a load defect fixed afterwards) |
+| 4 | 43262304898 | `31fd921` | faults | pass: 6 cases and 3 controls; phase 137.9 s, forwarded 172,029 B of 32 MiB allocated |
+| 5 | 43262313789 | `31fd921` | nat | fail: 8 of 10 cases and 3 controls passed; `dnat-cone-signal` and `dnat-cone-relay-signal` failed at the fixture punch control (host A received 0 datagrams), before any product started; this is a fixture result, not a product result |
+| 6 | 43262321962 | `31fd921` | base | pass: the twelve accepted cases and 3 controls unchanged; phase 203.5 s, forwarded 609,232 B |
+
+Dispatches 1 to 6 were all used. After dispatch 5 the control was changed to a recorded,
+non-decisive receipt and a drop of unsolicited inbound UDP before conntrack confirmation was
+added to its probe table as a hypothesis for the misses (an unsolicited packet would otherwise
+create a conntrack entry that takes the peer's preserved source port). **That last change
+(branch head) was not dispatched**: the cap was reached. The nat group therefore needs one
+more dispatch to verify it; the product verdicts of the nat group (A5, A6, D2, D4) were
+produced by dispatches 3 and 5 on code that the head changes only in the control.
+
+Product findings worth keeping:
+
+- Double NAT: no direct path with either mapping flavor and either dial order (A5, A6).
+- A silent published candidate consumes the whole 3 s native attempt, so relay negotiation is
+  not attempted (A5 direct-first, A2b without a hint).
+- Relay exhaustion at Server startup is a finite typed failure after 23.1 s (C5).
+- Native recovered within 0.06 s of a NAT state flush and within 0.7 to 1.4 s of a Client
+  address switch in the fixture (D4, D2); these are one-run, idle-connection values.
+- After a total outage the Client ends by itself with status 1; a fresh Client reaches the
+  Server 0.08 s after the blocks are lifted (C7).
+
 ### 10.6 Non-claims
 
 - Standby Ygg APP in B1 is proven by path exclusion and counters, not by a
@@ -351,5 +393,8 @@ unreachable the signal-mode Client still connects (relay signaling, then Native)
   LAN rows use an owned documentation-range segment, not RFC 1918 addresses or devices.
 - The runtime-block failover models the loss and return of the Native path; it is not
   an interface or address switch, NAT rebinding, or an IPv6 or NAT-type result.
+- E9 timings are one run per case. The A5 and A6 results are for two Linux conntrack mapping
+  flavors and an owned relay; they say nothing about real home routers, CGNAT or other NAT
+  types, and the likely cause of A5 is source-derived. The A2b proof uses an explicit hint.
 - Retained component results (E1) were not revalidated on a fresh SHA; a targeted
   pass is not full-sprint acceptance.

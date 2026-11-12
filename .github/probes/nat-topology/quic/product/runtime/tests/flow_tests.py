@@ -427,6 +427,8 @@ class NatProbeTests(unittest.TestCase):
         self.assertIn(f"add table inet {PREFIX}_nprobe\n", cone)
         self.assertIn("pnat ip saddr 10.0.1.2 ip protocol udp udp sport 40100 masquerade\n", cone)
         self.assertIn("udp dport 9001-9003 udp sport 40100 ct status snat counter name kept", cone)
+        self.assertIn(f"add chain inet {PREFIX}_nprobe punchin {{ type filter hook input priority 0; policy accept; }}\n", cone)
+        self.assertIn("punchin ip daddr 203.0.113.1 udp dport 40100 drop\n", cone)
         self.assertIn("udp dport 9001-9003 udp sport != 40100 ct status snat counter name moved", cone)
         self.assertIn("udp sport 40100 masquerade fully-random\n", natprobe.rules(PREFIX, "random", "10.0.2.2", "203.0.113.2"))
         self.assertEqual(natprobe.STATEMENTS["cone"], network.NAT_FLAVORS["cone"])
@@ -509,9 +511,13 @@ class PunchControlTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             natprobe.check_punch(self.GOOD[:1])
 
-    def run_punch(self, codes):
+    def run_punch(self, codes, received=None):
         calls, spawned = [], []
-        outputs = [json.dumps({key: value for key, value in item.items() if key != "host"}).encode() for item in self.GOOD]
+        goods = copy.deepcopy(self.GOOD)
+        for item in goods:
+            item["received"] = item["received"] if received is None else received
+        outputs = [json.dumps({key: value for key, value in item.items() if key != "host"}).encode() for item in goods]
+        kwargs = {}
 
         def checked(argv, deadline, data=None, what="x"):
             calls.append((what, argv[3]))
@@ -524,7 +530,7 @@ class PunchControlTests(unittest.TestCase):
         cfg = dict(CFG, ip=contract.IPS)
         with mock.patch.object(natprobe.kernel, "checked", checked), mock.patch.object(natprobe.subprocess, "Popen", popen):
             try:
-                result, error = natprobe.punch(cfg, TOOLS, time.monotonic() + 10), None
+                result, error = natprobe.punch(cfg, TOOLS, time.monotonic() + 10, **kwargs), None
             except ValueError as caught:
                 result, error = None, caught
         return result, error, calls, spawned
@@ -532,7 +538,7 @@ class PunchControlTests(unittest.TestCase):
     def test_punch_runs_one_socket_per_host_against_the_peer_router_and_always_removes_both_tables(self):
         result, error, calls, spawned = self.run_punch((0, 0))
         self.assertIsNone(error)
-        self.assertEqual(result, self.GOOD)
+        self.assertEqual(result, {"status": "pass", "receipts": self.GOOD})
         a, b = CFG["ns"]["rtr_a"], CFG["ns"]["rtr_b"]
         self.assertEqual(calls, [("punch control NAT install", a), ("punch control NAT install", b),
                                  ("punch control NAT removal", a), ("punch control NAT removal", b)])
@@ -540,6 +546,11 @@ class PunchControlTests(unittest.TestCase):
         self.assertIn("'203.0.113.2', 40100", spawned[0][-1].replace('"', "'"))
         self.assertIn("'203.0.113.1', 40100", spawned[1][-1].replace('"', "'"))
         self.assertIn("'10.0.1.2', 40100", spawned[0][-1].replace('"', "'"))
+        missed = self.run_punch((0, 0), received=0)
+        self.assertIsNone(missed[1])
+        self.assertEqual(missed[0]["status"], "fail")
+        self.assertIn("did not receive from the peer's public endpoint", missed[0]["error"])
+        self.assertEqual([item[0] for item in missed[2]][-2:], ["punch control NAT removal"] * 2)
         failed = self.run_punch((0, 1))
         self.assertIn("punch control worker failed", str(failed[1]))
         self.assertEqual([item[0] for item in failed[2]][-2:], ["punch control NAT removal"] * 2)

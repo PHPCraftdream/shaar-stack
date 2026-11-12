@@ -52,6 +52,10 @@ def rules(prefix, flavor, host_ip, wan_ip):
         f"add table inet {table}", f"add counter inet {table} kept", f"add counter inet {table} moved",
         f"add chain inet {table} pnat {{ type nat hook postrouting priority 100; policy accept; }}",
         f"add rule inet {table} pnat ip saddr {host_ip} ip protocol udp udp sport {SOURCE_PORT} {STATEMENTS[flavor]}",
+        # Unsolicited inbound UDP to the router itself is dropped before conntrack confirms it (like a real NAT): otherwise it would create
+        # an entry that takes the peer's preserved source port and breaks the hole punch control.
+        f"add chain inet {table} punchin {{ type filter hook input priority 0; policy accept; }}",
+        f"add rule inet {table} punchin ip daddr {wan_ip} udp dport {SOURCE_PORT} drop",
         f"add chain inet {table} pseen {{ type filter hook postrouting priority 200; policy accept; }}",
         f"add rule inet {table} pseen {watched} udp sport {SOURCE_PORT} ct status snat counter name kept",
         f"add rule inet {table} pseen {watched} udp sport != {SOURCE_PORT} ct status snat counter name moved"]) + "\n"
@@ -110,7 +114,9 @@ def check_punch(found):
 def punch(cfg, tools, deadline):
     """Fixture control for the cone NATs: the harness knows both public endpoints, so two plain UDP sockets can punch through.
 
-    It shows that the topology and counters allow a punched path; the products have no source for these endpoints."""
+    It shows whether the topology and counters allow a punched path; the products have no source for these endpoints.
+    Dispatch 43258223283 punched 4 of 4 times (with an unbounded loop), dispatch 43262313789 2 of 4 with the bounded one: the
+    cause of the misses is not established, so the outcome is recorded per case and never decides a product verdict."""
     pairs = (("host_a", "rtr_a", contract.IPS["rtr_b_wan"]), ("host_b", "rtr_b", contract.IPS["rtr_a_wan"]))
     table, installed, processes, found = table_name(cfg["prefix"]), [], [], []
     try:
@@ -136,4 +142,8 @@ def punch(cfg, tools, deadline):
         for router in installed:
             kernel.checked(kernel.ns_argv(tools, cfg, router, tools["nft"]) + ["delete", "table", "inet", table], deadline,
                            what="punch control NAT removal")
-    return check_punch(found)
+    # Supporting evidence, not an oracle of the product: a mismatch is recorded, it does not fail the case.
+    try:
+        return {"status": "pass", "receipts": check_punch(found)}
+    except ValueError as error:
+        return {"status": "fail", "receipts": found, "error": str(error)[:300]}

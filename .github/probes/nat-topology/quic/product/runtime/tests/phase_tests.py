@@ -45,8 +45,9 @@ def evidence(case):
         kept, moved = (3, 0) if spec["nat"] == "cone" else (0, 3)
         result_extra["nat_calibration"] = [{"router": router, "flavor": spec["nat"], "kept": kept, "moved": moved} for router in routers]
         if spec["nat"] == "cone":
-            result_extra["punch_control"] = [{"host": "host_a", "sent": 20, "received": 18, "first": ["203.0.113.2", 40100]},
-                                             {"host": "host_b", "sent": 20, "received": 19, "first": ["203.0.113.1", 40100]}]
+            result_extra["punch_control"] = {"status": "pass", "receipts": [
+                {"host": "host_a", "sent": 20, "received": 18, "first": ["203.0.113.2", 40100]},
+                {"host": "host_b", "sent": 20, "received": 19, "first": ["203.0.113.1", 40100]}]}
         if spec["direct"]:
             for router in routers:
                 routers[router]["counters"]["peer_sent"]["packets"] = 5
@@ -190,10 +191,10 @@ def mutate(case, name):
         del result["nat_calibration"][1]
     elif name == "punch-missing":
         del result["punch_control"]
-    elif name == "punch-failed":
-        result["punch_control"][0]["received"] = 0
-    elif name == "punch-wrong-source":
-        result["punch_control"][1]["first"] = ["203.0.113.2", 40100]
+    elif name == "punch-garbled":
+        result["punch_control"]["receipts"] = result["punch_control"]["receipts"][:1]
+    elif name == "punch-unknown-status":
+        result["punch_control"]["status"] = "skipped"
     elif name == "direct-path":
         counters["rtr_a"]["counters"]["peer_recv"]["packets"] = 1
     elif name == "no-relay-negotiation":
@@ -274,7 +275,7 @@ class EvidenceTests(unittest.TestCase):
                 names += ("peer-recv", "peer-sent", "ygg-used") if spec["direct"] else ("direct-path",)
                 names += ("ygg-missing",) if not spec["ygg_client_blocked"] and spec["mode"] == "standby" else ()
                 names += ("ygg-used",) if spec["ygg_client_blocked"] and not spec["direct"] else ()
-                names += ("punch-missing", "punch-failed", "punch-wrong-source") if spec["nat"] == "cone" else ()
+                names += ("punch-missing", "punch-garbled", "punch-unknown-status") if spec["nat"] == "cone" else ()
                 names += ("no-relay-negotiation", "no-dht-drop-seen") if spec.get("relay_first") else ()
             names += MUTATIONS.get("flow:" + spec.get("flow", "single"), ())
             if spec.get("flow") == "denied-key":
