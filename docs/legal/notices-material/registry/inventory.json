@@ -500,24 +500,22 @@
     "exact_archive_matched_identities": 533,
     "missing_archive_identities": 0,
     "current_registry_classification_counts": {
-      "component-only": 1,
-      "missing": 3,
-      "package-complete": 500,
+      "missing": 2,
+      "package-complete": 502,
       "preserved_complete_text": 15,
       "reference-only": 14
     },
     "current_pass_archive_count": 515,
     "current_pass_status_counts": {
-      "component-only": 1,
-      "missing": 3,
-      "package-complete": 497,
+      "missing": 2,
+      "package-complete": 499,
       "reference-only": 14
     },
     "current_pass_material_file_count": 894,
     "current_pass_material_bytes": 4421514,
-    "current_pass_complete_text_rows": 497,
-    "current_pass_missing_evidence_rows": 3,
-    "registry_text_available_identities": 515
+    "current_pass_complete_text_rows": 499,
+    "current_pass_missing_evidence_rows": 2,
+    "registry_text_available_identities": 517
   },
   "extra_local_data_candidates": [
     {
@@ -13582,7 +13580,7 @@
         }
       ],
       "checksum": "b604752cefc5aa3ab98992a107a8bd99465d2825c1584e0b60cb6957b21e19d7",
-      "classification": "missing",
+      "classification": "package-complete",
       "declared_license": "MIT",
       "materials": [],
       "name": "futures-bounded",
@@ -13602,7 +13600,7 @@
       ],
       "archive_member_count": 14,
       "decoded_tar_bytes": 52736,
-      "review_note": "No selected legal/context evidence; not a finding that no authentic terms exist.",
+      "review_note": "Authentic predecessor-repository license text (the repository this package was extracted from, at the revision of its last crate published there); the packaged repository holds no license file. Text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT",
@@ -13615,15 +13613,85 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/a-f/futures-bounded-0.3.0/LICENSE",
+                    "sha256": "e10098b8c52fd18ad0f116aac2c0dba1e99ca125d6848640c00688e160a3ee7d",
+                    "url": "https://raw.githubusercontent.com/libp2p/rust-libp2p/edca09b58e19dd1e6ca5183898ad24b0cfb32d92/LICENSE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "provenance_class": "predecessor-repository",
+      "raw_materials": [
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1074,
+          "material_path": "raw-sources/a-f/futures-bounded-0.3.0/LICENSE",
+          "material_sha256": "e10098b8c52fd18ad0f116aac2c0dba1e99ca125d6848640c00688e160a3ee7d",
+          "role": "package_terms",
+          "source_file": "LICENSE",
+          "url": "https://raw.githubusercontent.com/libp2p/rust-libp2p/edca09b58e19dd1e6ca5183898ad24b0cfb32d92/LICENSE"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "futures-bounded-0.3.0/.cargo_vcs_info.json",
+            "bytes": 94,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202264306663343065306665366331326239323639366637363664623662363266643866393035316263220a20207d2c0a202022706174685f696e5f766373223a2022220a7d",
+            "sha256": "007a4284434f212d742e22633c285a6d53830dd0c0dcd9e586673cd113307951"
+          },
+          "CHANGELOG.md": {
+            "archive_member": "futures-bounded-0.3.0/CHANGELOG.md",
+            "bytes": 1024,
+            "bytes_hex": "232320302e332e300a0a2d20416c6c6f7720666f72206d756c7469706c652074696d657220696d706c656d656e746174696f6e732e0a2020536565205b505220355d2868747470733a2f2f6769746875622e636f6d2f74686f6d617365697a696e6765722f727573742d667574757265732d626f756e6465642f70756c6c2f35292e0a0a232320302e322e340a0a2d204164642060467574757265734d61702e636f6e7461696e732829602e0a2020536565205b505220335d2868747470733a2f2f6769746875622e636f6d2f74686f6d617365697a696e6765722f727573742d667574757265732d626f756e6465642f70756c6c2f33292e0a0a232320302e322e330a0a2d20496e74726f647563652060467574757265735475706c65536574602c20686f6c64696e67207475706c6573206f66206120604675747572656020746f676574686572207769746820616e20617262697472617279207069656365206f6620646174612e0a2020536565205b505220343834315d2868747470733a2f2f6769746875622e636f6d2f6c69627032702f727573742d6c69627032702f70756c6c2f34383431292e0a0a232320302e322e320a0a2d2046697820616e20697373756520776865726520607b467574757265732c53747265616d7d4d6170602072657475726e732060506f6c6c3a3a50656e64696e67602064657370697465206265696e6720726561647920616674657220616e206974656d20686173206265656e207265706c616365642061732070617274206f6620607472795f70757368602e0a2020536565205b505220343836355d2868747470733a2f2f6769746875622e636f6d2f6c69627032702f727573742d6c69627032702f70756c6c2f34383635292e0a0a232320302e322e310a0a2d2041646420602e6c656e2829602067657474657220746f2060467574757265734d6170602c206046757475726573536574602c206053747265616d4d61706020616e64206053747265616d536574602e0a2020536565205b505220343734355d2868747470733a2f2f6769746875622e636f6d2f6c69627032702f727573742d6c69627032702f70756c6c2f34373435292e0a0a232320302e322e300a0a2d20416464206053747265616d4d617060207479706520616e642072656d6f76652060467574757265602d7375666669782066726f6d2060507573684572726f723a3a5265706c616365644675747572656020746f20726575736520697420666f72206053747265616d4d6170602e0a2020536565205b505220343631365d2868747470733a2f2f6769746875622e636f6d2f6c69627032702f727573742d6c69627032702f70756c6c2f34363136292e0a0a232320302e312e300a0a496e697469616c2072656c656173652e0a",
+            "sha256": "059bc023c91b4b82d413a6f646d94627319b32860a4ceeae02ccded25f84468f"
+          },
+          "Cargo.toml": {
+            "archive_member": "futures-bounded-0.3.0/Cargo.toml",
+            "bytes": 1331,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303231220a6e616d65203d2022667574757265732d626f756e646564220a76657273696f6e203d2022302e332e30220a6275696c64203d2066616c73650a7075626c697368203d20747275650a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d20225574696c697469657320666f7220626f756e64696e67206675747572657320696e2073697a6520616e642074696d652e220a726561646d65203d2066616c73650a6b6579776f726473203d205b0a202020202266757475726573222c0a20202020226173796e63222c0a20202020226261636b7072657373757265222c0a5d0a63617465676f72696573203d205b0a2020202022646174612d73747275637475726573222c0a20202020226173796e6368726f6e6f7573222c0a5d0a6c6963656e7365203d20224d4954220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f74686f6d617365697a696e6765722f727573742d667574757265732d626f756e646564220a0a5b6c69625d0a6e616d65203d2022667574757265735f626f756e646564220a70617468203d20227372632f6c69622e7273220a0a5b646570656e64656e636965732e667574757265732d74696d65725d0a76657273696f6e203d2022332e302e32220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e667574757265732d7574696c5d0a76657273696f6e203d2022302e332e3330220a0a5b646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d2022312e33352e31220a6665617475726573203d205b2274696d65225d0a6f7074696f6e616c203d20747275650a0a5b6465762d646570656e64656e636965732e667574757265735d0a76657273696f6e203d2022302e332e3330220a0a5b6465762d646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d2022312e33352e31220a6665617475726573203d205b0a20202020226d6163726f73222c0a20202020227274222c0a202020202273796e63222c0a5d0a",
+            "sha256": "12c653fc294ccecb03d1cd09d50245a8a9db3d77bf31208a5335c8294d675e03"
+          }
+        },
+        "package_path_in_vcs": "",
+        "provenance_class": "predecessor-repository",
+        "repository": "https://github.com/thomaseizinger/rust-futures-bounded",
+        "revision": "d0fc40e0fe6c12b92696f766db6b62fd8f9051bc",
+        "review_scope": "Packaged archive metadata and changelog tie the package to its predecessor repository; the pinned predecessor-repository root text is bound without legal clearance or license election.",
+        "binding_note": "The packaged repository (history extracted from rust-libp2p misc/futures-bounded) holds no license file at any revision. Its changelog cites libp2p/rust-libp2p pull requests for 0.2.x. The text is the libp2p/rust-libp2p root LICENSE at the revision of the 0.2.3 crate, the last published from that repository; it is byte-identical to the root LICENSE bound for prost-codec@0.4.0 at another revision. Whether it covers all authors of the extracted code needs human legal review.",
+        "predecessor": {
+          "archive_data_path": "license-blockers-1112/crates/futures-bounded-0.2.3.crate",
+          "archive_metadata": {
+            ".cargo_vcs_info.json": {
+              "archive_member": "futures-bounded-0.2.3/.cargo_vcs_info.json",
+              "bytes": 114,
+              "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202265646361303962353865313964643165366361353138333839386164323462306366623332643932220a20207d2c0a202022706174685f696e5f766373223a20226d6973632f667574757265732d626f756e646564220a7d",
+              "sha256": "5d5750d3008fe302b38b2fc914d66ccc88a368e23f059b269b9622e087502fe9"
+            },
+            "Cargo.toml": {
+              "archive_member": "futures-bounded-0.2.3/Cargo.toml",
+              "bytes": 1276,
+              "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303231220a727573742d76657273696f6e203d2022312e37332e30220a6e616d65203d2022667574757265732d626f756e646564220a76657273696f6e203d2022302e322e33220a7075626c697368203d20747275650a6465736372697074696f6e203d20225574696c697469657320666f7220626f756e64696e67206675747572657320696e2073697a6520616e642074696d652e220a6b6579776f726473203d205b0a202020202266757475726573222c0a20202020226173796e63222c0a20202020226261636b7072657373757265222c0a5d0a63617465676f72696573203d205b0a2020202022646174612d73747275637475726573222c0a20202020226173796e6368726f6e6f7573222c0a5d0a6c6963656e7365203d20224d4954220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6c69627032702f727573742d6c6962703270220a0a5b646570656e64656e636965732e667574757265732d74696d65725d0a76657273696f6e203d2022332e302e32220a0a5b646570656e64656e636965732e667574757265732d7574696c5d0a76657273696f6e203d2022302e332e3239220a0a5b6465762d646570656e64656e636965732e667574757265735d0a76657273696f6e203d2022302e332e3238220a0a5b6465762d646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d2022312e33342e30220a6665617475726573203d205b0a20202020226d6163726f73222c0a20202020227274222c0a202020202273796e63222c0a5d0a0a5b6c696e74732e636c697070795d0a6462675f6d6163726f203d20227761726e220a6d616e75616c5f6c65745f656c7365203d20227761726e220a706564616e746963203d2022616c6c6f77220a747970655f636f6d706c6578697479203d2022616c6c6f77220a756e6e65636573736172795f7772617073203d20227761726e220a757365645f756e64657273636f72655f62696e64696e67203d20227761726e220a0a5b6c696e74732e727573745d0a756e726561636861626c655f707562203d20227761726e220a",
+              "sha256": "d9b27d7e605d8062cf7338602757a903a4c652b0602277b4069e25014fbc3154"
+            }
+          },
+          "package_path_in_vcs": "misc/futures-bounded",
+          "sha256": "e1e2774cc104e198ef3d3e1ff4ab40f86fa3245d6cb6a3a46174f21463cee173",
+          "url": "https://static.crates.io/crates/futures-bounded/futures-bounded-0.2.3.crate",
+          "version": "0.2.3"
+        },
+        "text_repository": "https://github.com/libp2p/rust-libp2p",
+        "text_revision": "edca09b58e19dd1e6ca5183898ad24b0cfb32d92"
       }
     },
     {
@@ -35135,7 +35203,7 @@
         }
       ],
       "checksum": "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7",
-      "classification": "component-only",
+      "classification": "package-complete",
       "declared_license": "Apache-2.0 AND ISC",
       "materials": [
         {
@@ -35167,8 +35235,8 @@
           "material_bytes": 14870,
           "material_sha256": "005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d",
           "slice_sha256": "005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d",
-          "role": "component_terms",
-          "kind": "component_terms",
+          "role": "package_terms",
+          "kind": "package_terms",
           "archive_index": 319,
           "source_relative_path": "LICENSE-BoringSSL"
         },
@@ -35184,8 +35252,8 @@
           "material_bytes": 731,
           "material_sha256": "f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f",
           "slice_sha256": "f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f",
-          "role": "component_terms",
-          "kind": "component_terms",
+          "role": "package_terms",
+          "kind": "package_terms",
           "archive_index": 319,
           "source_relative_path": "LICENSE-other-bits"
         },
@@ -35258,7 +35326,7 @@
       ],
       "archive_member_count": 391,
       "decoded_tar_bytes": 8058368,
-      "review_note": "Authentic component-scoped terms preserved; package-level terms not established.",
+      "review_note": "The package LICENSE states that LICENSE-other-bits holds the ISC text for ring's own code and LICENSE-BoringSSL the Apache-2.0 text for code sourced from BoringSSL; the declaration is Apache-2.0 AND ISC. Both texts are retained verbatim; the archive's file headers name only ISC, Apache-2.0 and MIT, and the MIT/Apache-2.0 component texts (once_cell, fiat) are retained separately. Text availability only, not legal clearance.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "Apache-2.0 AND ISC",
@@ -35271,12 +35339,17 @@
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "ring-0.17.14/LICENSE-BoringSSL",
+                    "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/i/n/g/package/0.17.14/components/LICENSE-BoringSSL",
+                    "sha256": "005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           },
           {
             "expression_group": "ISC",
@@ -35286,27 +35359,20 @@
                 "identifiers": [
                   "ISC"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "ring-0.17.14/LICENSE-other-bits",
+                    "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/i/n/g/package/0.17.14/components/LICENSE-other-bits",
+                    "sha256": "f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": [
-          {
-            "archive_member": "ring-0.17.14/LICENSE-BoringSSL",
-            "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/i/n/g/package/0.17.14/components/LICENSE-BoringSSL",
-            "sha256": "005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d",
-            "scope": "component-only"
-          },
-          {
-            "archive_member": "ring-0.17.14/LICENSE-other-bits",
-            "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/i/n/g/package/0.17.14/components/LICENSE-other-bits",
-            "sha256": "f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f",
-            "scope": "component-only"
-          },
           {
             "archive_member": "ring-0.17.14/src/polyfill/once_cell/LICENSE-APACHE",
             "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/i/n/g/package/0.17.14/components/src/polyfill/once_cell/LICENSE-APACHE",
@@ -35320,6 +35386,22 @@
             "scope": "component-only"
           }
         ]
+      },
+      "provenance_class": "package-license-index",
+      "license_index": {
+        "archive_member": "ring-0.17.14/LICENSE",
+        "bytes": 499,
+        "sha256": "b3d734001a94efff3579978d953391aa7115f877657d25eb54037a43875d078a",
+        "maps": {
+          "LICENSE-BoringSSL": {
+            "expression": "Apache-2.0",
+            "sha256": "005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d"
+          },
+          "LICENSE-other-bits": {
+            "expression": "ISC",
+            "sha256": "f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f"
+          }
+        }
       }
     },
     {
@@ -56263,6 +56345,13 @@
     "gap_receipt_sha256": "3f6f2c53fb29aebd923e9e60cd36671a86f9f988d916e0a69c2fb03fc677e0e3",
     "gap_material_count": 32,
     "gap_material_bytes": 182118,
-    "gap_package_count": 17
+    "gap_package_count": 17,
+    "blocker_receipt_path": "raw-sources/receipts/blocker-receipt.json",
+    "blocker_receipt_bytes": 1748,
+    "blocker_receipt_sha256": "28f437fce7c3f535c8bd652349ca7e8331466f7beb632e03e70c1260aa4dea15",
+    "blocker_material_count": 1,
+    "blocker_material_bytes": 1074,
+    "blocker_package_count": 1,
+    "blocker_index_rows": 1
   }
 }

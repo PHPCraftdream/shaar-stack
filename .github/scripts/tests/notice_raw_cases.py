@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import unittest
 from unittest import mock
 
@@ -331,17 +332,17 @@ class RegistryGapBindingTests(unittest.TestCase):
         registry_rows = inventory["identities"]
         path_rows = prepared["identities"]
         available = sum(r["classification"] in complete for r in registry_rows)
-        self.assertEqual((available, len(registry_rows)), (515, 533))
-        self.assertEqual(inventory["counts"]["registry_text_available_identities"], 515)
+        self.assertEqual((available, len(registry_rows)), (517, 533))
+        self.assertEqual(inventory["counts"]["registry_text_available_identities"], 517)
         self.assertEqual(len(path_rows), 17)
         self.assertTrue(all(r.get("classification", "package-complete") == "package-complete" for r in path_rows))
         remaining = sorted(r["name"] + "@" + r["version"] for r in registry_rows if r["classification"] not in complete)
         self.assertEqual(remaining, sorted([
-            "base45@3.2.0", "block2@0.6.2", "dispatch2@0.3.1", "enum-assoc@1.4.1", "futures-bounded@0.3.0",
+            "base45@3.2.0", "block2@0.6.2", "dispatch2@0.3.1", "enum-assoc@1.4.1",
             "if-watch@3.2.2", "objc2@0.6.5", "objc2-core-foundation@0.3.2", "objc2-core-wlan@0.3.2",
             "objc2-encode@4.1.0", "objc2-foundation@0.3.2", "objc2-security@0.3.2",
             "objc2-security-foundation@0.3.2", "objc2-system-configuration@0.3.2", "pharos@0.5.3",
-            "ring@0.17.14", "winapi-i686-pc-windows-gnu@0.4.0", "winapi-x86_64-pc-windows-gnu@0.4.0"]))
+            "winapi-i686-pc-windows-gnu@0.4.0", "winapi-x86_64-pc-windows-gnu@0.4.0"]))
         prefix = "docs/legal/notices-material/registry/"
         referenced = {m["material_path"] for r in registry_rows for m in r.get("raw_materials", [])}
         referenced |= {m["material_path"].removeprefix(prefix) for r in path_rows for m in r.get("raw_materials", [])}
@@ -351,3 +352,232 @@ class RegistryGapBindingTests(unittest.TestCase):
         self.assertEqual(on_disk, referenced)
         for directory in [raw_root, *[p for p in raw_root.rglob("*") if p.is_dir()]]:
             self.assertLessEqual(len(list(directory.iterdir())), 7, directory)
+
+
+class RegistryBlockerBindingTests(unittest.TestCase):
+    """Predecessor-repository text and package license index, with the provenance class visible downstream."""
+
+    def inputs(self):
+        root = Path(__file__).resolve().parents[3]
+        registry = root / "docs/legal/notices-material/registry"
+        spec = importlib.util.spec_from_file_location("blocker_registry_replay", registry / "replay.py")
+        replay = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(replay)
+        rows = json.loads((registry / "inventory.json").read_bytes())["identities"]
+        by_key = {(r["name"], r["version"]): r for r in rows}
+        return root, registry, replay.blocker_sources, by_key
+
+    def members(self, row):
+        return {m["archive_member"]: bytes.fromhex(m["bytes_hex"])
+                for m in row["raw_source_binding"]["archive_metadata"].values()}
+
+    def test_predecessor_binding_validates_and_is_labelled(self):
+        _, registry, sources, rows = self.inputs()
+        receipt = sources.blocker_receipt(registry)
+        row = rows[("futures-bounded", "0.3.0")]
+        self.assertEqual(sources.validate_predecessor(row, registry, self.members(row), receipt), (1, 1074))
+        self.assertEqual((1, 1074, 1), sources.TOTALS)
+        self.assertEqual(row["provenance_class"], "predecessor-repository")
+        self.assertEqual(row["classification"], "package-complete")
+        old = row["raw_source_binding"]["predecessor"]
+        self.assertEqual((old["version"], old["package_path_in_vcs"]), ("0.2.3", "misc/futures-bounded"))
+        self.assertEqual(row["raw_source_binding"]["text_repository"], "https://github.com/libp2p/rust-libp2p")
+
+    def test_predecessor_binding_rejects_scope_class_metadata_text_and_receipt_changes(self):
+        _, registry, sources, rows = self.inputs()
+        receipt = sources.blocker_receipt(registry)
+        original = rows[("futures-bounded", "0.3.0")]
+        vcs = ".cargo_vcs_info.json"
+        for mutation in ("version", "checksum", "class", "binding_class", "revision", "path", "repository",
+                         "text_revision", "text_repository", "metadata", "dirty", "changelog", "old_sha",
+                         "old_version", "old_path", "old_meta", "role", "hash", "url", "identifier", "missing",
+                         "extra", "declared"):
+            row = copy.deepcopy(original)
+            binding, old = row["raw_source_binding"], row["raw_source_binding"]["predecessor"]
+            members = self.members(original)
+            if mutation == "version":
+                row["version"] = "0.0.0"
+            elif mutation == "checksum":
+                row["checksum"] = "0" * 64
+            elif mutation == "class":
+                del row["provenance_class"]
+            elif mutation == "binding_class":
+                binding["provenance_class"] = "other"
+            elif mutation == "revision":
+                binding["revision"] = "0" * 40
+            elif mutation == "path":
+                binding["package_path_in_vcs"] = "x"
+            elif mutation == "repository":
+                binding["repository"] += "-other"
+            elif mutation == "text_revision":
+                binding["text_revision"] = "0" * 40
+            elif mutation == "text_repository":
+                binding["text_repository"] += "-other"
+            elif mutation == "metadata":
+                binding["archive_metadata"][vcs]["sha256"] = "0" * 64
+            elif mutation == "dirty":
+                info = json.loads(members[f"futures-bounded-0.3.0/{vcs}"])
+                info["git"]["dirty"] = True
+                content = json.dumps(info).encode()
+                binding["archive_metadata"][vcs].update(
+                    bytes_hex=content.hex(), sha256=hashlib.sha256(content).hexdigest(), bytes=len(content))
+                members = self.members(row)
+            elif mutation == "changelog":
+                content = members["futures-bounded-0.3.0/CHANGELOG.md"].replace(b"libp2p/rust-libp2p", b"other/repo")
+                binding["archive_metadata"]["CHANGELOG.md"].update(
+                    bytes_hex=content.hex(), sha256=hashlib.sha256(content).hexdigest(), bytes=len(content))
+                members = self.members(row)
+            elif mutation == "old_sha":
+                old["sha256"] = "0" * 64
+            elif mutation == "old_version":
+                old["version"] = "0.2.4"
+            elif mutation == "old_path":
+                old["package_path_in_vcs"] = ""
+            elif mutation == "old_meta":
+                content = bytes.fromhex(old["archive_metadata"][vcs]["bytes_hex"]).replace(b"edca09b5", b"0000000a")
+                old["archive_metadata"][vcs].update(
+                    bytes_hex=content.hex(), sha256=hashlib.sha256(content).hexdigest(), bytes=len(content))
+            elif mutation == "role":
+                row["raw_materials"][0]["role"] = "reference_context"
+            elif mutation == "hash":
+                row["raw_materials"][0]["material_sha256"] = "0" * 64
+            elif mutation == "url":
+                row["raw_materials"][0]["url"] += "-other"
+            elif mutation == "identifier":
+                row["raw_materials"][0]["identifiers"] = ["ISC"]
+            elif mutation == "missing":
+                row["raw_materials"].pop()
+            elif mutation == "extra":
+                row["raw_materials"].append(copy.deepcopy(row["raw_materials"][0]))
+            else:
+                row["declared_license"] = "ISC"
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                sources.validate_predecessor(row, registry, members, receipt)
+        bad = copy.deepcopy(receipt)
+        bad["records"][0]["identities"] = ["jni@0.22.4"]
+        with self.assertRaises(ValueError):
+            sources.validate_predecessor(original, registry, self.members(original), bad)
+        read = sources.data_io.bounded_regular
+        with mock.patch.object(sources.data_io, "bounded_regular", side_effect=lambda path, cap:
+                               read(path, cap) + (b"x" if path.name == "LICENSE" else b"")):
+            with self.assertRaises(ValueError):
+                sources.validate_predecessor(original, registry, self.members(original), receipt)
+
+    def test_blocker_receipt_rejects_failed_request_scope_and_budget_changes(self):
+        _, registry, sources, _ = self.inputs()
+        document = json.loads((registry / sources.RECEIPT_REL).read_bytes())
+        self.assertEqual(len(sources.receipt_records(document)), 1)
+        for mutation in ("schema", "status", "elapsed", "http", "curl", "blob", "identity", "url", "request",
+                         "object", "total", "missing", "execution", "listing", "requests"):
+            changed = copy.deepcopy(document)
+            entry = changed["records"][0]
+            if mutation == "schema":
+                changed["schema"] = "other"
+            elif mutation == "status":
+                changed["status"] = "stopped"
+            elif mutation == "elapsed":
+                changed["elapsed_seconds"] = 301
+            elif mutation == "http":
+                entry["http_status"] = 302
+            elif mutation == "curl":
+                entry["curl_exit_code"] = 1
+            elif mutation == "blob":
+                entry["git_blob_matches_listing"] = False
+            elif mutation == "identity":
+                entry["identities"] = ["jni@0.22.4"]
+            elif mutation == "url":
+                entry["url"] += "-other"
+            elif mutation == "request":
+                entry["request_seconds"] = 31
+            elif mutation == "object":
+                entry["bytes"] = 65537
+            elif mutation == "total":
+                changed["body_bytes_total"] += 1
+            elif mutation == "missing":
+                changed["records"].pop()
+            elif mutation == "execution":
+                changed["execution_or_import"] = True
+            elif mutation == "requests":
+                changed["bounds"]["requests_max"] = 2
+            else:
+                entry["git_blob_sha1"] = "0" * 40
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                sources.receipt_records(changed)
+        read = sources.data_io.bounded_regular
+        with mock.patch.object(sources.data_io, "bounded_regular", side_effect=lambda path, cap:
+                               read(path, cap) + (b"x" if path.name == "blocker-receipt.json" else b"")):
+            with self.assertRaises(ValueError):
+                sources.blocker_receipt(registry)
+
+    def test_license_index_validates_and_rejects_unmapped_or_swapped_texts(self):
+        _, registry, sources, rows = self.inputs()
+        original = rows[("ring", "0.17.14")]
+        index = original["license_index"]
+        member = index["archive_member"]
+        terms = next(m for m in original["materials"] if m["archive_member"] == member)
+        members = {member: (registry / terms["material_path"]).read_bytes()}
+        self.assertEqual(sources.validate_index(original, registry, members), 2)
+        self.assertEqual(original["provenance_class"], "package-license-index")
+        self.assertEqual(original["classification"], "package-complete")
+        for mutation in ("class", "declared", "checksum", "member", "maps", "expression", "role", "material",
+                         "hash", "evidence", "classification", "named"):
+            row = copy.deepcopy(original)
+            changed = dict(members)
+            if mutation == "class":
+                row["provenance_class"] = "other"
+            elif mutation == "declared":
+                row["declared_license"] = "ISC"
+            elif mutation == "checksum":
+                row["checksum"] = "0" * 64
+            elif mutation == "member":
+                row["license_index"]["archive_member"] += "x"
+            elif mutation == "maps":
+                del row["license_index"]["maps"]["LICENSE-BoringSSL"]
+            elif mutation == "expression":
+                row["license_index"]["maps"]["LICENSE-other-bits"]["expression"] = "Apache-2.0"
+            elif mutation == "role":
+                next(m for m in row["materials"] if m["archive_member"].endswith("LICENSE-BoringSSL"))["role"] = "component_terms"
+            elif mutation == "material":
+                row["materials"] = [m for m in row["materials"] if not m["archive_member"].endswith("LICENSE-other-bits")]
+            elif mutation == "hash":
+                row["license_index"]["maps"]["LICENSE-other-bits"]["sha256"] = "0" * 64
+            elif mutation == "evidence":
+                row["terms_evidence"]["groups"][1]["alternatives"][0]["evidence"][0]["material_path"] += "x"
+            elif mutation == "classification":
+                row["classification"] = "component-only"
+            else:
+                changed = {member: members[member].replace(b"LICENSE-BoringSSL", b"LICENSE-Other")}
+                row["license_index"]["sha256"] = hashlib.sha256(changed[member]).hexdigest()
+                row["license_index"]["bytes"] = len(changed[member])
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                sources.validate_index(row, registry, changed)
+        read = sources.data_io.bounded_regular
+        with mock.patch.object(sources.data_io, "bounded_regular", side_effect=lambda path, cap: (
+                read(path, cap).replace(b"Permission to use, copy", b"Permission to use, kopy")
+                if path.name == "LICENSE-other-bits" else read(path, cap))):
+            with self.assertRaises(ValueError):
+                sources.validate_index(original, registry, members)
+
+    def test_provenance_class_reaches_corpus_manifests_and_notices(self):
+        root, _, _, _ = self.inputs()
+        notices = root / ".github/actions/dependency-license/notices"
+        loaded = {}
+        with mock.patch.dict(sys.modules):
+            for name in ("notice_corpus", "notice_render"):
+                spec = importlib.util.spec_from_file_location(name, notices / (name + ".py"))
+                loaded[name] = importlib.util.module_from_spec(spec)
+                sys.modules[name] = loaded[name]
+                spec.loader.exec_module(loaded[name])
+        entries, _ = loaded["notice_corpus"].load(root)
+        expected = {("futures-bounded", "0.3.0"): "predecessor-repository", ("ring", "0.17.14"): "package-license-index"}
+        classes = {(e.name, e.version): e.provenance for e in entries.values() if e.provenance}
+        self.assertEqual(classes, expected)
+        found = [e for e in entries.values() if (e.name, e.version) in expected]
+        self.assertTrue(all(e.complete for e in found))
+        manifest = json.loads((root / "docs/legal/notices-material/release/manifest-x86_64-unknown-linux-gnu.json").read_bytes())
+        self.assertEqual({(i["name"], i["version"]): i["provenance"] for i in manifest["identities"] if "provenance" in i},
+                         expected)
+        text, _ = loaded["notice_render"].render_notices(root, "t", ["p"], found, {"registry": "0", "prepared": "0"}, [])
+        for (name, version), cls in expected.items():
+            self.assertIn(f"{name} {version} | ".encode(), text)
+            self.assertIn(f"registry provenance={cls} |".encode(), text)

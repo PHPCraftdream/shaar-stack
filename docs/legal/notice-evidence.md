@@ -404,8 +404,8 @@ other with a message; at least one target must be verified.
 
 | Target | Cargo tree | Third-party | Registry | Path | Complete text | Distributed blockers | Reviewed gaps not distributed |
 |---|---|---|---|---|---|---|---|
-| `x86_64-unknown-linux-gnu` | 378 | 372 | 355 | 17 | 367 | 5 | 13 |
-| `x86_64-pc-windows-msvc` | 379 | 372 | 355 | 17 | 367 | 5 | 13 |
+| `x86_64-unknown-linux-gnu` | 378 | 372 | 355 | 17 | 369 | 3 | 13 |
+| `x86_64-pc-windows-msvc` | 379 | 372 | 355 | 17 | 369 | 3 | 13 |
 
 The two third-party sets differ (20 identities are linux-only, such as `netlink-*`,
 `rtnetlink` and `nix`; 20 are Windows-only, such as `windows-*`, `ipconfig` and `wmi`), so
@@ -442,7 +442,7 @@ every row; a contract test pins this).
   `dlopen2` 0.8.2, gated by `cfg(target_os = "android")` (and the gated `netdev`
   versions); the evaluation also excludes them on `x86_64-pc-windows-gnu`.
 
-### Remaining distributed blockers (5, both targets; confirmed by Cargo's own tree)
+### Distributed blockers (5 at first generation, 3 after the 2026-11-12 blocker pass below; both targets; confirmed by Cargo's own tree)
 
 Not filled; the generated bundle lists them under `RELEASE BLOCKERS` and
 `notices.py check --release` fails while any remain.
@@ -451,9 +451,12 @@ Not filled; the generated bundle lists them under `RELEASE BLOCKERS` and
 |---|---|---|
 | `base45` 3.2.0 | MIT | pinned revision holds no license file at root or package path; archived VCS state dirty |
 | `enum-assoc` 1.4.1 | MIT OR Apache-2.0 | no license file at the pinned revision |
-| `futures-bounded` 0.3.0 | MIT | no license file at the pinned revision |
+| `futures-bounded` 0.3.0 | MIT | no license file at the pinned revision (since bound, see the blocker pass below) |
 | `if-watch` 3.2.2 | MIT OR Apache-2.0 | no license file at the pinned revision |
-| `ring` 0.17.14 | Apache-2.0 AND ISC | component texts retained; no package-level Apache-2.0 text at the dirty pinned revision |
+| `ring` 0.17.14 | Apache-2.0 AND ISC | component texts retained; no package-level Apache-2.0 text at the dirty pinned revision (since reclassified, see the blocker pass below) |
+
+Current state: three remain (`base45`, `enum-assoc`, `if-watch`); the generated-file figures below
+are superseded by the blocker pass at the end of this document.
 
 ### Generated files
 
@@ -492,4 +495,114 @@ each runner, the structural guard discovery ran 181 tests including them, and ea
 check verified its own host manifest against Cargo's tree (the other target skipped by
 design) and reported the five blockers. Generation from the CI artifacts is local,
 read-only and offline. This establishes packaging determinism and text availability, not
+legal sufficiency, clearance, election or release permission.
+
+## Release-blocker investigation and bindings (2026-11-12 candidate)
+
+Acceptance criterion: for each of the five identities linked into `shaar-server` and
+`shaar-client` on both targets without authentic text, find verbatim upstream text in the
+order (a) same repository at a different revision, (b) a different published version of the
+same project, (c) for `ring`, the pinned sources' own licensing statement, (d) otherwise leave the
+gap documented with an upgrade path; record the provenance class of every binding. Non-goals: legal
+clearance, OR-alternative election, version or dependency changes, and any code change outside
+the corpus tooling. Authorization is the 2026-11-12 grant ("Все разрешения на работы с репами и
+скачиваниями - я выдаю"): HTTPS only, inert DATA in new directories under `.rush/downloads/`
+(`license-blockers-1112`: GitHub API listings, the 66 non-yanked `.crate` archives of the four
+crates and bare clones of their four repositories; `license-blockers-1112-raw`: the one raw GET
+with its receipt), nothing executed or imported.
+
+### Evidence per identity
+
+| Identity | Outcome | Class |
+|---|---|---|
+| `futures-bounded` 0.3.0 | bound: libp2p/rust-libp2p root `LICENSE` at `edca09b58e19dd1e6ca5183898ad24b0cfb32d92` | `predecessor-repository` |
+| `ring` 0.17.14 | reclassified complete: its `LICENSE` names the files carrying its terms | `package-license-index` |
+| `base45` 3.2.0 | gap remains | none |
+| `enum-assoc` 1.4.1 | gap remains | none |
+| `if-watch` 3.2.2 | gap remains | none |
+
+(a) and (b), checked for all four repository-based identities. Bare clones of
+`opendevtools/base45`, `Eolu/enum-assoc`, `thomaseizinger/rust-futures-bounded` and
+`libp2p/if-watch` (all refs; 48, 53, 35 and 115 commits) contain no path whose name matches
+license, licence, copying, unlicense, copyright or notice at any revision, and GitHub reports no
+repository license. `dvc94ch/if-watch` (the earlier home of `if-watch`, now a fork) and
+`mxinden/if-watch` (the same repository as `libp2p/if-watch`) hold no license file either; no
+issue or pull request mentions a license. The 66 non-yanked `.crate` archives (`base45` 8,
+`enum-assoc` 27, `futures-bounded` 8, `if-watch` 23) contain no license-named member, and the
+pinned versions embed no license text in a source file or manifest. So (a) and (b) yield nothing
+for `base45`, `enum-assoc` and `if-watch`.
+
+`futures-bounded` 0.3.0: its repository `thomaseizinger/rust-futures-bounded` was extracted with
+history from `libp2p/rust-libp2p` `misc/futures-bounded` (its first commit is the rust-libp2p
+change "refactor(relay): move stream-handling away from `{In,Out}boundUpgrade`", PR 4275, with
+rewritten hashes) and holds no license file at any revision. The packaged `CHANGELOG.md`
+cites rust-libp2p pull requests for 0.2.0 to 0.2.3, and the 0.2.3 crate (checksum
+`e1e2774cc104e198ef3d3e1ff4ab40f86fa3245d6cb6a3a46174f21463cee173`, VCS revision
+`edca09b58e19dd1e6ca5183898ad24b0cfb32d92`, path `misc/futures-bounded`, declared MIT, repository
+rust-libp2p) is the last published from there. At that revision the repository root `LICENSE`
+(MIT, "Copyright 2017-2020 Parity Technologies (UK) Ltd.", 1,074 bytes, git blob
+`da84696303f414f0898d89477013509f1a0a16c6`, SHA-256
+`e10098b8c52fd18ad0f116aac2c0dba1e99ca125d6848640c00688e160a3ee7d`) was fetched with one exact
+GET (HTTP 200, 1.7 s, receipt `registry/raw-sources/receipts/blocker-receipt.json`, 1,748 bytes,
+SHA-256 `28f437fce7c3f535c8bd652349ca7e8331466f7beb632e03e70c1260aa4dea15`; blob SHA-1 equals the
+contents listing). It is byte-identical to the root `LICENSE` already bound for `prost-codec`
+at another revision. This is not the same repository at another revision: the class
+`predecessor-repository` says so in the inventory (`provenance_class`, binding
+`text_repository`, `text_revision`, retained 0.2.3 VCS info and manifest), in the manifests and in
+the generated notices (`provenance=predecessor-repository`). Whether the Parity copyright line
+covers every author of the extracted code needs human legal review.
+
+`ring` 0.17.14 (c): the pinned archive's `LICENSE` (499 bytes) states that ring's own code is
+under the ISC text in `LICENSE-other-bits`, that code sourced from BoringSSL is under the Apache
+2.0 text in `LICENSE-BoringSSL` (some under ISC, license info at the top of each file), and that
+`src/polyfill/once_cell/LICENSE-APACHE` and `LICENSE-MIT` cover the once_cell code. The manifest
+declares `Apache-2.0 AND ISC`. Scanning all 391 archive files: every license header names ISC,
+Apache-2.0 or MIT (the OpenSSL mentions sit in Apache-2.0 headers; `third_party/fiat/LICENSE`
+is Apache-2.0 with its own copyright and `src/polyfill/slice.rs` carries an inline MIT header);
+the remaining mentions are public-domain code remarks. The BoringSSL file also reproduces Go and
+Chromium BSD-3 texts for test support code stated as not linked. Hence the retained `LICENSE` +
+`LICENSE-other-bits` + `LICENSE-BoringSSL` plus the retained component texts are the complete
+operative set for the declared expression; the earlier `component-only` classification came from
+roles, not from missing text. The two files were promoted from `component_terms` to
+`package_terms` (same bytes and paths; the `components/` directory name is historical), the row
+carries `license_index` naming each file with its expression and digest, class
+`package-license-index`, and the replay checks that the archived `LICENSE` bytes name the files,
+that each file matches the mapped license text and that the terms evidence binds them. This is a
+reviewed reclassification of existing authentic bytes, not new text.
+
+### Remaining blockers (3, both targets) and upgrade paths
+
+None of the three can be filled from authentic text: nothing upstream exists. Replacement
+or upgrade options (no version change was made; each needs a decision):
+
+- `base45` 3.2.0 (latest) is reached only through `multibase` 0.9.3, which the repository already
+  patches (`prepare.py`, removal of `base256emoji`). Extending that patch to drop the unused Base45
+  codec would remove `base45` from the graph; alternatively ask `opendevtools/base45` to add the
+  LICENSE files and move to that release.
+- `enum-assoc` 1.4.1 (1.4.2 also has none) is a proc-macro used by the patched `noq-proto` 1.3.0.
+  Options: replace its derives in the noq-proto patch by hand-written impls, or have
+  `Eolu/enum-assoc` add LICENSE files and upgrade.
+- `if-watch` 3.2.2 (latest) is reached through `libp2p-tcp` 0.45.0 (the `tcp` feature), `libp2p-quic`
+  0.14.0 and `libp2p-mdns` 0.49.0. It cannot be dropped without removing the libp2p TCP transport
+  use; the realistic path is an upstream `libp2p/if-watch` change adding LICENSE-MIT and
+  LICENSE-APACHE.
+- For the two `MIT OR Apache-2.0` identities (`enum-assoc`, `if-watch`) a reviewed decision could accept
+  the canonical Apache-2.0 text, which has no package-specific content, for the Apache alternative.
+  That would be a policy/legal choice and is not applied here.
+
+### Result and verification
+
+`notices.py check` against the Cargo trees of CI run `43245627450` (read-only, offline, local)
+reproduces both committed manifests; `check --release` still fails on the three blockers above.
+Complete text now covers 534 of 550 identities (369 of 372 per target); the reviewed gap list has
+16 entries (13 not distributed, 3 distributed). Registry classes: 502 package-complete, 15
+preserved-complete, 14 reference-only, 2 missing. Registry inventory 2,499,900 bytes, SHA-256
+`6d46dcde89d388f2994d4e5ebc13b5f45238319d12d75a747cc817b844ab8da5`; generated notices
+928,238 bytes (`d565c7faf9981335d19dd6d120e70d0912001ba742cbf6822f0b8bae0f438931`, Linux) and
+973,028 bytes (`8ec543a2c4ea9164759333641df31ab11287642af8f49a9e01e1da4c64f90169`, Windows);
+manifests 129,800 and 131,324 bytes. The local read-only replay
+(`python -I docs/legal/notices-material/registry/replay.py .`) reported PASS against the held archives
+including the new blocker totals (1 predecessor text / 1,074 bytes, 1 license-index row). New
+module `registry/blocker_sources.py`; the CI notice tests add `RegistryBlockerBindingTests` (5 test
+methods). Test execution evidence is CI only. This records text availability and provenance, not
 legal sufficiency, clearance, election or release permission.

@@ -550,6 +550,7 @@ raw_cases = importlib.util.module_from_spec(raw_spec)
 raw_spec.loader.exec_module(raw_cases)
 RegistryRawSourceTests = raw_cases.RegistryRawSourceTests
 RegistryGapBindingTests = raw_cases.RegistryGapBindingTests
+RegistryBlockerBindingTests = raw_cases.RegistryBlockerBindingTests
 
 
 

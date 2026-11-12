@@ -40,6 +40,7 @@ def load_sibling(name):
 
 data_io = load_sibling("data_io")
 raw_sources = load_sibling("raw_sources")
+blocker_sources = load_sibling("blocker_sources")
 digest = data_io.digest
 bounded_regular = data_io.bounded_regular
 safe_relative_path = data_io.safe_relative_path
@@ -227,6 +228,17 @@ def replay_unindexed_gap_rows(inventory, data_root, registry, receipt):
     return count, size, packages
 
 
+def check_predecessor_archive(data_root, key, binding):
+    """Compare the retained predecessor metadata with the held predecessor archive."""
+    old = binding["predecessor"]
+    totals = {"decoded": 0, "members": 0, "regular_bytes": 0, "evidence_bytes": 0}
+    members = gap_archive_members(data_root, old["archive_data_path"], old["sha256"], key[0], old["version"],
+                                  blocker_sources.PREDECESSOR_FILES, totals)
+    if {item["archive_member"]: item["bytes_hex"] for item in old["archive_metadata"].values()} != {
+            member: content.hex() for member, content in members.items()}:
+        raise ValueError(f"Predecessor metadata differs from its retained archive: {key[0]}@{key[1]}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Read-only bounded Task13/N1 DATA replay")
     parser.add_argument("worktree_root", type=Path)
@@ -291,6 +303,8 @@ def main():
     classification_counts = {}
     raw_count = raw_bytes = raw_packages = 0
     gap_count = gap_bytes = gap_packages = 0
+    blocker_count = blocker_bytes = blocker_packages = index_rows = 0
+    pinned_blocker_receipt = blocker_sources.blocker_receipt(registry)
     pinned_raw_receipt = raw_sources.raw_receipt(registry)
     status_counts = {}
     for index in range(ARCHIVE_COUNT):
@@ -365,11 +379,19 @@ def main():
                 gap_count += count
                 gap_bytes += size
                 gap_packages += 1
+            elif (identity["name"], identity["version"]) in blocker_sources.PREDECESSOR:
+                count, size = blocker_sources.validate_predecessor(row, registry, source_members, pinned_blocker_receipt)
+                check_predecessor_archive(data_root, (identity["name"], identity["version"]), row["raw_source_binding"])
+                blocker_count += count
+                blocker_bytes += size
+                blocker_packages += 1
             else:
                 count, size = raw_sources.validate_raw_sources(row, registry, source_members, pinned_raw_receipt)
                 raw_count += count
                 raw_bytes += size
                 raw_packages += 1
+        if (identity["name"], identity["version"]) in blocker_sources.INDEX:
+            index_rows += blocker_sources.validate_index(row, registry, source_members)
         for material in row.get("materials", []):
             relative_material = material["material_path"]
             material_path_on_disk = no_link_path(registry, relative_material)
@@ -408,6 +430,8 @@ def main():
     extra = replay_unindexed_gap_rows(inventory, data_root, registry, pinned_raw_receipt)
     gap_count, gap_bytes, gap_packages = (gap_count + extra[0], gap_bytes + extra[1], gap_packages + extra[2])
     supplement = inventory.get("raw_source_supplement", {})
+    if (blocker_count, blocker_bytes, blocker_packages) != blocker_sources.TOTALS or index_rows != sum(len(pin["maps"]) for pin in blocker_sources.INDEX.values()):
+        raise ValueError("Blocker replay totals mismatch")
     if (raw_count, raw_bytes, raw_packages) != (8, 38580, 5):
         raise ValueError("Raw supplement replay totals mismatch")
     if (gap_count, gap_bytes, gap_packages) != raw_sources.GAP_TOTALS:
@@ -427,6 +451,13 @@ def main():
             or supplement.get("gap_material_count") != gap_count
             or supplement.get("gap_material_bytes") != gap_bytes
             or supplement.get("gap_package_count") != gap_packages
+            or supplement.get("blocker_receipt_path") != blocker_sources.RECEIPT_REL
+            or supplement.get("blocker_receipt_sha256") != blocker_sources.RECEIPT_SHA
+            or supplement.get("blocker_receipt_bytes") != blocker_sources.RECEIPT_BYTES
+            or supplement.get("blocker_material_count") != blocker_count
+            or supplement.get("blocker_material_bytes") != blocker_bytes
+            or supplement.get("blocker_package_count") != blocker_packages
+            or supplement.get("blocker_index_rows") != len(blocker_sources.INDEX)
             or supplement.get("no_license_choice_or_legal_clearance") is not True):
         raise ValueError("Raw supplement inventory mismatch")
     root_locks = lock_identities(worktree / "Cargo.lock")
@@ -462,6 +493,8 @@ def main():
         "gap_raw_packages": gap_packages,
         "gap_raw_material_rows": gap_count,
         "gap_raw_material_bytes": gap_bytes,
+        "blocker_predecessor_texts": blocker_count,
+        "blocker_license_index_rows": len(blocker_sources.INDEX),
         "actual_inventory_sha256": inventory_sha,
         "actual_inventory_bytes": len(inventory_raw),
         "receipt_sha256": digest(receipt_raw),

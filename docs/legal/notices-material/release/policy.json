@@ -8,12 +8,11 @@
   "x86_64-unknown-linux-gnu": {"cfg": ["debug_assertions", "panic=\"unwind\"", "target_abi=\"\"", "target_arch=\"x86_64\"", "target_endian=\"little\"", "target_env=\"gnu\"", "target_family=\"unix\"", "target_feature=\"fxsr\"", "target_feature=\"sse\"", "target_feature=\"sse2\"", "target_has_atomic=\"16\"", "target_has_atomic=\"32\"", "target_has_atomic=\"64\"", "target_has_atomic=\"8\"", "target_has_atomic=\"ptr\"", "target_has_atomic_primitive_alignment=\"16\"", "target_has_atomic_primitive_alignment=\"32\"", "target_has_atomic_primitive_alignment=\"64\"", "target_has_atomic_primitive_alignment=\"8\"", "target_has_atomic_primitive_alignment=\"ptr\"", "target_os=\"linux\"", "target_pointer_width=\"64\"", "target_vendor=\"unknown\"", "unix"]}
  },
  "gaps": [
-  {"name": "base45", "version": "3.2.0", "reason": "pinned repository revision holds no license file at the repository root or the package path; the archived VCS state is also dirty"},
+  {"name": "base45", "version": "3.2.0", "reason": "no license file in any revision of the repository (all refs) or in any of the 8 published crate versions (the packaged VCS state is also dirty); only README/manifest declare MIT"},
   {"name": "block2", "version": "0.6.2", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
   {"name": "dispatch2", "version": "0.3.1", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
-  {"name": "enum-assoc", "version": "1.4.1", "reason": "pinned repository revision holds no license file at the repository root or the package path"},
-  {"name": "futures-bounded", "version": "0.3.0", "reason": "pinned repository revision holds no license file at the repository root or the package path"},
-  {"name": "if-watch", "version": "3.2.2", "reason": "pinned repository revision holds no license file at the repository root or the package path"},
+  {"name": "enum-assoc", "version": "1.4.1", "reason": "no license file in any revision of the repository or in any of the 27 non-yanked published crate versions; only the manifest declares MIT OR Apache-2.0"},
+  {"name": "if-watch", "version": "3.2.2", "reason": "no license file in any revision of the repository (including the dvc94ch fork) or in any of the 23 published crate versions; README and manifest declare MIT OR Apache-2.0"},
   {"name": "objc2", "version": "0.6.5", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
   {"name": "objc2-core-foundation", "version": "0.3.2", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
   {"name": "objc2-core-wlan", "version": "0.3.2", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
@@ -23,7 +22,6 @@
   {"name": "objc2-security-foundation", "version": "0.3.2", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
   {"name": "objc2-system-configuration", "version": "0.3.2", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
   {"name": "pharos", "version": "0.5.3", "reason": "pinned repository revision holds no license file at the repository root or the package path"},
-  {"name": "ring", "version": "0.17.14", "reason": "component texts are retained but the dirty pinned revision has no package-level Apache-2.0 text"},
   {"name": "winapi-i686-pc-windows-gnu", "version": "0.4.0", "reason": "the archive carries no VCS info, so there is no pinned revision to bind"},
   {"name": "winapi-x86_64-pc-windows-gnu", "version": "0.4.0", "reason": "the archive carries no VCS info, so there is no pinned revision to bind"}
  ]

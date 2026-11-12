@@ -1,0 +1,44 @@
+{
+  "schema": "n1-blocker-raw-acquisition-v1",
+  "authorization": {
+    "user_words": "\u0412\u0441\u0435 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u0438\u044f \u043d\u0430 \u0440\u0430\u0431\u043e\u0442\u044b \u0441 \u0440\u0435\u043f\u0430\u043c\u0438 \u0438 \u0441\u043a\u0430\u0447\u0438\u0432\u0430\u043d\u0438\u044f\u043c\u0438 - \u044f \u0432\u044b\u0434\u0430\u044e",
+    "date": "2026-11-12",
+    "scope": "One exact pinned raw.githubusercontent.com license-file GET for futures-bounded@0.3.0; inert DATA only"
+  },
+  "bounds": {
+    "requests_max": 1,
+    "per_object_bytes_max": 65536,
+    "request_seconds_max": 30,
+    "redirects": 0,
+    "retries": 0,
+    "concurrency": 1
+  },
+  "execution_or_import": false,
+  "records": [
+    {
+      "url": "https://raw.githubusercontent.com/libp2p/rust-libp2p/edca09b58e19dd1e6ca5183898ad24b0cfb32d92/LICENSE",
+      "repository": "https://github.com/libp2p/rust-libp2p",
+      "revision": "edca09b58e19dd1e6ca5183898ad24b0cfb32d92",
+      "source_file": "LICENSE",
+      "identities": [
+        "futures-bounded@0.3.0"
+      ],
+      "listing_git_blob_sha1": "da84696303f414f0898d89477013509f1a0a16c6",
+      "listing_size": 1074,
+      "index": 0,
+      "status": "completed",
+      "curl_exit_code": 0,
+      "http_status": 200,
+      "request_seconds": 1.687,
+      "bytes": 1074,
+      "sha256": "e10098b8c52fd18ad0f116aac2c0dba1e99ca125d6848640c00688e160a3ee7d",
+      "git_blob_sha1": "da84696303f414f0898d89477013509f1a0a16c6",
+      "body_path": "00/body",
+      "header_sha256": "7c758ae5db1bf958e2d57763ae3648cded35ba49788f33cd40c751751c8a4517",
+      "git_blob_matches_listing": true
+    }
+  ],
+  "status": "completed",
+  "elapsed_seconds": 1.687,
+  "body_bytes_total": 1074
+}
