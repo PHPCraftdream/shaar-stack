@@ -549,6 +549,7 @@ raw_spec = importlib.util.spec_from_file_location("notice_raw_cases", Path(__fil
 raw_cases = importlib.util.module_from_spec(raw_spec)
 raw_spec.loader.exec_module(raw_cases)
 RegistryRawSourceTests = raw_cases.RegistryRawSourceTests
+RegistryGapBindingTests = raw_cases.RegistryGapBindingTests
 
 
 

@@ -1,7 +1,9 @@
 # Preserve legal DATA byte-for-byte, including original line endings.
 * -text
 # The acquisition receipt retains its original CRLF bytes and digest.
-registry/raw-sources/receipt.json whitespace=cr-at-eol
-registry/raw-sources/jni-macro-receipt.json whitespace=cr-at-eol
+registry/raw-sources/receipts/receipt.json whitespace=cr-at-eol
+registry/raw-sources/receipts/jni-macro-receipt.json whitespace=cr-at-eol
 # Preserve this authentic Apache file's final blank line and pinned digest.
-registry/raw-sources/jni-sys-macros-0.4.1/LICENSE-APACHE whitespace=-blank-at-eof
+registry/raw-sources/j-l/jni-sys-macros-0.4.1/LICENSE-APACHE whitespace=-blank-at-eof
+# The prepared inventory retains its original CRLF line endings.
+prepared/inventory.json whitespace=cr-at-eol
