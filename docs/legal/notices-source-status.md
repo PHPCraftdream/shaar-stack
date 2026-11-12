@@ -295,3 +295,11 @@ Both original AUTHORS files contain the complete MIT grant/disclaimer and packag
 The canonical registry inventory is now 2,354,190 bytes, SHA-256 `623e6284892396da69eadea5706a283c91afe1282676a0fc0fd6dac31792de30`. It records 495/533 registry identities with complete package text under the existing availability definition; with the unchanged 15/17 path identities, this is 510/550 complete and 40 incomplete. These are canonical archive/path counts, not an all-source consolidation of the separate nine-URL upstream supplement. Prior dated digests/counts remain historical; the inventory retains its exact pre-AUTHORS input digest/counts/search description. The unchanged SPDX declaration is MIT OR Apache-2.0 OR LGPL-2.1-or-later; no LGPL license-policy permission is inferred.
 
 The 515-archive tranche now preserves 894 materials / 4,421,514 bytes; including the old 23 registry materials gives 917 / 4,505,353 bytes. The existing bounded replay reader's exact-dataset guards were updated without changing its source validation or limits. The existing dependency-license CI regression module now checks exact known AUTHORS digests, full MIT wording, the README binding and per-alternative classification through the real replay validator, plus missing-evidence and reference-role rejection controls. The old inventory fails those positive regressions. These tests are written, not locally executed; no new CI lane/framework or Task14 assembly is introduced. Local verification is restricted to syntax and independent own-stdlib DATA reads. This correction still requires CI and does not establish full Task13, current prepared-tree provenance, legal clearance or release readiness.
+
+## N2 notices assembly pointer — 2026-11-12
+
+Per-target notices assembly, the applicable sets (403 third-party identities on
+`x86_64-unknown-linux-gnu`, 404 on `x86_64-pc-windows-msvc`), the 13 gaps classified not
+distributed and the 5 remaining distributed blockers (`base45`, `enum-assoc`,
+`futures-bounded`, `if-watch`, `ring`) are recorded in `notice-evidence.md` under
+"Deterministic notices assembly and check". The corpus itself is unchanged.

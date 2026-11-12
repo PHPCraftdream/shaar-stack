@@ -30,3 +30,10 @@ inside the archive still lists the removed crates; Cargo never reads a dependenc
 file, so it is kept byte-identical and is not part of the product graph. This removal does not itself certify
 license compliance of the rest of the dependency graph: the dependency-license gate, notice
 collection, and review of third-party terms remain separate obligations.
+
+## Third-party notices
+
+Per-target `THIRD-PARTY-NOTICES` files for `shaar-server` and `shaar-client` are generated
+by `.github/actions/dependency-license/notices/notices.py` from the verified corpus under
+`docs/legal/notices-material/`. Five linked packages still lack authentic license text, so
+no bundle is releasable yet; see `docs/legal/notice-evidence.md`.
