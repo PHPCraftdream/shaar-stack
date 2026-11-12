@@ -56,7 +56,7 @@ pub(super) async fn round_trip(front: SocketAddr, payload: &[u8]) -> Result<Dura
     let started = Instant::now();
     timeout(IO, async {
         let mut stream = TcpStream::connect(front).await?;
-        stream.write_all(&[b'E']).await?;
+        stream.write_all(b"E").await?;
         stream.write_all(payload).await?;
         stream.shutdown().await?;
         let mut echoed = Vec::with_capacity(payload.len());
@@ -94,7 +94,7 @@ pub(super) async fn bulk(front: SocketAddr, mebibytes: usize) -> Result<f64, Str
     let started = Instant::now();
     let received = timeout(Duration::from_secs(120), async {
         let mut stream = TcpStream::connect(front).await?;
-        stream.write_all(&[b'E']).await?;
+        stream.write_all(b"E").await?;
         let (mut read, mut write) = stream.into_split();
         let sender = async move {
             let chunk = vec![PATTERN; CHUNK];
