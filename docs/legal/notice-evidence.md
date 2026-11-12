@@ -484,9 +484,12 @@ target. Regenerate the record after a corpus or graph change with
 both targets, using the CI metadata and the `third-party-notices-<OS>` tree artifacts, and
 copy the manifests into `release/`.
 
-Status: written and CI-executed. Run `43243902226` executed the new test module (39 tests,
-all passing) and the check on both runners; its check step failed only on the superset
-guard above, which led to the Cargo-tree-authoritative design recorded here. Generation
-from the CI artifacts is local, read-only and offline. This establishes packaging
-determinism and text availability, not legal sufficiency, clearance, election or release
-permission.
+Status: written and CI-executed. Run `43243902226` (first design) executed the new test
+module (39 tests, all passing) and its check step failed on both runners only on the
+superset guard above, which led to the Cargo-tree-authoritative design recorded here.
+Run `43245627450` is green on Ubuntu and Windows: `test_notices.py` executed 44 tests on
+each runner, the structural guard discovery ran 181 tests including them, and each runner's
+check verified its own host manifest against Cargo's tree (the other target skipped by
+design) and reported the five blockers. Generation from the CI artifacts is local,
+read-only and offline. This establishes packaging determinism and text availability, not
+legal sufficiency, clearance, election or release permission.
