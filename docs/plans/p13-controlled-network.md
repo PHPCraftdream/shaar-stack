@@ -1,9 +1,10 @@
 # P13 controlled NAT and UDP-blockade execution contract
 
-Status: **executed and accepted for the four product cases and the three cleanup
-controls** — fork workflow_dispatch run 43229756778 on `ca6c04a` (2026-11-12),
-phase status `pass`; see [Execution record](#execution-record-2026-11-12). This is
-not full P13 acceptance: the open and gated rows are listed in the P13 report,
+Status: **executed and accepted for the twelve product cases and the three cleanup
+controls** — the four original cases in fork workflow_dispatch run 43229756778 on
+`ca6c04a`, and all twelve in the extension run 43245366525 on `17b711c`
+(2026-11-12), phase status `pass`; see [Execution record](#execution-record-2026-11-12).
+This is not full P13 acceptance: the open and gated rows are listed in the P13 report,
 `docs/verification/scenarios.md` section 10.
 
 ## Authorization and fixed scope
@@ -88,6 +89,58 @@ routing the private Server address across WAN or by forging the DHT record.
 The approved historical `nat-peer` QUIC fixture is supporting calibration, not a
 substitute for any normal-product case above.
 
+## Extension cases (recorded 2026-11-12)
+
+The extension reuses the same disposable-runner, namespace-only scheme, the same
+normal products and the same dispatch job. It adds eight product cases and a
+kernel-side observation of traffic to non-owned destinations; the four cases above
+are unchanged. North-star steps: 3 (published address), 4–5 (path choice and
+failover), 6 (allowlist denial), plus the "no n0" goal. Non-goals: new networks,
+real devices, IPv6, NAT type variety, direct double-NAT punching, throughput.
+
+Each case below names its observable acceptance criterion.
+
+| Case | Row | Mode | Topology and rules | Acceptance (all exact) |
+| --- | --- | --- | --- | --- |
+| `lan-signal`, `lan-standby` | E1 | both | Client in the Router A namespace, Server in the Router B namespace; both are hosts on the owned `203.0.113.0/24` segment next to the DHT/relay/Ygg fixtures. Their router-side LAN interfaces are flushed after the calibrations so each host has exactly one address. No NAT, no forwarding on the path. Client Ygg dial blocked on its output hook so APP can only use Native | APP 61/61 bytes, target accepts 1, Client exit 0; the signed record lists exactly the Server's segment address `203.0.113.2`; on both routers forwarded quota bytes 0 and `udp_nat`, `tcp_nat`, `native_snat`, `native_drop` all 0; `lan_sent` and `lan_native` > 0 on both routers (Native UDP was sent and received on the segment) |
+| `relay-denied-signal` | C4b | signal | Single NAT (Server in WAN); Client-side router denies relay TCP, allows Ygg transit, UDP open | APP 61/61, accepts 1, Client exit 0, `udp_nat` and `native_snat` > 0; `tcp_drop` is recorded, not required (the product may not dial a relay when the direct path works) |
+| `failover-standby` | D2, D3 | standby | Single NAT, relay and Ygg transit open, UDP open at start. APP 1 over Native, then a runtime Native UDP block table (both routers, DHT exempt), then APP 2, then the block is lifted and a Ygg TCP block table is inserted, then APP 3 | APP 1: `native_snat` > 0 (Ygg is open, so Native carriage is policy plus counters, not exclusion). APP 2 succeeds within **10 s** of block insertion (north-star failover bound), exact bytes, `native_snat` growth during the block exactly 0, dropped Native UDP > 0, Ygg TCP packets grow. APP 3 succeeds within **40 s** of the block removal with Ygg blocked, so Native carried it by exclusion, and `native_snat` grows again. Target accepts 3, 183/183 bytes in total |
+| `failover-signal` | D2 | signal | As above without recovery | APP 1 as above; after the block APP 2 fails closed (terminal EOF/reset, 0 reply bytes), `native_snat` growth 0, dropped Native UDP > 0, target accepts stay 1. The Client process stays alive (a lost path mid-session fails the stream, it does not end the Client; first dispatch evidence), so it is stopped by console interrupt and must exit 0 |
+| `denied-blocked-standby` | G2 | standby | Double NAT, Native UDP blocked, Ygg only (the `blocked-standby` network) | Authorized Client first: APP 61/61, accepts 1, clean exit 0. Then a second Client with a different valid key: terminal EOF/reset, 0 reply bytes, target accepts still 1, second Client exits 1, Server stays up and stops cleanly |
+| `dht-drop-signal` | C2 | signal | Single NAT; Client-side router drops UDP to the DHT socket (all queries) | Hypothesis "fail closed" was refuted by dispatch 1 (the fixed target saw an admission). Accepted oracle: APP 61/61, target accepts 1, Client exit 0, `dht_drop` > 0, `udp_nat` and `native_snat` > 0. In signal mode only Native can carry APP, so the Client reached the Server over Native after discovery without the DHT; `relay_tcp` shows the libp2p signaling traffic that supplied the candidates |
+| `outage-standby` | C7 | standby | Double NAT, Native UDP blocked and Client-side relay and Ygg TCP both denied | Local admission then terminal failure, 0 reply bytes, target accepts 0, Client exit 1 on its own within the case bound |
+
+Notes on the oracles.
+
+- **LAN honesty.** The segment uses documentation-range addresses because the DHT
+  fixture admits only `203.0.113.1/2/10` as query sources. It proves direct IPv4 Native
+  over one shared L2 segment without NAT or forwarding, and that discovery finds the
+  segment address. It does not prove RFC 1918 LAN address handling, multicast LAN
+  discovery, Wi-Fi, or real devices.
+- **Runtime blocks are separate tables** (`<prefix>_dnative`, `<prefix>_dygg`, forward
+  hook priority -250, own named drop counter), inserted and deleted whole, so the
+  verified product table stays immutable. Failover time is measured from the commit of
+  the last router's insertion to the controller receiving APP 2's result, so it includes
+  the APP worker's process start and is conservative. The recovery bound of 40 s is a
+  fixture choice that fits the 90 s active window; it is not a north-star criterion.
+- **Observed no-n0 (F1).** Every case installs, in both router namespaces, a counter-only
+  `<prefix>_obs` table: forward and output hooks, counters for any destination outside
+  `10.0.0.0/8`, `203.0.113.0/24` (which contains the `203.0.113.10/32` WAN host),
+  loopback and link-scope multicast/broadcast, plus UDP/53 and TCP/443 to such
+  destinations. Before each case the exact installed rules are proven live by known probes
+  to TEST-NET-1 `192.0.2.77` (a destination no namespace routes or answers), then the
+  table is reinstalled with zero counters. The case fails if any observation counter is
+  nonzero at the end. Limits: IPv4 only (IPv6 forwarding is separately dropped and counted);
+  products running in the WAN namespace have no route out at all, so their attempts are
+  prevented rather than counted; traffic that never leaves a host namespace is not seen.
+- **Rule dependencies.** `nft --check` of every generated ruleset (now 53: the 48 case
+  tables, two calibration tables, the observation table and the two runtime-block tables)
+  stays the first step of the dispatch.
+- **Measured bounds.** Failover to Ygg took 7.0-7.1 s and Native recovery 13.1 s in
+  the three dispatches that ran the standby failover case; signal-mode fail-closed took
+  5.1 s. The 10 s bound is the north-star criterion; one run is not a 95th-percentile
+  claim.
+
 ## Enforceable resource and lifetime bounds
 
 - One Ubuntu job, one exact reviewed source SHA, cases sequentially; no fan-out.
@@ -105,11 +158,19 @@ substitute for any normal-product case above.
   APP streams, and at most 64 KiB request plus 64 KiB reply per transaction. No
   throughput loop or artificial load. Retry only actual typed transient I/O
   failure under one absolute transaction-campaign deadline.
-- Forwarded IP traffic: **64 MiB maximum across the privileged phase**. Product
-  cases receive 7 MiB per router per case (56 MiB maximum total); live-failure and
-  interruption controls receive 2 MiB per router each (8 MiB total). Setup-failure
-  controls start no traffic. Namespace-local kernel quotas must enforce these
-  allocations; a quota hit is a recorded failure, not a passing blockade.
+- Forwarded IP traffic: **64 MiB maximum across the privileged phase**. Re-split on
+  2026-11-12 for twelve product cases: each product case receives 2 MiB per router
+  (48 MiB maximum total); the live-failure and interruption controls receive 2 MiB per
+  router each (8 MiB total); 8 MiB stays unallocated. The first run of the original four
+  cases used 160,332 B in total, so 2 MiB per router and case keeps a margin of more
+  than two orders of magnitude. Setup-failure controls start no traffic. Namespace-local
+  kernel quotas must enforce these allocations; a quota hit is a recorded failure, not
+  a passing blockade.
+- The 150 s per-case ceiling is unchanged. Twelve cases at their ceiling would exceed
+  the 20 minute phase, so the worst case no longer fits by arithmetic; the phase refuses
+  to start a case whose ceiling plus the 45 s cleanup reserve no longer fits the
+  remaining time, records that as a failure, and orders the slowest cases last. The
+  observed duration of the original seven runs was 53.6 s in total.
 - Metadata/capture artifacts: at most 64 MiB aggregate, bounded files and packet
   capture buffers. Never dump production secrets or unbounded packet streams.
 - Setup-failure, live-child-failure and SIGTERM cleanup controls: at most 60
@@ -200,6 +261,28 @@ cleanup. No skipped or permission-blocked applicable P13 row counts as passed.
   passed their functional oracles but strict verification demanded an identity for
   a short-lived APP child that is never sampled. Each was repaired in the following
   commit; none was retried blindly.
-- **Not covered by this contract or its run:** LAN, network change, IPv6 NAT,
-  other NAT types, direct double-NAT punching, observed zero n0 contact, public and
-  device scenarios. They stay open or gated in `docs/verification/scenarios.md`.
+- **Not covered by this contract or its runs:** IPv6 NAT, other NAT types, direct
+  double-NAT punching, interface or address switch and NAT rebinding, recovery after a
+  total outage, RFC 1918 or device LANs, public and device scenarios. LAN (owned
+  segment), observed no-n0, runtime Native loss and recovery, key denial over Ygg, DHT
+  drop, total outage and relay-denied are covered by the extension (see above). The
+  rest stay open or gated in `docs/verification/scenarios.md`.
+
+## Extension execution record (2026-11-12)
+
+Authority: the north-star decision-log row of 2026-11-12 (extension) and the user's
+grant quoted there. Three of the at most four extension dispatches were used; each ran on
+a SHA whose ordinary fork CI was green and whose in-dispatch `nft --check` of all 53
+rulesets passed first. Evidence is preserved per dispatch under
+`.rush/downloads/p13-rows-dispatchN-<runid>/` in the primary checkout (not committed).
+
+| Dispatch | Run | Source SHA | Result |
+| --- | --- | --- | --- |
+| 1 | 43241277233 | `72db069` | fail: the four original cases and `relay-denied-signal`, `failover-standby`, `denied-blocked-standby`, `outage-standby` passed; `lan-*` failed (Server published an unreachable LAN-side candidate first, Client found no usable path), `failover-signal` and `dht-drop-signal` failed (Client stays alive after the stream fails; DHT-drop hypothesis wrong) |
+| 2 | 43243607361 | `7f89780` | fail: all but `dht-drop-signal` passed (LAN works with one interface per host; signal cases expect a console stop); `dht-drop-signal` still used the fail-closed oracle |
+| 3 | 43245366525 | `17b711c` | **pass**: 15 of 15 invocations (12 product cases, 3 cleanup controls), phase 185.2 s of 20 min, forwarded 582,967 B of the 64 MiB budget (largest router quota use 101,583 B of 2 MiB), zero leftover namespaces, host firewall and `ip_forward` unchanged, 269,150 B of artifacts |
+
+Fixes between dispatches were test-harness only (worker treats a reset local stream as a
+typed transient; LAN host isolation; signal-case expectations; C2 oracle) plus extra
+diagnostics (`lan_sent` counters, neighbor and link dumps on failure). No product code
+changed. A later documentation-only commit does not alter the executed source.
