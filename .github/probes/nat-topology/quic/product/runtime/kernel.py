@@ -106,8 +106,8 @@ def calibrate_quota(cfg, tools, router, host, deadline):
 def install_rules(cfg, tools, router, case, ports, purpose, deadline):
     plan = network.commands(cfg, router, tools["nft"], tools["ip"])
     text = network.rules(cfg["prefix"], router, case, ports, purpose).encode("ascii")
-    checked(plan["ipv4_forward"], deadline, what="router IPv4 forwarding")
-    checked(plan["ipv6_forward"], deadline, what="router IPv6 forwarding denial")
+    for setting in ("net.ipv4.ip_forward=1", "net.ipv6.conf.all.forwarding=0"):
+        checked(ns_argv(tools, cfg, router, tools["sysctl"], "-q", "-w", setting), deadline, what="router forwarding " + setting)
     readback = {}
     for family, name in (("ipv4", "net.ipv4.ip_forward"), ("ipv6", "net.ipv6.conf.all.forwarding")):
         value = checked(ns_argv(tools, cfg, router, tools["sysctl"], "-n", name), deadline, what="forwarding readback")
@@ -124,7 +124,8 @@ def snapshot(cfg, tools, router, deadline):
 
 
 def conntrack_lines(cfg, tools, router, deadline):
-    code, out, err = run_tool(ns_argv(tools, cfg, router, tools["cat"], "/proc/net/nf_conntrack"), deadline)
+    reader = "import sys; sys.stdout.write(open('/proc/net/nf_conntrack', encoding='ascii').read())"
+    code, out, err = run_tool(ns_argv(tools, cfg, router, tools["python"], "-I", "-c", reader), deadline)
     contract.require(code == 0, "conntrack procfs table unavailable in the router namespace (no conntrack CLI fallback)")
     lines = out.decode("utf-8", errors="replace").splitlines()
     contract.require(len(lines) <= 4096, "conntrack table exceeds the bounded inspection size")

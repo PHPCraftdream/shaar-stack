@@ -17,7 +17,7 @@ import kernel  # noqa: E402
 import preflight  # noqa: E402
 import processes  # noqa: E402
 
-TOOLS = ("ip", "nft", "setpriv", "sysctl", "cat")
+TOOLS = ("ip", "nft", "setpriv", "sysctl")
 SCOPE = "controlled-product-case-evidence"
 
 

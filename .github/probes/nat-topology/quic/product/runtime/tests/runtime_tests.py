@@ -114,6 +114,31 @@ class KernelTests(unittest.TestCase):
                     self.assertEqual((result["passed"], result["dropped"]), (8, 16))
                 self.assertEqual(calls, ["quota probe install", "quota probe sender", "quota probe snapshot", "quota probe removal"])
 
+    def test_router_setup_uses_verified_tools_and_refuses_unexpected_forwarding_readback(self):
+        cfg = {"prefix": "snaabbcc", "ip": contract.IPS,
+               "ns": {key: "snaabbcc-" + value for key, value in contract.SUFFIXES.items()}}
+        tools = {"ip": "/usr/sbin/ip", "nft": "/usr/sbin/nft", "sysctl": "/opt/verified/sysctl", "python": "/usr/bin/python3"}
+        for answers, ok in ((("1", "0"), True), (("0", "0"), False), (("1", "1"), False)):
+            calls, replies = [], list(answers)
+
+            def checked(argv, deadline, data=None, what="x", calls=calls, replies=replies):
+                calls.append((argv, what))
+                return (replies.pop(0) + "\n").encode() if argv[4:5] == ["/opt/verified/sysctl"] and "-n" in argv else b""
+
+            with self.subTest(answers=answers), mock.patch.object(kernel, "checked", checked):
+                args = (cfg, tools, "rtr_a", "blocked-standby", {"dht": 42001, "relay": 42002, "transit": 42003},
+                        "product", time.monotonic() + 5)
+                if ok:
+                    self.assertEqual(kernel.install_rules(*args)["forwarding"], {"ipv4": "1", "ipv6": "0"})
+                    self.assertEqual(calls[-1][1], "nft rule install")
+                    self.assertTrue(all(argv[:4] == ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-a"] for argv, _ in calls))
+                    self.assertEqual([argv[5:] for argv, _ in calls[:2]],
+                                     [["-q", "-w", "net.ipv4.ip_forward=1"], ["-q", "-w", "net.ipv6.conf.all.forwarding=0"]])
+                else:
+                    with self.assertRaises(ValueError):
+                        kernel.install_rules(*args)
+                    self.assertNotIn("nft rule install", [what for _, what in calls])
+
     def test_namespace_commands_only_enter_owned_namespaces_with_absolute_tools(self):
         cfg = {"prefix": "snaabbcc", "ns": {key: "snaabbcc-" + value for key, value in contract.SUFFIXES.items()}}
         tools = {"ip": "/usr/sbin/ip", "nft": "/usr/sbin/nft"}
