@@ -13,6 +13,8 @@ import stat
 # "server_exit" (expected Server exit status, default 0), "client2_exit" (exit status of a replacement Client).
 NETS = ("nat", "blocked", "lan", "dht-drop", "failover", "dnat", "ipv6", "relay", "recover")
 SEGMENT_NETS = ("lan", "ipv6")
+# Documentation-prefix IPv6 addresses of the two segment hosts (same plan as network.V6).
+V6 = {"rtr_a": "2001:db8:13::1", "rtr_b": "2001:db8:13::2"}
 LAN = {"client_ns": "rtr_a", "server_ns": "rtr_b", "net": "lan", "udp_blocked": False, "ygg_client_blocked": True,
        "target_accepts": 1, "client_exit": 0}
 NATIVE = {"server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0}

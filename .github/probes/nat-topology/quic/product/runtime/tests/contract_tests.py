@@ -284,6 +284,7 @@ class NetworkContractTests(unittest.TestCase):
         self.assertIn("lanin ip6 saddr 2001:db8:13::1 ip6 daddr 2001:db8:13::2 meta l4proto udp counter name lan6_native", v6b)
         self.assertIn("meta nfproto ipv6 counter name ipv6_drop drop", v6a)
         self.assertEqual(network.V6, {"rtr_a": "2001:db8:13::1", "rtr_b": "2001:db8:13::2"})
+        self.assertEqual(contract.V6, network.V6)
         for name in ("peer_sent", "peer_recv", "native_out", "native_new", "hole_in", "lan6_native", "lan6_sent"):
             self.assertIn(name, network.COUNTERS)
             self.assertNotIn(f"counter name {name}", rules("rtr_a", "native-signal"), name)
