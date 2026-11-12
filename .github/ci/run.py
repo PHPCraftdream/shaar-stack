@@ -242,6 +242,7 @@ PROCESS_CASES = tuple(sorted(tuple("process_smoke::" + name for name in (
     "process_smoke::composed::real_composed_key_only_payload_and_server_restart_in_signal_and_standby",
     "process_smoke::composed::real_composed_denied_key_never_reaches_target_in_signal_and_standby",
     "process_smoke::composed::real_composed_standby_forwards_when_dht_and_client_relay_are_unavailable",
+    "process_smoke::composed::real_composed_operator_contract_bind_allowlist_output_and_service_stop",
 )))
 
 

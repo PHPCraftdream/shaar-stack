@@ -1,5 +1,7 @@
 //! Retained-role lifecycle regressions, split by scenario.
 
+#[path = "endpoints/addresses.rs"]
+mod addresses;
 mod cancellation;
 mod capacity;
 mod client_starting;

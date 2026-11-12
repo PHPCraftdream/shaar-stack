@@ -250,6 +250,18 @@ impl ServerRole {
         }
     }
 
+    /// Native (IPv4) endpoint address once started; `None` before start and
+    /// after close. A wildcard IP means all interfaces. Call between
+    /// `start` and `run`.
+    pub fn native_addr(&self) -> Option<std::net::SocketAddr> {
+        match &self.phase {
+            ServerPhase::Admitted(parts) | ServerPhase::Live(parts) => {
+                parts.endpoint.as_ref().map(SignaledEndpoint::local_addr)
+            }
+            _ => None,
+        }
+    }
+
     /// Resumable startup: preflight, composition start, live transfer and
     /// the reservation. Cancel-safe: YES — ownership is retained across
     /// cancellation (state lives in the phase); `run`'s accept arms are

@@ -218,6 +218,20 @@ pub(super) async fn shutdown_scenario(
 
 /// cancel-safe: NO — the caller must reap the tracked signal helper.
 pub(super) async fn signal_owned(processes: &mut Processes, index: usize) -> Result<(), String> {
+    send_stop(processes, index, "-INT").await
+}
+
+/// Service-manager stop: SIGTERM on Unix; Windows has no SIGTERM, so Ctrl-Break.
+/// cancel-safe: NO — the caller must reap the tracked signal helper.
+pub(super) async fn terminate_owned(processes: &mut Processes, index: usize) -> Result<(), String> {
+    send_stop(processes, index, "-TERM").await
+}
+
+async fn send_stop(
+    processes: &mut Processes,
+    index: usize,
+    unix_signal: &str,
+) -> Result<(), String> {
     if processes.0[index]
         .child
         .try_wait()
@@ -230,10 +244,12 @@ pub(super) async fn signal_owned(processes: &mut Processes, index: usize) -> Res
         .child
         .id()
         .ok_or("process PID unavailable")?;
+    #[cfg(windows)]
+    let _ = unix_signal;
     #[cfg(unix)]
     let mut signal_command = {
         let mut command = Command::new("/bin/kill");
-        command.arg("-INT").arg(pid.to_string());
+        command.arg(unix_signal).arg(pid.to_string());
         command
     };
     #[cfg(windows)]

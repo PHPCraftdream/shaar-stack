@@ -161,6 +161,8 @@ pub struct ClientRole {
     options: RoleOptions,
     #[cfg(test)]
     events: Option<RoleEventLog>,
+    /// Bound local listener address, published once by the run loop.
+    listening: tokio::sync::watch::Sender<Option<SocketAddr>>,
     phase: ClientPhase,
 }
 
@@ -216,8 +218,20 @@ impl ClientRole {
             options,
             #[cfg(test)]
             events,
+            listening: tokio::sync::watch::channel(None).0,
             phase: ClientPhase::New,
         })
+    }
+
+    /// Resolves with the bound local listener address once the run loop has
+    /// bound it; `None` if the role is dropped first. Owns its state, so it
+    /// can be polled alongside `run`.
+    pub fn listening(&self) -> impl std::future::Future<Output = Option<SocketAddr>> + use<> {
+        let mut ready = self.listening.subscribe();
+        async move {
+            let bound = ready.wait_for(Option::is_some).await.ok()?;
+            *bound
+        }
     }
 
     /// Resumable startup.
@@ -415,7 +429,7 @@ impl ClientRole {
         let ClientPhase::Live(parts) = &mut self.phase else {
             unreachable!("phase restored to Live above")
         };
-        run_parts(parts, listen, shutdown).await
+        run_parts(parts, listen, &self.listening, shutdown).await
     }
 
     /// Resumable joined shutdown.

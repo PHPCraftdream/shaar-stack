@@ -63,4 +63,4 @@ All runs below are GitHub Actions runs on the owner's CI; "executed" means the t
 - Public-network interoperability and smoke (public DHT, public relay, public Yggdrasil peers): needs the owner's approval of exact targets and budgets.
 - Real home, mobile or LAN device tests; arbitrary double-NAT hole punching.
 - P14 resource and performance measurements; P16 first-version readiness; notices and license corpus completion.
-- Building outside the CI recipes, running as a service, SIGTERM handling, packaging and releases.
+- Building outside the CI recipes, running under a service manager (SIGTERM is handled but no unit file or manager was exercised), packaging and releases.

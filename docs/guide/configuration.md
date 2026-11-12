@@ -23,9 +23,9 @@ Without `network` the binaries run direct-only and print that the configured `fa
 | Field | Required | Default | Rules |
 |---|---|---|---|
 | `target` | yes | none | Numeric loopback socket address, nonzero port. The only place the server ever connects to. DNS names are not accepted. |
-| `bind` | no | `0.0.0.0:0` | Socket address of the direct QUIC endpoint (direct-only shape). Port 0 lets the OS choose. **Ignored in the composed shape** (source: the composed startup binds the native socket itself, IPv4 `0.0.0.0:0` plus an optional IPv6 `[::]:0`); the value is still parsed. |
+| `bind` | no | `0.0.0.0:0` | Socket address of the direct QUIC endpoint (direct-only shape). Port 0 lets the OS choose. **Rejected in the composed shape** (a file with `network` and a top-level `bind` fails validation with ``invalid configuration value for field `bind` (NotApplicable)``): the composed startup binds the native socket itself, IPv4 `0.0.0.0:0` plus an optional IPv6 `[::]:0`, and prints the chosen port (see [operations.md](operations.md)). The nested `network.mainline.bind` and `network.signaling.bind` are separate fields. |
 | `key_file` | no | `shaar.key` | Non-empty path of the raw 32-byte seed file. |
-| `allowlist_path` | no | `allowed.txt` | Non-empty path of the allowlist (see [operations.md](operations.md)). |
+| `allowlist_path` | no | `allowed.txt` | Non-empty path of the allowlist (see [operations.md](operations.md)): at most 256 entries, and at most 16 distinct keys when `network` is present. |
 | `fallback` | no | `standby` | `signal` or `standby`. See [operations.md](operations.md#path-modes). |
 | `network` | no | absent | Composed settings, see below. |
 
@@ -35,7 +35,7 @@ Without `network` the binaries run direct-only and print that the configured `fa
 |---|---|---|---|
 | `server` | yes | none | Server public key, hex (64 characters) or base32, validated as an Ed25519 public key. This is the only locator in the composed shape. |
 | `server_address` | direct-only: yes at runtime; composed: no | none | Numeric socket address: not wildcard, not multicast, not broadcast, port nonzero, and not the Yggdrasil-reserved `fd15:070a:510b::/48`. In the composed shape it is only an optional direct-address hint. |
-| `listen` | no | `127.0.0.1:2222` | Loopback socket address of the local TCP listener. Port 0 is accepted by the parser; the composed client does not print the chosen port, so use a fixed port there. |
+| `listen` | no | `127.0.0.1:2222` | Loopback socket address of the local TCP listener. Port 0 is accepted by the parser; both shapes print the chosen address as `listening=<ip:port>` on stdout. |
 | `key_file` | no | `shaar.key` | As for the server. |
 | `fallback` | no | `standby` | As for the server. |
 | `network` | no | absent | Composed settings, see below. |
@@ -65,6 +65,7 @@ Validation runs before any socket is opened. Syntax and unknown-field errors com
 | ``invalid configuration value for field `target` (NotLoopback)`` | `target` or `listen` is not a loopback address. |
 | ``invalid configuration value for field `target` (InvalidPort)`` | `target` has port 0 (also bootstrap entries). |
 | ``invalid configuration value for field `bind` (InvalidAddress)`` | Not a numeric socket address, or unusable (wildcard/multicast/broadcast/port 0 where forbidden). |
+| ``invalid configuration value for field `bind` (NotApplicable)`` | A top-level `bind` is present together with a `network` object (composed server). Remove it. |
 | ``invalid configuration value for field `server` (InvalidKey)`` | Not a valid hex/base32 Ed25519 public key; also an invalid relay PeerId (`network.signaling.relay`). |
 | ``invalid configuration value for field `fallback` (InvalidEnum)`` | Not exactly `signal` or `standby` (case sensitive). |
 | ``invalid configuration value for field `key_file` (EmptyPath)`` | Present but empty path (also `allowlist_path`). |
