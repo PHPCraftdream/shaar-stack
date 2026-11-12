@@ -1,0 +1,26 @@
+## Composed Server (DHT publication, signaling relay, Yggdrasil): see docs/guide/configuration.md.
+## All addresses below are documentation-only (RFC 5737) placeholders.
+target: 127.0.0.1:8080
+key_file:: server.key
+allowlist_path:: allowed.txt
+fallback: standby
+network: {
+    mainline: {
+        bind: 0.0.0.0:0
+        bootstrap: [
+            192.0.2.10:6881
+            192.0.2.11:6881
+        ]
+    }
+    signaling: {
+        bind: 0.0.0.0:0
+        relay: 12D3KooWRhxsqdyvN1Cy4HDzPjKtdscPa9XUyqoqJwHSsGY8LQTQ
+        relay_address: 192.0.2.20:4001
+    }
+    ygg: {
+        peers: [
+            tcp://192.0.2.30:1514
+            tls://192.0.2.31:1515
+        ]
+    }
+}

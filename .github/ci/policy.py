@@ -33,6 +33,7 @@ SUITES = {
     "sdk-network": ("shaar", ("network::",)),
     "sdk-identity": ("shaar", ("identity::",)),
     "sdk-config": ("shaar", ("config::",)),
+    "server-guide": ("shaar-server", ("tests::allowlist::",)),
     "sdk-signaling": ("shaar", ("network::signaling::",)),
     "sdk-admission": ("shaar", ("network::admission::",)),
     "sdk-forwarding": ("shaar", ("network::forwarding::",)),
@@ -89,6 +90,10 @@ RULES = (
     ("crates/shaar/src/startup/", ("sdk-startup",)),
     ("crates/shaar/src/identity/", ("sdk-identity",)),
     ("crates/shaar/src/config/", ("sdk-config",)),
+    # Documented examples are parsed verbatim by the tests of their owners.
+    ("docs/guide/examples/allowlist", ("server-guide",)),
+    ("docs/guide/examples/server", ("sdk-config",)),
+    ("docs/guide/examples/client", ("sdk-config",)),
     ("crates/shaar/src/network/signaling/", ("sdk-signaling",)),
     ("crates/shaar/src/network/admission/", ("sdk-admission",)),
     ("crates/shaar/src/network/forwarding/", ("sdk-forwarding",)),
@@ -207,7 +212,10 @@ def select(paths, *, full=False):
                         break
             if not owned:
                 match = re.fullmatch(r"crates/([^/]+)/tests/([A-Za-z_][A-Za-z0-9_-]*)\.rs", path)
-                if path.startswith("crates/shaar/tests/identity/"):
+                if path == "docs/guide/examples/keygen.rs":
+                    add(target("shaar", kind="test", name="sdk_network"))
+                    owned = ["integration:sdk_network"]
+                elif path.startswith("crates/shaar/tests/identity/"):
                     add(target("shaar", kind="test", name="identity"))
                     owned = ["integration:identity"]
                 elif match and match[1] in PACKAGES:

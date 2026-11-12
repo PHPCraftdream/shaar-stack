@@ -1,0 +1,7 @@
+## Direct-only Client (no network object): see docs/guide/configuration.md.
+## Public key of the Server; 198.51.100.8 is a documentation-only address.
+server: d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+server_address: 198.51.100.8:49152
+listen: 127.0.0.1:2222
+key_file:: client.key
+fallback: signal

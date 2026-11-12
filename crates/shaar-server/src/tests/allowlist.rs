@@ -89,3 +89,57 @@ async fn accepts_exactly_256_and_rejects_257_entries() {
     assert!(read_allowlist(&rejected).await.unwrap_err().contains("256"));
     fs::remove_file(rejected).unwrap();
 }
+
+/// The example of docs/guide/ is read verbatim by the production parser.
+const GUIDE_ALLOWLIST: &str = include_str!("../../../../docs/guide/examples/allowlist.txt");
+
+#[tokio::test]
+async fn documented_example_allowlist_is_accepted_verbatim() {
+    let path = file(GUIDE_ALLOWLIST);
+    let keys = read_allowlist(&path).await.unwrap();
+    fs::remove_file(path).unwrap();
+    let hex: Vec<String> = keys
+        .iter()
+        .map(|key| key.as_bytes().iter().map(|b| format!("{b:02x}")).collect())
+        .collect();
+    assert_eq!(
+        hex,
+        [
+            "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+            "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn documented_allowlist_error_messages() {
+    let cases = [
+        (
+            format!("{}\n", "ab".repeat(31)),
+            "invalid allowlist key on line 1",
+        ),
+        (
+            format!("# c\n\n{}0\n", "ab".repeat(32)),
+            "invalid allowlist key on line 3",
+        ),
+        (
+            format!("02{}\n", "00".repeat(31)),
+            "invalid allowlist key on line 1",
+        ),
+    ];
+    for (text, expected) in cases {
+        let path = file(&text);
+        let error = read_allowlist(&path).await.unwrap_err();
+        fs::remove_file(path).unwrap();
+        assert_eq!(error, expected);
+    }
+    let oversized = file(&"#".repeat(256 * 66 + 1));
+    let error = read_allowlist(&oversized).await.unwrap_err();
+    fs::remove_file(oversized).unwrap();
+    assert_eq!(error, "allowlist file exceeds 16896 bytes");
+    let missing = std::env::temp_dir().join("shaar-guide-no-such-allowlist");
+    assert_eq!(
+        read_allowlist(&missing).await.unwrap_err(),
+        "could not read allowlist"
+    );
+}

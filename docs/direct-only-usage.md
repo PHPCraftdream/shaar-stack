@@ -1,6 +1,6 @@
 # Direct-only Server/Client quick start
 
-This document describes the current `shaar-server` and `shaar-client` binaries. It is a direct-only operator guide, not a claim of complete production acceptance. Use ktav 0.8 syntax; both config schemas reject unknown fields. The examples use the scalar and socket-address forms present in `crates/shaar/tests/config.rs` and the ktav fixtures.
+This document describes the direct-only shape (no `network` object) of the current `shaar-server` and `shaar-client` binaries. It is not a claim of complete production acceptance. The complete guide, including the composed shape (DHT, relay, Yggdrasil), is in [guide/](guide/README.md); where the two differ, the guide is current. Use ktav 0.8 syntax; both config schemas reject unknown fields. The examples use the scalar and socket-address forms present in `crates/shaar/tests/config.rs` and the ktav fixtures.
 
 ## 1. Server configuration
 
@@ -53,7 +53,7 @@ The client also accepts no arguments, in which case it reads `client.ktav`. Conn
 
 ## 5. Limits and transport restrictions
 
-`fallback` accepts `signal` or `standby` and defaults to `standby`. For this direct-only server, explicitly select `signal`: `standby` causes server startup to fail. The client reports either setting and uses direct-only; `standby`/Ygg fallback is unavailable. Signal carries no application data and signaling negotiation is unsupported here. There is no relay/data fallback or guaranteed NAT traversal. Server admission is capped at 32 sessions; the client endpoint allows one session and accepts at most 16 concurrent local stream workers. The allowlist is checked before target forwarding. Expose only a target service you intend to make reachable by allowlisted clients.
+`fallback` accepts `signal` or `standby` and defaults to `standby`. Without a `network` object both binaries accept either value, print a notice that the configured fallback is not active and run direct-only; `standby`/Ygg fallback is unavailable in this shape. Signal carries no application data and signaling negotiation is unsupported here. There is no relay/data fallback or guaranteed NAT traversal. Server admission is capped at 32 sessions; the client endpoint allows one session and accepts at most 16 concurrent local stream workers. The allowlist is checked before target forwarding. Expose only a target service you intend to make reachable by allowlisted clients.
 
 ## 6. Shutdown and security
 

@@ -1,0 +1,26 @@
+## Composed Client that knows only the Server key: see docs/guide/configuration.md.
+## All addresses below are documentation-only (RFC 5737) placeholders.
+server: d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+listen: 127.0.0.1:2222
+key_file:: client.key
+fallback: standby
+network: {
+    mainline: {
+        bind: 0.0.0.0:0
+        bootstrap: [
+            192.0.2.10:6881
+            192.0.2.11:6881
+        ]
+    }
+    signaling: {
+        bind: 0.0.0.0:0
+        relay: 12D3KooWRhxsqdyvN1Cy4HDzPjKtdscPa9XUyqoqJwHSsGY8LQTQ
+        relay_address: 192.0.2.20:4001
+    }
+    ygg: {
+        peers: [
+            tcp://192.0.2.30:1514
+            tls://192.0.2.31:1515
+        ]
+    }
+}
