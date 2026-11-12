@@ -11,6 +11,9 @@ import unittest
 spec = importlib.util.spec_from_file_location("shaar_product_contract", Path(__file__).with_name("contract.py"))
 contract = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(contract)
+spec = importlib.util.spec_from_file_location("shaar_product_network", Path(__file__).with_name("network.py"))
+network = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(network)
 
 
 class ProductContractTests(unittest.TestCase):
@@ -118,3 +121,119 @@ class ProductContractTests(unittest.TestCase):
                 contract.bounded_json(real, 1)
             with self.assertRaises(ValueError):
                 contract.file_digest(real, 1)
+
+
+class NetworkContractTests(unittest.TestCase):
+    def evidence(self):
+        # Synthetic metadata tests the verifier only, never kernel or NAT acceptance.
+        table = "snaabbcc_product"
+        base = {"family": "inet", "table": table}
+        objects = [{"table": {"family": "inet", "name": table}}]
+        for name, kind, hook, priority in (("budget", "filter", "forward", -300),
+                                           ("paths", "filter", "forward", -200),
+                                           ("snat", "nat", "postrouting", 100)):
+            objects.append({"chain": {**base, "name": name, "type": kind, "hook": hook,
+                                      "prio": priority, "policy": "accept"}})
+        for name in sorted(network.COUNTERS):
+            objects.append({"counter": {**base, "name": name, "packets": 0, "bytes": 0}})
+        objects.append({"quota": {**base, "name": "phase_budget", "bytes": network.QUOTAS["product"], "used": 0, "inv": True}})
+        for comment in ("budget", "no-ipv6", "other-tcp-block", "udp-nat", "tcp-nat",
+                        "native-block", "dht-query", "dht-reply"):
+            chain = "budget" if comment == "budget" else "snat" if comment.endswith("-nat") else "paths"
+            objects.append({"rule": {**base, "chain": chain, "expr": [{"counter": "test_metadata"}], "comment": "p13-" + comment}})
+        return {"nftables": objects}
+
+    def object(self, document, kind, name):
+        return next(entry[kind] for entry in document["nftables"] if kind in entry and entry[kind].get("name") == name)
+
+    def test_rule_compiler_keeps_native_and_ygg_exclusions_separate(self):
+        self.assertEqual(network.CASES, set(contract.CASES))
+        self.assertEqual(network.QUOTAS, {"product": contract.PRODUCT_QUOTA, "fault": contract.FAULT_QUOTA})
+        ports = {"dht": 42001, "relay": 42002, "transit": 42003}
+        for case in network.CASES:
+            for router in ("rtr_a", "rtr_b"):
+                text = network.rules("snaabbcc", router, case, ports)
+                self.assertIn("over 7340032 bytes", text)
+                self.assertIn("quota name phase_budget counter name quota_drop drop", text)
+                self.assertIn("meta nfproto ipv6 counter name ipv6_drop drop", text)
+                self.assertIn("masquerade to :41010-41020", text)
+                self.assertIn("meta l4proto tcp counter name tcp_nat masquerade", text)
+                self.assertNotIn("ct state", text)
+                self.assertNotIn("flush ruleset", text)
+                self.assertNotIn("dnat", text)
+                if case.startswith("blocked-"):
+                    self.assertIn("p13-native-block", text)
+                    self.assertIn("udp dport 42001 accept", text)
+                else:
+                    self.assertNotIn("p13-native-block", text)
+                if router == "rtr_a":
+                    allowed, denied = (42003, 42002) if case.startswith("blocked-") else (42002, 42003)
+                    self.assertIn(f"tcp dport {allowed} accept", text)
+                    self.assertNotIn(f"tcp dport {denied} accept", text)
+        self.assertIn("over 2097152 bytes", network.rules("snaabbcc", "rtr_a", "native-signal", ports, "fault"))
+
+    def test_network_commands_cannot_change_the_host_or_foreign_namespaces(self):
+        cfg = {"prefix": "snaabbcc", "ns": {"rtr_a": "snaabbcc-rtr-a", "rtr_b": "snaabbcc-rtr-b"}}
+        for router in ("rtr_a", "rtr_b"):
+            plan = network.commands(cfg, router, "/usr/sbin/nft", "/usr/sbin/ip")
+            for argv in plan.values():
+                self.assertEqual(argv[:4], ["/usr/sbin/ip", "netns", "exec", cfg["ns"][router]])
+            self.assertIn("--check", plan["check_rules"])
+        for role in ("wan", "host_a", "default", ""):
+            with self.assertRaises(ValueError):
+                network.commands(cfg, role, "/usr/sbin/nft", "/usr/sbin/ip")
+        for changed in ({**cfg, "prefix": "../../host"}, {**cfg, "ns": {"rtr_a": "default"}}):
+            with self.assertRaises(ValueError):
+                network.commands(changed, "rtr_a", "/usr/sbin/nft", "/usr/sbin/ip")
+        ports = {"dht": 42001, "relay": 42002, "transit": 42003}
+        for changed in ({**ports, "relay": 42003}, {**ports, "dht": True}, {**ports, "transit": 65536}, {**ports, "extra": 1}):
+            with self.assertRaises(ValueError):
+                network.rules("snaabbcc", "rtr_a", "blocked-signal", changed)
+        with self.assertRaises(ValueError):
+            network.rules("snaabbcc", "rtr_a", "native-signal", ports, "unbounded")
+
+    def test_nft_metadata_requires_fresh_monotonic_budgets_and_real_drop_counters(self):
+        before, after = self.evidence(), self.evidence()
+        self.object(after, "counter", "native_drop").update(packets=2, bytes=200)
+        self.object(after, "counter", "udp_nat").update(packets=1, bytes=100)
+        self.object(after, "quota", "phase_budget")["used"] = 300
+        result = network.verify(before, after, "snaabbcc", "product", blocked=True, require_nat=True)
+        self.assertEqual(result["quota_used"], 300)
+        for mutation in ("quota-hit", "drop-hit", "zero-native", "zero-nat", "ipv6", "rollback", "changed-rule", "dirty-start"):
+            initial, final = copy.deepcopy(before), copy.deepcopy(after)
+            if mutation == "quota-hit":
+                self.object(final, "quota", "phase_budget")["used"] = network.QUOTAS["product"]
+            elif mutation == "drop-hit":
+                self.object(final, "counter", "quota_drop")["packets"] = 1
+            elif mutation in ("zero-native", "zero-nat"):
+                self.object(final, "counter", "native_drop" if mutation == "zero-native" else "udp_nat")["packets"] = 0
+            elif mutation == "ipv6":
+                self.object(final, "counter", "ipv6_drop")["packets"] = 1
+            elif mutation == "rollback":
+                self.object(initial, "quota", "phase_budget")["used"] = 301
+            elif mutation == "changed-rule":
+                final["nftables"][-1]["rule"]["expr"] = [{"accept": None}]
+            else:
+                self.object(initial, "counter", "tcp_nat")["packets"] = 1
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                network.verify(initial, final, "snaabbcc", "product", blocked=True, require_nat=True)
+
+    def test_nft_inventory_rejects_missing_duplicate_or_foreign_objects(self):
+        for mutation in ("missing-quota", "duplicate-counter", "foreign-table", "weak-quota", "missing-rule", "wrong-hook", "negative-counter"):
+            document = self.evidence()
+            if mutation == "missing-quota":
+                document["nftables"] = [row for row in document["nftables"] if "quota" not in row]
+            elif mutation == "duplicate-counter":
+                document["nftables"].append({"counter": copy.deepcopy(self.object(document, "counter", "native_drop"))})
+            elif mutation == "foreign-table":
+                self.object(document, "counter", "tcp_drop")["table"] = "foreign"
+            elif mutation == "weak-quota":
+                self.object(document, "quota", "phase_budget")["inv"] = False
+            elif mutation == "missing-rule":
+                document["nftables"] = [row for row in document["nftables"] if row.get("rule", {}).get("comment") != "p13-budget"]
+            elif mutation == "wrong-hook":
+                self.object(document, "chain", "budget")["hook"] = "input"
+            else:
+                self.object(document, "counter", "tcp_drop")["packets"] = -1
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                network.snapshot(document, "snaabbcc", "product")
