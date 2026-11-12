@@ -1,3 +1,4 @@
+| Composed operator contract (client logs its own key, composed `bind` rejected, 16-key allowlist limit named by field, bound addresses printed, SIGTERM stop) | Fork CI 43254724532 at `56448f5` (unit and SDK role tests, Linux and Windows; the SIGTERM tests are Unix-only and ran on Linux); process-feedback dispatch 43256530867 at `56448f5`, case `real_composed_operator_contract_bind_allowlist_output_and_service_stop` passed on Linux and Windows (Windows stops with Ctrl-Break) | Loopback with owned DHT, relay and Yggdrasil fixtures. SIGTERM under a real service manager was not exercised. |
 # Limits, platforms and the checks actually performed
 
 This page separates what was written, what ran in GitHub CI, and what has no evidence at all. No local build or test run contributed to any statement here.
