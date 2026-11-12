@@ -137,6 +137,69 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(phase.tree_bytes(root), 8)
 
 
+class PrecheckTests(unittest.TestCase):
+    TOOLS = {"ip": "/usr/sbin/ip", "nft": "/usr/sbin/nft"}
+
+    def test_inventory_is_the_eighteen_generated_rulesets(self):
+        names = [name for name, _ in phase.precheck_rulesets("snaabbcc")]
+        self.assertEqual(len(names), 18)
+        self.assertEqual(len(set(names)), 18)
+        self.assertEqual(sum(name.startswith("calibration/") for name in names), 2)
+        for case in contract.CASES:
+            for router in ("rtr_a", "rtr_b"):
+                for purpose in ("product", "fault"):
+                    self.assertIn(f"{case}/{router}/{purpose}", names)
+
+    def run_precheck(self, reject=None):
+        calls = []
+
+        def checked(argv, deadline, data=None, what="x"):
+            calls.append(("checked", argv[1:], what))
+            return b""
+
+        def run_tool(argv, deadline, data=None):
+            calls.append(("check", argv, data))
+            label = phase.precheck_rulesets("snaabbcc")[sum(c[0] == "check" for c in calls) - 1][0]
+            return (1, b"", b"syntax error") if label == reject else (0, b"", b"")
+
+        with mock.patch.object(phase.kernel, "checked", checked), mock.patch.object(phase.kernel, "run_tool", run_tool),                 mock.patch.object(phase.secrets, "token_hex", lambda size: "aabbcc"):
+            summary = {}
+            return summary, phase.run_precheck(summary, self.TOOLS), calls
+
+    def test_all_rulesets_run_in_one_owned_namespace_that_is_removed(self):
+        summary, ok, calls = self.run_precheck()
+        self.assertTrue(ok)
+        result = summary["syntax_precheck"]
+        self.assertEqual((result["status"], len(result["checks"]), result["namespace_removed"]), ("pass", 18, True))
+        self.assertEqual(calls[0][1:], (["netns", "add", "snaabbcc-chk"], "syntax pre-check namespace"))
+        self.assertEqual(calls[-1][1:], (["netns", "del", "snaabbcc-chk"], "syntax pre-check namespace removal"))
+        checks = [call for call in calls if call[0] == "check"]
+        self.assertEqual(len(checks), 18)
+        for _, argv, data in checks:
+            self.assertEqual(argv[:6], ["/usr/sbin/ip", "netns", "exec", "snaabbcc-chk", "/usr/sbin/nft", "--check"])
+            self.assertIn(b"add table inet", data)
+
+    def test_first_rejection_aborts_immediately_and_still_removes_the_namespace(self):
+        target = phase.precheck_rulesets("snaabbcc")[5][0]
+        summary, ok, calls = self.run_precheck(reject=target)
+        self.assertFalse(ok)
+        result = summary["syntax_precheck"]
+        self.assertEqual((result["status"], result["aborted_at"], len(result["checks"])), ("fail", target, 6))
+        self.assertEqual(result["checks"][-1]["error"], "syntax error")
+        self.assertTrue(result["namespace_removed"])
+        self.assertEqual(calls[-1][1][:2], ["netns", "del"])
+
+    def test_setup_errors_fail_the_gate_without_running_cases(self):
+        def broken(argv, deadline, data=None, what="x"):
+            raise RuntimeError("cannot add namespace")
+
+        with mock.patch.object(phase.kernel, "checked", broken):
+            summary = {}
+            self.assertFalse(phase.run_precheck(summary, self.TOOLS))
+        self.assertEqual(summary["syntax_precheck"]["status"], "fail")
+        self.assertIn("cannot add namespace", summary["syntax_precheck"]["error"])
+
+
 @unittest.skipUnless(sys.platform == "linux", "owned run.sh lifetime uses POSIX signals")
 class ScriptTests(unittest.TestCase):
     def script(self, text):

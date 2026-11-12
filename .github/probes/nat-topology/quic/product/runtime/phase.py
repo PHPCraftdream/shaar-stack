@@ -171,6 +171,46 @@ def namespaces(tools):
     return sorted(kernel.checked([tools["ip"], "netns", "list"], deadline, what="namespace inventory").decode().split("\n"))
 
 
+def precheck_rulesets(prefix):
+    """All 18 generated rulesets: 4 cases x 2 routers x {product, fault} plus both calibration tables."""
+    ports = {"dht": 42001, "relay": 42002, "transit": 42003}
+    found = [(f"{case}/{router}/{purpose}", network.rules(prefix, router, case, ports, purpose))
+             for case in sorted(contract.CASES) for router in ("rtr_a", "rtr_b") for purpose in ("product", "fault")]
+    found += [(f"calibration/{host}", kernel.probe_rules(prefix, contract.IPS[host])[1]) for host in ("host_a", "host_b")]
+    return found
+
+
+def syntax_precheck(tools, prefix):
+    """Dry-run every ruleset with the real nft inside one throwaway owned namespace; first rejection aborts."""
+    deadline = time.monotonic() + 60
+    name = prefix + "-chk"
+    result = {"namespace": name, "checks": [], "namespace_removed": False, "status": "fail"}
+    kernel.checked([tools["ip"], "netns", "add", name], deadline, what="syntax pre-check namespace")
+    try:
+        for label, text in precheck_rulesets(prefix):
+            code, _out, err = kernel.run_tool([tools["ip"], "netns", "exec", name, tools["nft"], "--check", "--file", "-"],
+                                              deadline, text.encode("ascii"))
+            result["checks"].append({"ruleset": label, "rc": code, "error": err.decode("utf-8", errors="replace")[:400]})
+            if code != 0:
+                result["aborted_at"] = label
+                break
+    finally:
+        kernel.checked([tools["ip"], "netns", "del", name], time.monotonic() + 20, what="syntax pre-check namespace removal")
+        result["namespace_removed"] = True
+    result["status"] = "pass" if len(result["checks"]) == len(precheck_rulesets(prefix)) and all(
+        item["rc"] == 0 for item in result["checks"]) else "fail"
+    return result
+
+
+def run_precheck(summary, tools):
+    """Record the pre-check outcome; any failure (including setup errors) means no case may start."""
+    try:
+        summary["syntax_precheck"] = syntax_precheck(tools, "sn" + secrets.token_hex(3))
+    except (RuntimeError, ValueError, TimeoutError, OSError) as error:
+        summary["syntax_precheck"] = {"status": "fail", "error": str(error)[:400]}
+    return summary["syntax_precheck"]["status"] == "pass"
+
+
 def phase(source, manifest_path, out):
     started = time.monotonic()
     end = started + contract.PHASE_SECONDS
@@ -178,7 +218,9 @@ def phase(source, manifest_path, out):
     products = contract.validate_manifest(manifest, source)
     ip = preflight.trusted_tool("ip")
     contract.require(ip is not None, "ip tool missing")
-    tools = {"ip": str(ip)}
+    nft = preflight.trusted_tool("nft")
+    contract.require(nft is not None, "nft tool missing")
+    tools = {"ip": str(ip), "nft": str(nft)}
     uid, gid = int(os.environ.get("SUDO_UID", "0")), int(os.environ.get("SUDO_GID", "0"))
     contract.require(os.geteuid() == 0 and uid > 0 and gid > 0, "phase requires a sudo caller with an unprivileged identity")
     env = {"PATH": BASE_PATH, "LANG": "C", "LC_ALL": "C", "SUDO_UID": str(uid), "SUDO_GID": str(gid),
@@ -189,7 +231,7 @@ def phase(source, manifest_path, out):
                "products": {name: item["sha256"] for name, item in products.items()}, "invocations": [], "status": "fail"}
     summary["namespaces_before"] = namespaces(tools)
     try:
-        for entry in PLAN:
+        for entry in PLAN if run_precheck(summary, tools) else ():
             budget = CONTROL_SECONDS if entry[1] != "product" else contract.CASE_SECONDS
             remaining = end - time.monotonic() - contract.CLEANUP_RESERVE
             if remaining < budget:
@@ -205,7 +247,7 @@ def phase(source, manifest_path, out):
         summary["elapsed_seconds"] = time.monotonic() - started
         summary["forwarded_bytes_observed"] = sum(item.get("verified", {}).get("forwarded_bytes", 0) for item in summary["invocations"])
         complete = [item["name"] for item in summary["invocations"]] == [entry[0] for entry in PLAN]
-        summary["status"] = "pass" if (complete and all(item["status"] == "pass" for item in summary["invocations"])
+        summary["status"] = "pass" if (complete and summary.get("syntax_precheck", {}).get("status") == "pass" and all(item["status"] == "pass" for item in summary["invocations"])
                                        and summary["namespaces_before"] == summary["namespaces_after"]
                                        and summary["artifact_bytes"] <= ARTIFACT_BYTES
                                        and summary["elapsed_seconds"] <= contract.PHASE_SECONDS) else "fail"
