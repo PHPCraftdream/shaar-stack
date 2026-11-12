@@ -134,19 +134,21 @@ async fn client_listening_reports_the_bound_listener_and_server_reports_its_nati
         let mut shutdown = std::pin::pin!(async {
             let _ = stopped.await;
         });
-        let mut run = std::pin::pin!(client.run(&mut shutdown));
-        let address = tokio::select! {
-            address = listening => address.expect("listener address published"),
-            result = &mut run => panic!("client role ended before binding: {result:?}"),
-        };
-        assert!(address.ip().is_loopback());
-        assert_ne!(address.port(), 0);
-        assert!(
-            TcpListener::bind(address).await.is_err(),
-            "the reported address is the live listener"
-        );
-        stop.send(()).unwrap();
-        run.await.expect("client run ends on shutdown");
+        {
+            let mut run = std::pin::pin!(client.run(&mut shutdown));
+            let address = tokio::select! {
+                address = listening => address.expect("listener address published"),
+                result = &mut run => panic!("client role ended before binding: {result:?}"),
+            };
+            assert!(address.ip().is_loopback());
+            assert_ne!(address.port(), 0);
+            assert!(
+                TcpListener::bind(address).await.is_err(),
+                "the reported address is the live listener"
+            );
+            stop.send(()).unwrap();
+            run.as_mut().await.expect("client run ends on shutdown");
+        }
         client.shutdown().await.expect("client joined close");
 
         client_transit.close().await.unwrap();
