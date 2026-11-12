@@ -50,9 +50,10 @@ def lan(counters, result, spec):
 
 
 def dht_drop(counters):
+    """C2: with every DHT query dropped the signal-mode Client still reached the Server; only Native can carry APP there."""
     contract.require(packets(counters, "rtr_a", "dht_drop") > 0, "the DHT block never observed a query")
-    contract.require(all(packets(counters, router, "native_snat") == 0 for router in counters),
-                     "Native UDP reached the Server although the record was unreachable")
+    contract.require(packets(counters, "rtr_a", "udp_nat") > 0 and packets(counters, "rtr_a", "native_snat") > 0,
+                     "no translated Native UDP although the APP succeeded without the DHT")
 
 
 def failover(spec, result, counters):

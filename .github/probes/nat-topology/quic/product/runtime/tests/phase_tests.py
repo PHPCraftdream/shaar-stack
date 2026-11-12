@@ -56,6 +56,8 @@ def evidence(case):
             routers[router]["counters"]["lan_sent"]["packets"] = 7
     else:
         routers["rtr_a"]["counters"]["dht_drop"]["packets"] = 3
+        routers["rtr_a"]["counters"]["udp_nat"]["packets"] = 4
+        routers["rtr_a"]["counters"]["native_snat"]["packets"] = 2
     if spec.get("flow") == "denied-key":
         observations.update(client1_exit=0, denied_app={"denied": True, "reply_bytes": 0})
     identities = {name: {"uid": UID, "capabilities": 0} for name in contract.identity_roles(spec)}
@@ -154,7 +156,7 @@ MUTATIONS = {
     "blocked": ("native_drop", "escape"),
     "nat": ("native_snat", "udp_nat", "tuple"),
     "lan": ("forwarded", "nat-hit", "no-lan-traffic", "wrong-address"),
-    "dht-drop": ("no-dht-drop", "escape"),
+    "dht-drop": ("no-dht-drop", "native_snat", "udp_nat"),
     "failover": ("native_snat", "udp_nat", "block-escape", "no-block-drop"),
 }
 

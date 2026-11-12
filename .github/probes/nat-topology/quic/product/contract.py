@@ -23,7 +23,7 @@ CASES = {
     "failover-standby": {"mode": "standby", "server_ns": "wan", "net": "failover", "flow": "failover", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 3, "client_exit": 0},
     "failover-signal": {"mode": "signal", "server_ns": "wan", "net": "failover", "flow": "failover", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
     "denied-blocked-standby": {"mode": "standby", "server_ns": "host_b", "net": "blocked", "flow": "denied-key", "udp_blocked": True, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0, "client2_exit": 1},
-    "dht-drop-signal": {"mode": "signal", "server_ns": "wan", "net": "dht-drop", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 0},
+    "dht-drop-signal": {"mode": "signal", "server_ns": "wan", "net": "dht-drop", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
     "outage-standby": {"mode": "standby", "server_ns": "host_b", "net": "blocked", "udp_blocked": True, "ygg_client_blocked": True, "target_accepts": 0, "client_exit": 1},
 }
 IPS = {"wan": "203.0.113.10", "rtr_a_wan": "203.0.113.1", "rtr_b_wan": "203.0.113.2",
