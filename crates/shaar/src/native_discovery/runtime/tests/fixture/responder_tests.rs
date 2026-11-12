@@ -178,3 +178,29 @@ async fn resolver_does_not_acknowledge_a_corrupt_signed_put() {
     .await
     .expect("bounded corrupt-PUT rejection");
 }
+
+#[test]
+fn namespace_query_sources_are_exact_and_default_stays_loopback_only() {
+    for address in ["127.0.0.1", "::1"] {
+        let ip = address.parse().expect("loopback IP");
+        assert!(super::wire::source_allowed(ip, false));
+        assert!(super::wire::source_allowed(ip, true));
+    }
+    for address in ["203.0.113.1", "203.0.113.2", "203.0.113.10"] {
+        let ip = address.parse().expect("owned namespace IP");
+        assert!(!super::wire::source_allowed(ip, false));
+        assert!(super::wire::source_allowed(ip, true));
+    }
+    for address in [
+        "203.0.113.3",
+        "203.0.113.11",
+        "10.0.1.2",
+        "192.0.2.1",
+        "::ffff:203.0.113.1",
+        "2001:db8::1",
+    ] {
+        let ip = address.parse().expect("unadmitted IP");
+        assert!(!super::wire::source_allowed(ip, false));
+        assert!(!super::wire::source_allowed(ip, true));
+    }
+}

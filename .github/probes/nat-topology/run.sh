@@ -155,6 +155,16 @@ json_int() { # $1 -> JSON number (validated)
 # Capture a firewall ruleset in the PARENT shell with explicit status.
 # Sets the global FW_RAW; any failure (command error or empty output) is
 # reported by a nonzero return -- NEVER by a sentinel value.
+# Host routes, forwarding sysctls and interface names are compared with the
+# firewall text; IPv6 route lifetimes are stripped as they legitimately age.
+host_extra() {
+  echo "# host-extra-state"
+  ip -4 route show table main
+  ip -6 route show table main | sed -E 's/ expires [^ ]+//; s/ pref [a-z]+//'
+  sysctl -n net.ipv4.ip_forward net.ipv6.conf.all.forwarding net.ipv6.conf.default.forwarding
+  ip -o link show | awk -F': ' '{print $2}' | cut -d@ -f1 | sort
+}
+
 fw_capture() { # $1 = stderr log file
   if command -v iptables-save >/dev/null 2>&1; then
     FW_RAW="$(iptables-save 2>"$1")" || return 1
@@ -165,6 +175,7 @@ fw_capture() { # $1 = stderr log file
     return 1
   fi
   [ -n "$FW_RAW" ] || return 1
+  FW_RAW="${FW_RAW}"$'\n'"$(host_extra 2>>"$1")" || return 1
 }
 
 # Canonicalize a ruleset string in the parent shell, writing directly to the
@@ -574,8 +585,11 @@ ip netns exec "$NS_ROFF" sysctl -q -w net.ipv4.ip_forward=0
 [ "$(ip netns exec "$NS_ROFF" sysctl -n net.ipv4.ip_forward)" = "0" ] \
   || die "rtr-off ip_forward readback is not 0"
 
-setup_nat "$NS_RA" "$IF_RA0" 10.0.1.0/24
-setup_nat "$NS_RB" "$IF_RB0" 10.0.2.0/24
+# Product cases install their own TCP/UDP NAT and path rules in the controller.
+if [ -z "${FIXTURE_PRODUCT_CASE:-}" ]; then
+  setup_nat "$NS_RA" "$IF_RA0" 10.0.1.0/24
+  setup_nat "$NS_RB" "$IF_RB0" 10.0.2.0/24
+fi
 
 # --- hand the full topology to fixture.py (no hardcoded names there) -----------
 # FIXTURE_CONFIG is built by a python stdlib serializer from env values, so
@@ -628,6 +642,10 @@ PROGRAM="$HERE/fixture.py"
 PROGRAM_ARGS=(orchestrator)
 if [ -n "${FIXTURE_QUIC_BINARY:-}" ]; then
   PROGRAM="$HERE/quic/run.py"
+  PROGRAM_ARGS=()
+fi
+if [ -n "${FIXTURE_PRODUCT_CASE:-}" ]; then
+  PROGRAM="$HERE/quic/product/runtime/controller.py"
   PROGRAM_ARGS=()
 fi
 python3 -I "$PROGRAM" "${PROGRAM_ARGS[@]}" &

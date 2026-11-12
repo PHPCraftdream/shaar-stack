@@ -11,6 +11,8 @@ mod denial;
 #[allow(dead_code)] // Unit-fixture controls are not all used by the real-process cases.
 #[path = "../../../../src/native_discovery/runtime/tests/fixture/wire.rs"]
 mod mainline_fixture;
+#[cfg(target_os = "linux")]
+mod nat;
 mod outage;
 mod payload;
 #[path = "../../../../src/network/signaling/relay_fixture.rs"]

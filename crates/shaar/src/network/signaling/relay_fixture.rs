@@ -1,4 +1,8 @@
-use std::{io, net::SocketAddr, time::Duration};
+use std::{
+    io,
+    net::{Ipv4Addr, SocketAddr},
+    time::Duration,
+};
 
 use futures::StreamExt;
 use libp2p::{
@@ -25,13 +29,29 @@ pub(crate) struct RelayFixture {
 impl RelayFixture {
     /// cancel-safe: NO — fixture Drop aborts, while successful close joins its retained root.
     pub(crate) async fn start() -> Self {
+        Self::start_on(Ipv4Addr::LOCALHOST).await
+    }
+
+    /// cancel-safe: NO — retained root aborts on Drop; only close proves joined shutdown.
+    #[allow(dead_code)] // Used by the explicitly ignored namespace integration helper.
+    pub(crate) async fn start_namespace() -> Self {
+        Self::start_on(Ipv4Addr::new(203, 0, 113, 10)).await
+    }
+
+    async fn start_on(bind_ip: Ipv4Addr) -> Self {
         let key = Keypair::generate_ed25519();
         let peer = key.public().to_peer_id();
         let (ready, address) = oneshot::channel();
         let (stop, stopped) = oneshot::channel();
         let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let mut tasks = JoinSet::new();
-        tasks.spawn(run(key, ready, stopped, std::sync::Arc::clone(&counter)));
+        tasks.spawn(run(
+            key,
+            ready,
+            stopped,
+            std::sync::Arc::clone(&counter),
+            bind_ip,
+        ));
         let address = RelayAddr::new(peer, address.await.unwrap()).unwrap();
         Self {
             address,
@@ -62,6 +82,7 @@ async fn run(
     ready: oneshot::Sender<SocketAddr>,
     mut stop: oneshot::Receiver<()>,
     counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    bind_ip: Ipv4Addr,
 ) -> io::Result<()> {
     let mut executor = OwnedExecutor::new();
     let peer = key.public().to_peer_id();
@@ -90,7 +111,7 @@ async fn run(
         libp2p::swarm::Config::with_executor(executor.handle()),
     );
     swarm
-        .listen_on("/ip4/127.0.0.1/tcp/0".parse().unwrap())
+        .listen_on(format!("/ip4/{bind_ip}/tcp/0").parse().unwrap())
         .map_err(io::Error::other)?;
     let mut ready = Some(ready);
     let result = loop {

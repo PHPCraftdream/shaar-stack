@@ -95,6 +95,7 @@ RULES = (
 )
 PROOFS = (
     (".github/probes/nat-topology/quic/product/", "ci_policy"),
+    (".github/probes/nat-topology/", "ci_policy"),
     (".github/probes/native-graph-proof/", "native_graph"),
     (".github/probes/native-graph-multibase/", "native_graph"),
     (".github/probes/native-graph/", "native_graph"),

@@ -607,5 +607,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("options: [targeted, full]", text)
 
 
+def load_tests(loader, tests, pattern):
+    for filename in ("tests.py", "process_tests.py", "runtime/tests/worker_tests.py", "runtime/tests/runtime_tests.py",
+                     "runtime/tests/phase_tests.py", "runtime/tests/workflow_tests.py"):
+        path = ROOT / ".github/probes/nat-topology/quic/product" / filename
+        spec = importlib.util.spec_from_file_location("product_" + path.stem, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        tests.addTests(loader.loadTestsFromModule(module))
+    return tests
+
+
 if __name__ == "__main__":
     unittest.main()
