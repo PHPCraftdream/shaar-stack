@@ -15,7 +15,8 @@ MAX_ATTEMPTS = 16
 IO_SECONDS = 40
 LIFETIME_SECONDS = 125
 MAX_DEADLINE = 85
-TRANSIENT = {errno.ECONNREFUSED, errno.ECONNRESET, errno.ECONNABORTED, errno.EPIPE}
+RESET = (errno.ECONNRESET, errno.ECONNABORTED, errno.EPIPE, errno.ENOTCONN)
+TRANSIENT = {errno.ECONNREFUSED, *RESET}
 
 
 def payloads(nonce):
@@ -158,7 +159,7 @@ async def denied_terminal(stream):
     try:
         value = await asyncio.get_running_loop().sock_recv(stream, 1)
     except OSError as error:
-        if error.errno in (errno.ECONNRESET, errno.ECONNABORTED, errno.EPIPE):
+        if error.errno in RESET:
             return "reset"
         raise
     if value:
@@ -183,7 +184,7 @@ async def app(nonce, denied, port=FRONT_PORT, deadline=None, attempts=MAX_ATTEMP
                     await loop.sock_sendall(stream, request)
                     stream.shutdown(socket.SHUT_WR)
                 except OSError as error:
-                    if denied and error.errno in (errno.ECONNRESET, errno.ECONNABORTED, errno.EPIPE):
+                    if denied and error.errno in RESET:
                         result = {"denied": True, "terminal": "reset", "attempts": attempt, "reply_bytes": 0}
                         emit("SHAAR_NAT_RESULT", nonce, "app", **result)
                         return result
