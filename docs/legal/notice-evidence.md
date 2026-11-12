@@ -219,7 +219,8 @@ The registry inventory distinguishes four `raw_materials` from archive-member
 `materials`: root LICENSE for `dlopen2@0.8.2` and `valuable@0.1.1`, and both
 LICENSE-MIT and LICENSE-APACHE for `jni@0.22.4`. These 14,200 verbatim bytes were
 already acquired by the separately approved nine-URL pass; no new GET was made.
-The retained receipt is `registry/raw-sources/receipt.json` (5,542 bytes,
+The retained receipt is `registry/raw-sources/receipts/receipt.json` (moved from
+`raw-sources/receipt.json` on 2026-11-12, bytes unchanged; 5,542 bytes,
 SHA-256 `d4f45767bba3d21266670faa1ffeacc8076c9768a2da5f23d382aac2ebf8bfd5`).
 
 Each exact locked archive checksum binds the archived `.cargo_vcs_info.json`
@@ -252,7 +253,7 @@ The user separately authorized four exact pinned candidate GETs in proposal
 All four returned HTTP 200: 24,380 bytes in 5.39 seconds, without redirects,
 retries, fallback URLs, cloning, execution or imports. That request budget is
 consumed. The original 5,646-byte CRLF receipt is retained verbatim as
-`registry/raw-sources/jni-macro-receipt.json`, SHA-256
+`registry/raw-sources/receipts/jni-macro-receipt.json` (moved from `raw-sources/` on 2026-11-12; bytes unchanged), SHA-256
 `1a9f927618e812d27bdd1d1850042b9efa21a9f1f42396add47a468eac1aa120`.
 
 The new bindings are `jni-macros@0.22.4` at revision
@@ -280,3 +281,83 @@ Text availability is 500/533 registry plus unchanged 15/17 path identities:
 local checks are syntax/DATA only, not project test execution or full archive
 program replay. No broader revision applicability, OR election, legal clearance,
 release authority or completion of N1 is asserted.
+
+## Seventeen pinned root bindings closing gaps (2026-11-12 candidate)
+
+Authorization: on 2026-11-12 the user granted all permissions for repository work
+and downloads ("Все разрешения на работы с репами и скачиваниями - я выдаю"). Only
+exact pinned `raw.githubusercontent.com` license-file URLs at each archive's
+`.cargo_vcs_info.json` revision were requested: 27 GETs, one per URL, no
+redirects/retries/fallbacks, 64 KiB/object, 30 s/request, all HTTP 200, 157,286
+bytes in 42 s. Each body's git blob SHA-1 equals the blob SHA reported by the
+repository contents listing at that revision, so the bytes are exactly the files in
+the pinned commit. Nothing was executed or imported; no text was synthesized.
+The retained receipt is `registry/raw-sources/receipts/n1-gap-receipt.json`
+(27,525 bytes, SHA-256 `3f6f2c53fb29aebd923e9e60cd36671a86f9f988d916e0a69c2fb03fc677e0e3`);
+the 27 verbatim bodies are stored per package (32 files, 182,118 bytes, because
+`iroh-base`/`iroh-relay`/`iroh` and `prost-codec`/`rw-stream-sink` pin shared files).
+The download-side receipt, directory listings and bodies are in the untracked
+`.rush/downloads/notices-n1-gaps-1112/` and `.rush/downloads/n1-listings-1112/`.
+
+New registry bindings (15): `asn1-rs-impl@0.2.0`, `gloo-timers@0.3.0`,
+`gloo-timers@0.4.0`, `iroh-base@1.3.0`, `iroh-metrics-derive@1.0.1`,
+`iroh-relay@1.3.0`, `n0-error-macros@1.0.1`, `ndk-context@0.1.1`,
+`netwatch@0.19.3`, `prost-codec@0.4.0`, `rustls-platform-verifier-android@0.2.0`,
+`rw-stream-sink@0.5.0`, `uint@0.10.2`, `yamux@0.14.1`, `yasna@0.5.2`. New path
+bindings (2): `iroh@1.3.0` (revision `0072d7d84b233f9e7185eb676f049beaf557ac03`)
+and `iroh-dns@1.3.0` (revision `17c0612f80f78f5288e97b818b1360ae6ea0a51a`), both
+bound to the revision in the pinned upstream archive recorded in the prepared
+inventory; their patches do not alter license files. Each binding records the
+archived `.cargo_vcs_info.json` and packaged `Cargo.toml` bytes. Replay requires a
+clean (not dirty) revision, the matching `path_in_vcs`, package name/version, a
+declared expression whose alternatives are exactly covered by the bound files, and a
+repository equal to the pinned URL's. Both alternatives are retained and neither is
+elected. Package directories at the pinned revisions held no license files except the
+`LICENSE-BSD3` component notice and `rustls-platform-verifier-android`, whose package-directory `LICENSE-*` entries are
+git symlinks (blob SHA-1 equal to the targets `../LICENSE-APACHE`/`../LICENSE-MIT`);
+the repository-root files they name are bound. `uint` names its Apache alternative
+`LICENSE-APACHE2`. The `iroh-relay` and `iroh` component-scoped `LICENSE-BSD3` stay
+component-only evidence. The earlier package-directory candidate URLs for
+`iroh-dns` were never requested because the listing shows those files do not exist.
+
+Layout: the raw tree is now `registry/raw-sources/{receipts,a-f,g-i,j-l,m-r,s-z}/`
+(same alphabetical groups as `packages/`, each at most seven entries); the five
+earlier packages and both earlier receipts moved without byte changes and the exact
+path attributes in `notices-material/.gitattributes` follow them. The replay was split
+by responsibility into `replay.py`, `raw_sources.py` (receipts and bindings) and
+`data_io.py` (bounded readers), loaded by file path so isolated `python -I` runs work.
+
+Result: registry text availability is 515 of 533 and path identities 17 of 17, so
+532 of 550 third-party identities have authentic text available (previously 515 of
+550); 18 registry identities remain incomplete. Registry classification counts are
+500 package-complete, 15 preserved-complete, 14 reference-only, 3 missing and 1
+component-only. Inventory: 2,487,465 bytes, SHA-256
+`4ad6d77cbb2b138bc6991ef2fac0b3fc507c8ca0a4bf6c96437d17f10dbf1d30`; prepared
+inventory 97,688 bytes, SHA-256
+`ab03774b63930c9b5d32bb0124290f312cd71946be192dc975e3c7bbc98ab184`. Raw evidence
+now totals 40 files / 220,698 bytes across 22 packages; archive evidence is
+unchanged at 917 materials / 4,505,353 bytes. The local read-only replay
+(`python -I docs/legal/notices-material/registry/replay.py .`, not a unit test)
+reported PASS against the held archives; the CI notice tests add 5 gap test methods
+(bindings, receipt mutations, binding mutations, swapped-text rejection, exact counts,
+remaining gaps and raw-tree layout). Test execution evidence is CI only. This records
+text availability, not legal sufficiency, clearance, election, artifact inclusion or
+release permission, and does not complete N1.
+
+Remaining 18 gaps, each documented rather than filled:
+
+- `base45@3.2.0`, `enum-assoc@1.4.1`, `futures-bounded@0.3.0`, `if-watch@3.2.2`,
+  `pharos@0.5.3`: the pinned repository revision contains no license file at the
+  root or package path (declared MIT, MIT OR Apache-2.0, MIT, MIT OR Apache-2.0 and
+  Unlicense respectively). `base45`'s archived VCS state is also dirty.
+- `block2@0.6.2`, `dispatch2@0.3.1`, `objc2@0.6.5`, `objc2-core-foundation@0.3.2`,
+  `objc2-core-wlan@0.3.2`, `objc2-encode@4.1.0`, `objc2-foundation@0.3.2`,
+  `objc2-security@0.3.2`, `objc2-security-foundation@0.3.2`,
+  `objc2-system-configuration@0.3.2`: the pinned repository root holds only
+  `LICENSE.md`, a licensing statement with links and an Apple SDK caveat, not the
+  operative license texts (already retained as context); crate directories hold none.
+- `ring@0.17.14`: component-only. Its own `LICENSE` defers to `LICENSE-other-bits`
+  (ISC) and `LICENSE-BoringSSL`, all already retained; the pinned revision is dirty
+  and has no package-level Apache-2.0 text, so nothing new can be bound.
+- `winapi-i686-pc-windows-gnu@0.4.0`, `winapi-x86_64-pc-windows-gnu@0.4.0`: the
+  archives carry no VCS info, so there is no pinned revision to bind.

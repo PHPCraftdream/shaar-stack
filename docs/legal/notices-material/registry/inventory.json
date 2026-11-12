@@ -500,25 +500,24 @@
     "exact_archive_matched_identities": 533,
     "missing_archive_identities": 0,
     "current_registry_classification_counts": {
-      "component-only": 2,
-      "missing": 9,
-      "package-complete": 485,
+      "component-only": 1,
+      "missing": 3,
+      "package-complete": 500,
       "preserved_complete_text": 15,
-      "reference-only": 19,
-      "reusable_archive_missing_full_text": 1,
-      "reusable_archive_missing_full_text_partial_evidence": 2
+      "reference-only": 14
     },
     "current_pass_archive_count": 515,
     "current_pass_status_counts": {
-      "component-only": 2,
-      "missing": 9,
-      "package-complete": 485,
-      "reference-only": 19
+      "component-only": 1,
+      "missing": 3,
+      "package-complete": 497,
+      "reference-only": 14
     },
     "current_pass_material_file_count": 894,
     "current_pass_material_bytes": 4421514,
-    "current_pass_complete_text_rows": 485,
-    "current_pass_missing_evidence_rows": 9
+    "current_pass_complete_text_rows": 497,
+    "current_pass_missing_evidence_rows": 3,
+    "registry_text_available_identities": 515
   },
   "extra_local_data_candidates": [
     {
@@ -1763,7 +1762,7 @@
         }
       ],
       "checksum": "7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7",
-      "classification": "missing",
+      "classification": "package-complete",
       "declared_license": "MIT/Apache-2.0",
       "materials": [],
       "name": "asn1-rs-impl",
@@ -1783,7 +1782,7 @@
       ],
       "archive_member_count": 5,
       "decoded_tar_bytes": 10240,
-      "review_note": "No selected legal/context evidence; not a finding that no authentic terms exist.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT/Apache-2.0",
@@ -1796,24 +1795,78 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/a-f/asn1-rs-impl-0.2.0/LICENSE-MIT",
+                    "sha256": "a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513",
+                    "url": "https://raw.githubusercontent.com/rusticata/asn1-rs/a20e5f7319c896737ad0f2557037817b91ad854f/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/a-f/asn1-rs-impl-0.2.0/LICENSE-APACHE",
+                    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+                    "url": "https://raw.githubusercontent.com/rusticata/asn1-rs/a20e5f7319c896737ad0f2557037817b91ad854f/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10847,
+          "material_path": "raw-sources/a-f/asn1-rs-impl-0.2.0/LICENSE-APACHE",
+          "material_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/rusticata/asn1-rs/a20e5f7319c896737ad0f2557037817b91ad854f/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1060,
+          "material_path": "raw-sources/a-f/asn1-rs-impl-0.2.0/LICENSE-MIT",
+          "material_sha256": "a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/rusticata/asn1-rs/a20e5f7319c896737ad0f2557037817b91ad854f/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "asn1-rs-impl-0.2.0/.cargo_vcs_info.json",
+            "bytes": 98,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202261323065356637333139633839363733376164306632353537303337383137623931616438353466220a20207d2c0a202022706174685f696e5f766373223a2022696d706c220a7d",
+            "sha256": "bfb8aecdc47faea066fd27b878d0640c2e7859033c513ed32f342f25faef0b87"
+          },
+          "Cargo.toml": {
+            "archive_member": "asn1-rs-impl-0.2.0/Cargo.toml",
+            "bytes": 924,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303138220a6e616d65203d202261736e312d72732d696d706c220a76657273696f6e203d2022302e322e30220a617574686f7273203d205b225069657272652043686966666c696572203c63686966666c69657240777a64667470642e6e65743e225d0a6465736372697074696f6e203d2022496d706c656d656e746174696f6e2064657461696c7320666f7220746865206061736e312d727360206372617465220a686f6d6570616765203d202268747470733a2f2f6769746875622e636f6d2f7275737469636174612f61736e312d7273220a6c6963656e7365203d20224d49542f4170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f7275737469636174612f61736e312d72732e676974220a0a5b6c69625d0a70726f632d6d6163726f203d20747275650a0a5b646570656e64656e636965732e70726f632d6d6163726f325d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e71756f74655d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e73796e5d0a76657273696f6e203d2022322e30220a",
+            "sha256": "a631619d2ce5c7060ce03cbbfc08a45430350e55b700b8bb905ff4ecb2819a8e"
+          }
+        },
+        "package_path_in_vcs": "impl",
+        "repository": "https://github.com/rusticata/asn1-rs",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "a20e5f7319c896737ad0f2557037817b91ad854f"
       }
     },
     {
@@ -10978,7 +11031,7 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "raw_material_path": "raw-sources/dlopen2-0.8.2/LICENSE",
+                    "raw_material_path": "raw-sources/a-f/dlopen2-0.8.2/LICENSE",
                     "sha256": "39fa265207450e77c62e90c5594a06c085b655d8374c7ced4bf7894b6bd95dd2",
                     "url": "https://raw.githubusercontent.com/OpenByteDev/dlopen2/cc80e4a0a90d499b677fdf7743699b4b3a43a989/LICENSE"
                   }
@@ -11001,7 +11054,7 @@
             "MIT"
           ],
           "material_bytes": 1184,
-          "material_path": "raw-sources/dlopen2-0.8.2/LICENSE",
+          "material_path": "raw-sources/a-f/dlopen2-0.8.2/LICENSE",
           "material_sha256": "39fa265207450e77c62e90c5594a06c085b655d8374c7ced4bf7894b6bd95dd2",
           "role": "package_terms",
           "source_file": "LICENSE",
@@ -15882,7 +15935,7 @@
         }
       ],
       "checksum": "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [],
       "name": "gloo-timers",
@@ -15902,7 +15955,7 @@
       ],
       "archive_member_count": 9,
       "decoded_tar_bytes": 30208,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -15915,24 +15968,78 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/gloo-timers-0.3.0/LICENSE-MIT",
+                    "sha256": "5a6f5443ea473f130adbdcf84254761d1292bc79759b5253915d4b5e7afbef66",
+                    "url": "https://raw.githubusercontent.com/rustwasm/gloo/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/gloo-timers-0.3.0/LICENSE-APACHE",
+                    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+                    "url": "https://raw.githubusercontent.com/rustwasm/gloo/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10847,
+          "material_path": "raw-sources/g-i/gloo-timers-0.3.0/LICENSE-APACHE",
+          "material_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/rustwasm/gloo/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1078,
+          "material_path": "raw-sources/g-i/gloo-timers-0.3.0/LICENSE-MIT",
+          "material_sha256": "5a6f5443ea473f130adbdcf84254761d1292bc79759b5253915d4b5e7afbef66",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/rustwasm/gloo/f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "gloo-timers-0.3.0/.cargo_vcs_info.json",
+            "bytes": 107,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202266336262316431613163333364626363636166323634343661636137643063656138653964353734220a20207d2c0a202022706174685f696e5f766373223a20226372617465732f74696d657273220a7d",
+            "sha256": "b9cd64f2c7f504731396fb99e28c49626e9ad56cfd35097beac8af6b6c2b8ecd"
+          },
+          "Cargo.toml": {
+            "archive_member": "gloo-timers-0.3.0/Cargo.toml",
+            "bytes": 1422,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303231220a727573742d76657273696f6e203d2022312e3634220a6e616d65203d2022676c6f6f2d74696d657273220a76657273696f6e203d2022302e332e30220a617574686f7273203d205b225275737420616e6420576562417373656d626c7920576f726b696e672047726f7570225d0a6465736372697074696f6e203d2022436f6e76656e69656e636520637261746520666f7220776f726b696e672077697468204a6176615363726970742074696d657273220a686f6d6570616765203d202268747470733a2f2f6769746875622e636f6d2f727573747761736d2f676c6f6f220a726561646d65203d2022524541444d452e6d64220a63617465676f72696573203d205b0a20202020226170692d62696e64696e6773222c0a20202020226173796e6368726f6e6f7573222c0a20202020227761736d222c0a5d0a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f727573747761736d2f676c6f6f2f747265652f6d61737465722f6372617465732f74696d657273220a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a6665617475726573203d205b2266757475726573225d0a0a5b646570656e64656e636965732e667574757265732d6368616e6e656c5d0a76657273696f6e203d2022302e33220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e667574757265732d636f72655d0a76657273696f6e203d2022302e33220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e6a732d7379735d0a76657273696f6e203d2022302e332e3331220a0a5b646570656e64656e636965732e7761736d2d62696e6467656e5d0a76657273696f6e203d2022302e32220a0a5b6465762d646570656e64656e636965732e667574757265732d7574696c5d0a76657273696f6e203d2022302e33220a0a5b6465762d646570656e64656e636965732e7761736d2d62696e6467656e2d667574757265735d0a76657273696f6e203d2022302e342e34220a0a5b6465762d646570656e64656e636965732e7761736d2d62696e6467656e2d746573745d0a76657273696f6e203d2022302e332e34220a0a5b66656174757265735d0a64656661756c74203d205b5d0a66757475726573203d205b0a2020202022667574757265732d636f7265222c0a2020202022667574757265732d6368616e6e656c222c0a5d0a",
+            "sha256": "d66cc7c12121afe21475fb061064b88be5c48d543b9c9e469aeae55ef2833b3f"
+          }
+        },
+        "package_path_in_vcs": "crates/timers",
+        "repository": "https://github.com/rustwasm/gloo",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "f3bb1d1a1c33dbcccaf26446aca7d0cea8e9d574"
       }
     },
     {
@@ -15946,7 +16053,7 @@
         }
       ],
       "checksum": "482ce8a491a501da4cd806bd190275363d674f2845005c6ddbd5d3e1dd54495d",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [],
       "name": "gloo-timers",
@@ -15966,7 +16073,7 @@
       ],
       "archive_member_count": 10,
       "decoded_tar_bytes": 43008,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -15979,24 +16086,78 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/gloo-timers-0.4.0/LICENSE-MIT",
+                    "sha256": "5a6f5443ea473f130adbdcf84254761d1292bc79759b5253915d4b5e7afbef66",
+                    "url": "https://raw.githubusercontent.com/rustwasm/gloo/c8feeb18bf5dde6b7aed80c749e1aef89b34fb52/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/gloo-timers-0.4.0/LICENSE-APACHE",
+                    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+                    "url": "https://raw.githubusercontent.com/rustwasm/gloo/c8feeb18bf5dde6b7aed80c749e1aef89b34fb52/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10847,
+          "material_path": "raw-sources/g-i/gloo-timers-0.4.0/LICENSE-APACHE",
+          "material_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/rustwasm/gloo/c8feeb18bf5dde6b7aed80c749e1aef89b34fb52/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1078,
+          "material_path": "raw-sources/g-i/gloo-timers-0.4.0/LICENSE-MIT",
+          "material_sha256": "5a6f5443ea473f130adbdcf84254761d1292bc79759b5253915d4b5e7afbef66",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/rustwasm/gloo/c8feeb18bf5dde6b7aed80c749e1aef89b34fb52/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "gloo-timers-0.4.0/.cargo_vcs_info.json",
+            "bytes": 107,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202263386665656231386266356464653662376165643830633734396531616566383962333466623532220a20207d2c0a202022706174685f696e5f766373223a20226372617465732f74696d657273220a7d",
+            "sha256": "d26eff21e51135768362d1568eb6a85438b1a5b5b2a235819f7027e2a58300e5"
+          },
+          "Cargo.toml": {
+            "archive_member": "gloo-timers-0.4.0/Cargo.toml",
+            "bytes": 1670,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303231220a727573742d76657273696f6e203d2022312e3832220a6e616d65203d2022676c6f6f2d74696d657273220a76657273696f6e203d2022302e342e30220a617574686f7273203d205b225275737420616e6420576562417373656d626c7920576f726b696e672047726f7570225d0a6275696c64203d2066616c73650a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d2022436f6e76656e69656e636520637261746520666f7220776f726b696e672077697468204a6176615363726970742074696d657273220a686f6d6570616765203d202268747470733a2f2f6769746875622e636f6d2f727573747761736d2f676c6f6f220a726561646d65203d2022524541444d452e6d64220a63617465676f72696573203d205b0a20202020226170692d62696e64696e6773222c0a20202020226173796e6368726f6e6f7573222c0a20202020227761736d222c0a5d0a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f727573747761736d2f676c6f6f2f747265652f6d61737465722f6372617465732f74696d657273220a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a6665617475726573203d205b2266757475726573225d0a0a5b66656174757265735d0a64656661756c74203d205b5d0a66757475726573203d205b0a2020202022667574757265732d636f7265222c0a2020202022667574757265732d6368616e6e656c222c0a5d0a0a5b6c69625d0a6e616d65203d2022676c6f6f5f74696d657273220a70617468203d20227372632f6c69622e7273220a0a5b5b746573745d5d0a6e616d65203d20226e6f6465220a70617468203d202274657374732f6e6f64652e7273220a0a5b5b746573745d5d0a6e616d65203d2022776562220a70617468203d202274657374732f7765622e7273220a0a5b646570656e64656e636965732e667574757265732d6368616e6e656c5d0a76657273696f6e203d2022302e33220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e667574757265732d636f72655d0a76657273696f6e203d2022302e33220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e6a732d7379735d0a76657273696f6e203d2022302e332e3931220a0a5b646570656e64656e636965732e7761736d2d62696e6467656e5d0a76657273696f6e203d2022302e32220a0a5b6465762d646570656e64656e636965732e667574757265732d7574696c5d0a76657273696f6e203d2022302e33220a0a5b6465762d646570656e64656e636965732e7761736d2d62696e6467656e2d667574757265735d0a76657273696f6e203d2022302e342e3435220a0a5b6465762d646570656e64656e636965732e7761736d2d62696e6467656e2d746573745d0a76657273696f6e203d2022302e332e3435220a",
+            "sha256": "dc3e60fe8c842638973cb5cac159e7158e23375ce4a47f07c1d2417a1c27cd97"
+          }
+        },
+        "package_path_in_vcs": "crates/timers",
+        "repository": "https://github.com/rustwasm/gloo",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "c8feeb18bf5dde6b7aed80c749e1aef89b34fb52"
       }
     },
     {
@@ -20303,7 +20464,7 @@
         }
       ],
       "checksum": "6ae9092be76c9f5429776ab3394f5a5a78dc19dc2524267e884a5b9781546c3f",
-      "classification": "reusable_archive_missing_full_text_partial_evidence",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [
         {
@@ -20325,7 +20486,93 @@
       "nested_lock": false,
       "root_lock": true,
       "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "version": "1.3.0"
+      "version": "1.3.0",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT OR Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "MIT OR Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/iroh-base-1.3.0/LICENSE-MIT",
+                    "sha256": "f169adb8124d3b005416d8485d00777c9a7bdd9099982c52a4493f9732e6d050",
+                    "url": "https://raw.githubusercontent.com/n0-computer/iroh/0072d7d84b233f9e7185eb676f049beaf557ac03/LICENSE-MIT"
+                  }
+                ]
+              },
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/iroh-base-1.3.0/LICENSE-APACHE",
+                    "sha256": "903131e2786f073a942fbf8fae122d9e576e4dad758c6da7f9f2ba58fd8611ab",
+                    "url": "https://raw.githubusercontent.com/n0-computer/iroh/0072d7d84b233f9e7185eb676f049beaf557ac03/LICENSE-APACHE"
+                  }
+                ]
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10831,
+          "material_path": "raw-sources/g-i/iroh-base-1.3.0/LICENSE-APACHE",
+          "material_sha256": "903131e2786f073a942fbf8fae122d9e576e4dad758c6da7f9f2ba58fd8611ab",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/n0-computer/iroh/0072d7d84b233f9e7185eb676f049beaf557ac03/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1048,
+          "material_path": "raw-sources/g-i/iroh-base-1.3.0/LICENSE-MIT",
+          "material_sha256": "f169adb8124d3b005416d8485d00777c9a7bdd9099982c52a4493f9732e6d050",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/n0-computer/iroh/0072d7d84b233f9e7185eb676f049beaf557ac03/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "iroh-base-1.3.0/.cargo_vcs_info.json",
+            "bytes": 103,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202230303732643764383462323333663965373138356562363736663034396265616635353761633033220a20207d2c0a202022706174685f696e5f766373223a202269726f682d62617365220a7d",
+            "sha256": "660d9f00e6697886ef823316b4997a54c965b6fb5adeb99f0c32bf584c2844ca"
+          },
+          "Cargo.toml": {
+            "archive_member": "iroh-base-1.3.0/Cargo.toml",
+            "bytes": 2910,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303234220a727573742d76657273696f6e203d2022312e3931220a6e616d65203d202269726f682d62617365220a76657273696f6e203d2022312e332e30220a617574686f7273203d205b226e30207465616d225d0a6275696c64203d2066616c73650a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d202262617365207479706520616e64207574696c697469657320666f722049726f68220a726561646d65203d2022524541444d452e6d64220a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6e302d636f6d70757465722f69726f68220a7265736f6c766572203d202232220a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a616c6c2d6665617475726573203d20747275650a72757374646f632d61726773203d205b0a20202020222d2d636667222c0a202020202269726f685f646f63737273222c0a5d0a0a5b7061636b6167652e6d657461646174612e636172676f5f636865636b5f65787465726e616c5f74797065735d0a616c6c6f7765645f65787465726e616c5f7479706573203d205b0a20202020226e305f6572726f723a3a2a222c0a202020202273657264655f636f72653a3a2a222c0a202020202275726c3a3a2a222c0a5d0a0a5b66656174757265735d0a64656661756c74203d205b2272656c6179225d0a6b6579203d205b0a20202020226465703a637572766532353531392d64616c656b222c0a20202020226465703a656432353531392d64616c656b222c0a20202020226465703a75726c222c0a20202020226465703a6465726976655f6d6f7265222c0a20202020226465703a646174612d656e636f64696e67222c0a20202020226465703a646174612d656e636f64696e672d6d6163726f222c0a20202020226465703a72616e64222c0a20202020226465703a67657472616e646f6d222c0a20202020226465703a7a65726f697a65222c0a202020202272656c6179222c0a5d0a72656c6179203d205b0a20202020226465703a75726c222c0a20202020226465703a6465726976655f6d6f7265222c0a5d0a0a5b6c69625d0a6e616d65203d202269726f685f62617365220a70617468203d20227372632f6c69622e7273220a0a5b646570656e64656e636965732e637572766532353531392d64616c656b5d0a76657273696f6e203d20223e3d352e302e302d72632e302c3c362e302e30220a6665617475726573203d205b0a20202020227365726465222c0a202020202272616e645f636f7265222c0a20202020227a65726f697a65222c0a5d0a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e646174612d656e636f64696e675d0a76657273696f6e203d2022322e362e30220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e646174612d656e636f64696e672d6d6163726f5d0a76657273696f6e203d2022302e312e3139220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e6465726976655f6d6f72655d0a76657273696f6e203d2022322e302e31220a6665617475726573203d205b0a20202020226465627567222c0a2020202022646973706c6179222c0a5d0a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e656432353531392d64616c656b5d0a76657273696f6e203d20223e3d332e302e302d72632e302c3c342e302e30220a6665617475726573203d205b0a20202020227365726465222c0a202020202272616e645f636f7265222c0a20202020227a65726f697a65222c0a5d0a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e6e302d6572726f725d0a76657273696f6e203d2022312e302e30220a0a5b646570656e64656e636965732e72616e645d0a76657273696f6e203d2022302e3130220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e73657264655d0a76657273696f6e203d202231220a6665617475726573203d205b0a2020202022646572697665222c0a20202020227263222c0a5d0a0a5b646570656e64656e636965732e75726c5d0a76657273696f6e203d2022322e352e33220a6665617475726573203d205b227365726465225d0a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e7a65726f697a655d0a76657273696f6e203d2022312e39220a6665617475726573203d205b22646572697665225d0a6f7074696f6e616c203d20747275650a0a5b6465762d646570656e64656e636965732e706f7374636172645d0a76657273696f6e203d202231220a6665617475726573203d205b227573652d737464225d0a0a5b6465762d646570656e64656e636965732e70726f70746573745d0a76657273696f6e203d2022312e31312e30220a0a5b6465762d646570656e64656e636965732e72616e645f6368616368615d0a76657273696f6e203d2022302e3130220a0a5b6465762d646570656e64656e636965732e73657264655f6a736f6e5d0a76657273696f6e203d202231220a0a5b6465762d646570656e64656e636965732e73657264655f746573745d0a76657273696f6e203d202231220a0a5b7461726765742e2763666728616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e222929272e646570656e64656e636965732e67657472616e646f6d5d0a76657273696f6e203d2022302e34220a6665617475726573203d205b227761736d5f6a73225d0a6f7074696f6e616c203d20747275650a0a5b6c696e74732e636c697070795d0a756e757365642d6173796e63203d20227761726e220a0a5b6c696e74732e727573745d0a6d697373696e675f64656275675f696d706c656d656e746174696f6e73203d20227761726e220a0a5b6c696e74732e727573742e756e65787065637465645f636667735d0a6c6576656c203d20227761726e220a7072696f72697479203d20300a636865636b2d636667203d205b0a20202020226366672869726f685f646f6373727329222c0a20202020226366672869726f685f6c6f6f6d29222c0a202020202263666728736b69705f706174636862617929222c0a5d0a",
+            "sha256": "9e4402f6c3a23cf120714ed96cf5285ba424a15cf5027b727a160a153aa34a15"
+          }
+        },
+        "package_path_in_vcs": "iroh-base",
+        "repository": "https://github.com/n0-computer/iroh",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "0072d7d84b233f9e7185eb676f049beaf557ac03"
+      }
     },
     {
       "archive_data": [
@@ -20451,7 +20698,7 @@
         }
       ],
       "checksum": "1ae5f0c4405d1fbc9fb16ff422ca40620e93dc36c30ecaba0c2aee3992b7bd48",
-      "classification": "missing",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [],
       "name": "iroh-metrics-derive",
@@ -20471,7 +20718,7 @@
       ],
       "archive_member_count": 6,
       "decoded_tar_bytes": 28672,
-      "review_note": "No selected legal/context evidence; not a finding that no authentic terms exist.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -20484,24 +20731,78 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/iroh-metrics-derive-1.0.1/LICENSE-MIT",
+                    "sha256": "339060c99d5c80c2742cae417f765980afe6b0149a78f959bbf2a79f19ab3af5",
+                    "url": "https://raw.githubusercontent.com/n0-computer/iroh-metrics/a9afb7cd49bb3804fffefec61647993851f9b8c8/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/iroh-metrics-derive-1.0.1/LICENSE-APACHE",
+                    "sha256": "7953ad8cebf4e01199521a5faa221ef59bec5cee0a9856b179590613a8560cbc",
+                    "url": "https://raw.githubusercontent.com/n0-computer/iroh-metrics/a9afb7cd49bb3804fffefec61647993851f9b8c8/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10831,
+          "material_path": "raw-sources/g-i/iroh-metrics-derive-1.0.1/LICENSE-APACHE",
+          "material_sha256": "7953ad8cebf4e01199521a5faa221ef59bec5cee0a9856b179590613a8560cbc",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/n0-computer/iroh-metrics/a9afb7cd49bb3804fffefec61647993851f9b8c8/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1048,
+          "material_path": "raw-sources/g-i/iroh-metrics-derive-1.0.1/LICENSE-MIT",
+          "material_sha256": "339060c99d5c80c2742cae417f765980afe6b0149a78f959bbf2a79f19ab3af5",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/n0-computer/iroh-metrics/a9afb7cd49bb3804fffefec61647993851f9b8c8/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "iroh-metrics-derive-1.0.1/.cargo_vcs_info.json",
+            "bytes": 113,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202261396166623763643439626233383034666666656665633631363437393933383531663962386338220a20207d2c0a202022706174685f696e5f766373223a202269726f682d6d6574726963732d646572697665220a7d",
+            "sha256": "fba25557b69e7a25c82147cfd02e49ec6ec78d6847ee5fef67fc5d7e93770d99"
+          },
+          "Cargo.toml": {
+            "archive_member": "iroh-metrics-derive-1.0.1/Cargo.toml",
+            "bytes": 1106,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303234220a727573742d76657273696f6e203d2022312e3835220a6e616d65203d202269726f682d6d6574726963732d646572697665220a76657273696f6e203d2022312e302e31220a617574686f7273203d205b0a20202020224672616e646f203c6672616e7a406e302e636f6d70757465723e222c0a20202020226e30207465616d222c0a5d0a6275696c64203d2066616c73650a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d2022646572697665206d6163726f7320666f722069726f682d6d657472696373220a726561646d65203d2066616c73650a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6e302d636f6d70757465722f69726f682d6d657472696373220a0a5b6c69625d0a6e616d65203d202269726f685f6d6574726963735f646572697665220a70617468203d20227372632f6c69622e7273220a70726f632d6d6163726f203d20747275650a0a5b646570656e64656e636965732e6865636b5d0a76657273696f6e203d2022302e35220a0a5b646570656e64656e636965732e70726f632d6d6163726f325d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e71756f74655d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e73796e5d0a76657273696f6e203d202232220a",
+            "sha256": "240af886a5743f9a448a9850321be81d93b3b9360ab080190be39ad75dcf6070"
+          }
+        },
+        "package_path_in_vcs": "iroh-metrics-derive",
+        "repository": "https://github.com/n0-computer/iroh-metrics",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "a9afb7cd49bb3804fffefec61647993851f9b8c8"
       }
     },
     {
@@ -20515,7 +20816,7 @@
         }
       ],
       "checksum": "ee116a8233f84980574bb8d11e4517503080cd2c3605bafca04ee9c35d708bd9",
-      "classification": "component-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [
         {
@@ -20570,7 +20871,7 @@
       ],
       "archive_member_count": 43,
       "decoded_tar_bytes": 640512,
-      "review_note": "Authentic component-scoped terms preserved; package-level terms not established.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -20583,21 +20884,31 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/iroh-relay-1.3.0/LICENSE-MIT",
+                    "sha256": "f169adb8124d3b005416d8485d00777c9a7bdd9099982c52a4493f9732e6d050",
+                    "url": "https://raw.githubusercontent.com/n0-computer/iroh/0072d7d84b233f9e7185eb676f049beaf557ac03/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/g-i/iroh-relay-1.3.0/LICENSE-APACHE",
+                    "sha256": "903131e2786f073a942fbf8fae122d9e576e4dad758c6da7f9f2ba58fd8611ab",
+                    "url": "https://raw.githubusercontent.com/n0-computer/iroh/0072d7d84b233f9e7185eb676f049beaf557ac03/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": [
@@ -20608,6 +20919,51 @@
             "scope": "component-only"
           }
         ]
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10831,
+          "material_path": "raw-sources/g-i/iroh-relay-1.3.0/LICENSE-APACHE",
+          "material_sha256": "903131e2786f073a942fbf8fae122d9e576e4dad758c6da7f9f2ba58fd8611ab",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/n0-computer/iroh/0072d7d84b233f9e7185eb676f049beaf557ac03/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1048,
+          "material_path": "raw-sources/g-i/iroh-relay-1.3.0/LICENSE-MIT",
+          "material_sha256": "f169adb8124d3b005416d8485d00777c9a7bdd9099982c52a4493f9732e6d050",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/n0-computer/iroh/0072d7d84b233f9e7185eb676f049beaf557ac03/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "iroh-relay-1.3.0/.cargo_vcs_info.json",
+            "bytes": 104,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202230303732643764383462323333663965373138356562363736663034396265616635353761633033220a20207d2c0a202022706174685f696e5f766373223a202269726f682d72656c6179220a7d",
+            "sha256": "0505719e34eeb01a399584e4ebe5874ac03548a8f6e123f101fdd46e1a5f6872"
+          },
+          "Cargo.toml": {
+            "archive_member": "iroh-relay-1.3.0/Cargo.toml",
+            "bytes": 7578,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303234220a727573742d76657273696f6e203d2022312e3931220a6e616d65203d202269726f682d72656c6179220a76657273696f6e203d2022312e332e30220a617574686f7273203d205b226e30207465616d225d0a6275696c64203d20226275696c642e7273220a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d202249726f6827732072656c61792073657276657220616e6420636c69656e74220a726561646d65203d2022524541444d452e6d64220a6b6579776f726473203d205b0a20202020226e6574776f726b696e67222c0a2020202022686f6c6570756e6368696e67222c0a2020202022703270222c0a5d0a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6e302d636f6d70757465722f69726f68220a7265736f6c766572203d202232220a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a616c6c2d6665617475726573203d20747275650a72757374646f632d61726773203d205b0a20202020222d2d636667222c0a202020202269726f685f646f63737273222c0a5d0a0a5b7061636b6167652e6d657461646174612e636172676f5f636865636b5f65787465726e616c5f74797065735d0a616c6c6f7765645f65787465726e616c5f7479706573203d205b0a202020202269726f685f626173653a3a2a222c0a202020202269726f685f646e733a3a2a222c0a202020202269726f685f6d6574726963733a3a2a222c0a20202020226e305f6572726f723a3a2a222c0a20202020226e6f713a3a2a222c0a20202020226e6f715f70726f746f3a3a2a222c0a202020202262797465733a3a2a222c0a2020202022687474703a3a2a222c0a2020202022687474705f626f64793a3a2a222c0a202020202268797065723a3a2a222c0a2020202022727573746c735f706b695f74797065733a3a2a222c0a202020202273657264655f636f72653a3a2a222c0a2020202022746f6b696f3a3a2a222c0a202020202275726c3a3a2a222c0a2020202022727573746c733a3a2a222c0a2020202022746f6b696f5f727573746c733a3a2a222c0a2020202022667574757265735f636f72653a3a73747265616d3a3a53747265616d222c0a2020202022667574757265735f73696e6b3a3a53696e6b222c0a5d0a0a5b66656174757265735d0a64656661756c74203d205b0a20202020226d657472696373222c0a2020202022746c732d72696e67222c0a5d0a6d657472696373203d205b2269726f682d6d6574726963732f6d657472696373225d0a706c6174666f726d2d7665726966696572203d205b226465703a727573746c732d706c6174666f726d2d7665726966696572225d0a736572766572203d205b0a20202020226d657472696373222c0a2020202022746f6b696f2f7369676e616c222c0a2020202022746f6b696f2f72742d6d756c74692d746872656164222c0a20202020226465703a636c6170222c0a20202020226465703a646173686d6170222c0a20202020226465703a726367656e222c0a20202020226465703a72656c6f616461626c652d7374617465222c0a20202020226465703a727573746c732d636572742d66696c652d726561646572222c0a20202020226465703a727573746c732d636572742d72656c6f616461626c652d7265736f6c766572222c0a20202020226465703a74696d65222c0a20202020226465703a746f6b696f2d727573746c732d61636d65222c0a20202020226465703a746f6b696f2d776562736f636b657473222c0a20202020226465703a73696d6475746638222c0a20202020226465703a73686131222c0a20202020226465703a746f6d6c222c0a20202020226465703a73657264655f6a736f6e222c0a20202020226465703a74726163696e672d73756273637269626572222c0a20202020226e6f712f706c6174666f726d2d7665726966696572222c0a20202020226e6f712f72756e74696d652d746f6b696f222c0a202020202269726f682d6d6574726963732f73657276696365222c0a2020202022746c732d72696e67222c0a5d0a746573742d7574696c73203d205b5d0a746c732d6177732d6c632d7273203d205b0a20202020226e6f712f6177732d6c632d7273222c0a2020202022727573746c732f6177732d6c632d7273222c0a2020202022746f6b696f2d727573746c732f6177732d6c632d7273222c0a2020202022746f6b696f2d776562736f636b6574732f6177735f6c635f7273222c0a202020202269726f682d646e732f746c732d6177732d6c632d7273222c0a5d0a746c732d72696e67203d205b0a20202020226e6f712f72696e67222c0a2020202022727573746c732f72696e67222c0a2020202022746f6b696f2d727573746c732f72696e67222c0a2020202022746f6b696f2d776562736f636b6574732f72696e67222c0a202020202269726f682d646e732f746c732d72696e67222c0a5d0a0a5b6c69625d0a6e616d65203d202269726f685f72656c6179220a63726174652d74797065203d205b0a20202020226c6962222c0a20202020226364796c6962222c0a5d0a70617468203d20227372632f6c69622e7273220a0a5b5b62696e5d5d0a6e616d65203d202269726f682d72656c6179220a70617468203d20227372632f6d61696e2e7273220a72657175697265642d6665617475726573203d205b22736572766572225d0a0a5b5b746573745d5d0a6e616d65203d202272656c61795f6178756d220a70617468203d202274657374732f72656c61795f6178756d2e7273220a0a5b5b746573745d5d0a6e616d65203d202272656c61795f6879706572220a70617468203d202274657374732f72656c61795f68797065722e7273220a0a5b5b746573745d5d0a6e616d65203d202272756e74696d655f61757468220a70617468203d202274657374732f72756e74696d655f617574682e7273220a0a5b646570656e64656e636965732e626c616b65335d0a76657273696f6e203d2022312e382e32220a0a5b646570656e64656e636965732e62797465735d0a76657273696f6e203d2022312e3131220a0a5b646570656e64656e636965732e636c61705d0a76657273696f6e203d202234220a6665617475726573203d205b22646572697665225d0a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e646173686d61705d0a76657273696f6e203d2022362e312e30220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e646174612d656e636f64696e675d0a76657273696f6e203d2022322e362e30220a0a5b646570656e64656e636965732e6465726976655f6d6f72655d0a76657273696f6e203d2022322e302e31220a6665617475726573203d205b0a20202020226465627567222c0a2020202022646973706c6179222c0a202020202266726f6d222c0a20202020227472795f696e746f222c0a20202020226465726566222c0a5d0a0a5b646570656e64656e636965732e687474705d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e687474702d626f64792d7574696c5d0a76657273696f6e203d2022302e312e30220a0a5b646570656e64656e636965732e68797065725d0a76657273696f6e203d202231220a6665617475726573203d205b0a2020202022736572766572222c0a2020202022636c69656e74222c0a20202020226874747031222c0a5d0a0a5b646570656e64656e636965732e68797065722d7574696c5d0a76657273696f6e203d2022302e312e31220a0a5b646570656e64656e636965732e69726f682d626173655d0a76657273696f6e203d2022312e332e30220a6665617475726573203d205b0a20202020226b6579222c0a202020202272656c6179222c0a5d0a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e69726f682d646e735d0a76657273696f6e203d2022312e332e30220a0a5b646570656e64656e636965732e69726f682d6d6574726963735d0a76657273696f6e203d2022312e302e32220a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e6c72755d0a76657273696f6e203d2022302e31382e30220a0a5b646570656e64656e636965732e6e302d6572726f725d0a76657273696f6e203d2022312e302e30220a0a5b646570656e64656e636965732e6e302d6675747572655d0a76657273696f6e203d2022302e33220a0a5b646570656e64656e636965732e6e6f715d0a76657273696f6e203d2022312e332e30220a6665617475726573203d205b22727573746c73225d0a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e6e6f712d70726f746f5d0a76657273696f6e203d2022312e332e30220a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e6e756d5f656e756d5d0a76657273696f6e203d2022302e37220a0a5b646570656e64656e636965732e70696e2d70726f6a6563745d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e706f7374636172645d0a76657273696f6e203d202231220a6665617475726573203d205b0a2020202022616c6c6f63222c0a20202020227573652d737464222c0a20202020226578706572696d656e74616c2d646572697665222c0a5d0a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e72616e645d0a76657273696f6e203d2022302e3130220a0a5b646570656e64656e636965732e726367656e5d0a76657273696f6e203d2022302e3134220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e72656c6f616461626c652d73746174655d0a76657273696f6e203d2022302e31220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e726571776573745d0a76657273696f6e203d2022302e3133220a6665617475726573203d205b22727573746c732d6e6f2d70726f7669646572225d0a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e727573746c735d0a76657273696f6e203d2022302e32332e3333220a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e727573746c732d636572742d66696c652d7265616465725d0a76657273696f6e203d2022302e342e32220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e727573746c732d636572742d72656c6f616461626c652d7265736f6c7665725d0a76657273696f6e203d2022302e372e31220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e727573746c732d706c6174666f726d2d76657269666965725d0a76657273696f6e203d2022302e372e30220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e73657264655d0a76657273696f6e203d202231220a6665617475726573203d205b0a2020202022646572697665222c0a20202020227263222c0a5d0a0a5b646570656e64656e636965732e73657264655f62797465735d0a76657273696f6e203d2022302e31312e3137220a0a5b646570656e64656e636965732e73657264655f6a736f6e5d0a76657273696f6e203d202231220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e736861315d0a76657273696f6e203d2022302e31312e30220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e73696d64757466385d0a76657273696f6e203d2022302e312e35220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e737472756d5d0a76657273696f6e203d2022302e3238220a6665617475726573203d205b22646572697665225d0a0a5b646570656e64656e636965732e74696d655d0a76657273696f6e203d2022302e332e3337220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b0a2020202022696f2d7574696c222c0a20202020226d6163726f73222c0a202020202273796e63222c0a20202020227274222c0a5d0a0a5b646570656e64656e636965732e746f6b696f2d727573746c735d0a76657273696f6e203d2022302e3236220a6665617475726573203d205b226c6f6767696e67225d0a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e746f6b696f2d727573746c732d61636d655d0a76657273696f6e203d2022302e39220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e746f6b696f2d7574696c5d0a76657273696f6e203d2022302e37220a6665617475726573203d205b0a2020202022696f2d7574696c222c0a2020202022696f222c0a2020202022636f646563222c0a20202020227274222c0a5d0a0a5b646570656e64656e636965732e746f6b696f2d776562736f636b6574735d0a76657273696f6e203d2022302e3133220a6665617475726573203d205b0a2020202022727573746c732d6272696e672d796f75722d6f776e2d636f6e6e6563746f72222c0a202020202267657472616e646f6d222c0a202020202272616e64222c0a2020202022736572766572222c0a2020202022736861315f736d6f6c222c0a5d0a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e746f6d6c5d0a76657273696f6e203d2022312e30220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e74726163696e675d0a76657273696f6e203d2022302e31220a0a5b646570656e64656e636965732e74726163696e672d737562736372696265725d0a76657273696f6e203d2022302e33220a6665617475726573203d205b22656e762d66696c746572225d0a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e75726c5d0a76657273696f6e203d2022322e352e33220a6665617475726573203d205b227365726465225d0a0a5b646570656e64656e636965732e776562706b692d726f6f74735d0a76657273696f6e203d2022312e302e33220a0a5b646570656e64656e636965732e776562706b695f74797065735d0a76657273696f6e203d2022312e3132220a7061636b616765203d2022727573746c732d706b692d7479706573220a0a5b6465762d646570656e64656e636965732e6178756d5d0a76657273696f6e203d2022302e38220a6665617475726573203d205b227773225d0a0a5b6465762d646570656e64656e636965732e636c61705d0a76657273696f6e203d202234220a6665617475726573203d205b22646572697665225d0a0a5b6465762d646570656e64656e636965732e6e302d74726163696e672d746573745d0a76657273696f6e203d2022302e33220a0a5b6465762d646570656e64656e636965732e70726f70746573745d0a76657273696f6e203d2022312e31312e30220a0a5b6465762d646570656e64656e636965732e72616e645f6368616368615d0a76657273696f6e203d2022302e3130220a0a5b6465762d646570656e64656e636965732e73657264655f6a736f6e5d0a76657273696f6e203d202231220a0a5b6465762d646570656e64656e636965732e746573742d73747261746567795d0a76657273696f6e203d2022302e342e35220a0a5b6465762d646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b0a2020202022696f2d7574696c222c0a202020202273796e63222c0a20202020227274222c0a20202020226e6574222c0a20202020226673222c0a20202020226d6163726f73222c0a202020202274696d65222c0a2020202022746573742d7574696c222c0a5d0a0a5b6465762d646570656e64656e636965732e74726163696e672d737562736372696265725d0a76657273696f6e203d2022302e33220a6665617475726573203d205b22656e762d66696c746572225d0a0a5b6275696c642d646570656e64656e636965732e6366675f616c69617365735d0a76657273696f6e203d2022302e322e32220a0a5b7461726765742e2763666728616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e222929272e646570656e64656e636965732e67657472616e646f6d5d0a76657273696f6e203d2022302e34220a6665617475726573203d205b227761736d5f6a73225d0a0a5b7461726765742e2763666728616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e222929272e646570656e64656e636965732e77735f73747265616d5f7761736d5d0a76657273696f6e203d2022302e372e34220a64656661756c742d6665617475726573203d2066616c73650a0a5b7461726765742e27636667286e6f7428616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e22292929272e646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b0a2020202022696f2d7574696c222c0a20202020226d6163726f73222c0a202020202273796e63222c0a20202020227274222c0a20202020226e6574222c0a20202020226673222c0a2020202022696f2d737464222c0a5d0a0a5b7461726765742e27636667286e6f7428616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e22292929272e646570656e64656e636965732e746f6b696f2d776562736f636b6574735d0a76657273696f6e203d2022302e3133220a6665617475726573203d205b0a2020202022727573746c732d6272696e672d796f75722d6f776e2d636f6e6e6563746f72222c0a202020202267657472616e646f6d222c0a202020202272616e64222c0a2020202022636c69656e74222c0a2020202022736861315f736d6f6c222c0a5d0a0a5b6c696e74732e636c697070795d0a756e757365642d6173796e63203d20227761726e220a0a5b6c696e74732e727573745d0a6d697373696e675f64656275675f696d706c656d656e746174696f6e73203d20227761726e220a0a5b6c696e74732e727573742e756e65787065637465645f636667735d0a6c6576656c203d20227761726e220a7072696f72697479203d20300a636865636b2d636667203d205b0a20202020226366672869726f685f646f6373727329222c0a20202020226366672869726f685f6c6f6f6d29222c0a202020202263666728736b69705f706174636862617929222c0a5d0a",
+            "sha256": "f3a93d207953dddddb96f9dd41a27d10df23662b2d9e50497ef2fa2f6b2f526a"
+          }
+        },
+        "package_path_in_vcs": "iroh-relay",
+        "repository": "https://github.com/n0-computer/iroh",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "0072d7d84b233f9e7185eb676f049beaf557ac03",
+        "binding_note": "The retained component-scoped LICENSE-BSD3 is unchanged and remains scoped to its Tailscale-derived portions; package terms are the repository-root files at the same revision as the archived VCS info."
       }
     },
     {
@@ -21009,7 +21365,7 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "raw_material_path": "raw-sources/jni-0.22.4/LICENSE-MIT",
+                    "raw_material_path": "raw-sources/j-l/jni-0.22.4/LICENSE-MIT",
                     "sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
                     "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-MIT"
                   }
@@ -21023,7 +21379,7 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "raw_material_path": "raw-sources/jni-0.22.4/LICENSE-APACHE",
+                    "raw_material_path": "raw-sources/j-l/jni-0.22.4/LICENSE-APACHE",
                     "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
                     "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7/LICENSE-APACHE"
                   }
@@ -21046,7 +21402,7 @@
             "Apache-2.0"
           ],
           "material_bytes": 10847,
-          "material_path": "raw-sources/jni-0.22.4/LICENSE-APACHE",
+          "material_path": "raw-sources/j-l/jni-0.22.4/LICENSE-APACHE",
           "material_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
           "role": "package_terms",
           "source_file": "LICENSE-APACHE",
@@ -21057,7 +21413,7 @@
             "MIT"
           ],
           "material_bytes": 1104,
-          "material_path": "raw-sources/jni-0.22.4/LICENSE-MIT",
+          "material_path": "raw-sources/j-l/jni-0.22.4/LICENSE-MIT",
           "material_sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
           "role": "package_terms",
           "source_file": "LICENSE-MIT",
@@ -21149,7 +21505,7 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "raw_material_path": "raw-sources/jni-macros-0.22.4/LICENSE-MIT",
+                    "raw_material_path": "raw-sources/j-l/jni-macros-0.22.4/LICENSE-MIT",
                     "sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
                     "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-MIT"
                   }
@@ -21163,7 +21519,7 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "raw_material_path": "raw-sources/jni-macros-0.22.4/LICENSE-APACHE",
+                    "raw_material_path": "raw-sources/j-l/jni-macros-0.22.4/LICENSE-APACHE",
                     "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
                     "url": "https://raw.githubusercontent.com/jni-rs/jni-rs/33045a124105c939d1e2cbdcb5a39e5d868ffa03/LICENSE-APACHE"
                   }
@@ -21181,7 +21537,7 @@
             "Apache-2.0"
           ],
           "material_bytes": 10847,
-          "material_path": "raw-sources/jni-macros-0.22.4/LICENSE-APACHE",
+          "material_path": "raw-sources/j-l/jni-macros-0.22.4/LICENSE-APACHE",
           "material_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
           "role": "package_terms",
           "source_file": "LICENSE-APACHE",
@@ -21192,7 +21548,7 @@
             "MIT"
           ],
           "material_bytes": 1104,
-          "material_path": "raw-sources/jni-macros-0.22.4/LICENSE-MIT",
+          "material_path": "raw-sources/j-l/jni-macros-0.22.4/LICENSE-MIT",
           "material_sha256": "fea1d5bf3dd71605ce5d7d2ff695c1837e914c77195e523a86b5391716477960",
           "role": "package_terms",
           "source_file": "LICENSE-MIT",
@@ -21492,7 +21848,7 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "raw_material_path": "raw-sources/jni-sys-macros-0.4.1/LICENSE-MIT",
+                    "raw_material_path": "raw-sources/j-l/jni-sys-macros-0.4.1/LICENSE-MIT",
                     "sha256": "1d85bd754b04ceec93e98e890edd1fa3c6a22e81bcb32135806beeccefa51cd1",
                     "url": "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-MIT"
                   }
@@ -21506,7 +21862,7 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "raw_material_path": "raw-sources/jni-sys-macros-0.4.1/LICENSE-APACHE",
+                    "raw_material_path": "raw-sources/j-l/jni-sys-macros-0.4.1/LICENSE-APACHE",
                     "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
                     "url": "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-APACHE"
                   }
@@ -21524,7 +21880,7 @@
             "Apache-2.0"
           ],
           "material_bytes": 11358,
-          "material_path": "raw-sources/jni-sys-macros-0.4.1/LICENSE-APACHE",
+          "material_path": "raw-sources/j-l/jni-sys-macros-0.4.1/LICENSE-APACHE",
           "material_sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
           "role": "package_terms",
           "source_file": "LICENSE-APACHE",
@@ -21535,7 +21891,7 @@
             "MIT"
           ],
           "material_bytes": 1071,
-          "material_path": "raw-sources/jni-sys-macros-0.4.1/LICENSE-MIT",
+          "material_path": "raw-sources/j-l/jni-sys-macros-0.4.1/LICENSE-MIT",
           "material_sha256": "1d85bd754b04ceec93e98e890edd1fa3c6a22e81bcb32135806beeccefa51cd1",
           "role": "package_terms",
           "source_file": "LICENSE-MIT",
@@ -25264,7 +25620,7 @@
         }
       ],
       "checksum": "4412346410d6616f3668c40e53c298e5320c7b856f7a960e5914e442601be79f",
-      "classification": "missing",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [],
       "name": "n0-error-macros",
@@ -25284,7 +25640,7 @@
       ],
       "archive_member_count": 5,
       "decoded_tar_bytes": 41472,
-      "review_note": "No selected legal/context evidence; not a finding that no authentic terms exist.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -25297,24 +25653,78 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/n0-error-macros-1.0.1/LICENSE-MIT",
+                    "sha256": "339060c99d5c80c2742cae417f765980afe6b0149a78f959bbf2a79f19ab3af5",
+                    "url": "https://raw.githubusercontent.com/n0-computer/n0-error/596f4113918712d545cbb25b7fa12c7153706f54/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/n0-error-macros-1.0.1/LICENSE-APACHE",
+                    "sha256": "7953ad8cebf4e01199521a5faa221ef59bec5cee0a9856b179590613a8560cbc",
+                    "url": "https://raw.githubusercontent.com/n0-computer/n0-error/596f4113918712d545cbb25b7fa12c7153706f54/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10831,
+          "material_path": "raw-sources/m-r/n0-error-macros-1.0.1/LICENSE-APACHE",
+          "material_sha256": "7953ad8cebf4e01199521a5faa221ef59bec5cee0a9856b179590613a8560cbc",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/n0-computer/n0-error/596f4113918712d545cbb25b7fa12c7153706f54/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1048,
+          "material_path": "raw-sources/m-r/n0-error-macros-1.0.1/LICENSE-MIT",
+          "material_sha256": "339060c99d5c80c2742cae417f765980afe6b0149a78f959bbf2a79f19ab3af5",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/n0-computer/n0-error/596f4113918712d545cbb25b7fa12c7153706f54/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "n0-error-macros-1.0.1/.cargo_vcs_info.json",
+            "bytes": 109,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202235393666343131333931383731326435343563626232356237666131326337313533373036663534220a20207d2c0a202022706174685f696e5f766373223a20226e302d6572726f722d6d6163726f73220a7d",
+            "sha256": "8ba7454e922ba475dfa6b7e52c43d912f6afdaa89b930f98cc1a440fbefa4cfd"
+          },
+          "Cargo.toml": {
+            "archive_member": "n0-error-macros-1.0.1/Cargo.toml",
+            "bytes": 1147,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303231220a6e616d65203d20226e302d6572726f722d6d6163726f73220a76657273696f6e203d2022312e302e31220a617574686f7273203d205b0a20202020224672616e646f203c6672616e7a406e302e636f6d70757465723e222c0a20202020226e30207465616d222c0a5d0a6275696c64203d2066616c73650a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d20226d6163726f7320666f72206e302d6572726f72220a726561646d65203d2066616c73650a6b6579776f726473203d205b0a20202020226572726f72222c0a20202020226c6f636174696f6e222c0a20202020226572676f6e6f6d6963222c0a5d0a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6e302d636f6d70757465722f6e302d6572726f72220a7265736f6c766572203d202233220a0a5b6c69625d0a6e616d65203d20226e305f6572726f725f6d6163726f73220a70617468203d20227372632f6c69622e7273220a70726f632d6d6163726f203d20747275650a0a5b646570656e64656e636965732e70726f632d6d6163726f325d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e71756f74655d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e73796e5d0a76657273696f6e203d202232220a6665617475726573203d205b0a202020202266756c6c222c0a202020202265787472612d747261697473222c0a5d0a",
+            "sha256": "3fc4f95ab3fe167050878cf322d679571d8b6d825d648cc27b4a37f3e0a598a8"
+          }
+        },
+        "package_path_in_vcs": "n0-error-macros",
+        "repository": "https://github.com/n0-computer/n0-error",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "596f4113918712d545cbb25b7fa12c7153706f54"
       }
     },
     {
@@ -25379,7 +25789,7 @@
         }
       ],
       "checksum": "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [],
       "name": "ndk-context",
@@ -25399,7 +25809,7 @@
       ],
       "archive_member_count": 6,
       "decoded_tar_bytes": 11264,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -25412,24 +25822,78 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/ndk-context-0.1.1/LICENSE-MIT",
+                    "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+                    "url": "https://raw.githubusercontent.com/rust-windowing/android-ndk-rs/10f2ba388fca20f7349996ebae26ccda7a6fda5c/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/ndk-context-0.1.1/LICENSE-APACHE",
+                    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+                    "url": "https://raw.githubusercontent.com/rust-windowing/android-ndk-rs/10f2ba388fca20f7349996ebae26ccda7a6fda5c/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 11357,
+          "material_path": "raw-sources/m-r/ndk-context-0.1.1/LICENSE-APACHE",
+          "material_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/rust-windowing/android-ndk-rs/10f2ba388fca20f7349996ebae26ccda7a6fda5c/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1036,
+          "material_path": "raw-sources/m-r/ndk-context-0.1.1/LICENSE-MIT",
+          "material_sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/rust-windowing/android-ndk-rs/10f2ba388fca20f7349996ebae26ccda7a6fda5c/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "ndk-context-0.1.1/.cargo_vcs_info.json",
+            "bytes": 105,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202231306632626133383866636132306637333439393936656261653236636364613761366664613563220a20207d2c0a202022706174685f696e5f766373223a20226e646b2d636f6e74657874220a7d",
+            "sha256": "63e46f6a74bfd27b6634c1ebffab676492f589a2bc12010a2ef50a0f11660844"
+          },
+          "Cargo.toml": {
+            "archive_member": "ndk-context-0.1.1/Cargo.toml",
+            "bytes": 895,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303231220a6e616d65203d20226e646b2d636f6e74657874220a76657273696f6e203d2022302e312e31220a617574686f7273203d205b2254686520527573742057696e646f77696e6720636f6e7472696275746f7273225d0a6465736372697074696f6e203d202248616e646c657320666f7220616363657373696e6720416e64726f69642041504973220a686f6d6570616765203d202268747470733a2f2f6769746875622e636f6d2f727573742d77696e646f77696e672f616e64726f69642d6e646b2d7273220a646f63756d656e746174696f6e203d202268747470733a2f2f646f63732e72732f6e646b2d636f6e74657874220a6b6579776f726473203d205b0a2020202022616e64726f6964222c0a20202020226e646b222c0a202020202261706b222c0a20202020226a6e69222c0a5d0a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f727573742d77696e646f77696e672f616e64726f69642d6e646b2d7273220a",
+            "sha256": "caed75f8ae352e5f07b1cf5b34cfb1e47cc4d76485dbaf12fe6cd033075bc67a"
+          }
+        },
+        "package_path_in_vcs": "ndk-context",
+        "repository": "https://github.com/rust-windowing/android-ndk-rs",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "10f2ba388fca20f7349996ebae26ccda7a6fda5c"
       }
     },
     {
@@ -26310,7 +26774,7 @@
         }
       ],
       "checksum": "39da9cad5f23aa43401f09497d3b280e51b5feba115d9ffbf38ca35d6ff95e96",
-      "classification": "reusable_archive_missing_full_text_partial_evidence",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [
         {
@@ -26332,7 +26796,93 @@
       "nested_lock": false,
       "root_lock": true,
       "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "version": "0.19.3"
+      "version": "0.19.3",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT OR Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "MIT OR Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/netwatch-0.19.3/LICENSE-MIT",
+                    "sha256": "33616ec4c88b6e00de66e6c06f1a55d80bb32a9d7939f3aa83d28e673a1adcae",
+                    "url": "https://raw.githubusercontent.com/n0-computer/net-tools/0030e57fc70981895bb86212ff0f059cc41c8a4e/LICENSE-MIT"
+                  }
+                ]
+              },
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/netwatch-0.19.3/LICENSE-APACHE",
+                    "sha256": "7986218ec4ea89de3511a843ae27fea2584a525036c220ff7b26589179f07888",
+                    "url": "https://raw.githubusercontent.com/n0-computer/net-tools/0030e57fc70981895bb86212ff0f059cc41c8a4e/LICENSE-APACHE"
+                  }
+                ]
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10831,
+          "material_path": "raw-sources/m-r/netwatch-0.19.3/LICENSE-APACHE",
+          "material_sha256": "7986218ec4ea89de3511a843ae27fea2584a525036c220ff7b26589179f07888",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/n0-computer/net-tools/0030e57fc70981895bb86212ff0f059cc41c8a4e/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1048,
+          "material_path": "raw-sources/m-r/netwatch-0.19.3/LICENSE-MIT",
+          "material_sha256": "33616ec4c88b6e00de66e6c06f1a55d80bb32a9d7939f3aa83d28e673a1adcae",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/n0-computer/net-tools/0030e57fc70981895bb86212ff0f059cc41c8a4e/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "netwatch-0.19.3/.cargo_vcs_info.json",
+            "bytes": 102,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202230303330653537666337303938313839356262383632313266663066303539636334316338613465220a20207d2c0a202022706174685f696e5f766373223a20226e65747761746368220a7d",
+            "sha256": "ce14165959064c77b353e053540620375dd853e1d06307beb3931213063be1c3"
+          },
+          "Cargo.toml": {
+            "archive_member": "netwatch-0.19.3/Cargo.toml",
+            "bytes": 5972,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303234220a727573742d76657273696f6e203d2022312e3931220a6e616d65203d20226e65747761746368220a76657273696f6e203d2022302e31392e33220a617574686f7273203d205b226e30207465616d225d0a6275696c64203d20226275696c642e7273220a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d202243726f73732d706c6174666f726d206d6f6e69746f72696e6720666f72206e6574776f726b20696e74657266616365206368616e676573220a726561646d65203d2022524541444d452e6d64220a6b6579776f726473203d205b0a20202020226e6574776f726b696e67222c0a2020202022696e7465726661636573222c0a5d0a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6e302d636f6d70757465722f6e65742d746f6f6c73220a7265736f6c766572203d202232220a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a616c6c2d6665617475726573203d20747275650a72757374646f632d61726773203d205b0a20202020222d2d636667222c0a202020202269726f685f646f63737273222c0a5d0a0a5b7061636b6167652e6d657461646174612e636172676f5f636865636b5f65787465726e616c5f74797065735d0a616c6c6f7765645f65787465726e616c5f7479706573203d205b0a202020202269706e65743a3a69706e65743a3a497076344e6574222c0a202020202269706e65743a3a69706e65743a3a497076364e6574222c0a20202020226e305f6572726f723a3a6572726f723a3a537461636b4572726f72222c0a20202020226e305f6572726f723a3a6d6574613a3a4d657461222c0a20202020226e305f776174636865723a3a446972656374222c0a20202020226e6f715f7564703a3a526563764d657461222c0a20202020226e6f715f7564703a3a5472616e736d6974222c0a2020202022746f6b696f3a3a73796e633a3a6d7073633a3a6572726f723a3a53656e644572726f72222c0a2020202022746f6b696f3a3a73796e633a3a6f6e6573686f743a3a6572726f723a3a526563764572726f72222c0a2020202022746f6b696f3a3a74696d653a3a696e7374616e743a3a496e7374616e74222c0a5d0a0a5b6c69625d0a6e616d65203d20226e65747761746368220a70617468203d20227372632f6c69622e7273220a0a5b5b746573745d5d0a6e616d65203d20227061746368626179220a70617468203d202274657374732f70617463686261792e7273220a0a5b5b746573745d5d0a6e616d65203d2022736d6f6b65220a70617468203d202274657374732f736d6f6b652e7273220a0a5b646570656e64656e636965732e61746f6d69632d77616b65725d0a76657273696f6e203d2022312e312e32220a0a5b646570656e64656e636965732e62797465735d0a76657273696f6e203d2022312e37220a0a5b646570656e64656e636965732e6465726976655f6d6f72655d0a76657273696f6e203d2022322e31220a6665617475726573203d205b0a20202020226465627567222c0a2020202022646973706c6179222c0a5d0a0a5b646570656e64656e636965732e69706e65745d0a76657273696f6e203d202232220a0a5b646570656e64656e636965732e6e302d6572726f725d0a76657273696f6e203d2022312e302e30220a0a5b646570656e64656e636965732e6e302d6675747572655d0a76657273696f6e203d2022302e332e32220a0a5b646570656e64656e636965732e6e302d776174636865725d0a76657273696f6e203d2022312e302e30220a0a5b646570656e64656e636965732e70696e2d70726f6a6563742d6c6974655d0a76657273696f6e203d2022302e322e3136220a0a5b646570656e64656e636965732e74696d655d0a76657273696f6e203d2022302e332e3434220a0a5b646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b0a2020202022696f2d7574696c222c0a20202020226d6163726f73222c0a202020202273796e63222c0a202020202274696d65222c0a5d0a0a5b646570656e64656e636965732e746f6b696f2d7574696c5d0a76657273696f6e203d2022302e37220a6665617475726573203d205b227274225d0a0a5b646570656e64656e636965732e74726163696e675d0a76657273696f6e203d2022302e31220a0a5b6465762d646570656e64656e636965732e74657374726573756c745d0a76657273696f6e203d2022302e342e31220a0a5b6465762d646570656e64656e636965732e74726163696e672d737562736372696265725d0a76657273696f6e203d2022302e33220a6665617475726573203d205b22656e762d66696c746572225d0a0a5b6275696c642d646570656e64656e636965732e6366675f616c69617365735d0a76657273696f6e203d2022302e322e32220a0a5b7461726765742e2763666728616c6c286e6f7428616e79287461726765745f6f73203d2022657370696466222c20616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e222929292c207461726765745f6f73203d202277696e646f7773222929272e646570656e64656e636965732e6e65746465765d0a76657273696f6e203d2022302e34352e30220a0a5b7461726765742e2763666728616c6c286e6f7428616e79287461726765745f6f73203d2022657370696466222c20616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e222929292c207461726765745f6f73203d202277696e646f7773222929272e646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b0a20202020226673222c0a2020202022696f2d737464222c0a5d0a0a5b7461726765742e2763666728616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e222929272e646570656e64656e636965732e6a732d7379735d0a76657273696f6e203d2022302e332e3833220a0a5b7461726765742e2763666728616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e222929272e646570656e64656e636965732e7765622d7379735d0a76657273696f6e203d2022302e332e3833220a6665617475726573203d205b0a20202020224576656e744c697374656e6572222c0a20202020224576656e74546172676574222c0a5d0a0a5b7461726765742e2763666728616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e222929272e6465762d646570656e64656e636965732e7761736d2d62696e6467656e2d746573745d0a76657273696f6e203d2022302e33220a0a5b7461726765742e2763666728616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e222929272e6465762d646570656e64656e636965732e7761736d2d74726163696e675d0a76657273696f6e203d2022322e312e30220a0a5b7461726765742e2763666728616e79287461726765745f6f73203d20226c696e7578222c207461726765745f6f73203d2022616e64726f6964222929272e646570656e64656e636965732e6e65746c696e6b2d7061636b65742d636f72655d0a76657273696f6e203d2022302e382e31220a0a5b7461726765742e2763666728616e79287461726765745f6f73203d20226c696e7578222c207461726765745f6f73203d2022616e64726f6964222929272e646570656e64656e636965732e6e65746c696e6b2d7061636b65742d726f7574655d0a76657273696f6e203d2022302e33312e30220a0a5b7461726765742e2763666728616e79287461726765745f6f73203d20226c696e7578222c207461726765745f6f73203d2022616e64726f6964222929272e646570656e64656e636965732e6e65746c696e6b2d70726f746f5d0a76657273696f6e203d2022302e31322e30220a0a5b7461726765742e2763666728616e79287461726765745f6f73203d20226c696e7578222c207461726765745f6f73203d2022616e64726f6964222929272e646570656e64656e636965732e6e65746c696e6b2d7379735d0a76657273696f6e203d2022302e382e37220a0a5b7461726765742e2763666728616e79287461726765745f6f73203d20226d61636f73222c207461726765745f6f73203d2022696f73222929272e646570656e64656e636965732e6f626a63322d636f72652d666f756e646174696f6e5d0a76657273696f6e203d2022302e332e32220a0a5b7461726765742e2763666728616e79287461726765745f6f73203d20226d61636f73222c207461726765745f6f73203d2022696f73222929272e646570656e64656e636965732e6f626a63322d73797374656d2d636f6e66696775726174696f6e5d0a76657273696f6e203d2022302e332e32220a0a5b7461726765742e27636667286e6f7428616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e22292929272e646570656e64656e636965732e6c6962635d0a76657273696f6e203d2022302e322e313339220a0a5b7461726765742e27636667286e6f7428616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e22292929272e646570656e64656e636965732e6e6f712d7564705d0a76657273696f6e203d2022312e302e30220a0a5b7461726765742e27636667286e6f7428616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e22292929272e646570656e64656e636965732e736f636b6574325d0a76657273696f6e203d2022302e36220a6665617475726573203d205b22616c6c225d0a0a5b7461726765742e27636667286e6f7428616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e22292929272e646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b0a20202020227274222c0a20202020226e6574222c0a5d0a0a5b7461726765742e27636667286e6f7428616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e22292929272e6465762d646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b0a2020202022696f2d7574696c222c0a202020202273796e63222c0a20202020227274222c0a20202020226e6574222c0a20202020226673222c0a20202020226d6163726f73222c0a202020202274696d65222c0a2020202022746573742d7574696c222c0a5d0a0a5b7461726765742e27636667286e6f7428616e79287461726765745f6f73203d2022657370696466222c20616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e22292c207461726765745f6f73203d202277696e646f777322292929272e646570656e64656e636965732e6e65746465765d0a76657273696f6e203d2022302e34362e31220a0a5b7461726765742e27636667286e6f7428616e79287461726765745f6f73203d2022657370696466222c20616c6c287461726765745f66616d696c79203d20227761736d222c207461726765745f6f73203d2022756e6b6e6f776e22292c207461726765745f6f73203d202277696e646f777322292929272e646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b0a20202020226673222c0a2020202022696f2d737464222c0a5d0a0a5b7461726765742e27636667287461726765745f6f73203d2022616e64726f69642229272e646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b2270726f63657373225d0a0a5b7461726765742e27636667287461726765745f6f73203d20226c696e75782229272e6465762d646570656e64656e636965732e63746f725d0a76657273696f6e203d2022312e30220a0a5b7461726765742e27636667287461726765745f6f73203d20226c696e75782229272e6465762d646570656e64656e636965732e70617463686261795d0a76657273696f6e203d2022302e37220a0a5b7461726765742e27636667287461726765745f6f73203d202277696e646f77732229272e646570656e64656e636965732e73657264655d0a76657273696f6e203d202231220a6665617475726573203d205b22646572697665225d0a0a5b7461726765742e27636667287461726765745f6f73203d202277696e646f77732229272e646570656e64656e636965732e77696e646f77735d0a76657273696f6e203d2022302e36322e32220a6665617475726573203d205b0a202020202257696e33325f4e6574776f726b4d616e6167656d656e745f497048656c706572222c0a202020202257696e33325f466f756e646174696f6e222c0a202020202257696e33325f4e6574776f726b4d616e6167656d656e745f4e646973222c0a202020202257696e33325f4e6574776f726b696e675f57696e536f636b222c0a5d0a0a5b7461726765742e27636667287461726765745f6f73203d202277696e646f77732229272e646570656e64656e636965732e77696e646f77732d726573756c745d0a76657273696f6e203d2022302e34220a0a5b7461726765742e27636667287461726765745f6f73203d202277696e646f77732229272e646570656e64656e636965732e776d695d0a76657273696f6e203d2022302e3138220a0a5b6c696e74732e636c697070795d0a756e757365642d6173796e63203d20227761726e220a0a5b6c696e74732e727573745d0a6d697373696e675f64656275675f696d706c656d656e746174696f6e73203d20227761726e220a0a5b6c696e74732e727573742e756e65787065637465645f636667735d0a6c6576656c203d20227761726e220a7072696f72697479203d20300a636865636b2d636667203d205b0a20202020226366672869726f685f646f6373727329222c0a202020202263666728736b69705f706174636862617929222c0a5d0a",
+            "sha256": "d4deae52892e167541155699588b7189ede6ea9269039f824ace0a92cc9b1032"
+          }
+        },
+        "package_path_in_vcs": "netwatch",
+        "repository": "https://github.com/n0-computer/net-tools",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "0030e57fc70981895bb86212ff0f059cc41c8a4e"
+      }
     },
     {
       "archive_data": [
@@ -32140,14 +32690,76 @@
         }
       ],
       "checksum": "f1da63327bb7a8c30a2227df7f43379d0a4731a2eb517b0f61416da6c2a3c739",
-      "classification": "reusable_archive_missing_full_text",
+      "classification": "package-complete",
       "declared_license": "MIT",
       "materials": [],
       "name": "prost-codec",
       "nested_lock": false,
       "root_lock": true,
       "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "version": "0.4.0"
+      "version": "0.4.0",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT",
+        "groups": [
+          {
+            "expression_group": "MIT",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/prost-codec-0.4.0/LICENSE",
+                    "sha256": "e10098b8c52fd18ad0f116aac2c0dba1e99ca125d6848640c00688e160a3ee7d",
+                    "url": "https://raw.githubusercontent.com/libp2p/rust-libp2p/7171dce2f90c05ba7892d4ba926abb1881db27c7/LICENSE"
+                  }
+                ]
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1074,
+          "material_path": "raw-sources/m-r/prost-codec-0.4.0/LICENSE",
+          "material_sha256": "e10098b8c52fd18ad0f116aac2c0dba1e99ca125d6848640c00688e160a3ee7d",
+          "role": "package_terms",
+          "source_file": "LICENSE",
+          "url": "https://raw.githubusercontent.com/libp2p/rust-libp2p/7171dce2f90c05ba7892d4ba926abb1881db27c7/LICENSE"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "prost-codec-0.4.0/.cargo_vcs_info.json",
+            "bytes": 110,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202237313731646365326639306330356261373839326434626139323661626231383831646232376337220a20207d2c0a202022706174685f696e5f766373223a20226d6973632f70726f73742d636f646563220a7d",
+            "sha256": "f27f13adda81dffca0d28f4b69a6bea827e7c1b73892c4810f628e6803d22ecc"
+          },
+          "Cargo.toml": {
+            "archive_member": "prost-codec-0.4.0/Cargo.toml",
+            "bytes": 1590,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303234220a727573742d76657273696f6e203d2022312e38382e30220a6e616d65203d202270726f73742d636f646563220a76657273696f6e203d2022302e342e30220a617574686f7273203d205b224d617820496e64656e203c6d61696c406d61782d696e64656e2e64653e225d0a6275696c64203d2066616c73650a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d20224173796e6368726f6e6f75732064652d2f656e636f64696e67206f662050726f746f6275662073747275637473207573696e67206173796e6368726f6e6f75732d636f6465632c20756e7369676e65642d766172696e7420616e642070726f73742e220a726561646d65203d2066616c73650a6b6579776f726473203d205b226e6574776f726b696e67225d0a63617465676f72696573203d205b226173796e6368726f6e6f7573225d0a6c6963656e7365203d20224d4954220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6c69627032702f727573742d6c6962703270220a7265736f6c766572203d202232220a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a616c6c2d6665617475726573203d20747275650a0a5b6c69625d0a6e616d65203d202270726f73745f636f646563220a70617468203d20227372632f6c69622e7273220a0a5b646570656e64656e636965732e6173796e6368726f6e6f75732d636f6465635d0a76657273696f6e203d2022302e37220a0a5b646570656e64656e636965732e62797465735d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e70726f73745d0a76657273696f6e203d2022302e3134220a0a5b646570656e64656e636965732e746869736572726f725d0a76657273696f6e203d202232220a0a5b646570656e64656e636965732e756e7369676e65642d766172696e745d0a76657273696f6e203d2022302e38220a6665617475726573203d205b22737464225d0a0a5b6465762d646570656e64656e636965732e667574757265735d0a76657273696f6e203d2022302e33220a0a5b6c696e74732e636c697070795d0a6462675f6d6163726f203d20227761726e220a6d616e75616c5f6c65745f656c7365203d20227761726e220a747970655f636f6d706c6578697479203d2022616c6c6f77220a756e6e65636573736172795f7772617073203d20227761726e220a757365645f756e64657273636f72655f62696e64696e67203d20227761726e220a0a5b6c696e74732e636c697070792e706564616e7469635d0a6c6576656c203d2022616c6c6f77220a7072696f72697479203d202d310a0a5b6c696e74732e727573745d0a756e726561636861626c655f707562203d20227761726e220a",
+            "sha256": "7dd88b3e3d21b574160d1d6c41ff538d7bce3dc46943034ffd30cf84a2240ddb"
+          }
+        },
+        "package_path_in_vcs": "misc/prost-codec",
+        "repository": "https://github.com/libp2p/rust-libp2p",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "7171dce2f90c05ba7892d4ba926abb1881db27c7",
+        "binding_note": "The repository-root LICENSE (MIT) at the pinned revision is shared byte-for-byte with rw-stream-sink@0.5.0, which pins the same revision."
+      }
     },
     {
       "archive_data": [
@@ -35838,7 +36450,7 @@
         }
       ],
       "checksum": "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f",
-      "classification": "missing",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [],
       "name": "rustls-platform-verifier-android",
@@ -35858,7 +36470,7 @@
       ],
       "archive_member_count": 5,
       "decoded_tar_bytes": 61440,
-      "review_note": "No selected legal/context evidence; not a finding that no authentic terms exist.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -35871,24 +36483,79 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/rustls-platform-verifier-android-0.2.0/LICENSE-MIT",
+                    "sha256": "1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c",
+                    "url": "https://raw.githubusercontent.com/rustls/rustls-platform-verifier/252e25161a91af476cbea620e29d277592d27ec7/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/rustls-platform-verifier-android-0.2.0/LICENSE-APACHE",
+                    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+                    "url": "https://raw.githubusercontent.com/rustls/rustls-platform-verifier/252e25161a91af476cbea620e29d277592d27ec7/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 11357,
+          "material_path": "raw-sources/m-r/rustls-platform-verifier-android-0.2.0/LICENSE-APACHE",
+          "material_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/rustls/rustls-platform-verifier/252e25161a91af476cbea620e29d277592d27ec7/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1066,
+          "material_path": "raw-sources/m-r/rustls-platform-verifier-android-0.2.0/LICENSE-MIT",
+          "material_sha256": "1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/rustls/rustls-platform-verifier/252e25161a91af476cbea620e29d277592d27ec7/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "rustls-platform-verifier-android-0.2.0/.cargo_vcs_info.json",
+            "bytes": 117,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202232353265323531363161393161663437366362656136323065323964323737353932643237656337220a20207d2c0a202022706174685f696e5f766373223a2022616e64726f69642d72656c656173652d737570706f7274220a7d",
+            "sha256": "f9de66ae77438abeb19e82916812a0266cfdbcd6a8b1ca0404f5f167daf0a43e"
+          },
+          "Cargo.toml": {
+            "archive_member": "rustls-platform-verifier-android-0.2.0/Cargo.toml",
+            "bytes": 1262,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303231220a6e616d65203d2022727573746c732d706c6174666f726d2d76657269666965722d616e64726f6964220a76657273696f6e203d2022302e322e30220a6275696c64203d2066616c73650a696e636c756465203d205b227372632f2a225d0a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d202254686520696e7465726e616c204a564d20737570706f727420636f6d706f6e656e74206f662074686520727573746c732d706c6174666f726d2d76657269666965722063726174652e20596f752073686f756c646e277420646570656e64206f6e2074686973206469726563746c792e220a726561646d65203d2066616c73650a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f727573746c732f727573746c732d706c6174666f726d2d7665726966696572220a0a5b6c69625d0a6e616d65203d2022727573746c735f706c6174666f726d5f76657269666965725f616e64726f6964220a70617468203d20227372632f6c69622e7273220a0a5b646570656e64656e636965735d0a0a5b6465762d646570656e64656e636965732e727573746c735d0a76657273696f6e203d2022302e3233220a6665617475726573203d205b226177732d6c632d7273225d0a64656661756c742d6665617475726573203d2066616c73650a0a5b6465762d646570656e64656e636965732e73696d696c61722d617373657274735d0a76657273696f6e203d202232220a0a5b6465762d646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d202231220a6665617475726573203d205b226d6163726f73225d0a0a5b6465762d646570656e64656e636965732e776562706b692d63636164625d0a76657273696f6e203d2022302e322e32220a",
+            "sha256": "f90c3a720b42da0c59e4b2e52bb6281ea304e000585ed2ed61731a9b5f68f23c"
+          }
+        },
+        "package_path_in_vcs": "android-release-support",
+        "repository": "https://github.com/rustls/rustls-platform-verifier",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "252e25161a91af476cbea620e29d277592d27ec7",
+        "binding_note": "The package directory entries LICENSE-APACHE and LICENSE-MIT at the pinned revision are git symlinks (blob contents ../LICENSE-APACHE and ../LICENSE-MIT); the repository-root files they name are the bound texts."
       }
     },
     {
@@ -36095,7 +36762,7 @@
         }
       ],
       "checksum": "57736c2b47f266c94699b56dc7b4f0a5a669ee87e5ef62bc4a54d8e05945353d",
-      "classification": "missing",
+      "classification": "package-complete",
       "declared_license": "MIT",
       "materials": [],
       "name": "rw-stream-sink",
@@ -36115,7 +36782,7 @@
       ],
       "archive_member_count": 6,
       "decoded_tar_bytes": 21504,
-      "review_note": "No selected legal/context evidence; not a finding that no authentic terms exist.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT",
@@ -36128,15 +36795,54 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/m-r/rw-stream-sink-0.5.0/LICENSE",
+                    "sha256": "e10098b8c52fd18ad0f116aac2c0dba1e99ca125d6848640c00688e160a3ee7d",
+                    "url": "https://raw.githubusercontent.com/libp2p/rust-libp2p/7171dce2f90c05ba7892d4ba926abb1881db27c7/LICENSE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1074,
+          "material_path": "raw-sources/m-r/rw-stream-sink-0.5.0/LICENSE",
+          "material_sha256": "e10098b8c52fd18ad0f116aac2c0dba1e99ca125d6848640c00688e160a3ee7d",
+          "role": "package_terms",
+          "source_file": "LICENSE",
+          "url": "https://raw.githubusercontent.com/libp2p/rust-libp2p/7171dce2f90c05ba7892d4ba926abb1881db27c7/LICENSE"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "rw-stream-sink-0.5.0/.cargo_vcs_info.json",
+            "bytes": 113,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202237313731646365326639306330356261373839326434626139323661626231383831646232376337220a20207d2c0a202022706174685f696e5f766373223a20226d6973632f72772d73747265616d2d73696e6b220a7d",
+            "sha256": "da7022eabf27be9848ee0229d45d90f98030f2ee9e30979deb2b44f0b6b729b0"
+          },
+          "Cargo.toml": {
+            "archive_member": "rw-stream-sink-0.5.0/Cargo.toml",
+            "bytes": 1556,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303234220a727573742d76657273696f6e203d2022312e38382e30220a6e616d65203d202272772d73747265616d2d73696e6b220a76657273696f6e203d2022302e352e30220a617574686f7273203d205b2250617269747920546563686e6f6c6f67696573203c61646d696e407061726974792e696f3e225d0a6275696c64203d2066616c73650a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d2022416461707461746f72206265747765656e2053747265616d2f53696e6b20616e64204173796e63526561642f4173796e635772697465220a726561646d65203d2066616c73650a6b6579776f726473203d205b226e6574776f726b696e67225d0a63617465676f72696573203d205b0a20202020226e6574776f726b2d70726f6772616d6d696e67222c0a20202020226173796e6368726f6e6f7573222c0a5d0a6c6963656e7365203d20224d4954220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f6c69627032702f727573742d6c6962703270220a7265736f6c766572203d202232220a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a616c6c2d6665617475726573203d20747275650a0a5b6c69625d0a6e616d65203d202272775f73747265616d5f73696e6b220a70617468203d20227372632f6c69622e7273220a0a5b646570656e64656e636965732e667574757265735d0a76657273696f6e203d2022302e33220a0a5b646570656e64656e636965732e70696e2d70726f6a6563745d0a76657273696f6e203d2022312e31220a0a5b646570656e64656e636965732e7374617469635f617373657274696f6e735d0a76657273696f6e203d202231220a0a5b6465762d646570656e64656e636965732e746f6b696f5d0a76657273696f6e203d2022312e3533220a6665617475726573203d205b0a20202020227274222c0a20202020226d6163726f73222c0a5d0a64656661756c742d6665617475726573203d2066616c73650a0a5b6c696e74732e636c697070795d0a6462675f6d6163726f203d20227761726e220a6d616e75616c5f6c65745f656c7365203d20227761726e220a747970655f636f6d706c6578697479203d2022616c6c6f77220a756e6e65636573736172795f7772617073203d20227761726e220a757365645f756e64657273636f72655f62696e64696e67203d20227761726e220a0a5b6c696e74732e636c697070792e706564616e7469635d0a6c6576656c203d2022616c6c6f77220a7072696f72697479203d202d310a0a5b6c696e74732e727573745d0a756e726561636861626c655f707562203d20227761726e220a",
+            "sha256": "1ee7eeb3c80583dc5a4bffb7ecd322f071a376e33ceaaf2093146369212b62aa"
+          }
+        },
+        "package_path_in_vcs": "misc/rw-stream-sink",
+        "repository": "https://github.com/libp2p/rust-libp2p",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "7171dce2f90c05ba7892d4ba926abb1881db27c7",
+        "binding_note": "The repository-root LICENSE (MIT) at the pinned revision is shared byte-for-byte with prost-codec@0.4.0, which pins the same revision."
       }
     },
     {
@@ -45104,7 +45810,7 @@
         }
       ],
       "checksum": "2833f28e3adbd1b867292ee4053252ea89ab85e44e5e4701ffead8cada0539fa",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [],
       "name": "uint",
@@ -45124,7 +45830,7 @@
       ],
       "archive_member_count": 11,
       "decoded_tar_bytes": 150528,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -45137,24 +45843,79 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/s-z/uint-0.10.2/LICENSE-MIT",
+                    "sha256": "4fd70c448a560ab3226168373907c277e610a6cc21f8d618decee144421070ca",
+                    "url": "https://raw.githubusercontent.com/paritytech/parity-common/d2817a6d9118ee985805c37b2a44c0f2c9ae3e93/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/s-z/uint-0.10.2/LICENSE-APACHE2",
+                    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+                    "url": "https://raw.githubusercontent.com/paritytech/parity-common/d2817a6d9118ee985805c37b2a44c0f2c9ae3e93/LICENSE-APACHE2"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10847,
+          "material_path": "raw-sources/s-z/uint-0.10.2/LICENSE-APACHE2",
+          "material_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE2",
+          "url": "https://raw.githubusercontent.com/paritytech/parity-common/d2817a6d9118ee985805c37b2a44c0f2c9ae3e93/LICENSE-APACHE2"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1068,
+          "material_path": "raw-sources/s-z/uint-0.10.2/LICENSE-MIT",
+          "material_sha256": "4fd70c448a560ab3226168373907c277e610a6cc21f8d618decee144421070ca",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/paritytech/parity-common/d2817a6d9118ee985805c37b2a44c0f2c9ae3e93/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "uint-0.10.2/.cargo_vcs_info.json",
+            "bytes": 98,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202264323831376136643931313865653938353830356333376232613434633066326339616533653933220a20207d2c0a202022706174685f696e5f766373223a202275696e74220a7d",
+            "sha256": "4f8cb97fd6f335fb5b4e3c6cbfc20d484ef83c7e6a2634eca9c3bb8fbbbb48d6"
+          },
+          "Cargo.toml": {
+            "archive_member": "uint-0.10.2/Cargo.toml",
+            "bytes": 1897,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303231220a727573742d76657273696f6e203d2022312e35362e31220a6e616d65203d202275696e74220a76657273696f6e203d2022302e31302e32220a617574686f7273203d205b2250617269747920546563686e6f6c6f67696573203c61646d696e407061726974792e696f3e225d0a6275696c64203d2066616c73650a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d20224c617267652066697865642d73697a6520696e74656765722061726974686d65746963220a686f6d6570616765203d202268747470733a2f2f6769746875622e636f6d2f706172697479746563682f7061726974792d636f6d6d6f6e220a726561646d65203d2022524541444d452e6d64220a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f706172697479746563682f7061726974792d636f6d6d6f6e220a0a5b66656174757265735d0a64656661756c74203d205b22737464225d0a737464203d205b0a2020202022627974656f726465722f737464222c0a20202020226372756e6368792f737464222c0a20202020226865782f737464222c0a5d0a0a5b6c69625d0a6e616d65203d202275696e74220a70617468203d20227372632f6c69622e7273220a0a5b5b6578616d706c655d5d0a6e616d65203d20226d6f64756c6172220a70617468203d20226578616d706c65732f6d6f64756c61722e7273220a0a5b5b746573745d5d0a6e616d65203d202275696e745f7465737473220a70617468203d202274657374732f75696e745f74657374732e7273220a72657175697265642d6665617475726573203d205b22737464225d0a0a5b5b62656e63685d5d0a6e616d65203d2022626967696e74220a70617468203d202262656e636865732f626967696e742e7273220a6861726e657373203d2066616c73650a0a5b646570656e64656e636965732e6172626974726172795d0a76657273696f6e203d2022312e30220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e627974656f726465725d0a76657273696f6e203d2022312e342e32220a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e6372756e6368795d0a76657273696f6e203d2022302e322e32220a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e6865785d0a76657273696f6e203d2022302e34220a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e717569636b636865636b5d0a76657273696f6e203d202231220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e7374617469635f617373657274696f6e735d0a76657273696f6e203d2022312e302e30220a0a5b6465762d646570656e64656e636965732e637269746572696f6e5d0a76657273696f6e203d2022302e382e31220a0a5b6465762d646570656e64656e636965732e6e756d2d626967696e745d0a76657273696f6e203d2022302e342e30220a0a5b7461726765742e2763666728616c6c28756e69782c207461726765745f61726368203d20227838365f3634222929272e6465762d646570656e64656e636965732e7275675d0a76657273696f6e203d2022312e362e30220a6665617475726573203d205b0a2020202022696e7465676572222c0a2020202022737464222c0a5d0a64656661756c742d6665617475726573203d2066616c73650a",
+            "sha256": "1c952ed9dba9eb573802427e5adc9be9e7d0d6f321177877d1a601bd7dfd203f"
+          }
+        },
+        "package_path_in_vcs": "uint",
+        "repository": "https://github.com/paritytech/parity-common",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "d2817a6d9118ee985805c37b2a44c0f2c9ae3e93",
+        "binding_note": "The workspace root names its Apache-2.0 alternative LICENSE-APACHE2; the file is bound unchanged."
       }
     },
     {
@@ -46648,7 +47409,7 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "raw_material_path": "raw-sources/valuable-0.1.1/LICENSE",
+                    "raw_material_path": "raw-sources/s-z/valuable-0.1.1/LICENSE",
                     "sha256": "ed60d479b8fd1f64e9cbc3de449a16a53ac1b3d1b6aeb9bf9d190a8e93061b44",
                     "url": "https://raw.githubusercontent.com/tokio-rs/valuable/9efc29b6e58cef28f6566a47aa7e142a55fead77/LICENSE"
                   }
@@ -46671,7 +47432,7 @@
             "MIT"
           ],
           "material_bytes": 1065,
-          "material_path": "raw-sources/valuable-0.1.1/LICENSE",
+          "material_path": "raw-sources/s-z/valuable-0.1.1/LICENSE",
           "material_sha256": "ed60d479b8fd1f64e9cbc3de449a16a53ac1b3d1b6aeb9bf9d190a8e93061b44",
           "role": "package_terms",
           "source_file": "LICENSE",
@@ -53516,7 +54277,7 @@
         }
       ],
       "checksum": "4f4e661d6ba6f09a768e31c6f3d88f9fac596ad5d376515d598a37b62d220b34",
-      "classification": "missing",
+      "classification": "package-complete",
       "declared_license": "Apache-2.0 OR MIT",
       "materials": [],
       "name": "yamux",
@@ -53536,7 +54297,7 @@
       ],
       "archive_member_count": 17,
       "decoded_tar_bytes": 150528,
-      "review_note": "No selected legal/context evidence; not a finding that no authentic terms exist.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "Apache-2.0 OR MIT",
@@ -53549,24 +54310,78 @@
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/s-z/yamux-0.14.1/LICENSE-APACHE",
+                    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+                    "url": "https://raw.githubusercontent.com/paritytech/yamux/cc3d0e89f615ef4f329f7a246c95a8ff1e8cc12d/LICENSE-APACHE"
+                  }
+                ]
               },
               {
                 "expression": "MIT",
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/s-z/yamux-0.14.1/LICENSE-MIT",
+                    "sha256": "ec353d4fecf7963b4c054384557e5dbc3c7a717997eb4a3815b315721a6aa75a",
+                    "url": "https://raw.githubusercontent.com/paritytech/yamux/cc3d0e89f615ef4f329f7a246c95a8ff1e8cc12d/LICENSE-MIT"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 11358,
+          "material_path": "raw-sources/s-z/yamux-0.14.1/LICENSE-APACHE",
+          "material_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/paritytech/yamux/cc3d0e89f615ef4f329f7a246c95a8ff1e8cc12d/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1069,
+          "material_path": "raw-sources/s-z/yamux-0.14.1/LICENSE-MIT",
+          "material_sha256": "ec353d4fecf7963b4c054384557e5dbc3c7a717997eb4a3815b315721a6aa75a",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/paritytech/yamux/cc3d0e89f615ef4f329f7a246c95a8ff1e8cc12d/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "yamux-0.14.1/.cargo_vcs_info.json",
+            "bytes": 99,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202263633364306538396636313565663466333239663761323436633935613866663165386363313264220a20207d2c0a202022706174685f696e5f766373223a202279616d7578220a7d",
+            "sha256": "ebfd4e8bbb57a0418243279fd0d941b1e630c67c7dc7f11ec9ed4f7f66e89c93"
+          },
+          "Cargo.toml": {
+            "archive_member": "yamux-0.14.1/Cargo.toml",
+            "bytes": 1552,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303231220a6e616d65203d202279616d7578220a76657273696f6e203d2022302e31342e31220a617574686f7273203d205b2250617269747920546563686e6f6c6f67696573203c61646d696e407061726974792e696f3e225d0a6275696c64203d2066616c73650a6175746f6c6962203d2066616c73650a6175746f62696e73203d2066616c73650a6175746f6578616d706c6573203d2066616c73650a6175746f7465737473203d2066616c73650a6175746f62656e63686573203d2066616c73650a6465736372697074696f6e203d20224d756c7469706c65786572206f7665722072656c6961626c652c206f72646572656420636f6e6e656374696f6e73220a726561646d65203d2066616c73650a6b6579776f726473203d205b0a20202020226e6574776f726b222c0a202020202270726f746f636f6c222c0a5d0a63617465676f72696573203d205b226e6574776f726b2d70726f6772616d6d696e67225d0a6c6963656e7365203d20224170616368652d322e30204f52204d4954220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f706172697479746563682f79616d7578220a0a5b6c69625d0a6e616d65203d202279616d7578220a70617468203d20227372632f6c69622e7273220a0a5b646570656e64656e636965732e667574757265735d0a76657273696f6e203d2022302e33220a6665617475726573203d205b0a2020202022737464222c0a20202020226578656375746f72222c0a5d0a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e6c6f675d0a76657273696f6e203d2022302e34220a0a5b646570656e64656e636965732e6e6f686173682d6861736865725d0a76657273696f6e203d2022302e32220a0a5b646570656e64656e636965732e7061726b696e675f6c6f745d0a76657273696f6e203d2022302e3132220a0a5b646570656e64656e636965732e70696e2d70726f6a6563745d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e7374617469635f617373657274696f6e735d0a76657273696f6e203d202231220a0a5b646570656e64656e636965732e7765622d74696d655d0a76657273696f6e203d202231220a0a5b6465762d646570656e64656e636965732e667574757265735d0a76657273696f6e203d2022302e33220a6665617475726573203d205b226578656375746f72225d0a64656661756c742d6665617475726573203d2066616c73650a0a5b6465762d646570656e64656e636965732e72616e645d0a76657273696f6e203d2022302e3130220a6665617475726573203d205b0a2020202022737464222c0a20202020227374645f726e67222c0a20202020227468726561645f726e67222c0a5d0a64656661756c742d6665617475726573203d2066616c73650a",
+            "sha256": "47a0c4c58c40a901bf6a23b63c5ab984cded75a55adea2447d3c3af803934e4c"
+          }
+        },
+        "package_path_in_vcs": "yamux",
+        "repository": "https://github.com/paritytech/yamux",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "cc3d0e89f615ef4f329f7a246c95a8ff1e8cc12d"
       }
     },
     {
@@ -53580,7 +54395,7 @@
         }
       ],
       "checksum": "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [
         {
@@ -53618,7 +54433,7 @@
       ],
       "archive_member_count": 17,
       "decoded_tar_bytes": 264704,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Authentic pinned repository-root license text is bound to the exact archived clean VCS revision and manifest declaration; text availability only, not legal clearance or election.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -53631,24 +54446,78 @@
                 "identifiers": [
                   "MIT"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/s-z/yasna-0.5.2/LICENSE-MIT",
+                    "sha256": "2a7df90e60fd5512b8bca35d3ce90e068f21c52d962855053fd1d9e2e7ca0f16",
+                    "url": "https://raw.githubusercontent.com/qnighy/yasna.rs/b7e65f9a4c317494cce2d18ea02b3d6eaaea7985/LICENSE-MIT"
+                  }
+                ]
               },
               {
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "availability": "available",
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/s-z/yasna-0.5.2/LICENSE-APACHE",
+                    "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+                    "url": "https://raw.githubusercontent.com/qnighy/yasna.rs/b7e65f9a4c317494cce2d18ea02b3d6eaaea7985/LICENSE-APACHE"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
+      },
+      "raw_materials": [
+        {
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "material_bytes": 10847,
+          "material_path": "raw-sources/s-z/yasna-0.5.2/LICENSE-APACHE",
+          "material_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "role": "package_terms",
+          "source_file": "LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/qnighy/yasna.rs/b7e65f9a4c317494cce2d18ea02b3d6eaaea7985/LICENSE-APACHE"
+        },
+        {
+          "identifiers": [
+            "MIT"
+          ],
+          "material_bytes": 1055,
+          "material_path": "raw-sources/s-z/yasna-0.5.2/LICENSE-MIT",
+          "material_sha256": "2a7df90e60fd5512b8bca35d3ce90e068f21c52d962855053fd1d9e2e7ca0f16",
+          "role": "package_terms",
+          "source_file": "LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/qnighy/yasna.rs/b7e65f9a4c317494cce2d18ea02b3d6eaaea7985/LICENSE-MIT"
+        }
+      ],
+      "raw_source_binding": {
+        "archive_metadata": {
+          ".cargo_vcs_info.json": {
+            "archive_member": "yasna-0.5.2/.cargo_vcs_info.json",
+            "bytes": 94,
+            "bytes_hex": "7b0a202022676974223a207b0a202020202273686131223a202262376536356639613463333137343934636365326431386561303262336436656161656137393835220a20207d2c0a202022706174685f696e5f766373223a2022220a7d",
+            "sha256": "87fde6d591c515f607a72a75f6f0455bdfcb773e8402a9bc76be75d3fdf0b8c1"
+          },
+          "Cargo.toml": {
+            "archive_member": "yasna-0.5.2/Cargo.toml",
+            "bytes": 1372,
+            "bytes_hex": "2320544849532046494c45204953204155544f4d41544943414c4c592047454e45524154454420425920434152474f0a230a23205768656e2075706c6f6164696e672063726174657320746f2074686520726567697374727920436172676f2077696c6c206175746f6d61746963616c6c790a2320226e6f726d616c697a652220436172676f2e746f6d6c2066696c657320666f72206d6178696d616c20636f6d7061746962696c6974790a23207769746820616c6c2076657273696f6e73206f6620436172676f20616e6420616c736f20726577726974652060706174686020646570656e64656e636965730a2320746f2072656769737472792028652e672e2c206372617465732e696f2920646570656e64656e636965732e0a230a2320496620796f75206172652072656164696e6720746869732066696c65206265206177617265207468617420746865206f726967696e616c20436172676f2e746f6d6c0a232077696c6c206c696b656c79206c6f6f6b207665727920646966666572656e742028616e64206d756368206d6f726520726561736f6e61626c65292e0a232053656520436172676f2e746f6d6c2e6f72696720666f7220746865206f726967696e616c20636f6e74656e74732e0a0a5b7061636b6167655d0a65646974696f6e203d202232303138220a6e616d65203d20227961736e61220a76657273696f6e203d2022302e352e32220a617574686f7273203d205b224d6173616b692048617261203c61636b69652e682e676d616940676d61696c2e636f6d3e225d0a696e636c756465203d205b0a20202020227372632f2a2a2f2a2e7273222c0a2020202022436172676f2e746f6d6c222c0a5d0a6465736372697074696f6e203d202241534e2e31206c69627261727920666f722052757374220a686f6d6570616765203d202268747470733a2f2f6769746875622e636f6d2f716e696768792f7961736e612e7273220a646f63756d656e746174696f6e203d202268747470733a2f2f646f63732e72732f7961736e61220a726561646d65203d2022524541444d452e6d64220a6b6579776f726473203d205b0a2020202022706172736572222c0a202020202273657269616c697a6174696f6e222c0a5d0a6c6963656e7365203d20224d4954204f52204170616368652d322e30220a7265706f7369746f7279203d202268747470733a2f2f6769746875622e636f6d2f716e696768792f7961736e612e7273220a0a5b7061636b6167652e6d657461646174612e646f63732e72735d0a6665617475726573203d205b0a20202020226e756d2d626967696e74222c0a20202020226269742d766563222c0a202020202274696d65222c0a2020202022737464222c0a5d0a0a5b646570656e64656e636965732e6269742d7665635d0a76657273696f6e203d2022302e362e31220a6665617475726573203d205b22737464225d0a6f7074696f6e616c203d20747275650a64656661756c742d6665617475726573203d2066616c73650a0a5b646570656e64656e636965732e6e756d2d626967696e745d0a76657273696f6e203d2022302e34220a6f7074696f6e616c203d20747275650a0a5b646570656e64656e636965732e74696d655d0a76657273696f6e203d2022302e332e31220a6665617475726573203d205b22737464225d0a6f7074696f6e616c203d20747275650a64656661756c742d6665617475726573203d2066616c73650a0a5b6465762d646570656e64656e636965732e6e756d2d7472616974735d0a76657273696f6e203d2022302e32220a64656661756c742d6665617475726573203d2066616c73650a0a5b66656174757265735d0a64656661756c74203d205b5d0a737464203d205b5d0a",
+            "sha256": "21d71ce98bb98c63b1c3f4687e77d0f6dd2a20c6deba1c8fe336a97772cb9a66"
+          }
+        },
+        "package_path_in_vcs": "",
+        "repository": "https://github.com/qnighy/yasna.rs",
+        "review_scope": "Exact archived package declaration and pinned repository-root files at the archived clean revision; no legal clearance or license election.",
+        "revision": "b7e65f9a4c317494cce2d18ea02b3d6eaaea7985"
       }
     },
     {
@@ -55384,10 +56253,16 @@
     "no_license_choice_or_legal_clearance": true,
     "package_count": 5,
     "receipt_bytes": 5542,
-    "receipt_path": "raw-sources/receipt.json",
+    "receipt_path": "raw-sources/receipts/receipt.json",
     "receipt_sha256": "d4f45767bba3d21266670faa1ffeacc8076c9768a2da5f23d382aac2ebf8bfd5",
-    "macro_receipt_path": "raw-sources/jni-macro-receipt.json",
+    "macro_receipt_path": "raw-sources/receipts/jni-macro-receipt.json",
     "macro_receipt_bytes": 5646,
-    "macro_receipt_sha256": "1a9f927618e812d27bdd1d1850042b9efa21a9f1f42396add47a468eac1aa120"
+    "macro_receipt_sha256": "1a9f927618e812d27bdd1d1850042b9efa21a9f1f42396add47a468eac1aa120",
+    "gap_receipt_path": "raw-sources/receipts/n1-gap-receipt.json",
+    "gap_receipt_bytes": 27525,
+    "gap_receipt_sha256": "3f6f2c53fb29aebd923e9e60cd36671a86f9f988d916e0a69c2fb03fc677e0e3",
+    "gap_material_count": 32,
+    "gap_material_bytes": 182118,
+    "gap_package_count": 17
   }
 }

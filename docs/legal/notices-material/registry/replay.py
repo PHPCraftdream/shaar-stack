@@ -1,11 +1,11 @@
 import argparse
 import gzip
-import hashlib
+import importlib.util
 import io
 import json
 import os
 import re
-import stat
+import sys
 import tarfile
 import tomllib
 import unicodedata
@@ -27,39 +27,23 @@ TOTAL_MEMBERS_CAP = 250000
 RECEIPT_REL = "notices-registry-authorized-1109/receipt.json"
 
 
-def digest(data):
-    return hashlib.sha256(data).hexdigest()
+def load_sibling(name):
+    key = "notices_registry_" + name
+    module = sys.modules.get(key)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(key, Path(__file__).with_name(name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[key] = module
+        spec.loader.exec_module(module)
+    return module
 
 
-def bounded_regular(path, cap):
-    metadata = path.lstat()
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > cap:
-        raise ValueError(f"Not a bounded regular file: {path}")
-    with path.open("rb") as stream:
-        data = stream.read(cap + 1)
-    if len(data) != metadata.st_size or len(data) > cap:
-        raise ValueError(f"Bounded read mismatch: {path}")
-    return data
-
-
-def safe_relative_path(value):
-    if not isinstance(value, str) or not value or "\\" in value or value.startswith("/") or re.match(r"^[A-Za-z]:", value):
-        raise ValueError(f"Unsafe relative path: {value!r}")
-    parts = value.split("/")
-    if any(part in ("", ".", "..") or "\x00" in part for part in parts):
-        raise ValueError(f"Unsafe path component: {value!r}")
-    return parts
-
-
-def no_link_path(root, relative):
-    parts = safe_relative_path(relative)
-    current = root
-    for part in parts:
-        current = current / part
-        metadata = current.lstat()
-        if stat.S_ISLNK(metadata.st_mode):
-            raise ValueError(f"Symlink in DATA path: {current}")
-    return current
+data_io = load_sibling("data_io")
+raw_sources = load_sibling("raw_sources")
+digest = data_io.digest
+bounded_regular = data_io.bounded_regular
+safe_relative_path = data_io.safe_relative_path
+no_link_path = data_io.no_link_path
 
 
 def archive_path(name, directory, expected_root):
@@ -140,7 +124,7 @@ def parse_archive(compressed, identity, expected_member_count, requested_members
                 if len(data) != member.size:
                     raise ValueError(f"Short or oversized archive member read: {normalized}")
                 members[normalized] = data
-    if member_count != expected_member_count:
+    if expected_member_count is not None and member_count != expected_member_count:
         raise ValueError(f"Member count mismatch for {identity['name']}@{identity['version']}: {member_count}")
     return decoded, member_count, regular_bytes, members
 
@@ -191,154 +175,6 @@ def validate_terms_evidence(row):
             raise ValueError(f"Package-complete classification lacks package-scope text: {row['name']}@{row['version']}")
 
 
-RAW_RECEIPT_SHA = "d4f45767bba3d21266670faa1ffeacc8076c9768a2da5f23d382aac2ebf8bfd5"
-MACRO_RECEIPT_SHA = "1a9f927618e812d27bdd1d1850042b9efa21a9f1f42396add47a468eac1aa120"
-MACRO_RECEIPT_BYTES = 5646
-MACRO_PROPOSAL_SHA = "dca3218e59f24108feedbc36fdb416c500792a35c5aee50b48ee1b3fadf457a7"
-MACRO_READMES = {("jni-macros", "0.22.4"): None, ("jni-sys-macros", "0.4.1"): "README.md"}
-RAW_PACKAGES = {
-    ("dlopen2", "0.8.2"): (
-        "5e2c5bd4158e66d1e215c49b837e11d62f3267b30c92f1d171c4d3105e3dc4d4",
-        "cc80e4a0a90d499b677fdf7743699b4b3a43a989", "dlopen2", "OpenByteDev/dlopen2"),
-    ("valuable", "0.1.1"): (
-        "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65",
-        "9efc29b6e58cef28f6566a47aa7e142a55fead77", "valuable", "tokio-rs/valuable"),
-    ("jni", "0.22.4"): (
-        "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498",
-        "5ae9458a4ec44c5318f37ddc7569c1d4ae8a69e7", "crates/jni", "jni-rs/jni-rs"),
-    ("jni-macros", "0.22.4"): (
-        "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3",
-        "33045a124105c939d1e2cbdcb5a39e5d868ffa03", "crates/jni-macros", "jni-rs/jni-rs"),
-    ("jni-sys-macros", "0.4.1"): (
-        "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264",
-        "64d77b7a5f119d7b55b4e2c169a4668067ff59e6", "jni-sys-macros", "jni-rs/jni-sys"),
-}
-
-
-def macro_records(document):
-    """Validate the second acquisition format before adapting its separate DATA records."""
-    attempts = document.get("attempts", [])
-    elapsed = document.get("elapsed_seconds")
-    if (document.get("proposal_sha256") != MACRO_PROPOSAL_SHA or document.get("status") != "completed"
-            or len(attempts) != 4 or type(elapsed) not in (int, float) or not 0 <= elapsed <= 300):
-        raise ValueError("Macro acquisition proposal/status/pass budget mismatch")
-    records, seen = [], set()
-    for attempt in attempts:
-        candidate = attempt.get("candidate", {})
-        package = candidate.get("package", {})
-        key = (package.get("name"), package.get("version"))
-        if key not in MACRO_READMES:
-            raise ValueError("Unreviewed macro acquisition package")
-        checksum, revision, package_path, repository = RAW_PACKAGES[key]
-        name = candidate.get("root_candidate_path")
-        url = f"https://raw.githubusercontent.com/{repository}/{revision}/{name}"
-        size, seconds = attempt.get("bytes"), attempt.get("request_seconds")
-        if (name not in {"LICENSE-APACHE", "LICENSE-MIT"} or (key, name) in seen
-                or package.get("checksum") != checksum or candidate.get("revision") != revision
-                or candidate.get("package_path_in_vcs") != package_path
-                or candidate.get("repository") != "https://github.com/" + repository
-                or candidate.get("url") != url or attempt.get("attempt_number_for_url") != 1
-                or attempt.get("status") != "completed" or attempt.get("text_available") is not True
-                or attempt.get("http_status_output") != "200" or attempt.get("curl_exit_code") != 0
-                or type(size) is not int or not 0 < size <= 65536
-                or type(seconds) not in (int, float) or not 0 <= seconds <= 30):
-            raise ValueError("Macro acquisition identity/HTTP/material/request budget mismatch")
-        seen.add((key, name))
-        records.append({"url": url, "status": "fetched", "http_status": 200,
-                        "identities": [f"{key[0]}@{key[1]}"], "revision": revision,
-                        "source_file": name, "bytes": size, "sha256": attempt.get("sha256"),
-                        "acquisition_proposal_sha256": MACRO_PROPOSAL_SHA})
-    expected = {(key, name) for key in MACRO_READMES for name in ("LICENSE-APACHE", "LICENSE-MIT")}
-    total = sum(record["bytes"] for record in records)
-    if seen != expected or document.get("body_bytes_total") != total or total > 262144:
-        raise ValueError("Macro acquisition material set/total budget mismatch")
-    return records
-
-
-def raw_receipt(registry):
-    data = bounded_regular(no_link_path(registry, "raw-sources/receipt.json"), 65536)
-    if len(data) != 5542 or digest(data) != RAW_RECEIPT_SHA:
-        raise ValueError("Pinned raw acquisition receipt mismatch")
-    receipt = json.loads(data)
-    data = bounded_regular(no_link_path(registry, "raw-sources/jni-macro-receipt.json"), 65536)
-    if len(data) != MACRO_RECEIPT_BYTES or digest(data) != MACRO_RECEIPT_SHA:
-        raise ValueError("Pinned macro acquisition receipt mismatch")
-    receipt["records"].extend(macro_records(json.loads(data)))
-    receipt["macro_proposal_sha256"] = MACRO_PROPOSAL_SHA
-    return receipt
-
-
-def validate_raw_sources(row, registry, source_members, receipt):
-    """Bind separate repository-root DATA to one exact locked archive revision."""
-    key = (row["name"], row["version"])
-    expected = RAW_PACKAGES.get(key)
-    if expected is None or row.get("source") != "registry+https://github.com/rust-lang/crates.io-index":
-        raise ValueError("Unreviewed raw-source package identity")
-    checksum, revision, package_path, repository = expected
-    binding = row.get("raw_source_binding", {})
-    if (row.get("checksum") != checksum or binding.get("revision") != revision
-            or binding.get("package_path_in_vcs") != package_path
-            or binding.get("repository") != "https://github.com/" + repository):
-        raise ValueError("Raw-source archive/revision/repository binding mismatch")
-    metadata = binding.get("archive_metadata", {})
-    if set(metadata) != {".cargo_vcs_info.json", "Cargo.toml.orig"}:
-        raise ValueError("Raw-source archived metadata set mismatch")
-    decoded = {}
-    for name, item in metadata.items():
-        member = f"{row['name']}-{row['version']}/{name}"
-        content = source_members.get(member)
-        if (item.get("archive_member") != member or content is None
-                or len(content) > 65536 or digest(content) != item.get("sha256")
-                or content.hex() != item.get("bytes_hex")):
-            raise ValueError("Raw-source metadata differs from archived bytes")
-        decoded[name] = content.decode("utf-8")
-    vcs = json.loads(decoded[".cargo_vcs_info.json"])
-    original = tomllib.loads(decoded["Cargo.toml.orig"]).get("package", {})
-    readme = MACRO_READMES[key] if key in MACRO_READMES else (
-        "../README.md" if package_path.count("/") == 0 else "../../README.md")
-    if key in MACRO_READMES and (original.get("license") != "MIT OR Apache-2.0"
-            or original.get("repository") != "https://github.com/" + repository
-            or vcs.get("git", {}).get("dirty", False)
-            or receipt.get("macro_proposal_sha256") != MACRO_PROPOSAL_SHA):
-        raise ValueError("Macro archived license/repository/clean revision/proposal scope mismatch")
-    if (vcs.get("git", {}).get("sha1") != revision or vcs.get("path_in_vcs") != package_path
-            or original.get("readme") != readme or binding.get("original_readme") != readme):
-        raise ValueError("Archived VCS/readme scope mismatch")
-    if receipt.get("proposal_sha256") != "5a3d9d02e89b33df6c677268a44735c9770a4d7f8d92835718cb21798232dc6b":
-        raise ValueError("Raw acquisition proposal mismatch")
-    materials = row.get("raw_materials", [])
-    filenames = {"LICENSE-APACHE", "LICENSE-MIT"} if key[0] == "jni" or key in MACRO_READMES else {"LICENSE"}
-    if len(materials) != len(filenames) or {m.get("source_file") for m in materials} != filenames:
-        raise ValueError("Reviewed raw material set mismatch")
-    total = 0
-    for material in materials:
-        name = material["source_file"]
-        url = f"https://raw.githubusercontent.com/{repository}/{revision}/{name}"
-        records = [r for r in receipt.get("records", []) if r.get("url") == url]
-        if len(records) != 1:
-            raise ValueError("Raw acquisition URL absent or duplicated")
-        record = records[0]
-        if key in MACRO_READMES and record.get("acquisition_proposal_sha256") != MACRO_PROPOSAL_SHA:
-            raise ValueError("Macro material acquisition proposal mismatch")
-        identity = f"{key[0]}@{key[1]}"
-        path = f"raw-sources/{key[0]}-{key[1]}/{name}"
-        identifiers = ["Apache-2.0" if name == "LICENSE-APACHE" else "MIT"]
-        if (record.get("status") != "fetched" or record.get("http_status") != 200
-                or record.get("identities") != [identity] or record.get("revision") != revision
-                or record.get("source_file") != name or material.get("url") != url
-                or material.get("material_path") != path or material.get("role") != "package_terms"
-                or material.get("identifiers") != identifiers):
-            raise ValueError("Raw material receipt identity/scope mismatch")
-        content = bounded_regular(no_link_path(registry, path), 65536)
-        if (len(content) != record.get("bytes") or len(content) != material.get("material_bytes")
-                or digest(content) != record.get("sha256")
-                or digest(content) != material.get("material_sha256")):
-            raise ValueError("Raw material bytes differ from pinned receipt")
-        total += len(content)
-    return len(materials), total
-
-
-
 def registry_shape(registry):
     pending = [registry]
     directories = 0
@@ -356,6 +192,39 @@ def registry_shape(registry):
             if entry.is_dir(follow_symlinks=False):
                 pending.append(Path(entry.path))
     return directories, maximum_items
+
+
+def gap_archive_members(data_root, relative, checksum, name, version, items, totals):
+    compressed = bounded_regular(no_link_path(data_root, relative), COMPRESSED_CAP)
+    if digest(compressed) != checksum:
+        raise ValueError(f"Gap archive checksum mismatch: {name}@{version}")
+    wanted = {f"{name}-{version}/{file}" for file in items}
+    return parse_archive(compressed, {"name": name, "version": version}, None, wanted, totals)[3]
+
+
+def replay_unindexed_gap_rows(inventory, data_root, registry, receipt):
+    """Validate gap bindings whose archives sit outside the 515-archive receipt (legacy rows, path packages)."""
+    count = size = packages = 0
+    totals = {"decoded": 0, "members": 0, "regular_bytes": 0, "evidence_bytes": 0}
+    items = (".cargo_vcs_info.json", "Cargo.toml")
+    rows = [(row, row["archive_data"][0]["path"], row["checksum"]) for row in inventory["identities"]
+            if not any("receipt_index" in item for item in row["archive_data"])
+            and (row["name"], row["version"]) in raw_sources.GAP_PACKAGES]
+    prepared = json.loads(bounded_regular(no_link_path(registry.parent, "prepared/inventory.json"), 1024 * 1024))
+    rows += [(row, row["upstream_archive"]["path"], row["upstream_archive"]["sha256"]) for row in prepared["identities"]
+             if (row["cargo_identity"]["name"], row["cargo_identity"]["version"]) in raw_sources.GAP_PACKAGES]
+    if len(rows) != 5:
+        raise ValueError("Unindexed gap row set mismatch")
+    for row, relative, checksum in rows:
+        name, version, _, _ = raw_sources.gap_view(row)
+        members = gap_archive_members(data_root, relative, checksum, name, version, items, totals)
+        view = raw_sources.terms_view(row)
+        validate_terms_evidence(view)
+        if view["classification"] != "package-complete":
+            raise ValueError(f"Gap row not package-complete: {name}@{version}")
+        added, added_bytes = raw_sources.validate_gap_binding(row, registry, members, receipt)
+        count, size, packages = count + added, size + added_bytes, packages + 1
+    return count, size, packages
 
 
 def main():
@@ -421,7 +290,8 @@ def main():
     material_archive_rows = 0
     classification_counts = {}
     raw_count = raw_bytes = raw_packages = 0
-    pinned_raw_receipt = raw_receipt(registry)
+    gap_count = gap_bytes = gap_packages = 0
+    pinned_raw_receipt = raw_sources.raw_receipt(registry)
     status_counts = {}
     for index in range(ARCHIVE_COUNT):
         receipt = receipt_by_index[index]
@@ -490,10 +360,16 @@ def main():
         if package.get("license") != row["declared_license"] or package.get("license_file") != manifest.get("license_file"):
             raise ValueError(f"Cargo.toml declaration mismatch: {index}")
         if row.get("raw_source_binding") or row.get("raw_materials"):
-            count, size = validate_raw_sources(row, registry, source_members, pinned_raw_receipt)
-            raw_count += count
-            raw_bytes += size
-            raw_packages += 1
+            if (identity["name"], identity["version"]) in raw_sources.GAP_PACKAGES:
+                count, size = raw_sources.validate_gap_binding(row, registry, source_members, pinned_raw_receipt)
+                gap_count += count
+                gap_bytes += size
+                gap_packages += 1
+            else:
+                count, size = raw_sources.validate_raw_sources(row, registry, source_members, pinned_raw_receipt)
+                raw_count += count
+                raw_bytes += size
+                raw_packages += 1
         for material in row.get("materials", []):
             relative_material = material["material_path"]
             material_path_on_disk = no_link_path(registry, relative_material)
@@ -529,18 +405,28 @@ def main():
         if row.get("archive_data") and any("receipt_index" in item for item in row["archive_data"]):
             status_counts[row["classification"]] = status_counts.get(row["classification"], 0) + 1
 
+    extra = replay_unindexed_gap_rows(inventory, data_root, registry, pinned_raw_receipt)
+    gap_count, gap_bytes, gap_packages = (gap_count + extra[0], gap_bytes + extra[1], gap_packages + extra[2])
     supplement = inventory.get("raw_source_supplement", {})
     if (raw_count, raw_bytes, raw_packages) != (8, 38580, 5):
         raise ValueError("Raw supplement replay totals mismatch")
-    if (supplement.get("receipt_path") != "raw-sources/receipt.json"
-            or supplement.get("receipt_sha256") != RAW_RECEIPT_SHA
+    if (gap_count, gap_bytes, gap_packages) != raw_sources.GAP_TOTALS:
+        raise ValueError(f"Gap raw replay totals mismatch: {gap_count}/{gap_bytes}/{gap_packages}")
+    if (supplement.get("receipt_path") != "raw-sources/receipts/receipt.json"
+            or supplement.get("receipt_sha256") != raw_sources.RAW_RECEIPT_SHA
             or supplement.get("receipt_bytes") != 5542
-            or supplement.get("macro_receipt_path") != "raw-sources/jni-macro-receipt.json"
-            or supplement.get("macro_receipt_sha256") != MACRO_RECEIPT_SHA
-            or supplement.get("macro_receipt_bytes") != MACRO_RECEIPT_BYTES
+            or supplement.get("macro_receipt_path") != "raw-sources/receipts/jni-macro-receipt.json"
+            or supplement.get("macro_receipt_sha256") != raw_sources.MACRO_RECEIPT_SHA
+            or supplement.get("macro_receipt_bytes") != raw_sources.MACRO_RECEIPT_BYTES
             or supplement.get("material_count") != raw_count
             or supplement.get("material_bytes") != raw_bytes
             or supplement.get("package_count") != raw_packages
+            or supplement.get("gap_receipt_path") != "raw-sources/receipts/n1-gap-receipt.json"
+            or supplement.get("gap_receipt_sha256") != raw_sources.GAP_RECEIPT_SHA
+            or supplement.get("gap_receipt_bytes") != raw_sources.GAP_RECEIPT_BYTES
+            or supplement.get("gap_material_count") != gap_count
+            or supplement.get("gap_material_bytes") != gap_bytes
+            or supplement.get("gap_package_count") != gap_packages
             or supplement.get("no_license_choice_or_legal_clearance") is not True):
         raise ValueError("Raw supplement inventory mismatch")
     root_locks = lock_identities(worktree / "Cargo.lock")
@@ -573,6 +459,9 @@ def main():
         "raw_packages": raw_packages,
         "raw_material_rows": raw_count,
         "raw_material_bytes": raw_bytes,
+        "gap_raw_packages": gap_packages,
+        "gap_raw_material_rows": gap_count,
+        "gap_raw_material_bytes": gap_bytes,
         "actual_inventory_sha256": inventory_sha,
         "actual_inventory_bytes": len(inventory_raw),
         "receipt_sha256": digest(receipt_raw),
