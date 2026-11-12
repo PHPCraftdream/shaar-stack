@@ -150,6 +150,16 @@ class KernelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             kernel.ns_argv(tools, {**cfg, "ns": {**cfg["ns"], "rtr_a": "default"}}, "rtr_a", "/bin/true")
 
+    def test_lan_isolation_flushes_only_the_router_lan_side_interfaces(self):
+        cfg = {"prefix": "snaabbcc", "ns": {key: "snaabbcc-" + value for key, value in contract.SUFFIXES.items()}}
+        tools = {"ip": "/usr/sbin/ip", "nft": "/usr/sbin/nft"}
+        calls = []
+        with mock.patch.object(kernel, "checked", lambda argv, deadline, data=None, what="x": calls.append((argv, what)) or b""):
+            kernel.isolate_segment(cfg, tools, 0)
+        self.assertEqual([argv for argv, _ in calls], [
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-a", "/usr/sbin/ip", "addr", "flush", "dev", "snaabbccra1"],
+            ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-b", "/usr/sbin/ip", "addr", "flush", "dev", "snaabbccrb1"]])
+
     def test_nat_observation_requires_a_replied_published_native_tuple_in_the_fixed_range(self):
         ports = kernel.native_candidates(["203.0.113.10:40123", "203.0.113.10:42001", "10.0.2.2:40123", "127.0.0.1:9", "bad"], 42001)
         self.assertEqual(ports, [40123])

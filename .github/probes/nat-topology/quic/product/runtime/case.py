@@ -230,6 +230,8 @@ class Run:
         self.ports = {"dht": ready["dht_port"], "relay": ready["relay_port"], "transit": ready["transit_port"]}
         ev["wan"] = {**self.ports, "control_port": ready["control_port"], "relay_peer": ready["relay_peer"]}
         self.before = self.calibrate_and_install(self.ports)
+        if spec["net"] == "lan":
+            kernel.isolate_segment(self.cfg, self.tools, self.limit(10))
         count = spec["target_accepts"]
         target_args = ["--deny"] if count == 0 else ["--accepts", str(count)] if count > 1 else []
         self.target = self.python_worker("target", spec["server_ns"], "target", *target_args)

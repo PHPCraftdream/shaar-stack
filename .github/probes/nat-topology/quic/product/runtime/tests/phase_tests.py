@@ -53,6 +53,7 @@ def evidence(case):
         for router in routers:
             routers[router]["quota_used"] = 0
             routers[router]["counters"]["lan_native"]["packets"] = 7
+            routers[router]["counters"]["lan_sent"]["packets"] = 7
     else:
         routers["rtr_a"]["counters"]["dht_drop"]["packets"] = 3
     if spec.get("flow") == "denied-key":

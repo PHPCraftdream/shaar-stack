@@ -43,9 +43,10 @@ def lan(counters, result, spec):
         contract.require(result["kernel"][router]["quota_used"] == 0, f"{router} forwarded traffic in the LAN case")
         for name in ("udp_nat", "tcp_nat", "native_snat", "native_drop"):
             contract.require(packets(counters, router, name) == 0, f"{router} {name} is nonzero in the LAN case")
-        contract.require(packets(counters, router, "lan_native") > 0, f"{router} saw no Native UDP on the LAN segment")
+        contract.require(packets(counters, router, "lan_native") > 0 and packets(counters, router, "lan_sent") > 0,
+                         f"{router} sent or saw no Native UDP on the LAN segment")
     published = [item.rpartition(":")[0] for item in result["publication"]["native_addresses"]]
-    contract.require(contract.ip_for(spec["server_ns"]) in published, "published addresses lack the segment address")
+    contract.require(published == [contract.ip_for(spec["server_ns"])], f"published addresses differ from the segment address: {published}")
 
 
 def dht_drop(counters):
