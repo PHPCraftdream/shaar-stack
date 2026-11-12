@@ -75,13 +75,23 @@ async def exchange_target(stream, request, reply):
         stream.close()
 
 
+def merge_receipts(completed, new):
+    """Sum per-connection receipts; the target result reports exact totals across all accepted APP streams."""
+    if completed is None:
+        return dict(new)
+    return {key: completed[key] + new[key] for key in completed}
+
+
 async def stop_frame(reader, nonce):
     frame = await reader.readuntil(b"\n")
     if frame != ("STOP " + nonce + "\n").encode("ascii") or await reader.read(1) != b"":
         raise ValueError("target stop frame must be nonce-bound and terminal")
 
 
-async def target(nonce, denied, bound, control):
+async def target(nonce, denied, bound, control, expected=None):
+    """expected: exact number of APP streams to accept (default 1, or 0 when denied); a further admission is a failure."""
+    if expected is None:
+        expected = 0 if denied else 1
     request, reply = payloads(nonce)
     loop = asyncio.get_running_loop()
     accept, stop, active = None, None, set()
@@ -96,7 +106,7 @@ async def target(nonce, denied, bound, control):
                 if accept in done:
                     stream, address = accept.result()
                     accepted += 1
-                    if address[0] != "127.0.0.1" or denied or accepted > 1:
+                    if address[0] != "127.0.0.1" or denied or accepted > expected:
                         stream.close()
                         raise ValueError("unexpected fixed-target TCP admission")
                     stream.setblocking(False)
@@ -104,10 +114,10 @@ async def target(nonce, denied, bound, control):
                     accept = asyncio.create_task(loop.sock_accept(bound))
                 for task in done & active:
                     active.remove(task)
-                    completed = task.result()
+                    completed = merge_receipts(completed, task.result())
                 if stop in done:
                     stop.result()
-                    if active or accepted != (0 if denied else 1) or (not denied and completed is None):
+                    if active or accepted != expected or (expected and completed is None):
                         raise ValueError("target stopped before its required APP outcome")
                     # Products must already be reaped before the controller sends STOP.
                     accept.cancel()
@@ -156,12 +166,12 @@ async def denied_terminal(stream):
     return "eof"
 
 
-async def app(nonce, denied, port=FRONT_PORT, deadline=None):
+async def app(nonce, denied, port=FRONT_PORT, deadline=None, attempts=MAX_ATTEMPTS, pause=None):
     request, reply = payloads(nonce)
     loop = asyncio.get_running_loop()
     admitted = False
     async with asyncio.timeout(IO_SECONDS if deadline is None else deadline):
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        for attempt in range(1, attempts + 1):
             stream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             stream.setblocking(False)
             try:
@@ -187,12 +197,12 @@ async def app(nonce, denied, port=FRONT_PORT, deadline=None):
                 emit("SHAAR_NAT_RESULT", nonce, "app", **result)
                 return result
             except OSError as error:
-                if error.errno not in TRANSIENT or attempt == MAX_ATTEMPTS:
+                if error.errno not in TRANSIENT or attempt == attempts:
                     raise
             finally:
                 stream.close()
             # Backoff follows an actual typed failure, never a readiness sleep.
-            await asyncio.sleep(min(0.05 * 2 ** (attempt - 1), 5.0))
+            await asyncio.sleep(min(0.05 * 2 ** (attempt - 1), 5.0) if pause is None else pause)
     raise RuntimeError("APP attempt budget exhausted")
 
 
@@ -213,18 +223,22 @@ async def main(args):
     if args.role == "app":
         if not 1 <= args.deadline <= MAX_DEADLINE:
             raise ValueError("APP campaign deadline outside the bounded window")
-        await app(args.nonce, args.deny, deadline=args.deadline)
+        if not 1 <= args.attempts <= MAX_ATTEMPTS or not (args.pause is None or 0.05 <= args.pause <= 10):
+            raise ValueError("APP attempt budget or pause outside the bounded window")
+        await app(args.nonce, args.deny, deadline=args.deadline, attempts=args.attempts, pause=args.pause)
         return
     if args.role == "stop":
         if not 1024 <= args.port <= 65535:
             raise ValueError("control port outside the owned range")
         await stop(args.nonce, args.port)
         return
+    if not 0 <= args.accepts <= MAX_ATTEMPTS:
+        raise ValueError("target accept budget outside the bounded window")
     control = asyncio.StreamReader(limit=64)
     transport, _ = await asyncio.get_running_loop().connect_read_pipe(
         lambda: asyncio.StreamReaderProtocol(control), sys.stdin.buffer)
     try:
-        await target(args.nonce, args.deny, listener(TARGET_PORT), control)
+        await target(args.nonce, args.deny, listener(TARGET_PORT), control, 0 if args.deny else args.accepts)
     finally:
         transport.close()
 
@@ -236,4 +250,7 @@ if __name__ == "__main__":
     parser.add_argument("--deny", action="store_true")
     parser.add_argument("--deadline", type=int, default=IO_SECONDS)
     parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--attempts", type=int, default=MAX_ATTEMPTS)
+    parser.add_argument("--pause", type=float, default=None)
+    parser.add_argument("--accepts", type=int, default=1)
     asyncio.run(main(parser.parse_args()))

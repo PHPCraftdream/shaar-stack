@@ -36,13 +36,13 @@ class ConfigTests(unittest.TestCase):
                 client = configs.client_text(case, KEY, "/w/keys/client.key", PORTS, RELAY)
                 self.assertIn(f"target: 127.0.0.1:{contract.TARGET_PORT}\n", server)
                 self.assertIn(f"fallback: {spec['mode']}\n", server)
-                self.assertIn(f"bind: {contract.IPS[spec['server_ns']]}:0\n", server)
+                self.assertIn(f"bind: {contract.ip_for(spec['server_ns'])}:0\n", server)
                 self.assertIn("allowlist_path:: /w/allow.txt\n", server)
                 self.assertIn(f"server: {KEY}\nlisten: 127.0.0.1:{contract.FRONT_PORT}\n", client)
                 self.assertIn(f"fallback: {spec['mode']}\n", client)
                 self.assertNotIn("server_address", client)
                 self.assertNotIn("target", client)
-                self.assertIn(f"bind: {contract.IPS['host_a']}:0\n", client)
+                self.assertIn(f"bind: {contract.ip_for(contract.client_ns(spec))}:0\n", client)
                 for text in (server, client):
                     self.assertIn(f"203.0.113.10:{PORTS['dht']}\n", text)
                     self.assertIn(f"relay: {RELAY}\nrelay_address: 203.0.113.10:{PORTS['relay']}\n", text)
@@ -194,12 +194,22 @@ class CaseTests(unittest.TestCase):
                 runcase.app_expectation(contract.CASES["native-signal"], {**ok, field: value})
         closed = {"nonce": NONCE, "denied": True, "reply_bytes": 0, "terminal": "eof"}
         runcase.app_expectation(contract.CASES["blocked-signal"], closed)
+        # The failover case accepts 1 stream in signal mode, yet its post-block APP must fail closed.
+        runcase.app_expectation(contract.CASES["failover-signal"], closed, ok=False)
+        runcase.app_expectation(contract.CASES["failover-signal"], ok, ok=True)
+        with self.assertRaises(ValueError):
+            runcase.app_expectation(contract.CASES["failover-signal"], ok, ok=False)
         for field, value in (("denied", False), ("reply_bytes", 1), ("terminal", "timeout")):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 runcase.app_expectation(contract.CASES["blocked-signal"], {**closed, field: value})
         receipt = {"accepts": 1, "request_bytes": len(request), "reply_bytes": len(reply)}
         runcase.target_expectation(contract.CASES["blocked-standby"], NONCE, receipt)
         runcase.target_expectation(contract.CASES["blocked-signal"], NONCE, {"accepts": 0, "request_bytes": 0, "reply_bytes": 0})
+        triple = {"accepts": 3, "request_bytes": 3 * len(request), "reply_bytes": 3 * len(reply)}
+        runcase.target_expectation(contract.CASES["failover-standby"], NONCE, triple)
+        for changed in ({"accepts": 2}, {"request_bytes": len(request)}, {"reply_bytes": 0}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                runcase.target_expectation(contract.CASES["failover-standby"], NONCE, {**triple, **changed})
         for spec, changed in (("blocked-standby", {"accepts": 2}), ("blocked-standby", {"reply_bytes": 0}),
                               ("blocked-signal", {"accepts": 1}), ("blocked-signal", {"request_bytes": 1})):
             base = receipt if spec == "blocked-standby" else {"accepts": 0, "request_bytes": 0, "reply_bytes": 0}
@@ -241,6 +251,13 @@ class ControllerTests(unittest.TestCase):
         entries, errors = controller.child_report(ok, spec, True)
         self.assertEqual((len(entries), errors), (3, []))
         self.assertTrue(all(item["error"] is None for item in entries))
+        second = contract.CASES["denied-blocked-standby"]
+        fine = self.children(("client", 0, []), ("client2", 1, []), ("app2", 0, []), ("server", 0, []))
+        self.assertEqual(controller.child_report(fine, second, True)[1], [])
+        for name, code in (("client", 1), ("client2", 0)):
+            changed = self.children(("client", 0, []), ("client2", 1, []))
+            changed.children[0 if name == "client" else 1].returncode = code
+            self.assertEqual(len(controller.child_report(changed, second, True)[1]), 1, name)
         for bad in (("client", 0, []), ("server", 1, []), ("wan", 0, ["TERM"]), ("wan", -15, ["TERM"])):
             changed = self.children(("client", 1, []), bad)
             _, errors = controller.child_report(changed, spec, True)

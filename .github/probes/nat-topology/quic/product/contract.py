@@ -8,19 +8,34 @@ from pathlib import Path
 import re
 import stat
 
+# "net" selects the kernel-side expectation class; "flow" selects the controller flow (default: one APP campaign).
+LAN = {"client_ns": "rtr_a", "server_ns": "rtr_b", "net": "lan", "udp_blocked": False, "ygg_client_blocked": True,
+       "target_accepts": 1, "client_exit": 0}
 CASES = {
-    "native-signal": {"mode": "signal", "server_ns": "wan", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
-    "native-standby": {"mode": "standby", "server_ns": "wan", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
-    "blocked-standby": {"mode": "standby", "server_ns": "host_b", "udp_blocked": True, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
-    "blocked-signal": {"mode": "signal", "server_ns": "host_b", "udp_blocked": True, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 1},
+    "native-signal": {"mode": "signal", "server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
+    "native-standby": {"mode": "standby", "server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
+    "blocked-standby": {"mode": "standby", "server_ns": "host_b", "net": "blocked", "udp_blocked": True, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
+    "blocked-signal": {"mode": "signal", "server_ns": "host_b", "net": "blocked", "udp_blocked": True, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 1},
+    # Client and Server are hosts on the owned 203.0.113.0/24 segment next to the DHT/relay/Ygg fixtures: no NAT, no forwarding.
+    "lan-signal": {**LAN, "mode": "signal"},
+    "lan-standby": {**LAN, "mode": "standby"},
+    "relay-denied-signal": {"mode": "signal", "server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
+    "failover-standby": {"mode": "standby", "server_ns": "wan", "net": "failover", "flow": "failover", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 3, "client_exit": 0},
+    "failover-signal": {"mode": "signal", "server_ns": "wan", "net": "failover", "flow": "failover", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 1},
+    "denied-blocked-standby": {"mode": "standby", "server_ns": "host_b", "net": "blocked", "flow": "denied-key", "udp_blocked": True, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0, "client2_exit": 1},
+    "dht-drop-signal": {"mode": "signal", "server_ns": "wan", "net": "dht-drop", "udp_blocked": False, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 1},
+    "outage-standby": {"mode": "standby", "server_ns": "host_b", "net": "blocked", "udp_blocked": True, "ygg_client_blocked": True, "target_accepts": 0, "client_exit": 1},
 }
 IPS = {"wan": "203.0.113.10", "rtr_a_wan": "203.0.113.1", "rtr_b_wan": "203.0.113.2",
        "rtr_off_wan": "203.0.113.3", "host_a": "10.0.1.2", "host_b": "10.0.2.2", "host_off": "10.0.3.2"}
 SUFFIXES = {"wan": "wan", "host_a": "host-a", "host_b": "host-b", "rtr_a": "rtr-a",
             "rtr_b": "rtr-b", "host_off": "host-off", "rtr_off": "rtr-off"}
+IP_KEYS = {"rtr_a": "rtr_a_wan", "rtr_b": "rtr_b_wan"}
 TRANSLATED_RANGE = (41010, 41020)
 # Long-lived owned children whose /proc privilege receipt is read; short-lived keys/app/stop workers are not sampled.
 IDENTITY_ROLES = ("wan", "target", "server", "client")
+FAILOVER_SECONDS = 10.0
+RECOVERY_SECONDS = 40.0
 MAX_CHILDREN = 16
 MAX_LINE = 8192
 MAX_LOG = 1024 * 1024
@@ -31,7 +46,8 @@ PHASE_SECONDS = 1200
 CLEANUP_RESERVE = 45
 FRONT_PORT = 48001
 TARGET_PORT = 48002
-PRODUCT_QUOTA = 7 * 1024 * 1024
+# Per router and case: 12 product cases x 2 routers x 2 MiB + 2 live controls x 2 routers x 2 MiB = 56 MiB of the 64 MiB phase budget.
+PRODUCT_QUOTA = 2 * 1024 * 1024
 FAULT_QUOTA = 2 * 1024 * 1024
 REQUEST_PREFIX = b"shaar-controlled-request:"
 REPLY_PREFIX = b"shaar-fixed-target-reply:"
@@ -40,6 +56,24 @@ REPLY_PREFIX = b"shaar-fixed-target-reply:"
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def ip_for(namespace):
+    """Address a product binds in an owned namespace; router namespaces use their WAN-segment address."""
+    return IPS[IP_KEYS.get(namespace, namespace)]
+
+
+def client_ns(spec):
+    return spec.get("client_ns", "host_a")
+
+
+def final_client_exit(spec):
+    """Exit status of the Client that is alive at shutdown (the second Client when a case replaces it)."""
+    return spec.get("client2_exit", spec["client_exit"])
+
+
+def identity_roles(spec):
+    return IDENTITY_ROLES + (("client2",) if spec.get("flow") == "denied-key" else ())
 
 
 def hex_value(value, size):

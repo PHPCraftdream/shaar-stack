@@ -8,10 +8,10 @@ import sys
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location("shaar_product_contract", Path(__file__).with_name("contract.py"))
+spec = importlib.util.spec_from_file_location("shaar_product_contract", Path(__file__).resolve().parents[2] / "contract.py")
 contract = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(contract)
-spec = importlib.util.spec_from_file_location("shaar_product_network", Path(__file__).with_name("network.py"))
+spec = importlib.util.spec_from_file_location("shaar_product_network", Path(__file__).resolve().parents[2] / "network.py")
 network = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(network)
 
@@ -25,11 +25,27 @@ class ProductContractTests(unittest.TestCase):
                 "ns": {name: prefix + "-" + suffix for name, suffix in contract.SUFFIXES.items()}}
 
     def test_case_inventory_and_phase_budgets_remain_closed(self):
-        self.assertEqual(set(contract.CASES), {"native-signal", "native-standby", "blocked-standby", "blocked-signal"})
+        self.assertEqual(list(contract.CASES), [
+            "native-signal", "native-standby", "blocked-standby", "blocked-signal", "lan-signal", "lan-standby",
+            "relay-denied-signal", "failover-standby", "failover-signal", "denied-blocked-standby", "dht-drop-signal",
+            "outage-standby"])
         self.assertEqual(contract.PHASE_SECONDS, 1200)
+        self.assertEqual(contract.CASE_SECONDS, 150)
         self.assertEqual(contract.MAX_CHILDREN, 16)
         self.assertEqual(contract.CLEANUP_RESERVE, 45)
-        self.assertEqual(4 * 2 * contract.PRODUCT_QUOTA + 2 * 2 * contract.FAULT_QUOTA, 64 * 1024 * 1024)
+        self.assertEqual(contract.FAILOVER_SECONDS, 10.0)
+        # 12 product cases and 2 live controls, each with two per-router quotas, leave headroom under 64 MiB.
+        self.assertEqual(12 * 2 * contract.PRODUCT_QUOTA + 2 * 2 * contract.FAULT_QUOTA, 56 * 1024 * 1024)
+        for name, spec in contract.CASES.items():
+            self.assertIn(spec["net"], ("nat", "blocked", "lan", "dht-drop", "failover"), name)
+            self.assertEqual(spec["udp_blocked"], spec["net"] == "blocked", name)
+            self.assertIn(contract.client_ns(spec), ("host_a", "rtr_a"), name)
+            self.assertIn(contract.ip_for(spec["server_ns"]), contract.IPS.values(), name)
+        self.assertEqual(contract.ip_for("rtr_b"), "203.0.113.2")
+        self.assertEqual(contract.final_client_exit(contract.CASES["denied-blocked-standby"]), 1)
+        self.assertEqual(contract.final_client_exit(contract.CASES["native-signal"]), 0)
+        self.assertEqual(contract.identity_roles(contract.CASES["denied-blocked-standby"])[-1], "client2")
+        self.assertEqual(contract.identity_roles(contract.CASES["native-signal"]), contract.IDENTITY_ROLES)
         self.assertEqual(contract.CASES["blocked-signal"]["target_accepts"], 0)
         self.assertEqual(contract.CASES["blocked-signal"]["client_exit"], 1)
         self.assertFalse(contract.CASES["native-standby"]["udp_blocked"])
@@ -132,7 +148,9 @@ class NetworkContractTests(unittest.TestCase):
         for name, kind, hook, priority in (("budget", "filter", "forward", -300),
                                            ("paths", "filter", "forward", -200),
                                            ("natout", "nat", "postrouting", 100),
-                                           ("seen", "filter", "postrouting", 200)):
+                                           ("seen", "filter", "postrouting", 200),
+                                           ("lanin", "filter", "input", -200),
+                                           ("lanout", "filter", "output", -200)):
             objects.append({"chain": {**base, "name": name, "type": kind, "hook": hook,
                                       "prio": priority, "policy": "accept"}})
         for name in sorted(network.COUNTERS):
@@ -149,19 +167,21 @@ class NetworkContractTests(unittest.TestCase):
         return next(entry[kind] for entry in document["nftables"] if kind in entry and entry[kind].get("name") == name)
 
     def test_rule_compiler_keeps_native_and_ygg_exclusions_separate(self):
+        import re
         self.assertEqual(network.CASES, set(contract.CASES))
         self.assertEqual(network.QUOTAS, {"product": contract.PRODUCT_QUOTA, "fault": contract.FAULT_QUOTA})
         ports = {"dht": 42001, "relay": 42002, "transit": 42003}
         for case in network.CASES:
+            profile = network.PROFILES[case]
             for router in ("rtr_a", "rtr_b"):
                 text = network.rules("snaabbcc", router, case, ports)
-                self.assertIn("over 7340032 bytes", text)
+                self.assertIn(f"over {contract.PRODUCT_QUOTA} bytes", text)
                 self.assertIn("quota name phase_budget counter name quota_drop drop", text)
                 self.assertIn("meta nfproto ipv6 counter name ipv6_drop drop", text)
                 self.assertIn("masquerade to :41010-41020", text)
-                import re
                 # nft keywords such as snat/dnat/filter cannot be chain names (real nft rejected "snat").
-                self.assertEqual(re.findall(r"add chain inet \S+ (\w+) ", text), ["budget", "paths", "natout", "seen"])
+                self.assertEqual(re.findall(r"add chain inet \S+ (\w+) ", text),
+                                 ["budget", "paths", "lanin", "lanout", "natout", "seen"])
                 self.assertIn("udp dport != 42001 ct status snat counter name native_snat", text)
                 # Port-range NAT needs an explicit transport match in the rule.
                 self.assertIn("ip protocol udp counter name udp_nat masquerade to :41010-41020", text)
@@ -169,16 +189,38 @@ class NetworkContractTests(unittest.TestCase):
                 self.assertNotIn("ct state", text)
                 self.assertNotIn("flush ruleset", text)
                 self.assertNotIn("dnat", text)
-                if case.startswith("blocked-"):
+                if profile["udp"] == "blocked":
                     self.assertIn("p13-native-block", text)
                     self.assertIn("udp dport 42001 accept", text)
                 else:
                     self.assertNotIn("p13-native-block", text)
+                self.assertEqual("p13-dht-block" in text, bool(profile.get("dht_drop")) and router == "rtr_a")
+                self.assertEqual("p13-lan-native" in text, bool(profile.get("lan")))
+                self.assertEqual("p13-lan-ygg-block" in text, bool(profile.get("lan")) and router == "rtr_a")
                 if router == "rtr_a":
-                    allowed, denied = (42003, 42002) if case.startswith("blocked-") else (42002, 42003)
-                    self.assertIn(f"tcp dport {allowed} accept", text)
-                    self.assertNotIn(f"tcp dport {denied} accept", text)
+                    for service, port, counter in (("relay", 42002, "relay_tcp"), ("transit", 42003, "ygg_tcp")):
+                        accept = f"tcp dport {port} counter name {counter} accept"
+                        self.assertEqual(accept in text, service in profile["tcp_a"], (case, service))
+                else:
+                    self.assertIn("tcp dport 42002 counter name relay_tcp accept", text)
+                    self.assertIn("tcp dport 42003 counter name ygg_tcp accept", text)
         self.assertIn("over 2097152 bytes", network.rules("snaabbcc", "rtr_a", "native-signal", ports, "fault"))
+
+    def test_runtime_lan_and_outage_profiles_match_the_reviewed_path_policy(self):
+        profiles = network.PROFILES
+        self.assertEqual(profiles["failover-standby"]["udp"], "runtime")
+        self.assertEqual(set(profiles["failover-standby"]["tcp_a"]), {"relay", "transit"})
+        self.assertEqual(profiles["relay-denied-signal"]["tcp_a"], ("transit",))
+        self.assertEqual(profiles["outage-standby"], {"udp": "blocked", "tcp_a": ()})
+        ports = {"dht": 42001, "relay": 42002, "transit": 42003}
+        outage = network.rules("snaabbcc", "rtr_a", "outage-standby", ports)
+        self.assertNotIn("counter name relay_tcp accept", outage)
+        self.assertNotIn("counter name ygg_tcp accept", outage)
+        lan = network.rules("snaabbcc", "rtr_b", "lan-signal", ports)
+        self.assertIn("lanin ip saddr 203.0.113.1 ip daddr 203.0.113.2 meta l4proto udp counter name lan_native", lan)
+        lan = network.rules("snaabbcc", "rtr_a", "lan-standby", ports)
+        self.assertIn("lanin ip saddr 203.0.113.2 ip daddr 203.0.113.1 meta l4proto udp counter name lan_native", lan)
+        self.assertIn("lanout ip daddr 203.0.113.10 tcp dport 42003 counter name tcp_drop drop", lan)
 
     def test_network_commands_cannot_change_the_host_or_foreign_namespaces(self):
         cfg = {"prefix": "snaabbcc", "ns": {"rtr_a": "snaabbcc-rtr-a", "rtr_b": "snaabbcc-rtr-b"}}

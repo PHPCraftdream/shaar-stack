@@ -10,10 +10,13 @@ import time
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE.parent / "flows"))
 import configs  # noqa: E402
 import contract  # noqa: E402
+import scenarios  # noqa: E402
 import kernel  # noqa: E402
 import network  # noqa: E402
+import observe  # noqa: E402
 import processes  # noqa: E402
 import worker  # noqa: E402
 
@@ -31,10 +34,10 @@ def atomic(path, value):
     os.replace(temporary, path)
 
 
-def app_expectation(spec, result):
-    """Exact APP outcome for the case; a denied/failed stream never counts as a pass."""
+def app_expectation(spec, result, ok=None):
+    """Exact APP outcome (ok: success expected; default from the case); a denied/failed stream never counts as a pass."""
     request, reply = worker.payloads(result["nonce"])
-    if spec["target_accepts"] == 1:
+    if spec["target_accepts"] > 0 if ok is None else ok:
         contract.require(result.get("denied") is False and result.get("reply_bytes") == len(reply)
                          and result.get("request_bytes") == len(request), "APP did not receive the exact fixed-target reply")
     else:
@@ -44,9 +47,10 @@ def app_expectation(spec, result):
 
 def target_expectation(spec, nonce, result):
     request, reply = worker.payloads(nonce)
-    want = {"accepts": spec["target_accepts"], "request_bytes": len(request) if spec["target_accepts"] else 0,
-            "reply_bytes": len(reply) if spec["target_accepts"] else 0}
+    count = spec["target_accepts"]
+    want = {"accepts": count, "request_bytes": count * len(request), "reply_bytes": count * len(reply)}
     contract.require({key: result.get(key) for key in want} == want, "fixed-target accept/byte receipt differs from the case")
+
 
 
 class Run:
@@ -56,6 +60,7 @@ class Run:
         self.nonce, self.uid, self.gid = cfg["nonce"], cfg["helper_uid"], cfg["helper_gid"]
         self.work, self.started = root / "work", started
         self.hard = supervisor.deadline
+        self.client_ns = contract.client_ns(self.spec)
         self.live = {}
         self.ev = {"case": case, "purpose": purpose, "identities": {}, "observations": {}, "markers": {}}
 
@@ -63,7 +68,8 @@ class Run:
         return min(time.monotonic() + seconds, self.hard)
 
     def launch(self, name, ns, exe, args, env=None, markers=()):
-        argv = processes.namespace_command(self.cfg, ns, exe, args, self.tools["ip"], self.tools["setpriv"])
+        argv = processes.namespace_command(self.cfg, ns, exe, args, self.tools["ip"], self.tools["setpriv"],
+                                           lan=self.spec["net"] == "lan")
         return self.sup.spawn(name, argv, env or {}, markers)
 
     def identity(self, child):
@@ -101,35 +107,81 @@ class Run:
         self.ev["observations"].setdefault("config_sha256", {})[name] = hashlib.sha256(text.encode("utf-8")).hexdigest()
         return str(path)
 
-    def product(self, name, ns, config):
-        child = self.launch(name, ns, self.products["shaar-" + name]["executable"], ["--config", config], markers=(STARTUP,))
+    def other_key(self):
+        """A valid identity seed that no allowlist contains: the unauthorized Client's private key file."""
+        path = self.work / "keys" / "other.key"
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(bytes([0xD3]) * 32)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chown(path, self.uid, self.gid)
+        os.chmod(path, 0o600)
+        return str(path)
+
+    def product(self, name, ns, config, binary=None):
+        exe = self.products["shaar-" + (binary or name)]["executable"]
+        child = self.launch(name, ns, exe, ["--config", config], markers=(STARTUP,))
         self.ev["markers"][name] = self.sup.mark(child, STARTUP, self.limit(30))
         self.identity(child)
         return child
 
     def calibrate_and_install(self, ports):
-        deadline = self.limit(30)
+        deadline = self.limit(45)
+        pairs = (("rtr_a", "host_a"), ("rtr_b", "host_b"))
         self.ev["quota_calibration"] = [kernel.calibrate_quota(self.cfg, self.tools, router, host, deadline)
-                                        for router, host in (("rtr_a", "host_a"), ("rtr_b", "host_b"))]
+                                        for router, host in pairs]
+        self.ev["observe_calibration"] = [observe.calibrate(self.cfg, self.tools, router, host, deadline)
+                                          for router, host in pairs]
         self.ev["rules"] = [kernel.install_rules(self.cfg, self.tools, router, self.case, ports, self.purpose, deadline)
                             for router in ("rtr_a", "rtr_b")]
         return {router: kernel.snapshot(self.cfg, self.tools, router, deadline) for router in ("rtr_a", "rtr_b")}
 
+    def counters(self, router):
+        """Validated packet counters of the case's product table right now."""
+        document = kernel.snapshot(self.cfg, self.tools, router, self.limit(10))
+        found = network.snapshot(document, self.cfg["prefix"], self.purpose)["counters"]
+        return {name: value["packets"] for name, value in found.items()}
+
+    def expect_app(self, result, ok):
+        app_expectation(self.spec, result, ok)
+
+    def app_once(self, name, deadline, guards, denied, attempts=None, pause=None):
+        """One bounded APP campaign; returns (ready, result, monotonic completion time)."""
+        extra = ["--deadline", str(int(deadline))]
+        if denied:
+            extra.append("--deny")
+        if attempts is not None:
+            extra += ["--attempts", str(attempts)]
+        if pause is not None:
+            extra += ["--pause", str(pause)]
+        app = self.python_worker(name, self.client_ns, "app", *extra)
+        ready = self.await_event(app, "SHAAR_NAT_READY", self.limit(deadline), watch=guards)
+        result = self.await_event(app, "SHAAR_NAT_RESULT", self.limit(deadline + 5), watch=guards)
+        done = time.monotonic()
+        self.expect_app(result, not denied)
+        contract.require(self.sup.wait(app, self.limit(10)) == 0, "APP worker failed")
+        return ready, result, done
+
     def verify_kernel(self, before):
-        blocked = self.spec["udp_blocked"]
+        net = self.spec["net"]
         deadline = self.limit(20)
-        report = {}
+        report, watched = {}, {}
         for router in ("rtr_a", "rtr_b"):
             after = kernel.snapshot(self.cfg, self.tools, router, deadline)
+            watched[router] = observe.read(self.cfg, self.tools, router, deadline)
+            self.ev["observe"] = watched  # recorded before any verdict so a violation keeps its evidence
             client_side = router == "rtr_a"
-            report[router] = network.verify(before[router], after, self.cfg["prefix"], self.purpose, blocked=blocked,
-                                            require_nat=client_side and not blocked, require_drop=client_side and blocked)
+            report[router] = network.verify(before[router], after, self.cfg["prefix"], self.purpose, blocked=net == "blocked",
+                                            require_nat=client_side and net in ("nat", "failover"),
+                                            require_drop=client_side and net == "blocked")
+            observe.verify_zero(watched[router], router)
         self.ev["kernel"] = report
         self.ev["forwarded_bytes"] = sum(item["quota_used"] for item in report.values())
 
     def observe_nat(self, native_ports):
         """Conntrack tuple while mappings are fresh; counters in verify_kernel are the required NAT oracle."""
-        if self.spec["udp_blocked"]:
+        if self.spec["net"] != "nat":
             return
         seen = self.ev["observations"]
         try:
@@ -144,25 +196,26 @@ class Run:
         else:
             seen["native_nat_tuple"] = found
 
-    def stop_all(self, wan_ready, server, client, target):
-        sup = self.sup
-        if self.spec["client_exit"] == 0:
-            sup.interrupt(client)
-        client_code = sup.wait(client, self.limit(45))
-        contract.require(client_code == self.spec["client_exit"], f"Client exit status {client_code} differs from the case")
-        sup.interrupt(server)
-        contract.require(sup.wait(server, self.limit(30)) == 0, "Server did not shut down normally")
-        sup.send_stdin(target, ("STOP " + self.nonce + "\n").encode("ascii"))
-        receipt = self.await_event(target, "SHAAR_NAT_RESULT", self.limit(20))
-        target_expectation(self.spec, self.nonce, receipt)
+    def stop_all(self):
+        sup, spec = self.sup, self.spec
+        expected = contract.final_client_exit(spec)
+        if expected == 0:
+            sup.interrupt(self.client)
+        client_code = sup.wait(self.client, self.limit(45))
+        contract.require(client_code == expected, f"Client exit status {client_code} differs from the case")
+        sup.interrupt(self.server)
+        contract.require(sup.wait(self.server, self.limit(30)) == 0, "Server did not shut down normally")
+        sup.send_stdin(self.target, ("STOP " + self.nonce + "\n").encode("ascii"))
+        receipt = self.await_event(self.target, "SHAAR_NAT_RESULT", self.limit(20))
+        target_expectation(spec, self.nonce, receipt)
         self.ev["observations"]["target"] = receipt
-        contract.require(sup.wait(target, self.limit(20)) == 0, "fixed-target worker failed")
-        stopper = self.python_worker("stop-wan", "wan", "stop", "--port", str(wan_ready["control_port"]))
+        contract.require(sup.wait(self.target, self.limit(20)) == 0, "fixed-target worker failed")
+        stopper = self.python_worker("stop-wan", "wan", "stop", "--port", str(self.wan_ready["control_port"]))
         self.await_event(stopper, "SHAAR_NAT_RESULT", self.limit(20))
         contract.require(sup.wait(stopper, self.limit(20)) == 0, "WAN control worker failed")
         return client_code
 
-    def run(self, after_live):
+    def bring_up(self, after_live):
         spec, ev = self.spec, self.ev
         keys, ready = self.helper("keys", "wan", "keys", verify=False, SHAAR_NAT_DIRECTORY=str(self.work / "keys"))
         contract.require(self.sup.wait(keys, self.limit(20)) == 0, "identity provisioning helper failed")
@@ -170,50 +223,48 @@ class Run:
             status = (self.work / "keys" / name).stat()
             contract.require(status.st_uid == self.uid and status.st_mode & 0o777 == 0o600, "provisioned key ownership/mode differs")
         ev["observations"]["key_files"] = "owned by the unprivileged helper identity, mode 0600"
-        server_key, client_key = ready["server_key"], ready["client_key"]
-        wan, wan_ready = self.helper("wan", "wan", "wan", SHAAR_NAT_SERVICE_KEY=server_key)
+        self.server_key, client_key = ready["server_key"], ready["client_key"]
+        self.wan, self.wan_ready = self.helper("wan", "wan", "wan", SHAAR_NAT_SERVICE_KEY=self.server_key)
         wan_started = time.monotonic()
-        ports = {"dht": wan_ready["dht_port"], "relay": wan_ready["relay_port"], "transit": wan_ready["transit_port"]}
-        ev["wan"] = {**ports, "control_port": wan_ready["control_port"], "relay_peer": wan_ready["relay_peer"]}
-        before = self.calibrate_and_install(ports)
-        denied = [] if spec["target_accepts"] else ["--deny"]
-        target = self.python_worker("target", spec["server_ns"], "target", *denied)
-        contract.require(self.await_event(target, "SHAAR_NAT_READY", self.limit(20))["port"] == contract.TARGET_PORT,
+        ready = self.wan_ready
+        self.ports = {"dht": ready["dht_port"], "relay": ready["relay_port"], "transit": ready["transit_port"]}
+        ev["wan"] = {**self.ports, "control_port": ready["control_port"], "relay_peer": ready["relay_peer"]}
+        self.before = self.calibrate_and_install(self.ports)
+        count = spec["target_accepts"]
+        target_args = ["--deny"] if count == 0 else ["--accepts", str(count)] if count > 1 else []
+        self.target = self.python_worker("target", spec["server_ns"], "target", *target_args)
+        contract.require(self.await_event(self.target, "SHAAR_NAT_READY", self.limit(20))["port"] == contract.TARGET_PORT,
                          "fixed target port differs")
-        self.identity(target)
-        relay = wan_ready["relay_peer"]
+        self.identity(self.target)
+        self.relay = ready["relay_peer"]
         allow = self.owned_file("allowlist.txt", configs.allowlist_text(client_key))
         server_cfg = self.owned_file("server.ktav", configs.server_text(
-            self.case, str(self.work / "keys/server.key"), allow, ports, relay))
+            self.case, str(self.work / "keys/server.key"), allow, self.ports, self.relay))
         client_cfg = self.owned_file("client.ktav", configs.client_text(
-            self.case, server_key, str(self.work / "keys/client.key"), ports, relay))
-        active_start = time.monotonic()
-        active_end = min(active_start + ACTIVE_SECONDS, wan_started + 95)
-        server = self.product("server", spec["server_ns"], server_cfg)
-        publication = self.await_event(wan, "SHAAR_NAT_PUBLICATION", self.limit(45), watch=(server,))
-        contract.validate_publication(publication, self.nonce, server_key)
-        server_ip = contract.IPS[spec["server_ns"]]
-        contract.require(any(item.rpartition(":")[0] == server_ip for item in publication["native_addresses"]),
+            self.case, self.server_key, str(self.work / "keys/client.key"), self.ports, self.relay))
+        self.active_start = time.monotonic()
+        self.active_end = min(self.active_start + ACTIVE_SECONDS, wan_started + 95)
+        self.server = self.product("server", spec["server_ns"], server_cfg)
+        self.publication = self.await_event(self.wan, "SHAAR_NAT_PUBLICATION", self.limit(45), watch=(self.server,))
+        contract.validate_publication(self.publication, self.nonce, self.server_key)
+        server_ip = contract.ip_for(spec["server_ns"])
+        contract.require(any(item.rpartition(":")[0] == server_ip for item in self.publication["native_addresses"]),
                          "signed Server record lacks its namespace Native address")
-        ev["publication"] = publication
-        client = self.product("client", "host_a", client_cfg)
+        ev["publication"] = self.publication
+        self.client = self.product("client", self.client_ns, client_cfg)
         contract.require("server_address=none" in ev["markers"]["client"], "Client must be configured with the Server key only")
-        live = {"wan": wan, "target": target, "server": server, "client": client}
+        live = {"wan": self.wan, "target": self.target, "server": self.server, "client": self.client}
         atomic(self.root / "records/children_started", {"nonce": self.nonce, "pids": {k: v.process.pid for k, v in live.items()}})
         after_live()
-        budget = int(min(worker.MAX_DEADLINE, active_end - time.monotonic()))
-        contract.require(budget >= 10, "active budget exhausted before the APP campaign")
-        guards = (server,) if spec["client_exit"] == 1 else (server, client)
-        app = self.python_worker("app", "host_a", "app", "--deadline", str(budget), *denied)
-        ev["observations"]["app_ready"] = self.await_event(app, "SHAAR_NAT_READY", self.limit(budget), watch=guards)
-        result = self.await_event(app, "SHAAR_NAT_RESULT", self.limit(budget + 5), watch=guards)
-        app_expectation(spec, result)
-        ev["observations"]["app"] = result
-        contract.require(self.sup.wait(app, self.limit(10)) == 0, "APP worker failed")
-        ev["active_seconds"] = time.monotonic() - active_start
-        self.observe_nat(kernel.native_candidates(publication["native_addresses"], ports["dht"]))
-        ev["client_exit"] = self.stop_all(wan_ready, server, client, target)
-        contract.require(self.sup.wait(wan, self.limit(20)) == 0, "WAN helper did not stop gracefully")
-        self.verify_kernel(before)
-        contract.require(set(ev["identities"]) == set(contract.IDENTITY_ROLES), "verified identity set differs from the contract")
+
+    def run(self, after_live):
+        spec, ev = self.spec, self.ev
+        self.bring_up(after_live)
+        scenarios.FLOWS[spec.get("flow", "single")](self)
+        ev["active_seconds"] = time.monotonic() - self.active_start
+        self.observe_nat(kernel.native_candidates(self.publication["native_addresses"], self.ports["dht"]))
+        ev["client_exit"] = self.stop_all()
+        contract.require(self.sup.wait(self.wan, self.limit(20)) == 0, "WAN helper did not stop gracefully")
+        self.verify_kernel(self.before)
+        contract.require(set(ev["identities"]) == set(contract.identity_roles(spec)), "verified identity set differs from the contract")
         return ev

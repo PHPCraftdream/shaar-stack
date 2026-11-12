@@ -3,9 +3,28 @@
 import copy
 import re
 
-CASES = {"native-signal", "native-standby", "blocked-standby", "blocked-signal"}
-COUNTERS = {"quota_drop", "ipv6_drop", "native_drop", "tcp_drop", "udp_nat", "tcp_nat", "native_snat"}
-QUOTAS = {"product": 7 * 1024 * 1024, "fault": 2 * 1024 * 1024}
+# udp: "blocked" installs the Native UDP block from the start; "open" and "runtime" (blocked later by a dynamic table) do not.
+# tcp_a: owned TCP services the Client-side router forwards ("relay", "transit" = Ygg hub); the Server-side router allows both.
+_NATIVE = {"udp": "open", "tcp_a": ("relay",)}
+_BLOCKED = {"udp": "blocked", "tcp_a": ("transit",)}
+_FAILOVER = {"udp": "runtime", "tcp_a": ("relay", "transit")}
+PROFILES = {
+    "native-signal": _NATIVE, "native-standby": _NATIVE,
+    "blocked-standby": _BLOCKED, "blocked-signal": _BLOCKED,
+    "lan-signal": {**_NATIVE, "lan": True}, "lan-standby": {**_NATIVE, "lan": True},
+    "relay-denied-signal": {"udp": "open", "tcp_a": ("transit",)},
+    "failover-standby": _FAILOVER, "failover-signal": _FAILOVER,
+    "denied-blocked-standby": _BLOCKED,
+    "dht-drop-signal": {"udp": "open", "tcp_a": ("relay", "transit"), "dht_drop": True},
+    "outage-standby": {"udp": "blocked", "tcp_a": ()},
+}
+CASES = set(PROFILES)
+COUNTERS = {"quota_drop", "ipv6_drop", "native_drop", "tcp_drop", "udp_nat", "tcp_nat", "native_snat",
+            "ygg_tcp", "relay_tcp", "dht_drop", "lan_native"}
+QUOTAS = {"product": 2 * 1024 * 1024, "fault": 2 * 1024 * 1024}
+CHAINS = {"budget": ("filter", "forward", -300), "paths": ("filter", "forward", -200),
+          "natout": ("nat", "postrouting", 100), "seen": ("filter", "postrouting", 200),
+          "lanin": ("filter", "input", -200), "lanout": ("filter", "output", -200)}
 
 
 def require(condition, message):
@@ -21,7 +40,7 @@ def table_name(prefix):
 
 def rules(prefix, router, case, ports, purpose="product"):
     table = table_name(prefix)
-    require(router in ("rtr_a", "rtr_b") and case in CASES, "unreviewed router/case")
+    require(router in ("rtr_a", "rtr_b") and case in PROFILES, "unreviewed router/case")
     require(purpose in QUOTAS, "unreviewed traffic allocation")
     require(type(ports) is dict and set(ports) == {"dht", "relay", "transit"}, "fixture port inventory differs")
     require(all(type(value) is int and 1024 <= value <= 65535 for value in ports.values()),
@@ -30,7 +49,8 @@ def rules(prefix, router, case, ports, purpose="product"):
     require(ports["relay"] != ports["transit"], "TCP fixture listeners overlap")
     host = "10.0.1.2" if router == "rtr_a" else "10.0.2.2"
     wan_ip = "203.0.113.1" if router == "rtr_a" else "203.0.113.2"
-    blocked = case.startswith("blocked-")
+    profile = PROFILES[case]
+    blocked = profile["udp"] == "blocked"
     lines = [f"add table inet {table}"]
     for name in sorted(COUNTERS):
         lines.append(f"add counter inet {table} {name}")
@@ -38,18 +58,22 @@ def rules(prefix, router, case, ports, purpose="product"):
               f"add chain inet {table} budget {{ type filter hook forward priority -300; policy accept; }}",
               f"add rule inet {table} budget quota name phase_budget counter name quota_drop drop comment \"p13-budget\"",
               f"add chain inet {table} paths {{ type filter hook forward priority -200; policy accept; }}",
+              f"add chain inet {table} lanin {{ type filter hook input priority -200; policy accept; }}",
+              f"add chain inet {table} lanout {{ type filter hook output priority -200; policy accept; }}",
               f"add rule inet {table} paths meta nfproto ipv6 counter name ipv6_drop drop comment \"p13-no-ipv6\""]
+    if profile.get("dht_drop") and router == "rtr_a":
+        lines.append(f"add rule inet {table} paths ip daddr 203.0.113.10 udp dport {ports['dht']} counter name dht_drop drop comment \"p13-dht-block\"")
     if blocked:
         # Only the actual DHT socket is exempt, not established UDP connections.
         lines += [f"add rule inet {table} paths ip daddr 203.0.113.10 udp dport {ports['dht']} accept comment \"p13-dht-query\"",
                   f"add rule inet {table} paths ip saddr 203.0.113.10 udp sport {ports['dht']} accept comment \"p13-dht-reply\"",
                   f"add rule inet {table} paths meta l4proto udp counter name native_drop drop comment \"p13-native-block\""]
-    allowed_tcp = [ports["relay"], ports["transit"]]
-    if router == "rtr_a":
-        allowed_tcp = [ports["transit"] if blocked else ports["relay"]]
-    for port in allowed_tcp:
-        lines += [f"add rule inet {table} paths ip daddr 203.0.113.10 tcp dport {port} accept comment \"p13-owned-tcp-query\"",
-                  f"add rule inet {table} paths ip saddr 203.0.113.10 tcp sport {port} accept comment \"p13-owned-tcp-reply\""]
+    allowed_tcp = profile["tcp_a"] if router == "rtr_a" else ("relay", "transit")
+    for service, counter in (("relay", "relay_tcp"), ("transit", "ygg_tcp")):
+        if service in allowed_tcp:
+            port = ports[service]
+            lines += [f"add rule inet {table} paths ip daddr 203.0.113.10 tcp dport {port} counter name {counter} accept comment \"p13-owned-tcp-query\"",
+                      f"add rule inet {table} paths ip saddr 203.0.113.10 tcp sport {port} counter name {counter} accept comment \"p13-owned-tcp-reply\""]
     lines += [f"add rule inet {table} paths meta l4proto tcp counter name tcp_drop drop comment \"p13-other-tcp-block\"",
               f"add chain inet {table} natout {{ type nat hook postrouting priority 100; policy accept; }}",
               f"add rule inet {table} natout ip saddr {host} ip protocol udp counter name udp_nat masquerade to :41010-41020 comment \"p13-udp-nat\"",
@@ -58,6 +82,12 @@ def rules(prefix, router, case, ports, purpose="product"):
               f"add chain inet {table} seen {{ type filter hook postrouting priority 200; policy accept; }}",
               f"add rule inet {table} seen ip saddr {wan_ip} ip daddr 203.0.113.10 udp sport 41010-41020 udp dport != {ports['dht']} "
               f"ct status snat counter name native_snat comment \"p13-snat-seen\""]
+    if profile.get("lan"):
+        # LAN: Client (rtr_a ns) and Server (rtr_b ns) share one segment; count it on input, block the Client's Ygg dial on output.
+        source, target = ("203.0.113.2", "203.0.113.1") if router == "rtr_a" else ("203.0.113.1", "203.0.113.2")
+        lines.append(f"add rule inet {table} lanin ip saddr {source} ip daddr {target} meta l4proto udp counter name lan_native comment \"p13-lan-native\"")
+        if router == "rtr_a":
+            lines.append(f"add rule inet {table} lanout ip daddr 203.0.113.10 tcp dport {ports['transit']} counter name tcp_drop drop comment \"p13-lan-ygg-block\"")
     return "\n".join(lines) + "\n"
 
 
@@ -103,13 +133,11 @@ def snapshot(document, prefix, purpose):
                 value[field] = 0
             counters[name] = {key: raw[key] for key in ("packets", "bytes")}
         elif kind == "chain":
-            expected = {"budget": ("filter", "forward", -300), "paths": ("filter", "forward", -200),
-                        "natout": ("nat", "postrouting", 100), "seen": ("filter", "postrouting", 200)}
-            require(raw.get("name") in expected, "foreign nft chain")
-            require((raw.get("type"), raw.get("hook"), raw.get("prio")) == expected[raw["name"]]
+            require(raw.get("name") in CHAINS, "foreign nft chain")
+            require((raw.get("type"), raw.get("hook"), raw.get("prio")) == CHAINS[raw["name"]]
                     and raw.get("policy") == "accept", "nft chain hook, priority or policy changed")
         elif kind == "rule":
-            require(raw.get("chain") in ("budget", "paths", "natout", "seen")
+            require(raw.get("chain") in CHAINS
                     and type(raw.get("expr")) is list and 1 <= len(raw["expr"]) <= 12,
                     "missing or unbounded installed rule expressions")
             comment = raw.get("comment", "")
@@ -125,8 +153,8 @@ def snapshot(document, prefix, purpose):
             value["used"] = 0
         immutable.append({kind: value})
     require(set(counters) == COUNTERS and len(quotas) == 1, "incomplete named quota/counter snapshot")
-    require(sum("table" in item for item in immutable) == 1 and sum("chain" in item for item in immutable) == 4
-            and {item["chain"]["name"] for item in immutable if "chain" in item} == {"budget", "paths", "natout", "seen"},
+    require(sum("table" in item for item in immutable) == 1 and sum("chain" in item for item in immutable) == len(CHAINS)
+            and {item["chain"]["name"] for item in immutable if "chain" in item} == set(CHAINS),
             "owned nft table/chain inventory changed")
     for comment in ("p13-budget", "p13-no-ipv6", "p13-other-tcp-block", "p13-udp-nat", "p13-tcp-nat", "p13-snat-seen"):
         require(comments.count(comment) == 1, "missing or duplicated installed rule identity")
