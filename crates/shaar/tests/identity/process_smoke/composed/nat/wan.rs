@@ -91,10 +91,10 @@ pub(super) async fn run(nonce: &str) -> Result<(), String> {
     tasks.abort_all();
     let mut wire_error = None;
     while let Some(result) = tasks.join_next().await {
-        if let Err(error) = result {
-            if !error.is_cancelled() {
-                wire_error = Some(format!("namespace wire actor join failed: {error}"));
-            }
+        if let Err(error) = result
+            && !error.is_cancelled()
+        {
+            wire_error = Some(format!("namespace wire actor join failed: {error}"));
         }
     }
     let relay_close = timeout(IO_TIMEOUT, relay.close()).await;
