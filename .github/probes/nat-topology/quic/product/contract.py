@@ -18,6 +18,7 @@ IPS = {"wan": "203.0.113.10", "rtr_a_wan": "203.0.113.1", "rtr_b_wan": "203.0.11
        "rtr_off_wan": "203.0.113.3", "host_a": "10.0.1.2", "host_b": "10.0.2.2", "host_off": "10.0.3.2"}
 SUFFIXES = {"wan": "wan", "host_a": "host-a", "host_b": "host-b", "rtr_a": "rtr-a",
             "rtr_b": "rtr-b", "host_off": "host-off", "rtr_off": "rtr-off"}
+TRANSLATED_RANGE = (41010, 41020)
 MAX_CHILDREN = 16
 MAX_LINE = 8192
 MAX_LOG = 1024 * 1024

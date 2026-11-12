@@ -75,6 +75,7 @@ class Child:
     exited: bool = False
     returncode: object = None
     signals: list = field(default_factory=list)
+    markers: dict = field(default_factory=dict)
 
 
 class Supervisor:
@@ -91,7 +92,7 @@ class Supervisor:
         self.children = []
         self.closed = False
 
-    def spawn(self, name, argv, environment):
+    def spawn(self, name, argv, environment, markers=()):
         if self.closed or time.monotonic() >= self.deadline:
             raise TimeoutError("child admission deadline")
         if len(self.children) >= MAX_CHILDREN:
@@ -106,7 +107,7 @@ class Supervisor:
             process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, env=environment, close_fds=True)
             pidfd = os.pidfd_open(process.pid)
-            child = Child(name, process, pidfd, logs)
+            child = Child(name, process, pidfd, logs, markers={bytes(item): None for item in markers})
             self.selector.register(pidfd, selectors.EVENT_READ, (child, "exit"))
             for channel in ("stdout", "stderr"):
                 stream = getattr(process, channel)
@@ -132,6 +133,9 @@ class Supervisor:
     def _line(self, child, channel, line):
         if len(line) > MAX_LINE:
             raise ValueError("owned child exceeded its line byte budget")
+        for needle, seen in child.markers.items():
+            if seen is None and needle in line:
+                child.markers[needle] = line[:512].decode("utf-8", errors="replace")
         if channel == "stdout" and line.startswith(b"SHAAR_NAT_"):
             prefix, separator, payload = line.partition(b" ")
             if not separator or prefix not in (b"SHAAR_NAT_READY", b"SHAAR_NAT_PUBLICATION", b"SHAAR_NAT_RESULT"):
@@ -188,6 +192,30 @@ class Supervisor:
             if child.exited and child.open_streams == 0:
                 raise RuntimeError(f"owned helper ended before {kind}: {child.name} rc={child.returncode}")
             self.step(deadline)
+
+    def mark(self, child, needle, deadline):
+        """Wait for a pre-registered output marker; an earlier child exit is a failure."""
+        while child.markers[needle] is None:
+            if child.exited and child.open_streams == 0:
+                raise RuntimeError(f"owned child ended before marker: {child.name} rc={child.returncode}")
+            self.step(deadline)
+        return child.markers[needle]
+
+    def interrupt(self, child):
+        """Console stop through the exact pidfd; never a PID-number signal."""
+        if child not in self.children or child.exited:
+            raise ValueError("cannot signal an unowned or exited child")
+        signal.pidfd_send_signal(child.pidfd, signal.SIGINT)
+
+    def send_stdin(self, child, data):
+        """One bounded terminal control frame; stdin is closed afterwards."""
+        if child not in self.children or len(data) > 128:
+            raise ValueError("invalid control frame target or size")
+        try:
+            child.process.stdin.write(data)
+            child.process.stdin.close()
+        except BrokenPipeError as error:
+            raise RuntimeError("owned child closed its control pipe early") from error
 
     def verify_identity(self, child, uid, gid):
         if child not in self.children or child.exited:

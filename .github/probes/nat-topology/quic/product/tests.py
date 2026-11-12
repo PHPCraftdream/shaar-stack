@@ -218,6 +218,20 @@ class NetworkContractTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 network.verify(initial, final, "snaabbcc", "product", blocked=True, require_nat=True)
 
+    def test_server_side_router_needs_no_drop_counter_but_keeps_rule_identity(self):
+        before, after = self.evidence(), self.evidence()
+        # Client side must observe drops; the Server-side router may legitimately see none.
+        with self.assertRaises(ValueError):
+            network.verify(before, after, "snaabbcc", "product", blocked=True)
+        result = network.verify(before, after, "snaabbcc", "product", blocked=True, require_drop=False)
+        self.assertEqual(result["quota_used"], 0)
+        self.object(after, "counter", "native_drop").update(packets=1, bytes=10)
+        network.verify(before, after, "snaabbcc", "product", blocked=True, require_drop=True)
+        missing = self.evidence()
+        missing["nftables"] = [row for row in missing["nftables"] if row.get("rule", {}).get("comment") != "p13-native-block"]
+        with self.assertRaises(ValueError):
+            network.verify(before, missing, "snaabbcc", "product", blocked=True, require_drop=False)
+
     def test_nft_inventory_rejects_missing_duplicate_or_foreign_objects(self):
         for mutation in ("missing-quota", "duplicate-counter", "foreign-table", "weak-quota", "missing-rule", "wrong-hook", "negative-counter"):
             document = self.evidence()

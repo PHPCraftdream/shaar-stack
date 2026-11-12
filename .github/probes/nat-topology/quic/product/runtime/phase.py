@@ -1,0 +1,224 @@
+"""Root driver for the bounded privileged phase: four product cases plus three cleanup controls."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import secrets
+import signal
+import subprocess
+import sys
+import time
+
+sys.dont_write_bytecode = True
+HERE = Path(__file__).resolve().parent
+TOPOLOGY = HERE.parents[2]
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(TOPOLOGY))
+import childman  # noqa: E402
+import contract  # noqa: E402
+import kernel  # noqa: E402
+import network  # noqa: E402
+import preflight  # noqa: E402
+
+ARTIFACT_BYTES = 64 * 1024 * 1024
+CONTROL_SECONDS = 60
+ALLOCATED_BYTES = 4 * 2 * contract.PRODUCT_QUOTA + 2 * 2 * contract.FAULT_QUOTA
+# (name, kind, case, run.sh flags); order keeps cheap cleanup proof ahead of product traffic.
+PLAN = (
+    ("setup-failure", "setup-fault", "native-signal", ("--fault-inject-setup",)),
+    ("native-signal", "product", "native-signal", ()),
+    ("native-standby", "product", "native-standby", ()),
+    ("blocked-standby", "product", "blocked-standby", ()),
+    ("blocked-signal", "product", "blocked-signal", ()),
+    ("live-failure", "fixture-fault", "native-signal", ("--fault-inject-fixture",)),
+    ("interruption", "interrupt", "native-signal", ()),
+)
+BASE_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+def interrupted(_signum, _frame):
+    raise SystemExit(143)
+
+
+def guarded(check, *args):
+    """childman validators exit the process on failure; convert that into a recorded result."""
+    try:
+        check(list(args))
+        return None
+    except SystemExit as error:
+        return f"validator rejected evidence (exit {error.code})"
+
+
+def verify_product_case(ev, case, source, nonce):
+    """Strict conclusions over raw controller evidence; never trusts a bare exit status."""
+    spec = contract.CASES[case]
+    result = ev.get("case_result") or {}
+    contract.require(ev.get("status") == "pass" and ev.get("case") == case and ev.get("purpose") == "product"
+                     and ev.get("source_revision") == source and ev.get("config", {}).get("nonce") == nonce,
+                     "controller evidence is not a passing record of this exact case")
+    contract.require(ev.get("normal_native_gate_enabled") is False, "normal product test gate must remain OFF")
+    contract.require(len(result.get("quota_calibration", [])) == 2
+                     and all(item["passed"] >= 1 and item["dropped"] >= 1 for item in result["quota_calibration"]),
+                     "kernel quota enforcement was not proven live")
+    kernel_report = result.get("kernel", {})
+    contract.require(set(kernel_report) == {"rtr_a", "rtr_b"}
+                     and all(0 <= item["quota_used"] < network.QUOTAS["product"] for item in kernel_report.values()),
+                     "router quota receipts missing or exhausted")
+    observed = result.get("observations", {})
+    contract.require(observed.get("target", {}).get("accepts") == spec["target_accepts"]
+                     and result.get("client_exit") == spec["client_exit"], "target accepts or Client exit differ")
+    uid = ev["config"]["helper_uid"]
+    contract.require({"wan", "target", "server", "client", "app"} <= set(result.get("identities", {}))
+                     and all(item.get("unsampled") or (item["uid"] == uid and item["capabilities"] == 0) for item in result["identities"].values()),
+                     "every owned child must have a verified unprivileged identity")
+    if spec["udp_blocked"]:
+        contract.require(kernel_report["rtr_a"]["counters"]["native_drop"]["packets"] > 0, "no dropped Native UDP attempt")
+    else:
+        contract.require("native_nat_tuple" in observed, "no real Native NAT tuple observed")
+    return {"forwarded_bytes": result["forwarded_bytes"], "active_seconds": result["active_seconds"]}
+
+
+def run_script(script, flags, casedir, nonce, env, seconds):
+    """Own run.sh through one Popen; bounded wait, TERM then KILL, always reaped."""
+    process = subprocess.Popen(["bash", str(script), *flags, str(casedir), nonce], env=env, stdin=subprocess.DEVNULL)
+    notes = []
+    try:
+        code = process.wait(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        notes.append("case deadline: TERM")
+        process.send_signal(signal.SIGTERM)
+        try:
+            code = process.wait(timeout=contract.CLEANUP_RESERVE)
+        except subprocess.TimeoutExpired:
+            notes.append("cleanup deadline: KILL")
+            process.kill()
+            code = process.wait(timeout=10)
+        notes.append("timed out")
+    except BaseException:
+        process.terminate()
+        try:
+            process.wait(timeout=contract.CLEANUP_RESERVE)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        raise
+    return code, notes
+
+
+def invoke(entry, out, source, env, seconds):
+    name, kind, case, flags = entry
+    casedir = out / f"{name}-{time.time_ns()}"
+    nonce = secrets.token_hex(16)
+    script = TOPOLOGY / "run.sh"
+    environment = {**env, "FIXTURE_PRODUCT_CASE": case}
+    record = {"name": name, "kind": kind, "case": case, "casedir": str(casedir), "nonce": nonce, "problems": []}
+    started = time.monotonic()
+    if kind == "interrupt":
+        os.environ.update(environment, FIXTURE_PRODUCT_HOLD="1")
+        try:
+            problem = guarded(childman.supervise_interrupt, str(script), str(casedir), nonce, "35")
+        finally:
+            os.environ.pop("FIXTURE_PRODUCT_HOLD", None)
+        record["exit_code"] = 143 if problem is None else None
+        if problem:
+            record["problems"].append(problem)
+    else:
+        code, notes = run_script(script, flags, casedir, nonce, environment, seconds)
+        record.update(exit_code=code, notes=notes)
+        record["problems"] += notes
+        failing = kind != "product"
+        if (code != 0) != failing:
+            record["problems"].append(f"unexpected run.sh exit status {code}")
+        cleanup = casedir / "cleanup-evidence.json"
+        label = "normal" if kind == "product" else kind
+        record["problems"] += [p for p in (guarded(childman.validate_cleanup, str(cleanup), "--case", label, "--nonce", nonce),) if p]
+        evidence = casedir / "evidence.json"
+        if kind == "product":
+            problem = guarded(childman.validate_evidence, str(evidence), "--expect-status", "pass", "--nonce", nonce)
+            if problem is None:
+                try:
+                    record["verified"] = verify_product_case(contract.bounded_json(evidence, 1024 * 1024), case, source, nonce)
+                except (ValueError, KeyError, TypeError, OSError) as error:
+                    problem = "strict product verification: " + str(error)[:300]
+            if problem:
+                record["problems"].append(problem)
+        elif kind == "fixture-fault":
+            for check, args in ((childman.validate_phase, (str(casedir / "records/children_started"), nonce)),
+                                (childman.validate_evidence, (str(evidence), "--expect-status", "fail", "--nonce", nonce,
+                                                              "--expect-exception-substr", "injected fixture failure"))):
+                problem = guarded(check, *args)
+                if problem:
+                    record["problems"].append(problem)
+    record["elapsed_seconds"] = time.monotonic() - started
+    record["status"] = "pass" if not record["problems"] else "fail"
+    return record
+
+
+def tree_bytes(path):
+    return sum(item.stat().st_size for item in Path(path).rglob("*") if item.is_file() and not item.is_symlink())
+
+
+def namespaces(tools):
+    deadline = time.monotonic() + 10
+    return sorted(kernel.checked([tools["ip"], "netns", "list"], deadline, what="namespace inventory").decode().split("\n"))
+
+
+def phase(source, manifest_path, out):
+    started = time.monotonic()
+    end = started + contract.PHASE_SECONDS
+    manifest = contract.bounded_json(manifest_path)
+    products = contract.validate_manifest(manifest, source)
+    ip = preflight.trusted_tool("ip")
+    contract.require(ip is not None, "ip tool missing")
+    tools = {"ip": str(ip)}
+    uid, gid = int(os.environ.get("SUDO_UID", "0")), int(os.environ.get("SUDO_GID", "0"))
+    contract.require(os.geteuid() == 0 and uid > 0 and gid > 0, "phase requires a sudo caller with an unprivileged identity")
+    env = {"PATH": BASE_PATH, "LANG": "C", "LC_ALL": "C", "SUDO_UID": str(uid), "SUDO_GID": str(gid),
+           "FIXTURE_PRODUCT_SOURCE": source, "FIXTURE_PRODUCT_MANIFEST": str(Path(manifest_path).resolve())}
+    out.mkdir(exist_ok=True)
+    summary = {"schema": 1, "scope": "controlled-product-matrix-phase", "source_revision": source,
+               "runner_image": os.environ.get("ImageVersion", "unknown")[:200], "allocated_forward_bytes": ALLOCATED_BYTES,
+               "products": {name: item["sha256"] for name, item in products.items()}, "invocations": [], "status": "fail"}
+    summary["namespaces_before"] = namespaces(tools)
+    try:
+        for entry in PLAN:
+            budget = CONTROL_SECONDS if entry[1] != "product" else contract.CASE_SECONDS
+            remaining = end - time.monotonic() - contract.CLEANUP_RESERVE
+            if remaining < budget:
+                summary["invocations"].append({"name": entry[0], "status": "fail", "problems": ["privileged phase budget exhausted"]})
+                break
+            record = invoke(entry, out, source, env, budget)
+            summary["invocations"].append(record)
+            if any("survived" in item or "still present" in item for item in record["problems"]):
+                break  # leftovers: stop before creating more owned resources
+    finally:
+        summary["namespaces_after"] = namespaces(tools)
+        summary["artifact_bytes"] = tree_bytes(out)
+        summary["elapsed_seconds"] = time.monotonic() - started
+        summary["forwarded_bytes_observed"] = sum(item.get("verified", {}).get("forwarded_bytes", 0) for item in summary["invocations"])
+        complete = [item["name"] for item in summary["invocations"]] == [entry[0] for entry in PLAN]
+        summary["status"] = "pass" if (complete and all(item["status"] == "pass" for item in summary["invocations"])
+                                       and summary["namespaces_before"] == summary["namespaces_after"]
+                                       and summary["artifact_bytes"] <= ARTIFACT_BYTES
+                                       and summary["elapsed_seconds"] <= contract.PHASE_SECONDS) else "fail"
+        (out / "phase-summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    return summary
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", required=True)
+    parser.add_argument("--manifest", required=True)
+    arguments = parser.parse_args()
+    contract.require(contract.hex_value(arguments.source, 40), "source must be the exact reviewed commit SHA")
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(signum, interrupted)
+    summary = phase(arguments.source, arguments.manifest, TOPOLOGY / "out")
+    print(json.dumps({"status": summary["status"], "invocations": {item["name"]: item["status"] for item in summary["invocations"]}}))
+    return 0 if summary["status"] == "pass" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

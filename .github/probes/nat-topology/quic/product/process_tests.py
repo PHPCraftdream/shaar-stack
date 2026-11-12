@@ -66,7 +66,7 @@ class PrivilegeTests(unittest.TestCase):
 
     def test_helper_line_protocol_and_queue_are_bounded(self):
         supervisor = processes.Supervisor.__new__(processes.Supervisor)
-        child = types.SimpleNamespace(events=deque())
+        child = types.SimpleNamespace(events=deque(), markers={})
         line = b'SHAAR_NAT_READY {"pid":42}'
         for _ in range(processes.MAX_EVENTS):
             supervisor._line(child, "stdout", line)
@@ -76,7 +76,7 @@ class PrivilegeTests(unittest.TestCase):
         for invalid in (b"x" * (processes.MAX_LINE + 1), b"SHAAR_NAT_UNKNOWN {}", b"SHAAR_NAT_READY []",
                         b"SHAAR_NAT_READY {", b'SHAAR_NAT_READY {"x":"\xff"}'):
             with self.subTest(line=invalid[:24]), self.assertRaises((ValueError, UnicodeError)):
-                supervisor._line(types.SimpleNamespace(events=deque()), "stdout", invalid)
+                supervisor._line(types.SimpleNamespace(events=deque(), markers={}), "stdout", invalid)
 
 
 @unittest.skipUnless(sys.platform == "linux" and hasattr(os, "pidfd_open"), "Linux pidfd supervisor")
@@ -154,3 +154,32 @@ class SupervisorTests(unittest.TestCase):
             self.assertTrue(child.exited)
             self.assertIn("TERM", child.signals)
             self.assertIsNotNone(child.process.returncode)
+
+    def test_markers_console_interrupt_and_terminal_control_frame_use_owned_handles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            owner = self.create(directory)
+            code = "; ".join((
+                "import signal, sys",
+                "signal.signal(signal.SIGINT, lambda *_: (print('stopped', flush=True), sys.exit(0)))",
+                "print('composed startup: ready', flush=True)",
+                "sys.stdin.readline()",
+                "signal.pause()"))
+            child = owner.spawn("marked", [sys.executable, "-I", "-c", code], {}, markers=[b"composed startup:"])
+            self.assertIn("composed startup", owner.mark(child, b"composed startup:", owner.deadline))
+            with self.assertRaises(ValueError):
+                owner.send_stdin(child, b"x" * 129)
+            owner.send_stdin(child, b"STOP" + bytes([10]))
+            owner.interrupt(child)
+            self.assertEqual(owner.wait(child, owner.deadline), 0)
+            self.assertEqual(child.signals, [])
+            with self.assertRaises(ValueError):
+                owner.interrupt(child)
+            self.assertEqual(owner.close(), [])
+
+    def test_marker_wait_fails_when_the_child_exits_without_the_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            owner = self.create(directory)
+            child = owner.spawn("silent", [sys.executable, "-I", "-c", "print('other')"], {}, markers=[b"never"])
+            with self.assertRaisesRegex(RuntimeError, "ended before marker"):
+                owner.mark(child, b"never", owner.deadline)
+            self.assertEqual(owner.close(), [])

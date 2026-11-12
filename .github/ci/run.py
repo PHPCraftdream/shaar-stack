@@ -339,8 +339,52 @@ def process_feedback():
     print("Verified reviewed process lifecycle cases:", len(selected))
 
 
+def product_manifest():
+    """Normal products plus the explicit namespace helper binary; provenance only, no test execution."""
+    directory = ROOT / "target/ci-product"
+    directory.mkdir(parents=True, exist_ok=True)
+    build, status = capture(
+        ["cargo", "build", "--locked", "-p", "shaar-server", "-p", "shaar-client", "--message-format=json"],
+        directory / "products.build.jsonl", stderr=directory / "products.build.stderr")
+    if status:
+        raise ValueError("product build failed: " + str(status))
+    products = {}
+    for name in ("shaar-server", "shaar-client"):
+        binary = product_executable(build, name)
+        with binary.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        products[name] = {"executable": str(binary), "sha256": digest, "bytes": binary.stat().st_size,
+                          "source_path": str(ROOT / "crates" / name / "src/main.rs"), "profile_test": False}
+    iroh = [item for item in map(json.loads, build.splitlines())
+            if item.get("reason") == "compiler-artifact" and item.get("target", {}).get("name") == "iroh"]
+    if not iroh or any("shaar-native-gate" in item.get("features", []) for item in iroh):
+        raise ValueError("normal products must be built with the native packet gate feature OFF")
+    arguments = ["cargo", "test", "--locked", "-p", "shaar", "--test", "identity"]
+    messages, status = capture(arguments + ["--no-run", "--message-format=json"],
+                               directory / "identity.build.jsonl", stderr=directory / "identity.build.stderr")
+    if status:
+        raise ValueError("helper test compilation failed: " + str(status))
+    helper = executable(messages, POLICY.target("shaar", kind="test", name="identity"))
+    ignored, status = capture([str(helper), "--list", "--ignored", "--format=terse"], directory / "identity.ignored.log")
+    if status or "process_smoke::composed::nat::fixture_child" not in set(VERIFY.parse_listing(ignored, "")):
+        raise ValueError("explicit namespace helper is not an ignored test of the compiled binary")
+    with helper.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    products["identity-helper"] = {"executable": str(helper), "sha256": digest, "bytes": helper.stat().st_size,
+                                   "profile_test": True}
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    manifest = {"source_revision": revision, "normal_native_gate_enabled": False, "products": products}
+    contract = load("runner_product_contract", ROOT / ".github/probes/nat-topology/quic/product/contract.py")
+    contract.validate_manifest(manifest, revision)
+    (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print("Product manifest recorded for", revision, sorted(products))
+
+
 def main():
     mode = sys.argv[1]
+    if mode == "product-manifest":
+        product_manifest()
+        return
     if mode == "process-feedback":
         process_feedback()
         return

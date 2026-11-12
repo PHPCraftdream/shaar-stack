@@ -128,7 +128,7 @@ def snapshot(document, prefix, purpose):
     return {"immutable": immutable, "counters": counters, "quota_used": quotas[0], "comments": comments}
 
 
-def verify(before, after, prefix, purpose, blocked=False, require_nat=False):
+def verify(before, after, prefix, purpose, blocked=False, require_nat=False, require_drop=None):
     initial, final = snapshot(before, prefix, purpose), snapshot(after, prefix, purpose)
     require(initial["immutable"] == final["immutable"], "installed nft objects changed during the case")
     require(final["quota_used"] >= initial["quota_used"], "kernel quota usage rolled back")
@@ -143,6 +143,7 @@ def verify(before, after, prefix, purpose, blocked=False, require_nat=False):
     if blocked:
         require(all(final["comments"].count(comment) == 1 for comment in
                     ("p13-native-block", "p13-dht-query", "p13-dht-reply")), "missing installed UDP blockade rules")
+    if blocked if require_drop is None else require_drop:
         require(final["counters"]["native_drop"]["packets"] > 0, "blockade never observed a Native UDP attempt")
     if require_nat:
         require(final["counters"]["udp_nat"]["packets"] > 0, "Native positive lacks observed UDP NAT admission")
