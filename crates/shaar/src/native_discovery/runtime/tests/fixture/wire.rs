@@ -48,13 +48,16 @@ fn encode(value: &Value) -> Vec<u8> {
 }
 
 // This cfg(test)-only fixture is shared by native runtime and startup role
-// regressions. `capture_get` is crate-visible for startup resolver observation;
+// regressions. `report_observed` (OFF by default) stamps every reply with the
+// BEP 42 `ip` vote of the observed requester; no current caller chains it.
+// `capture_get` is crate-visible for startup resolver observation;
 // `reply_get` is available to the denial case to answer its captured GET.
 pub(crate) struct LoopbackPeer {
     socket: UdpSocket,
     pub(crate) address: SocketAddr,
     pending_puts: Vec<(SocketAddr, Vec<u8>)>,
     namespace_sources: bool,
+    report_observed: bool,
 }
 
 pub(super) fn source_allowed(ip: std::net::IpAddr, namespace: bool) -> bool {
@@ -88,7 +91,7 @@ impl LoopbackPeer {
             assert_eq!(bytes_field(&parsed, b"y"), Some(b"q".as_slice()));
             let transaction = bytes_field(&parsed, b"t").expect("transaction");
             let arguments = field(&parsed, b"a").expect("query arguments");
-            let response = match bytes_field(&parsed, b"q").expect("method") {
+            let reply = match bytes_field(&parsed, b"q").expect("method") {
                 b"put" => {
                     let captured = std::sync::Arc::new(CapturedPut::from_arguments(arguments));
                     let _ = captured.signed_packet();
@@ -116,7 +119,7 @@ impl LoopbackPeer {
                                 // The parent may have cancelled; this single notification is best effort.
                                 let _ = observed.send(());
                             }
-                            encode(&dict([
+                            dict([
                                 (
                                     b"r".as_slice(),
                                     dict([
@@ -130,7 +133,7 @@ impl LoopbackPeer {
                                 ),
                                 (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
                                 (b"y".as_slice(), Value::Bytes(b"r".to_vec())),
-                            ]))
+                            ])
                         }
                         None => response(transaction, ReplyKind::Get),
                     }
@@ -139,10 +142,7 @@ impl LoopbackPeer {
                 b"ping" => response(transaction, ReplyKind::Ping),
                 other => panic!("unexpected composed KRPC method: {other:?}"),
             };
-            self.socket
-                .send_to(&response, source)
-                .await
-                .expect("owned KRPC response");
+            self.reply(source, reply).await;
         }
     }
 
@@ -165,7 +165,35 @@ impl LoopbackPeer {
             address,
             pending_puts: Vec::new(),
             namespace_sources,
+            report_observed: false,
         }
+    }
+
+    /// Explicit fixture option, OFF by default: every KRPC reply then carries the BEP 42 `ip`
+    /// field with the observed requester endpoint, exactly like a real Mainline node. No
+    /// current caller chains it, so accepted case responses stay byte-for-byte unchanged.
+    #[allow(dead_code)] // Opt-in for the future vote cases; current cases keep the default.
+    pub(crate) fn report_observed(mut self, enabled: bool) -> Self {
+        self.report_observed = enabled;
+        self
+    }
+
+    /// One owned KRPC reply: the option stamps the requester vote before the unchanged
+    /// encoder; the write keeps the same bound/expect semantics as the direct sends.
+    async fn reply(&self, source: SocketAddr, mut reply: Value) {
+        if self.report_observed
+            && let Some(vote) = observed_vote(source)
+        {
+            let Value::Dict(fields) = &mut reply else {
+                panic!("KRPC replies are dictionaries");
+            };
+            fields.insert(b"ip".to_vec(), vote);
+        }
+        let packet = encode(&reply);
+        self.socket
+            .send_to(&packet, source)
+            .await
+            .expect("owned KRPC response");
     }
 
     /// cancel-safe: NO — cancellation may interrupt an ancillary ACK; retain or terminate the waiter.
@@ -207,18 +235,13 @@ impl LoopbackPeer {
                 }
                 other => panic!("unexpected method while resolving: {other:?}"),
             };
-            self.socket
-                .send_to(&response(transaction, kind), source)
-                .await
-                .expect("bootstrap reply");
+            self.reply(source, response(transaction, kind)).await;
         }
     }
 
     pub(crate) async fn reply_empty_get(&self, source: SocketAddr, transaction: &[u8]) {
-        self.socket
-            .send_to(&response(transaction, ReplyKind::Get), source)
-            .await
-            .expect("actual empty GET response");
+        self.reply(source, response(transaction, ReplyKind::Get))
+            .await;
     }
 
     pub(crate) async fn reply_get(
@@ -235,15 +258,15 @@ impl LoopbackPeer {
             (b"seq".as_slice(), Value::Int(item.seq())),
             (b"v".as_slice(), Value::Bytes(item.value().to_vec())),
         ];
-        let packet = encode(&dict([
-            (b"r".as_slice(), dict(fields)),
-            (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
-            (b"y".as_slice(), Value::Bytes(b"r".to_vec())),
-        ]));
-        self.socket
-            .send_to(&packet, source)
-            .await
-            .expect("actual GET response");
+        self.reply(
+            source,
+            dict([
+                (b"r".as_slice(), dict(fields)),
+                (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
+                (b"y".as_slice(), Value::Bytes(b"r".to_vec())),
+            ]),
+        )
+        .await;
     }
 
     pub(crate) async fn serve_record(&mut self, item: &n0_mainline::MutableItem) {
@@ -283,10 +306,7 @@ impl LoopbackPeer {
                         b"ping" => ReplyKind::Ping,
                         other => panic!("unexpected KRPC query in bounded observation: {other:?}"),
                     };
-                    self.socket
-                        .send_to(&response(transaction, kind), source)
-                        .await
-                        .expect("bootstrap response during bounded negative observation");
+                    self.reply(source, response(transaction, kind)).await;
                 }
             }
         }
@@ -311,11 +331,8 @@ impl LoopbackPeer {
             .retain(|(pending_source, pending_transaction)| {
                 *pending_source != source || pending_transaction.as_slice() != transaction
             });
-        let reply = response(transaction, ReplyKind::PutAcknowledgement);
-        self.socket
-            .send_to(&reply, source)
-            .await
-            .expect("reply to held PUT");
+        self.reply(source, response(transaction, ReplyKind::PutAcknowledgement))
+            .await;
     }
 
     pub(crate) async fn reject(&mut self, source: SocketAddr, transaction: &[u8]) {
@@ -327,15 +344,15 @@ impl LoopbackPeer {
             Value::Int(201),
             Value::Bytes(b"PUT rejected".to_vec()),
         ]);
-        let packet = encode(&dict([
-            (b"e".as_slice(), error),
-            (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
-            (b"y".as_slice(), Value::Bytes(b"e".to_vec())),
-        ]));
-        self.socket
-            .send_to(&packet, source)
-            .await
-            .expect("reject held PUT");
+        self.reply(
+            source,
+            dict([
+                (b"e".as_slice(), error),
+                (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
+                (b"y".as_slice(), Value::Bytes(b"e".to_vec())),
+            ]),
+        )
+        .await;
     }
 
     pub(crate) async fn acknowledge_next(&mut self) {
@@ -375,25 +392,16 @@ impl LoopbackPeer {
                     captured.push(item);
                 }
                 b"get" => {
-                    let reply = response(&transaction, ReplyKind::Get);
-                    self.socket
-                        .send_to(&reply, source)
-                        .await
-                        .expect("reply to Mainline query");
+                    self.reply(source, response(&transaction, ReplyKind::Get))
+                        .await;
                 }
                 b"find_node" => {
-                    let reply = response(&transaction, ReplyKind::FindNode);
-                    self.socket
-                        .send_to(&reply, source)
-                        .await
-                        .expect("reply to Mainline query");
+                    self.reply(source, response(&transaction, ReplyKind::FindNode))
+                        .await;
                 }
                 b"ping" => {
-                    let reply = response(&transaction, ReplyKind::Ping);
-                    self.socket
-                        .send_to(&reply, source)
-                        .await
-                        .expect("reply to Mainline query");
+                    self.reply(source, response(&transaction, ReplyKind::Ping))
+                        .await;
                 }
                 other => panic!(
                     "unexpected Mainline query: {:?}",
@@ -452,16 +460,29 @@ enum ReplyKind {
     PutAcknowledgement,
 }
 
-fn response(transaction: &[u8], kind: ReplyKind) -> Vec<u8> {
-    let mut response = vec![(b"id" as &'static [u8], Value::Bytes(NODE_ID.to_vec()))];
+/// BEP 42 observed-address vote: the requester endpoint in the 6-byte compact IPv4 form the
+/// pinned n0-mainline parser accepts (four address octets, big-endian port). An IPv6 source
+/// omits the field; the pinned parser rejects the 18-byte form.
+fn observed_vote(source: SocketAddr) -> Option<Value> {
+    let SocketAddr::V4(observed) = source else {
+        return None;
+    };
+    let mut endpoint = [0_u8; 6];
+    endpoint[..4].copy_from_slice(&observed.ip().octets());
+    endpoint[4..].copy_from_slice(&observed.port().to_be_bytes());
+    Some(Value::Bytes(endpoint.to_vec()))
+}
+
+fn response(transaction: &[u8], kind: ReplyKind) -> Value {
+    let mut fields = vec![(b"id" as &'static [u8], Value::Bytes(NODE_ID.to_vec()))];
     match kind {
-        ReplyKind::Get => response.push((b"token", Value::Bytes(TOKEN.to_vec()))),
-        ReplyKind::FindNode => response.push((b"nodes", Value::Bytes(Vec::new()))),
+        ReplyKind::Get => fields.push((b"token", Value::Bytes(TOKEN.to_vec()))),
+        ReplyKind::FindNode => fields.push((b"nodes", Value::Bytes(Vec::new()))),
         ReplyKind::Ping | ReplyKind::PutAcknowledgement => {}
     }
-    encode(&dict([
-        (b"r".as_slice(), dict(response)),
+    dict([
+        (b"r".as_slice(), dict(fields)),
         (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
         (b"y".as_slice(), Value::Bytes(b"r".to_vec())),
-    ]))
+    ])
 }

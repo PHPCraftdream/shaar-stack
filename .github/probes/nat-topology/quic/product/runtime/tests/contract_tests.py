@@ -54,6 +54,12 @@ class ProductContractTests(unittest.TestCase):
         self.assertFalse(contract.CASES["native-standby"]["udp_blocked"])
         self.assertTrue(contract.CASES["blocked-standby"]["udp_blocked"])
 
+    def test_dht_observed_fixture_option_is_recorded_and_unreachable_from_cases(self):
+        self.assertEqual(contract.DHT_OBSERVED_KEY, "dht_observed")
+        self.assertEqual(contract.DHT_OBSERVED_ENV, "SHAAR_NAT_DHT_OBSERVED")
+        for name, spec in contract.CASES.items():
+            self.assertNotIn(contract.DHT_OBSERVED_KEY, spec, name)
+
     def test_new_row_cases_declare_their_flows_exits_and_identities(self):
         cases = contract.CASES
         for name in ("dnat-cone-signal", "dnat-cone-standby", "dnat-cone-relay-signal", "dnat-cone-relay-standby"):
