@@ -68,9 +68,10 @@ jobs:
           {
             echo "NDK_ROOT=$ndk"
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$clang"
-            echo "CC_AARCH64_LINUX_ANDROID=$clang"
-            echo "CXX_AARCH64_LINUX_ANDROID=$bin/aarch64-linux-android24-clang++"
-            echo "AR_AARCH64_LINUX_ANDROID=$bin/llvm-ar"
+            # cc-rs reads the lowercase target spelling, not the uppercase Cargo one.
+            echo "CC_aarch64_linux_android=$clang"
+            echo "CXX_aarch64_linux_android=$bin/aarch64-linux-android24-clang++"
+            echo "AR_aarch64_linux_android=$bin/llvm-ar"
           } >> "$GITHUB_ENV"
           if [ -f "$ndk/source.properties" ]; then cat "$ndk/source.properties"; fi
           "$clang" --version
