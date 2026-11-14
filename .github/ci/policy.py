@@ -133,6 +133,12 @@ PROOFS = (
     (".github/workflows/sdk-lock.yml", "ci_policy"),
     (".github/workflows/nat-topology.yml", "ci_policy"),
     (".github/workflows/quic-nat.yml", "ci_policy"),
+    # Dispatch-only release-build evidence for the five platform targets.
+    (".github/workflows/platform-build.yml", "ci_policy"),
+    # The merged gate workflow owning both the iroh bridge and noq backend jobs.
+    (".github/workflows/iroh-gate.yml", "ci_policy"),
+    # The deleted noq-gate.yml path stays selectable: cumulative integration-base diffs list removed paths.
+    (".github/workflows/noq-gate.yml", "ci_policy"),
     (".github/actions/prepare-sources/", "ci_policy"),
     (".github/scripts/tests/", "ci_policy"),
     (".github/scripts/check_structure.py", "ci_policy"),

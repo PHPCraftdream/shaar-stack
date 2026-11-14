@@ -1,5 +1,6 @@
 """CI runner contracts; subprocess execution is mocked except the explicit workflow self-test."""
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -450,6 +451,186 @@ class ResourceBudgetTests(unittest.TestCase):
         for forbidden in ("sudo", "continue-on-error", "curl ", "ip netns"):
             self.assertNotIn(forbidden, job)
 
+
+class PlatformBuildTests(unittest.TestCase):
+    def test_unreviewed_or_missing_target_fails_before_any_cargo_invocation(self):
+        seen = []
+
+        def record(arguments, log, *, stderr=None, extra_env=None):
+            seen.append(list(arguments))
+            log.write_text("", encoding="utf-8")
+            return "", 0
+
+        with patch.object(RUN, "capture", side_effect=record):
+            for target in ("x86_64-pc-linux-gnu", "aarch64-linux-android; rm -rf /", ""):
+                with self.subTest(target=target), self.assertRaisesRegex(ValueError, "not reviewed"):
+                    RUN.platform_build(target)
+            self.assertEqual(seen, [])
+        with patch.object(RUN.sys, "argv", ["run.py", "platform-build"]):
+            with self.assertRaisesRegex(ValueError, "target argument"):
+                RUN.main()
+
+    def test_platform_build_stages_products_and_records_a_build_only_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            binaries = {}
+            for name in ("shaar-server", "shaar-client"):
+                binary = root / "target/x86_64-unknown-linux-gnu/release" / name
+                binary.parent.mkdir(parents=True, exist_ok=True)
+                binary.write_bytes(name.encode())
+                binaries[name] = binary
+            payload = [
+                {"reason": "compiler-artifact", "features": ["default"],
+                 "profile": {"test": False}, "target": {"kind": ["lib"], "name": "iroh"}},
+                {"reason": "build-script-executed"},
+                {"reason": "compiler-artifact", "profile": {"test": False},
+                 "target": {"kind": ["bin"], "name": "shaar-server",
+                            "src_path": str(root / "crates/shaar-server/src/main.rs")},
+                 "executable": str(binaries["shaar-server"])},
+                {"reason": "compiler-artifact", "profile": {"test": False},
+                 "target": {"kind": ["bin"], "name": "shaar-client",
+                            "src_path": str(root / "crates/shaar-client/src/main.rs")},
+                 "executable": str(binaries["shaar-client"])},
+            ]
+            text = "\n".join(json.dumps(item) for item in payload) + "\n"
+            seen, calls = [], []
+
+            def record(arguments, log, *, stderr=None, extra_env=None):
+                seen.append(list(arguments))
+                log.write_text(text, encoding="utf-8")
+                if stderr:
+                    stderr.write_text("cargo stderr diagnostics\n", encoding="utf-8")
+                return text, 0
+
+            def command(arguments, **kwargs):
+                calls.append(list(arguments))
+                self.assertEqual(kwargs, {"cwd": root, "text": True})
+                if arguments[0] == "rustc":
+                    return "rustc 1.99.1 (fixture 2026-01-01)\nbinary: rustc\n"
+                return "c" * 40 + "\n"
+
+            with patch.object(RUN, "ROOT", root), \
+                 patch.object(RUN, "capture", side_effect=record), \
+                 patch.object(RUN.subprocess, "check_output", side_effect=command), \
+                 patch.dict(RUN.os.environ, {"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER": "clang-wrapper"}):
+                RUN.platform_build("x86_64-unknown-linux-gnu")
+            self.assertEqual(seen, [["cargo", "build", "--release", "--locked", "--target",
+                                     "x86_64-unknown-linux-gnu", "-p", "shaar-server",
+                                     "-p", "shaar-client", "--message-format=json"]])
+            self.assertEqual(calls, [["rustc", "--version", "--verbose"], ["git", "rev-parse", "HEAD"]])
+            staged = root / "target/platform-build/x86_64-unknown-linux-gnu"
+            for name in ("shaar-server", "shaar-client"):
+                self.assertEqual((staged / name).read_bytes(), name.encode())
+            manifest = json.loads((staged / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(sorted(manifest), ["cargo_linker", "evidence", "products", "profile",
+                                                "source_revision", "target", "toolchain"])
+            self.assertEqual(manifest["source_revision"], "c" * 40)
+            self.assertEqual(manifest["target"], "x86_64-unknown-linux-gnu")
+            self.assertEqual(manifest["profile"], "release")
+            self.assertTrue(manifest["toolchain"].startswith("rustc 1.99.1"))
+            self.assertEqual(manifest["cargo_linker"], "clang-wrapper")
+            self.assertEqual(manifest["evidence"], "build-only")
+            self.assertEqual(sorted(manifest["products"]), ["shaar-client", "shaar-server"])
+            for name in ("shaar-server", "shaar-client"):
+                entry = manifest["products"][name]
+                self.assertEqual(entry["executable"], name)
+                self.assertEqual(entry["sha256"], hashlib.sha256(name.encode()).hexdigest())
+                self.assertEqual(entry["bytes"], len(name))
+            self.assertTrue((staged / "products.build.jsonl").is_file())
+            self.assertTrue((staged / "products.build.stderr").is_file())
+
+    def test_failed_cargo_native_gate_or_missing_iroh_artifact_fails_the_platform_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+
+            def toolchain(arguments, **kwargs):
+                return "rustc 1.99.1 (fixture)\n"
+
+            def failed_build(arguments, log, *, stderr=None, extra_env=None):
+                log.write_text("error: could not compile workspace\n", encoding="utf-8")
+                return "error: could not compile workspace\n", 101
+
+            with patch.object(RUN, "ROOT", root), \
+                 patch.object(RUN, "capture", side_effect=failed_build), \
+                 patch.object(RUN.subprocess, "check_output", side_effect=toolchain):
+                with self.assertRaisesRegex(ValueError, "build failed for aarch64-apple-darwin: 101"):
+                    RUN.platform_build("aarch64-apple-darwin")
+
+            def payload_capture(lines):
+                def record(arguments, log, *, stderr=None, extra_env=None):
+                    text = "\n".join(json.dumps(item) for item in lines) + "\n"
+                    log.write_text(text, encoding="utf-8")
+                    return text, 0
+                return record
+
+            gate = payload_capture([{"reason": "compiler-artifact", "features": ["shaar-native-gate"],
+                                     "target": {"name": "iroh"}}])
+            without_iroh = payload_capture([{"reason": "compiler-artifact", "profile": {"test": False},
+                                             "target": {"kind": ["bin"], "name": "shaar-server"}}])
+            for label, lines in (("gate", gate), ("iroh", without_iroh)):
+                with self.subTest(case=label), \
+                     patch.object(RUN, "ROOT", root), \
+                     patch.object(RUN, "capture", side_effect=payload_capture(lines)), \
+                     patch.object(RUN.subprocess, "check_output", side_effect=toolchain), \
+                     self.assertRaisesRegex(ValueError, "native packet gate feature OFF"):
+                    RUN.platform_build("x86_64-pc-windows-msvc")
+
+
+class WorkflowStructureTests(unittest.TestCase):
+    def test_platform_build_workflow_is_dispatch_only_and_binds_the_five_reviewed_targets(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/platform-build.yml").read_text(encoding="utf-8")
+        header = workflow.split("\npermissions:", 1)[0]
+        self.assertIn("on:\n  workflow_dispatch:", header)
+        for forbidden in ("push:", "pull_request:", "schedule:"):
+            self.assertNotIn(forbidden, header)
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn("fail-fast: false", workflow)
+        self.assertEqual(workflow.count("- target: "), 5)
+        for target, runner in (("x86_64-unknown-linux-gnu", "ubuntu-latest"),
+                               ("x86_64-pc-windows-msvc", "windows-latest"),
+                               ("aarch64-apple-darwin", "macos-latest"),
+                               ("x86_64-apple-darwin", "macos-latest"),
+                               ("aarch64-linux-android", "ubuntu-latest")):
+            self.assertIn("- target: " + target + "\n            os: " + runner, workflow)
+        self.assertIn("RUSTUP_TOOLCHAIN: \"1.99.1\"", workflow)
+        self.assertIn("uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5", workflow)
+        self.assertIn("uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5", workflow)
+        self.assertIn("uses: ./.github/actions/prepare-sources", workflow)
+        self.assertIn("selection: '{\"relay\": false, \"dns\": false, \"resolver\": false, \"kad\": false}'", workflow)
+        self.assertIn("resolve_only: \"false\"", workflow)
+        self.assertIn("run: python -I .github/ci/run.py platform-build ${{ matrix.target }}", workflow)
+        self.assertIn("uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2", workflow)
+        self.assertIn("name: platform-build-${{ matrix.target }}", workflow)
+        self.assertIn("retention-days: 7", workflow)
+        self.assertIn("if-no-files-found: error", workflow)
+        self.assertIn("Build-only evidence: the executables were compiled for this target; "
+                      "they were not executed in CI, not packaged, and not verified on any device.", workflow)
+        self.assertIn("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=", workflow)
+        selected = RUN.POLICY.select([".github/workflows/platform-build.yml"])
+        self.assertEqual(selected["suites"], ["ci_policy"])
+        self.assertEqual(selected["targets"], [])
+        self.assertFalse(selected["selection"]["rust"])
+        self.assertFalse(selected["selection"]["product"])
+        self.assertFalse(selected["selection"]["full"])
+
+    def test_merged_gate_workflow_keeps_both_jobs_and_the_removed_file_selectable(self):
+        workflows = Path(__file__).resolve().parents[1] / "workflows"
+        merged = (workflows / "iroh-gate.yml").read_text(encoding="utf-8")
+        self.assertIn("name: iroh and noq payload gates", merged)
+        self.assertIn("  bridge:\n", merged)
+        self.assertIn("  backend:\n", merged)
+        self.assertEqual(merged.count("fail-fast: false"), 2)
+        self.assertIn("group: iroh-gate-${{ github.ref }}", merged)
+        self.assertIn("cargo test --manifest-path \"$manifest\" --locked --lib payload_policy -- --nocapture", merged)
+        self.assertIn("cargo build --manifest-path \"$manifest\" --locked --bin nat-peer", merged)
+        self.assertIn("name: noq-gate-evidence-${{ matrix.os }}", merged)
+        self.assertIn("name: iroh-gate-${{ matrix.os }}", merged)
+        self.assertFalse((workflows / "noq-gate.yml").exists())
+        for path in (".github/workflows/iroh-gate.yml", ".github/workflows/noq-gate.yml"):
+            with self.subTest(path=path):
+                selected = RUN.POLICY.select([path])
+                self.assertEqual(selected["suites"], ["ci_policy"])
+                self.assertEqual(selected["targets"], [])
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -469,6 +470,55 @@ def resource_run():
     print("Resource budgets verified:", {case: entry["rows"] for case, entry in summary["cases"].items()})
 
 
+PLATFORM_TARGETS = frozenset((
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-linux-android",
+))
+PLATFORM_PRODUCTS = ("shaar-server", "shaar-client")
+
+
+def platform_build(target):
+    """Release products for one platform target; provenance only, no execution."""
+    if target not in PLATFORM_TARGETS:
+        raise ValueError("platform build target is not reviewed: " + repr(target))
+    directory = ROOT / "target/platform-build" / target
+    directory.mkdir(parents=True, exist_ok=True)
+    linker = os.environ.get("CARGO_TARGET_" + target.upper().replace("-", "_") + "_LINKER", "")
+    toolchain = subprocess.check_output(["rustc", "--version", "--verbose"], cwd=ROOT, text=True).strip()
+    print("Platform build:", target, "linker:", linker or "<target default>")
+    print(toolchain)
+    build, status = capture(
+        ["cargo", "build", "--release", "--locked", "--target", target,
+         "-p", "shaar-server", "-p", "shaar-client", "--message-format=json"],
+        directory / "products.build.jsonl", stderr=directory / "products.build.stderr")
+    if status:
+        raise ValueError("platform product build failed for " + target + ": " + str(status))
+    iroh = [item for item in map(json.loads, build.splitlines())
+            if item.get("reason") == "compiler-artifact" and item.get("target", {}).get("name") == "iroh"]
+    if not iroh or any("shaar-native-gate" in item.get("features", []) for item in iroh):
+        raise ValueError("platform products must be built with the native packet gate feature OFF")
+    products = {}
+    for name in PLATFORM_PRODUCTS:
+        binary = product_executable(build, name)
+        staged = directory / binary.name
+        shutil.copy2(binary, staged)
+        with binary.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        products[name] = {"executable": staged.name, "sha256": digest,
+                          "bytes": staged.stat().st_size}
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("platform source revision is not an exact SHA")
+    manifest = {"source_revision": revision, "target": target, "profile": "release",
+                "toolchain": toolchain, "cargo_linker": linker, "products": products,
+                "evidence": "build-only"}
+    (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print("Platform products staged for", target, sorted(products))
+
+
 def main():
     mode = sys.argv[1]
     if mode == "product-manifest":
@@ -482,6 +532,11 @@ def main():
         return
     if mode == "resource-run":
         resource_run()
+        return
+    if mode == "platform-build":
+        if len(sys.argv) < 3:
+            raise ValueError("platform-build requires one reviewed target argument")
+        platform_build(sys.argv[2])
         return
     if mode == "self-test":
         self_test()
