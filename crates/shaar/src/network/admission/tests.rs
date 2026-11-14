@@ -24,11 +24,11 @@ async fn bind(seed: u8, allowed: &[PublicKey], sessions: usize) -> Endpoint {
     .expect("bind SDK endpoint")
 }
 
-/// The pending set must not make the endpoint non-Send: callers move it into tasks.
+/// The pending set must keep the endpoint Send and Sync: callers share it across tasks.
 #[test]
-fn endpoint_stays_send() {
-    fn assert_send<T: Send>() {}
-    assert_send::<Endpoint>();
+fn endpoint_stays_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Endpoint>();
 }
 
 #[test]
@@ -464,7 +464,7 @@ async fn backend_metadata_exhaustion_is_capacity_not_a_generic_connect_failure()
             slots: Arc::new(Semaphore::new(1)),
             custom: None,
             pending_cap: 1,
-            pending: FuturesUnordered::new(),
+            pending: Pending::new(),
         };
         let observer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         assert!(matches!(

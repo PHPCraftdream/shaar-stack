@@ -61,6 +61,40 @@ struct HandshakeOutcome {
 /// One concurrently driven inbound handshake, bounded by the endpoint's pending cap.
 type PendingHandshake = Pin<Box<dyn Future<Output = HandshakeOutcome> + Send>>;
 
+/// Parked inbound handshakes. The `Mutex` is only a `Sync` adapter for the boxed
+/// futures: every access goes through `&mut self` and `get_mut`, so it is never
+/// locked, never contended and never held across an await.
+struct Pending(std::sync::Mutex<FuturesUnordered<PendingHandshake>>);
+
+impl Pending {
+    fn new() -> Self {
+        Self(std::sync::Mutex::new(FuturesUnordered::new()))
+    }
+
+    fn set(&mut self) -> &mut FuturesUnordered<PendingHandshake> {
+        self.0
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn len(&mut self) -> usize {
+        self.set().len()
+    }
+
+    fn is_empty(&mut self) -> bool {
+        self.set().is_empty()
+    }
+
+    fn push(&mut self, handshake: PendingHandshake) {
+        self.set().push(handshake);
+    }
+
+    /// cancel-safe: yes — a completed handshake is taken only in the poll that returns it.
+    async fn next(&mut self) -> Option<HandshakeOutcome> {
+        self.set().next().await
+    }
+}
+
 /// Parks one accepted transport attempt; its 10 s deadline starts at insertion.
 /// Dropping the parked future abandons only that one handshake.
 fn park_handshake(incoming: iroh::endpoint::Incoming) -> PendingHandshake {
@@ -85,7 +119,7 @@ pub struct Endpoint {
     custom: Option<Arc<SignalingTransport>>,
     /// Concurrent inbound handshakes allowed before authentication.
     pending_cap: usize,
-    pending: FuturesUnordered<PendingHandshake>,
+    pending: Pending,
 }
 
 impl Endpoint {
@@ -208,7 +242,7 @@ impl Endpoint {
             slots,
             custom,
             pending_cap: limits.sessions,
-            pending: FuturesUnordered::new(),
+            pending: Pending::new(),
         })
     }
 
