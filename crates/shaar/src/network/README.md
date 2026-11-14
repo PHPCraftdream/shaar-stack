@@ -17,7 +17,10 @@ by this layer. Forwarding and target errors belong to the next P06 layer.
 ## Bounds and ownership
 
 - Limits accepts 1..=32 session slots, shared by outbound handshakes and returned
-  sessions. `accept(&mut self)` serializes inbound handshakes. Admission uses only
+  sessions. Inbound handshakes are driven concurrently in a per-endpoint pending set capped at
+  the same session limit, separate from the slot pool: slots are charged only after
+  authentication, a parked Initial holds none, and attempts beyond the cap are
+  refused. Admission uses only
   immediate semaphore acquisition, never an unbounded waiter queue. Tokio's proven
   semaphore owns its internal synchronization; the SDK holds no lock across await
   and does not claim formal lock-freedom for dependency internals.
@@ -25,7 +28,10 @@ by this layer. Forwarding and target errors belong to the next P06 layer.
   remains caller-owned and cancellable; no SDK task is spawned or detached.
 - The Noq listener retains at most the configured session count of pending Initials,
   16 KiB subsequent bytes each and 512 KiB aggregate. The first packet is outside
-  these byte counts and separately bounded by the Initial count.
+  these byte counts and separately bounded by the Initial count. The SDK pending
+  set is an additional per-endpoint cap on concurrently driven inbound handshakes,
+  so parked and live connections together stay within the twice-the-session-count
+  connection quota.
 - Allocated metadata has twice the session count, including protocol closing/drain
   state. Closed Session handles continue holding their SDK slot until dropped;
   dropping one releases that slot, not the separate Noq metadata quota.
@@ -41,8 +47,10 @@ Sessions contain no Endpoint clones. Session drop requests synchronous immediate
 connection close; it cannot perform asynchronous drain. `Endpoint::close(self)`
 waits for backend shutdown and then drops the sole SDK endpoint owner, including
 when Session handles still exist. Cancellation of close does not promise completion
-of drain. Handshake cancellation returns SDK slots via ownership, but consumed
-Initials are not replayed and backend metadata may persist until Drained.
+of drain. Outbound handshake cancellation returns the SDK slot via ownership and
+abandons the attempt; inbound attempts are not consumed by accept cancellation —
+they are parked in the endpoint's pending set and a later call completes the same
+handshake. Backend metadata may persist until Drained.
 
 The first Windows run at `538f399` passed formatting, clippy and nine of the ten
 network tests, but immediate UDP rebinding failed with AddrInUse while Session

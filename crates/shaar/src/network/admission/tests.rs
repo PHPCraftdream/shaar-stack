@@ -24,6 +24,13 @@ async fn bind(seed: u8, allowed: &[PublicKey], sessions: usize) -> Endpoint {
     .expect("bind SDK endpoint")
 }
 
+/// The pending set must not make the endpoint non-Send: callers move it into tasks.
+#[test]
+fn endpoint_stays_send() {
+    fn assert_send<T: Send>() {}
+    assert_send::<Endpoint>();
+}
+
 #[test]
 fn policy_bounds_and_native_address_denial() {
     for limit in [0, 33, usize::MAX] {
@@ -231,24 +238,27 @@ async fn saturated_inbound_is_refused_and_dropped_sessions_allow_a_new_peer() {
     .expect("SDK inbound saturation/reuse deadline");
 }
 
+/// Covers the documented cancel-safe contract of `accept`: a dropped accept
+/// future parks the attempt and a later call completes the same handshake.
 #[tokio::test(flavor = "multi_thread")]
-async fn cancelled_inbound_handshake_returns_slot_after_actual_response() {
-    tokio::time::timeout(Duration::from_secs(25), async {
+async fn dropped_accept_retains_the_in_flight_handshake() {
+    tokio::time::timeout(Duration::from_secs(30), async {
         let mut server = bind(67, &[key(68)], 1).await;
         let client = bind(68, &[], 1).await;
+        let address = server.local_addr();
         let proxy = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let mut packet = [0u8; 2048];
         let mut attempt = Box::pin(client.connect(key(67), proxy.local_addr().unwrap()));
-        let size = tokio::select! {
-            result = &mut attempt => panic!("completed before peer response: {result:?}"),
-            packet = proxy.recv_from(&mut packet) => packet.unwrap().0,
+        let (size, peer) = tokio::select! {
+            result = &mut attempt => panic!("completed before any peer response: {result:?}"),
+            packet = proxy.recv_from(&mut packet) => packet.unwrap(),
         };
-        let address = server.local_addr();
+        // One-way relay: the Initial reaches the server, its response dies here.
         proxy.send_to(&packet[..size], address).await.unwrap();
         let slots = server.slots.clone();
         let mut accept = Box::pin(server.accept());
         tokio::select! {
-            result = &mut accept => panic!("completed before client received response: {result:?}"),
+            result = &mut accept => panic!("completed without a reachable client: {result:?}"),
             _ = async {
                 loop {
                     let (_, source) = proxy.recv_from(&mut packet).await.unwrap();
@@ -256,14 +266,131 @@ async fn cancelled_inbound_handshake_returns_slot_after_actual_response() {
                 }
             } => {}
         }
-        assert_eq!(slots.available_permits(), 0);
-        drop(accept);
+        // A parked handshake holds no session slot; slots are charged only
+        // after authentication.
         assert_eq!(slots.available_permits(), 1);
-        drop(attempt);
+        // Dropping the accept future parks the handshake in the endpoint: it is
+        // neither abandoned nor replayed, just retained for the next accept.
+        drop(accept);
+        assert_eq!(server.slots.available_permits(), 1);
+        // The relay turns transparent again and the SAME handshake completes.
+        let relay = tokio::spawn(async move {
+            let mut packet = [0u8; 2048];
+            loop {
+                let Ok((size, source)) = proxy.recv_from(&mut packet).await else {
+                    break;
+                };
+                let target = if source == address { peer } else { address };
+                if proxy.send_to(&packet[..size], target).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let (accepted, connected) = tokio::time::timeout(
+            Duration::from_secs(20),
+            tokio::join!(server.accept(), &mut attempt),
+        )
+        .await
+        .expect("retained handshake completes after the accept future was dropped");
+        let accepted = accepted.unwrap();
+        let connected = connected.unwrap();
+        assert_eq!(accepted.peer_id(), key(68));
+        // The slot is charged only now, at authentication.
+        assert_eq!(server.slots.available_permits(), 0);
+        relay.abort();
+        drop((accepted, connected, attempt));
         tokio::join!(server.close(), client.close());
     })
     .await
-    .expect("SDK inbound cancellation deadline");
+    .expect("SDK inbound accept-cancellation deadline");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn silent_initial_does_not_stall_a_second_peer() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let mut server = bind(67, &[key(68)], 2).await;
+        let legit = bind(68, &[], 1).await;
+        let address = server.local_addr();
+        // A silent peer: its Initial reaches the server, every response dies at
+        // the proxy, so the handshake stays parked without a session slot.
+        let silent = bind(69, &[], 1).await;
+        let proxy = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut packet = [0u8; 2048];
+        let mut attempt = Box::pin(silent.connect(key(67), proxy.local_addr().unwrap()));
+        let size = tokio::select! {
+            result = &mut attempt => panic!("completed before any peer response: {result:?}"),
+            packet = proxy.recv_from(&mut packet) => packet.unwrap().0,
+        };
+        proxy.send_to(&packet[..size], address).await.unwrap();
+        assert_eq!(server.slots.available_permits(), 2);
+        // The legitimate peer is admitted while the silent handshake is parked,
+        // far below the 10 s handshake deadline; the serial accept first awaited
+        // the silent handshake's Deadline and failed this bound.
+        let (accepted, connected) = tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::join!(server.accept(), legit.connect(key(67), address)),
+        )
+        .await
+        .expect("second peer admitted below the handshake deadline");
+        let accepted = accepted.unwrap();
+        let connected = connected.unwrap();
+        assert_eq!(accepted.peer_id(), key(68));
+        assert_eq!(accepted.connection.alpn(), ALPN);
+        // One slot for the admitted peer; the parked silent attempt holds none.
+        assert_eq!(server.slots.available_permits(), 1);
+        drop((accepted, connected, attempt));
+        tokio::join!(server.close(), legit.close(), silent.close());
+    })
+    .await
+    .expect("silent-Initial concurrency deadline");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_handshake_cap_bounds_silent_initials() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        const EXCESS: usize = 2;
+        let mut server = bind(67, &[key(68)], 8).await;
+        let address = server.local_addr();
+        let cap = server.pending_cap;
+        // One silent peer per one-way relay: Initial in, every response dies.
+        let count = cap + EXCESS;
+        let mut silent_peers = Vec::new();
+        for seed in 70..(70 + count as u8) {
+            let client = bind(seed, &[], 1).await;
+            let proxy = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let mut packet = [0u8; 2048];
+            let mut attempt = Box::pin(client.connect(key(67), proxy.local_addr().unwrap()));
+            let size = tokio::select! {
+                result = &mut attempt => panic!("completed before any peer response: {result:?}"),
+                packet = proxy.recv_from(&mut packet) => packet.unwrap().0,
+            };
+            proxy.send_to(&packet[..size], address).await.unwrap();
+            silent_peers.push((client, proxy, attempt));
+        }
+        // The accept loop parks up to the cap and refuses the excess instead of
+        // queueing memory.
+        let _ = tokio::time::timeout(Duration::from_secs(2), server.accept()).await;
+        assert_eq!(server.pending.len(), cap);
+        // Silent peers hold no session slots.
+        assert_eq!(server.slots.available_permits(), 8);
+        // At the cap a new attempt is refused promptly while accept is polled, not parked.
+        let direct = bind(68, &[], 1).await;
+        let refused = tokio::time::timeout(Duration::from_secs(3), async {
+            tokio::select! {
+                result = direct.connect(key(67), address) => result,
+                accepted = server.accept() => panic!("unexpected admission: {accepted:?}"),
+            }
+        })
+        .await
+        .expect("over-cap attempt refused promptly");
+        assert!(refused.is_err());
+        assert_eq!(server.pending.len(), cap);
+        drop(silent_peers);
+        drop(refused);
+        tokio::join!(server.close(), direct.close());
+    })
+    .await
+    .expect("pending cap deadline");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -336,6 +463,8 @@ async fn backend_metadata_exhaustion_is_capacity_not_a_generic_connect_failure()
             allowlist: Allowlist::default(),
             slots: Arc::new(Semaphore::new(1)),
             custom: None,
+            pending_cap: 1,
+            pending: FuturesUnordered::new(),
         };
         let observer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         assert!(matches!(

@@ -18,11 +18,13 @@
 //! Cancellation contract: waiter cancellation of [`ServerRole::start`],
 //! [`ServerRole::run`] or [`ServerRole::shutdown`] never drops an owner —
 //! ownership is retained across cancellation by keeping every owner inside
-//! the phase. The native and Yggdrasil accept arms are themselves
-//! cancellation-unsafe per their SDK contracts (`network/admission/mod.rs`,
-//! `network/admission/ygg/mod.rs`): a losing select arm can abandon a
-//! consumed handshake, which is not replayed, and the SDK returns the
-//! admission slot. Dropping the whole role restores the owned owners into
+//! the phase. The Yggdrasil accept arm is itself cancellation-unsafe per
+//! its SDK contract (`network/admission/ygg/mod.rs`): a losing select arm
+//! can abandon a consumed handshake, which is not replayed, and the SDK
+//! returns the admission slot. The native accept arm is cancel-safe per
+//! its SDK contract — a losing select arm parks the polled attempt in the
+//! endpoint and the next loop iteration completes it, so no native
+//! handshake is abandoned. Dropping the whole role restores the owned owners into
 //! the retained composition synchronously; the composition owner task's
 //! ordered close (watcher stop + withdraw + Mainline close, payload before
 //! bridge, native endpoint close last) then closes them.
@@ -447,9 +449,12 @@ impl ServerRole {
     /// transferred payload pair is live, the Yggdrasil endpoint, with the
     /// pump drive and a bounded session set. Cancel-safe: YES — ownership
     /// is retained across cancellation (the phase keeps every owner), but
-    /// the accept arms themselves are cancellation-unsafe per their SDK
-    /// contracts: a losing select arm can abandon a consumed handshake,
-    /// which is not replayed; the SDK returns the admission slot.
+    /// the native accept arm is cancel-safe per `network/admission/mod.rs`
+    /// (a losing select arm parks the attempt; the next call completes it),
+    /// while the Yggdrasil accept arm remains cancellation-unsafe per
+    /// `network/admission/ygg/mod.rs` (a losing select arm can abandon a
+    /// consumed handshake, which is not replayed; the SDK returns the
+    /// admission slot).
     pub async fn run(
         &mut self,
         shutdown: &mut std::pin::Pin<&mut impl std::future::Future<Output = ()>>,

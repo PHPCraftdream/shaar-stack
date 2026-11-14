@@ -1,5 +1,6 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{future::Future, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 
+use futures::{StreamExt, stream::FuturesUnordered};
 use iroh::endpoint::{
     BindOpts, NetReportConfig, PortmapperConfig, QuicTransportConfig, VarInt, presets,
 };
@@ -45,6 +46,35 @@ const _: () = assert!(
     "path idle must precede connection idle"
 );
 
+/// A failed inbound handshake parked in the pending set.
+enum HandshakeFailure {
+    Deadline,
+    Handshake(iroh::endpoint::ConnectingError),
+}
+
+/// Outcome of one parked inbound handshake.
+struct HandshakeOutcome {
+    source: IncomingAddr,
+    connection: Result<iroh::endpoint::Connection, HandshakeFailure>,
+}
+
+/// One concurrently driven inbound handshake, bounded by the endpoint's pending cap.
+type PendingHandshake = Pin<Box<dyn Future<Output = HandshakeOutcome> + Send>>;
+
+/// Parks one accepted transport attempt; its 10 s deadline starts at insertion.
+/// Dropping the parked future abandons only that one handshake.
+fn park_handshake(incoming: iroh::endpoint::Incoming) -> PendingHandshake {
+    let source = incoming.remote_addr();
+    Box::pin(async move {
+        let connection =
+            match tokio::time::timeout(HANDSHAKE_TIMEOUT, async { incoming.await }).await {
+                Ok(connection) => connection.map_err(HandshakeFailure::Handshake),
+                Err(_elapsed) => Err(HandshakeFailure::Deadline),
+            };
+        HandshakeOutcome { source, connection }
+    })
+}
+
 /// Native sockets and immutable admission policy. Not Clone.
 /// No SDK task is spawned: callers own/poll handshakes and shutdown themselves.
 pub struct Endpoint {
@@ -53,6 +83,9 @@ pub struct Endpoint {
     allowlist: Allowlist,
     slots: Arc<Semaphore>,
     custom: Option<Arc<SignalingTransport>>,
+    /// Concurrent inbound handshakes allowed before authentication.
+    pending_cap: usize,
+    pending: FuturesUnordered<PendingHandshake>,
 }
 
 impl Endpoint {
@@ -96,9 +129,10 @@ impl Endpoint {
     }
 
     /// Binds over a caller-provided admission pool. The shared pool bounds LIVE
-    /// admission (pending outbound handshakes, accepted handshakes, live handles)
+    /// admission (outbound handshakes, authenticated sessions and live handles)
     /// across every endpoint built over it; the numeric iroh incoming/connection
     /// limits stay per endpoint as transport-level guards.
+    /// Inbound handshakes are bounded per endpoint by the pending cap before authentication.
     /// cancel-safe: NO — cancellation does not prove completed backend startup or drain.
     pub(in crate::network) async fn bind_custom_shared(
         identity: &Identity,
@@ -173,6 +207,8 @@ impl Endpoint {
             allowlist,
             slots,
             custom,
+            pending_cap: limits.sessions,
+            pending: FuturesUnordered::new(),
         })
     }
 
@@ -288,32 +324,86 @@ impl Endpoint {
         Ok(session)
     }
 
-    /// Accepts one fully handshaken, allowlisted peer. Mutable access serializes
-    /// inbound handshakes; a rejected peer never produces an application session.
-    /// cancel-safe: NO — a received Initial/handshake is consumed, not replayed;
-    /// SDK slots are returned on cancellation, protocol metadata drains separately.
+    /// Accepts one fully handshaken, allowlisted peer.
+    ///
+    /// Inbound handshakes are driven concurrently and bounded by their own cap
+    /// (`pending_cap`, the configured session limit kept separate from the slot
+    /// pool): a silent or unauthenticated Initial parks without a session slot,
+    /// so it never delays or displaces another peer's admission and cannot
+    /// exhaust the authenticated session pool. An attempt beyond the cap is
+    /// refused immediately, and so is one that arrives while the session pool is
+    /// saturated ([`NetworkError::Capacity`], before any handshake work); a peer
+    /// that authenticates after the pool filled up meanwhile is closed with the
+    /// same error. Initials that arrive while no
+    /// accept poll is pending queue inside the transport under its own limits.
+    /// Parked handshakes progress only while this future is polled; the
+    /// endpoint retains them across calls, and `pending + live` stays within
+    /// the transport's `connection_limit` headroom.
+    ///
+    /// cancel-safe: YES — dropping or losing the select race on this future
+    /// parks the polled attempt in the pending set (or leaves it queued in the
+    /// transport), and a later call completes the same handshake; an attempt is
+    /// always either parked or refused, never silently consumed. Each failed
+    /// handshake is returned as its own error as soon as it completes
+    /// ([`NetworkError::Deadline`] for the 10 s handshake deadline) while the
+    /// other parked handshakes stay in place; after [`Self::close`] the call
+    /// answers [`NetworkError::Closed`].
     pub async fn accept(&mut self) -> Result<Session, NetworkError> {
-        let incoming = self.inner.accept().await.ok_or(NetworkError::Closed)?;
-        let source = incoming.remote_addr();
-        let admission = match self.admit() {
-            Ok(admission) => admission,
-            Err(error) => {
-                incoming.refuse();
-                return Err(error);
+        loop {
+            if self.inner.is_closed() {
+                return Err(NetworkError::Closed);
+            }
+            tokio::select! {
+                biased;
+                completed = self.pending.next(), if !self.pending.is_empty() => {
+                    // The arm is disabled while the set is empty, so `None` cannot occur.
+                    let Some(outcome) = completed else { continue };
+                    return self.finish_inbound(outcome);
+                }
+                incoming = self.inner.accept() => match incoming {
+                    Some(incoming) => {
+                        // A saturated pool refuses before any handshake work, as before;
+                        // the check takes no slot, so parked handshakes still hold none.
+                        if let Err(error) = self.admit() {
+                            incoming.refuse();
+                            return Err(error);
+                        }
+                        if self.pending.len() >= self.pending_cap {
+                            incoming.refuse();
+                            continue;
+                        }
+                        self.pending.push(park_handshake(incoming));
+                    }
+                    None => return Err(NetworkError::Closed),
+                },
+            }
+        }
+    }
+
+    /// Authenticates one completed handshake and charges the session slot only now.
+    fn finish_inbound(&self, outcome: HandshakeOutcome) -> Result<Session, NetworkError> {
+        let connection = match outcome.connection {
+            Ok(connection) => connection,
+            Err(HandshakeFailure::Deadline) => return Err(NetworkError::Deadline),
+            Err(HandshakeFailure::Handshake(error)) => {
+                return Err(NetworkError::from_handshake(error));
             }
         };
-        let connection = tokio::time::timeout(HANDSHAKE_TIMEOUT, async { incoming.await })
-            .await
-            .map_err(|_| NetworkError::Deadline)?
-            .map_err(NetworkError::from_handshake)?;
         if !self.allowlist.contains(&connection.remote_id()) {
             connection.close(VarInt::from_u32(ACCESS_DENIED), b"");
             return Err(NetworkError::AccessDenied);
         }
-        if !self.source_matches(&source, &connection.remote_id()) {
+        if !self.source_matches(&outcome.source, &connection.remote_id()) {
             connection.close(VarInt::from_u32(2), b"");
             return Err(NetworkError::PeerMismatch);
         }
+        let admission = match self.admit() {
+            Ok(admission) => admission,
+            Err(error) => {
+                connection.close(VarInt::from_u32(2), b"");
+                return Err(error);
+            }
+        };
         Self::session(connection, admission)
     }
 

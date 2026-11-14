@@ -333,6 +333,9 @@ impl SignaledEndpoint {
             .map_err(NetworkError::SignalingOperation)
     }
 
+    /// cancel-safe: YES — inherits the native admission contract: in-flight
+    /// handshakes are retained by the endpoint across cancellation and completed
+    /// by a later call; failed attempts are reported once no attempt remains.
     pub async fn accept(&mut self) -> Result<Session, NetworkError> {
         self.endpoint.accept().await
     }
