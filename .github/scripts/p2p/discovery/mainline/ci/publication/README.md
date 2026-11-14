@@ -4,7 +4,7 @@
 
 The transformed crate adds `EndpointInfo::to_pkarr_signed_packet_at(&self, secret_key: &SecretKey, ttl: u32, timestamp_micros: u64) -> Result<pkarr::SignedPacket, EncodingError>`. It checks endpoint/key binding first (`EncodingError::WrongSigningKey`), then rejects values above `i64::MAX` (`EncodingError::InvalidTimestamp`), then delegates TXT/DNS encoding and signing to the existing upstream implementation (`EncodingError::FailedBuildingPacket` for its errors). The internal `pub(crate)` helper takes `u64` and is not externally exported.
 
-The old `to_pkarr_signed_packet` method remains byte-for-byte source unchanged, and continues taking its timestamp from upstream `Timestamp::now()`. No custom preimage, signer, or DNS encoding is added. The transformed library root adds `#![forbid(unsafe_code)]`. No extra public helper or attrs module export is added.
+The old `to_pkarr_signed_packet` method remains byte-for-byte source unchanged, and continues taking its timestamp from upstream `Timestamp::now()`. No custom preimage, signer, or DNS encoding is added. The transformed library root adds `#![cfg_attr(not(any(target_os = "android", doc)), forbid(unsafe_code))]`: forbid(unsafe_code) stays in force on every target except Android, where upstream iroh-dns ships cfg-gated JNI unsafe, and rustdoc builds, which compile the declaration for the documented example. No extra public helper or attrs module export is added.
 
 ## Parent CI invocation
 
