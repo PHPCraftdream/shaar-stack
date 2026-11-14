@@ -1,11 +1,13 @@
 //! Production [`Dialer`] implementations for the composed client role.
 //!
-//! Native priority is fixed: direct candidates first, key-directed relay
-//! negotiation second, Yggdrasil only ever on the standby owner's fallback
-//! side. All dials are bounded by the caller-supplied attempt deadline; a
-//! link completed after the deadline is abandoned, never returned.
+//! Native priority is fixed: direct candidates first — public/reflexive-scope
+//! candidates ahead of private/local-scope ones, every private/local connect
+//! bounded by a fixed slice (R1) — then key-directed relay negotiation, and
+//! Yggdrasil only ever on the standby owner's fallback side. All dials are
+//! bounded by the caller-supplied attempt deadline; a link completed after
+//! the deadline is abandoned, never returned.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,12 +24,21 @@ use crate::network::{
 use crate::path::{DialError, Dialer, PathKind, Route, StandbyError, StandbyOwner};
 use crate::startup::resources::SharedResources;
 
+#[cfg(test)]
+#[path = "../tests/dial_order_tests.rs"]
+mod dial_order_tests;
+
 /// Maximum direct addresses carried from one resolve (matches the
 /// composition's snapshot bound).
 const MAX_CANDIDATES: usize = crate::startup::resources::MAX_SNAPSHOT_ADDRESSES;
 
 /// Hard ceiling for one Mainline resolve inside a dial attempt.
 const RESOLVE_BUDGET: Duration = Duration::from_secs(5);
+
+/// Fixed connect slice for one private/local-scope candidate (R1): a silent
+/// candidate must not consume the whole attempt deadline. Public-scope
+/// candidates keep the full remaining deadline.
+const LOCAL_CANDIDATE_SLICE: Duration = Duration::from_secs(1);
 
 /// A denied or mismatched key is infrastructure-level rejection: retrying
 /// the same key through another transport must not evade admission.
@@ -135,16 +146,115 @@ impl NativeDialer {
     }
 }
 
+/// Dialer-side scope heuristic (R1; documented here because the signed record
+/// carries bare socket addresses with no scope information). Private/local
+/// scope covers RFC 1918, CGNAT 100.64/10, IPv4 loopback and link-local, and
+/// IPv6 loopback and link-local (IPv4-mapped forms count as their embedded
+/// IPv4 range). Custom/fabric addresses never arrive as candidates: the
+/// record publisher admits bare `TransportAddr::Ip` entries only. Everything
+/// else is treated as public/reflexive scope and keeps the full deadline.
+fn candidate_is_local(address: SocketAddr) -> bool {
+    match address.ip() {
+        IpAddr::V4(ip) => ipv4_is_local(ip),
+        IpAddr::V6(ip) => ipv6_is_local(ip),
+    }
+}
+
+/// IPv4 ranges of the documented private/local heuristic.
+fn ipv4_is_local(ip: Ipv4Addr) -> bool {
+    let [first, second, _, _] = ip.octets();
+    first == 10
+        || (first == 172 && (16..=31).contains(&second))
+        || (first == 192 && second == 168)
+        || (first == 100 && (64..=127).contains(&second))
+        || first == 127
+        || (first == 169 && second == 254)
+}
+
+/// IPv6 ranges: loopback and link-local, with IPv4-mapped addresses
+/// classified as their embedded IPv4 range.
+fn ipv6_is_local(ip: Ipv6Addr) -> bool {
+    if let Some(mapped) = ip.to_ipv4_mapped() {
+        return ipv4_is_local(mapped);
+    }
+    ip.is_loopback() || (ip.segments()[0] & 0xffc0) == 0xfe80
+}
+
+/// Stable public-first reordering (R1): public/reflexive-scope candidates
+/// keep their record order ahead of private/local-scope candidates, which
+/// keep theirs.
+fn public_first_order(candidates: &mut [SocketAddr]) {
+    // `sort_by_key` is stable and `false` (public) sorts before `true` (local); the
+    // list is bounded by MAX_CANDIDATES, so this is a handful of comparisons.
+    candidates.sort_by_key(|candidate| candidate_is_local(*candidate));
+}
+
+/// The direct-candidate phase of one attempt (R1). Candidates are ordered
+/// public-first; each private/local-scope connect is bounded by
+/// [`LOCAL_CANDIDATE_SLICE`] capped at the remaining deadline, and a
+/// timed-out candidate is removed from the list so one dial never retries it.
+/// Returns the completed session, or `None` when the list is exhausted and
+/// the caller reaches relay negotiation. `Err` still ends the attempt when
+/// the deadline is spent or the peer was denied (`fatal_peer_error`), so the
+/// total attempt budget, the retry schedule and the typed `Exhausted` exit
+/// are unchanged.
+async fn dial_candidate_list<C, Fut>(
+    candidates: &mut Vec<SocketAddr>,
+    deadline: Instant,
+    mut connect: C,
+) -> Result<Option<Session>, DialError>
+where
+    C: FnMut(SocketAddr) -> Fut,
+    Fut: std::future::Future<Output = Result<Session, NetworkError>> + 'static,
+{
+    public_first_order(candidates);
+    while let Some(address) = candidates.first().copied() {
+        if Instant::now() >= deadline {
+            return Err(DialError);
+        }
+        let connect_deadline = if candidate_is_local(address) {
+            deadline.min(Instant::now() + LOCAL_CANDIDATE_SLICE)
+        } else {
+            deadline
+        };
+        match timeout_at(connect_deadline, connect(address)).await {
+            Ok(Ok(session)) => {
+                candidates.clear();
+                return Ok(Some(session));
+            }
+            // Upstream text is redacted: `DialError` carries no payload.
+            Ok(Err(error)) => {
+                if fatal_peer_error(&error) {
+                    return Err(DialError);
+                }
+                candidates.remove(0);
+            }
+            // R1: a timed-out candidate is dropped from the list instead of
+            // ending the attempt; the next candidate gets the remaining time.
+            Err(_) => {
+                candidates.remove(0);
+            }
+        }
+    }
+    candidates.clear();
+    Ok(None)
+}
+
 impl Dialer for NativeDialer {
     type Link = Session;
 
-    /// One attempt: direct candidates first, relay negotiation only when all
-    /// direct candidates failed and time remains. A failed cold Mainline
-    /// lookup does NOT end the attempt: the pinned relay is addressed by key
-    /// alone, so the dial still reaches relay negotiation. Native priority is
+    /// One attempt: direct candidates first — public/reflexive-scope
+    /// candidates ahead of private/local-scope ones, every private/local
+    /// connect bounded by a fixed slice and a timed-out candidate dropped
+    /// from the list (R1) — then relay negotiation only when all direct
+    /// candidates failed and time remains. A failed cold Mainline lookup does
+    /// NOT end the attempt: the pinned relay is addressed by key alone, so
+    /// the dial still reaches relay negotiation. Native priority is
     /// unchanged (direct candidates first, relay negotiation second).
     /// `AccessDenied`/`PeerMismatch` end the attempt immediately — a denied
-    /// key is not retried through other infrastructure.
+    /// key is not retried through other infrastructure. The total attempt
+    /// budget, the retry schedule and the typed `Exhausted` exit are
+    /// unchanged by the slice and drop rules.
     /// cancel-safe: NO — handshakes may complete after cancellation; the
     /// abandoned link closes on drop and the candidate list stays consistent.
     async fn dial(&mut self, deadline: Instant) -> Result<Self::Link, DialError> {
@@ -156,30 +266,28 @@ impl Dialer for NativeDialer {
         if self.resolve_candidates(deadline).await.is_err() {
             self.candidates.clear();
         }
-        while let Some(address) = self.candidates.first().copied() {
-            if Instant::now() >= deadline {
-                return Err(DialError);
+        // One Arc clone per candidate attempt (bounded by MAX_CANDIDATES) so
+        // the connect future is owned and the seam stays injectable in tests.
+        let endpoint = Arc::clone(&self.endpoint);
+        let peer = self.peer;
+        let connected = dial_candidate_list(&mut self.candidates, deadline, move |address| {
+            let endpoint = Arc::clone(&endpoint);
+            async move { endpoint.connect(peer, address).await }
+        })
+        .await?;
+        if let Some(session) = connected {
+            #[cfg(test)]
+            if let Some(events) = &self.events {
+                events.capture_native(&session);
             }
-            match timeout_at(deadline, self.endpoint.connect(self.peer, address)).await {
-                Ok(Ok(session)) => {
-                    #[cfg(test)]
-                    if let Some(events) = &self.events {
-                        events.capture_native(&session);
-                    }
-                    self.candidates.clear();
-                    return Ok(session);
-                }
-                // Upstream text is redacted: `DialError` carries no payload.
-                Ok(Err(error)) => {
-                    if fatal_peer_error(&error) {
-                        return Err(DialError);
-                    }
-                    self.candidates.remove(0);
-                }
-                Err(_) => return Err(DialError),
-            }
+            return Ok(session);
         }
-        self.candidates.clear();
+        // Relay negotiation only when time remains: exhausting the list
+        // exactly at the deadline still ends the attempt inside the unchanged
+        // budget.
+        if Instant::now() >= deadline {
+            return Err(DialError);
+        }
         self.ensure_relay().await?;
         let relay = self.relay_addr;
         match timeout_at(deadline, self.endpoint.connect_via(self.peer, relay)).await {

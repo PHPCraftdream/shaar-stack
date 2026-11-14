@@ -89,6 +89,14 @@ FAULT_QUOTA = 2 * 1024 * 1024
 RESERVE_FAIL = b"relay reservation failed at startup"
 REQUEST_PREFIX = b"shaar-controlled-request:"
 REPLY_PREFIX = b"shaar-fixed-target-reply:"
+# Leaf L5 fixture part: the owned Mainline DHT fixture (the identity-helper "wan" role answering
+# on dht_port) can stamp every KRPC reply with the requester's compact IPv4 endpoint (the BEP 42
+# `ip` field), exactly like a real node. The fixture option is OFF by default and unreachable
+# from every current case. A future case opts in with a "dht_observed" spec key; the wan helper
+# then reads DHT_OBSERVED_ENV=1 and chains the fixture option, and child_environment allows the
+# name only together with the new L3/L4 cases, so accepted responses stay byte-identical.
+DHT_OBSERVED_KEY = "dht_observed"
+DHT_OBSERVED_ENV = "SHAAR_NAT_DHT_OBSERVED"
 
 
 def require(condition, message):

@@ -103,6 +103,56 @@ fn field<'a>(value: &'a Value, key: &[u8]) -> &'a Value {
     fields.get(key).expect("reply field")
 }
 
+/// The accepted no-vote reply envelope for the query transaction (option-off wire shape).
+fn reply_envelope(transaction: &[u8], r: Value) -> Value {
+    dict([
+        (b"r".as_slice(), r),
+        (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
+        (b"y".as_slice(), Value::Bytes(b"r".to_vec())),
+    ])
+}
+
+fn responder_id() -> Value {
+    Value::Bytes(vec![0x41; 20])
+}
+
+fn probe_arguments() -> Value {
+    dict([
+        (b"id".as_slice(), Value::Bytes(vec![0x42; 20])),
+        (b"target".as_slice(), Value::Bytes(vec![0x42; 20])),
+    ])
+}
+
+fn observed_endpoint(source: std::net::SocketAddrV4) -> Value {
+    let mut endpoint = Vec::with_capacity(6);
+    endpoint.extend_from_slice(&source.ip().octets());
+    endpoint.extend_from_slice(&source.port().to_be_bytes());
+    Value::Bytes(endpoint)
+}
+
+async fn raw_receive(socket: &UdpSocket) -> Vec<u8> {
+    let mut packet = [0; 2048];
+    let length = socket.recv(&mut packet).await.expect("owned reply");
+    packet[..length].to_vec()
+}
+
+fn decode(packet: &[u8]) -> Value {
+    serde_bencode::from_bytes(packet).expect("reply bencode")
+}
+
+async fn assert_stamped(socket: &UdpSocket, source: std::net::SocketAddrV4, expected: Value) {
+    let reply = decode(&raw_receive(socket).await);
+    let mut fields = match reply {
+        Value::Dict(fields) => fields,
+        other => panic!("reply dictionary: {other:?}"),
+    };
+    let vote = fields
+        .remove(b"ip".as_slice())
+        .expect("observed-address vote present");
+    assert_eq!(vote, observed_endpoint(source));
+    assert_eq!(Value::Dict(fields), expected);
+}
+
 #[tokio::test]
 async fn resolver_acknowledges_repeated_signed_put_without_replacing_service_record() {
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -203,4 +253,179 @@ fn namespace_query_sources_are_exact_and_default_stays_loopback_only() {
         assert!(!super::wire::source_allowed(ip, false));
         assert!(!super::wire::source_allowed(ip, true));
     }
+}
+
+/// Option-off equivalence: the default fixture pins the accepted pre-change replies exactly
+/// (decoded value equality plus byte-length equality; bencode length is independent of the
+/// Value::Dict HashMap order, and the encoder path is untouched by the option).
+#[tokio::test]
+async fn default_peer_replies_stay_byte_equivalent_without_the_observed_address_option() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut peer = LoopbackPeer::bind().await;
+        let socket = UdpSocket::bind("127.0.0.1:0").await.expect("owned sender");
+        socket.connect(peer.address).await.expect("owned peer");
+        let service = record(0x76);
+        let mut responder = std::pin::pin!(peer.serve_record(&service));
+        let exchange = async {
+            for (method, expected) in [
+                (
+                    b"ping".as_slice(),
+                    reply_envelope(b"ff", dict([(b"id".as_slice(), responder_id())])),
+                ),
+                (
+                    b"find_node".as_slice(),
+                    reply_envelope(
+                        b"ff",
+                        dict([
+                            (b"id".as_slice(), responder_id()),
+                            (b"nodes".as_slice(), Value::Bytes(Vec::new())),
+                        ]),
+                    ),
+                ),
+                (
+                    b"get".as_slice(),
+                    reply_envelope(
+                        b"ff",
+                        dict([
+                            (b"id".as_slice(), responder_id()),
+                            (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
+                        ]),
+                    ),
+                ),
+            ] {
+                socket
+                    .send(&query(b"ff", method, probe_arguments()))
+                    .await
+                    .expect("bounded fixture probe");
+                let reply = raw_receive(&socket).await;
+                assert_eq!(decode(&reply), expected);
+                assert_eq!(
+                    reply.len(),
+                    serde_bencode::to_bytes(&expected)
+                        .expect("bounded reply encoding")
+                        .len()
+                );
+            }
+            socket.send(&get(&service)).await.expect("service GET");
+            let served = reply_envelope(
+                b"gg",
+                dict([
+                    (b"id".as_slice(), responder_id()),
+                    (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
+                    (b"k".as_slice(), Value::Bytes(service.key().to_vec())),
+                    (
+                        b"sig".as_slice(),
+                        Value::Bytes(service.signature().to_vec()),
+                    ),
+                    (b"seq".as_slice(), Value::Int(service.seq())),
+                    (b"v".as_slice(), Value::Bytes(service.value().to_vec())),
+                ]),
+            );
+            let reply = raw_receive(&socket).await;
+            assert_eq!(decode(&reply), served);
+            assert_eq!(
+                reply.len(),
+                serde_bencode::to_bytes(&served)
+                    .expect("bounded reply encoding")
+                    .len()
+            );
+        };
+        tokio::select! {
+            () = exchange => {},
+            () = &mut responder => panic!("responder must stay live"),
+        }
+    })
+    .await
+    .expect("bounded option-off equivalence exchange");
+}
+
+/// Option-on behavior: every reply carries the BEP 42 `ip` vote of the observed requester
+/// endpoint (compact IPv4 form) and is otherwise identical to the accepted shape.
+#[tokio::test]
+async fn observed_address_option_stamps_the_requester_endpoint_into_every_reply() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut peer = LoopbackPeer::bind().await.report_observed(true);
+        let socket = UdpSocket::bind("127.0.0.1:0").await.expect("owned sender");
+        socket.connect(peer.address).await.expect("owned peer");
+        let std::net::SocketAddr::V4(source) = socket.local_addr().expect("sender endpoint") else {
+            panic!("IPv4 loopback sender");
+        };
+        let service = record(0x77);
+        let mut responder = std::pin::pin!(peer.serve_record(&service));
+        let exchange = async {
+            for (method, expected) in [
+                (
+                    b"ping".as_slice(),
+                    reply_envelope(b"ff", dict([(b"id".as_slice(), responder_id())])),
+                ),
+                (
+                    b"get".as_slice(),
+                    reply_envelope(
+                        b"ff",
+                        dict([
+                            (b"id".as_slice(), responder_id()),
+                            (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
+                        ]),
+                    ),
+                ),
+            ] {
+                socket
+                    .send(&query(b"ff", method, probe_arguments()))
+                    .await
+                    .expect("bounded fixture probe");
+                assert_stamped(&socket, source, expected).await;
+            }
+            socket.send(&get(&service)).await.expect("service GET");
+            assert_stamped(
+                &socket,
+                source,
+                reply_envelope(
+                    b"gg",
+                    dict([
+                        (b"id".as_slice(), responder_id()),
+                        (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
+                        (b"k".as_slice(), Value::Bytes(service.key().to_vec())),
+                        (
+                            b"sig".as_slice(),
+                            Value::Bytes(service.signature().to_vec()),
+                        ),
+                        (b"seq".as_slice(), Value::Int(service.seq())),
+                        (b"v".as_slice(), Value::Bytes(service.value().to_vec())),
+                    ]),
+                ),
+            )
+            .await;
+        };
+        tokio::select! {
+            () = exchange => {},
+            () = &mut responder => panic!("responder must stay live"),
+        }
+        // The PUT acknowledgement carries the same vote.
+        let mut put_peer = LoopbackPeer::bind().await.report_observed(true);
+        let put_socket = UdpSocket::bind("127.0.0.1:0").await.expect("owned sender");
+        put_socket
+            .connect(put_peer.address)
+            .await
+            .expect("owned peer");
+        let std::net::SocketAddr::V4(put_source) =
+            put_socket.local_addr().expect("sender endpoint")
+        else {
+            panic!("IPv4 loopback sender");
+        };
+        let item = record(0x78);
+        put_socket
+            .send(&put(&item, false))
+            .await
+            .expect("signed PUT");
+        let captured = put_peer.serve_until_put().await;
+        assert_eq!(captured.key, item.key());
+        assert_stamped(
+            &put_socket,
+            put_source,
+            reply_envelope(b"pp", dict([(b"id".as_slice(), responder_id())])),
+        )
+        .await;
+    })
+    .await
+    .expect("bounded option-on observed-address exchange");
 }

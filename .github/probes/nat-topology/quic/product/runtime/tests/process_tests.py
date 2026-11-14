@@ -69,7 +69,9 @@ class PrivilegeTests(unittest.TestCase):
         self.assertEqual(environment["SHAAR_NAT_ROLE"], "wan")
         self.assertEqual(set(environment), {"PATH", "LANG", "LC_ALL", "SHAAR_NAT_ROLE"})
         for extra in ({"LD_PRELOAD": "/foreign.so"}, {"PYTHONPATH": "/foreign"},
-                      {"SHAAR_NAT_ROLE": "x" * 4097}, {"SHAAR_NAT_NONCE": "\0"}):
+                      {"SHAAR_NAT_ROLE": "x" * 4097}, {"SHAAR_NAT_NONCE": "\0"},
+                      # The recorded L5 DHT observed-address option is not an owned child variable yet.
+                      {"SHAAR_NAT_DHT_OBSERVED": "1"}):
             with self.assertRaises(ValueError):
                 processes.child_environment(extra)
 
