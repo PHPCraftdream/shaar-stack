@@ -141,7 +141,7 @@ fn decode(packet: &[u8]) -> Value {
 }
 
 async fn assert_stamped(socket: &UdpSocket, source: std::net::SocketAddrV4, expected: Value) {
-    let reply = raw_receive(socket).await;
+    let reply = decode(&raw_receive(socket).await);
     let mut fields = match reply {
         Value::Dict(fields) => fields,
         other => panic!("reply dictionary: {other:?}"),
@@ -265,7 +265,7 @@ async fn default_peer_replies_stay_byte_equivalent_without_the_observed_address_
         let socket = UdpSocket::bind("127.0.0.1:0").await.expect("owned sender");
         socket.connect(peer.address).await.expect("owned peer");
         let service = record(0x76);
-        let responder = std::pin::pin!(peer.serve_record(&service));
+        let mut responder = std::pin::pin!(peer.serve_record(&service));
         let exchange = async {
             for (method, expected) in [
                 (
@@ -342,7 +342,7 @@ async fn observed_address_option_stamps_the_requester_endpoint_into_every_reply(
             panic!("IPv4 loopback sender");
         };
         let service = record(0x77);
-        let responder = std::pin::pin!(peer.serve_record(&service));
+        let mut responder = std::pin::pin!(peer.serve_record(&service));
         let exchange = async {
             for (method, expected) in [
                 (
