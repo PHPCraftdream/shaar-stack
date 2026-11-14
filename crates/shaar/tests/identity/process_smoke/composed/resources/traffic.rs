@@ -17,6 +17,8 @@ use tokio::{
 };
 
 const IO: Duration = Duration::from_secs(20);
+const RELEASE_WAIT: Duration = Duration::from_secs(10);
+const RELEASE_STEP: Duration = Duration::from_millis(100);
 const CHUNK: usize = 64 * 1024;
 const PATTERN: u8 = 0x5a;
 
@@ -139,19 +141,36 @@ pub(super) async fn hold_streams(
 ) -> Result<Vec<TcpStream>, String> {
     let mut held = Vec::with_capacity(count);
     for _ in 0..count {
-        let mut stream = timeout(IO, TcpStream::connect(front))
-            .await
-            .map_err(|_| "hold connect deadline")?
-            .map_err(|e| e.to_string())?;
-        stream.write_all(b"Ex").await.map_err(|e| e.to_string())?;
-        let mut byte = [0_u8; 1];
-        timeout(IO, stream.read_exact(&mut byte))
-            .await
-            .map_err(|_| "hold echo deadline")?
-            .map_err(|e| e.to_string())?;
+        // At the stream cap a product refuses (resets) the surplus stream until an earlier,
+        // still closing stream is released; retry for a bounded time instead of failing.
+        let started = Instant::now();
+        let stream = loop {
+            match hold_one(front).await {
+                Ok(stream) => break stream,
+                Err(_) if started.elapsed() < RELEASE_WAIT => {
+                    tokio::time::sleep(RELEASE_STEP).await;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         held.push(stream);
     }
     Ok(held)
+}
+
+/// Opens one echo stream and proves it is served by reading one echoed byte.
+async fn hold_one(front: SocketAddr) -> Result<TcpStream, String> {
+    let mut stream = timeout(IO, TcpStream::connect(front))
+        .await
+        .map_err(|_| "hold connect deadline")?
+        .map_err(|e| e.to_string())?;
+    stream.write_all(b"Ex").await.map_err(|e| e.to_string())?;
+    let mut byte = [0_u8; 1];
+    timeout(IO, stream.read_exact(&mut byte))
+        .await
+        .map_err(|_| "hold echo deadline")?
+        .map_err(|e| e.to_string())?;
+    Ok(stream)
 }
 
 /// Writes into a stream whose target never reads until a write blocks. Returns
@@ -197,4 +216,28 @@ async fn target_echoes_and_stalls_by_first_byte() {
     release.notify_waiters();
     drop((held, stalled));
     service.abort();
+}
+
+#[tokio::test]
+async fn hold_streams_retries_a_refused_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        // The first stream is refused, like a product that is at its stream cap.
+        drop(listener.accept().await.unwrap());
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut buffer = [0_u8; 2];
+                if stream.read_exact(&mut buffer).await.is_ok() {
+                    let _ = stream.write_all(&buffer[..1]).await;
+                    let mut sink = [0_u8; 1];
+                    let _ = stream.read(&mut sink).await;
+                }
+            });
+        }
+    });
+    let held = hold_streams(address, 1).await.unwrap();
+    assert_eq!(held.len(), 1);
+    server.abort();
 }
