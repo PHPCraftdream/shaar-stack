@@ -103,11 +103,11 @@ fn field<'a>(value: &'a Value, key: &[u8]) -> &'a Value {
     fields.get(key).expect("reply field")
 }
 
-/// The accepted no-vote reply envelope for transaction b"ff" (option-off wire shape).
-fn reply_envelope(r: Value) -> Value {
+/// The accepted no-vote reply envelope for the query transaction (option-off wire shape).
+fn reply_envelope(transaction: &[u8], r: Value) -> Value {
     dict([
         (b"r".as_slice(), r),
-        (b"t".as_slice(), Value::Bytes(b"ff".to_vec())),
+        (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
         (b"y".as_slice(), Value::Bytes(b"r".to_vec())),
     ])
 }
@@ -270,21 +270,27 @@ async fn default_peer_replies_stay_byte_equivalent_without_the_observed_address_
             for (method, expected) in [
                 (
                     b"ping".as_slice(),
-                    reply_envelope(dict([(b"id".as_slice(), responder_id())])),
+                    reply_envelope(b"ff", dict([(b"id".as_slice(), responder_id())])),
                 ),
                 (
                     b"find_node".as_slice(),
-                    reply_envelope(dict([
-                        (b"id".as_slice(), responder_id()),
-                        (b"nodes".as_slice(), Value::Bytes(Vec::new())),
-                    ])),
+                    reply_envelope(
+                        b"ff",
+                        dict([
+                            (b"id".as_slice(), responder_id()),
+                            (b"nodes".as_slice(), Value::Bytes(Vec::new())),
+                        ]),
+                    ),
                 ),
                 (
                     b"get".as_slice(),
-                    reply_envelope(dict([
-                        (b"id".as_slice(), responder_id()),
-                        (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
-                    ])),
+                    reply_envelope(
+                        b"ff",
+                        dict([
+                            (b"id".as_slice(), responder_id()),
+                            (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
+                        ]),
+                    ),
                 ),
             ] {
                 socket
@@ -301,17 +307,20 @@ async fn default_peer_replies_stay_byte_equivalent_without_the_observed_address_
                 );
             }
             socket.send(&get(&service)).await.expect("service GET");
-            let served = reply_envelope(dict([
-                (b"id".as_slice(), responder_id()),
-                (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
-                (b"k".as_slice(), Value::Bytes(service.key().to_vec())),
-                (
-                    b"sig".as_slice(),
-                    Value::Bytes(service.signature().to_vec()),
-                ),
-                (b"seq".as_slice(), Value::Int(service.seq())),
-                (b"v".as_slice(), Value::Bytes(service.value().to_vec())),
-            ]));
+            let served = reply_envelope(
+                b"gg",
+                dict([
+                    (b"id".as_slice(), responder_id()),
+                    (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
+                    (b"k".as_slice(), Value::Bytes(service.key().to_vec())),
+                    (
+                        b"sig".as_slice(),
+                        Value::Bytes(service.signature().to_vec()),
+                    ),
+                    (b"seq".as_slice(), Value::Int(service.seq())),
+                    (b"v".as_slice(), Value::Bytes(service.value().to_vec())),
+                ]),
+            );
             let reply = raw_receive(&socket).await;
             assert_eq!(decode(&reply), served);
             assert_eq!(
@@ -347,14 +356,17 @@ async fn observed_address_option_stamps_the_requester_endpoint_into_every_reply(
             for (method, expected) in [
                 (
                     b"ping".as_slice(),
-                    reply_envelope(dict([(b"id".as_slice(), responder_id())])),
+                    reply_envelope(b"ff", dict([(b"id".as_slice(), responder_id())])),
                 ),
                 (
                     b"get".as_slice(),
-                    reply_envelope(dict([
-                        (b"id".as_slice(), responder_id()),
-                        (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
-                    ])),
+                    reply_envelope(
+                        b"ff",
+                        dict([
+                            (b"id".as_slice(), responder_id()),
+                            (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
+                        ]),
+                    ),
                 ),
             ] {
                 socket
@@ -367,17 +379,20 @@ async fn observed_address_option_stamps_the_requester_endpoint_into_every_reply(
             assert_stamped(
                 &socket,
                 source,
-                reply_envelope(dict([
-                    (b"id".as_slice(), responder_id()),
-                    (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
-                    (b"k".as_slice(), Value::Bytes(service.key().to_vec())),
-                    (
-                        b"sig".as_slice(),
-                        Value::Bytes(service.signature().to_vec()),
-                    ),
-                    (b"seq".as_slice(), Value::Int(service.seq())),
-                    (b"v".as_slice(), Value::Bytes(service.value().to_vec())),
-                ])),
+                reply_envelope(
+                    b"gg",
+                    dict([
+                        (b"id".as_slice(), responder_id()),
+                        (b"token".as_slice(), Value::Bytes(b"ok".to_vec())),
+                        (b"k".as_slice(), Value::Bytes(service.key().to_vec())),
+                        (
+                            b"sig".as_slice(),
+                            Value::Bytes(service.signature().to_vec()),
+                        ),
+                        (b"seq".as_slice(), Value::Int(service.seq())),
+                        (b"v".as_slice(), Value::Bytes(service.value().to_vec())),
+                    ]),
+                ),
             )
             .await;
         };
@@ -407,7 +422,7 @@ async fn observed_address_option_stamps_the_requester_endpoint_into_every_reply(
         assert_stamped(
             &put_socket,
             put_source,
-            reply_envelope(dict([(b"id".as_slice(), responder_id())])),
+            reply_envelope(b"pp", dict([(b"id".as_slice(), responder_id())])),
         )
         .await;
     })
