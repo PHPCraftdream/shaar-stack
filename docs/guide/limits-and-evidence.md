@@ -38,7 +38,7 @@ This page separates what was written, what ran in GitHub CI, and what has no evi
 ### Resources and performance
 
 - Bounds that exist in code: 1 MiB config, 256 allowlist entries (16 in the composed shape), 32 server sessions, 1 client session, 16 streams per session, 16 local client workers, a per-endpoint pending-handshake cap equal to the session limit (kept separate from the slot pool), at most 4 bootstrap nodes, 4 Yggdrasil peers and 4 published addresses.
-- **No performance, load, long-duration or efficiency claims are made.** The agreed efficiency criteria in `docs/plans/north-star.md` (first byte, failover time, direct share) are targets measured in controlled fixtures only; P14 (resources and performance) has not been run, so idle CPU, memory growth and leak behaviour are **Unverified**.
+- **No performance, load, long-duration or efficiency claims are made.** The agreed efficiency criteria in `docs/plans/north-star.md` (first byte, failover time, direct share) are targets measured in controlled fixtures only; P14 measured resources on loopback in CI (one dispatch at `c84d9a6`, both cases passed against provisional ceilings: idle CPU under 0.2%, steady RSS under 23 MiB per process, no descriptor, thread or memory growth after repeated client restarts), which is a pass/fail check on a shared runner, not a capacity, long-duration or 95th-percentile claim; behaviour over hours, on real networks and with many concurrent peers is **Unverified**. See `docs/verification/scenarios.md` section 11.
 
 ### Other
 
@@ -79,5 +79,5 @@ All runs below are GitHub Actions runs on the owner's CI; "executed" means the t
 
 - Public-network interoperability and smoke (public DHT, public relay, public Yggdrasil peers): needs the owner's approval of exact targets and budgets.
 - Real home, mobile or LAN device tests; a product mechanism that learns public (reflexive) addresses, without which double-NAT hole punching does not happen (§10 A5).
-- P14 resource and performance measurements; P16 first-version readiness; notices and license corpus completion.
+- Long-duration, public-network and many-peer resource behaviour; P16 first-version readiness; notices and license corpus completion.
 - Building outside the CI recipes, running under a service manager (SIGTERM is handled but no unit file or manager was exercised), packaging and releases.
