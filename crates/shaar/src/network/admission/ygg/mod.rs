@@ -8,7 +8,7 @@ use shaar_ygg::{YggBridge, YggCarrier, YggPump};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::network::{
-    ALPN, Allowlist, Limits, NetworkError, STREAM_LIMIT, Session, session::ACCESS_DENIED,
+    ALPN, Allowlist, Limits, NetworkError, STREAM_TRANSPORT_LIMIT, Session, session::ACCESS_DENIED,
 };
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -66,7 +66,7 @@ impl YggEndpoint {
             .map_err(NetworkError::SignalingOperation)?;
         let transport = QuicTransportConfig::builder()
             .application_data_filter(|path| custom_mapped(path.remote()))
-            .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_LIMIT)))
+            .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_TRANSPORT_LIMIT)))
             .max_concurrent_uni_streams(VarInt::from_u32(0))
             .stream_receive_window(VarInt::from_u32(256 * 1024))
             .receive_window(VarInt::from_u32(1024 * 1024))
