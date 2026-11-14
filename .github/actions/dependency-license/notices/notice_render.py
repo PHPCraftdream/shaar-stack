@@ -13,7 +13,10 @@ PREAMBLE = (
     "Where a package declares alternatives joined by OR, the texts of all alternatives are listed and\n"
     "no alternative is elected. Identical texts are printed once and referenced by number. Each text\n"
     "is framed by BEGIN and END lines; its byte count and SHA-256 are on the BEGIN line, and one\n"
-    "newline is added before the END line. This file is not a legal determination.\n"
+    "newline is added before the END line. A package marked provenance=<class> has texts that are not\n"
+    "the license files of its packaged revision: predecessor-repository means the text comes from the\n"
+    "repository the package was extracted from; package-license-index means the package's own LICENSE\n"
+    "names the retained files that carry its terms. This file is not a legal determination.\n"
 )
 
 
@@ -44,7 +47,8 @@ def render_notices(root, target, products, entries, digests, blockers):
                 order.append(text)
             refs.append("T%03d=%s" % (numbers[text.sha256], label(text)))
         state = "" if entry.complete else " INCOMPLETE"
-        lines.append("%s %s | %s | %s%s | %s\n" % (entry.name, entry.version, entry.declared, entry.kind, state,
+        kind = entry.kind + (" provenance=" + entry.provenance if entry.provenance else "")
+        lines.append("%s %s | %s | %s%s | %s\n" % (entry.name, entry.version, entry.declared, kind, state,
                                                   " ".join(refs) or "-"))
     head = ["THIRD-PARTY NOTICES\n", "Target: %s\n" % target, "Products: %s\n" % ", ".join(products),
             "Generator: %s\n" % GENERATOR, "Registry inventory sha256: %s\n" % digests["registry"],
@@ -82,7 +86,8 @@ def render_manifest(fields, entries):
         lines.append("  " + line({
             "name": entry.name, "version": entry.version, "kind": entry.kind, "checksum": entry.checksum,
             "declared": entry.declared, "complete": entry.complete,
-            "texts": [t.sha256 for t in ordered_texts(entry)]}))
+            "texts": [t.sha256 for t in ordered_texts(entry)],
+            **({"provenance": entry.provenance} if entry.provenance else {})}))
     parts.append(",\n".join(lines))
     parts.append("\n ]\n}\n")
     return "".join(parts).encode("utf-8")

@@ -17,7 +17,10 @@ sys.path.insert(0, str(RUNTIME.parent / "flows"))
 import verdicts as checks  # noqa: E402
 import contract  # noqa: E402
 import dynamic  # noqa: E402
+import natprobe  # noqa: E402
+import network  # noqa: E402
 import observe  # noqa: E402
+import perturb  # noqa: E402
 import scenarios  # noqa: E402
 import worker  # noqa: E402
 
@@ -166,6 +169,8 @@ class FakeRun:
     def __init__(self, case, counters=(), times=()):
         self.spec, self.ev = contract.CASES[case], {"observations": {}}
         self.cfg, self.tools, self.ports = CFG, TOOLS, PORTS
+        self.work, self.fillers = Path("/w"), [types.SimpleNamespace(name="filler1", exited=False)]
+        self.active_start = time.monotonic()
         self.server, self.client = types.SimpleNamespace(name="server"), types.SimpleNamespace(name="client")
         self.active_end = time.monotonic() + 90
         self.case, self.server_key, self.relay, self.client_ns = case, "ab" * 32, "12D3KooWabc", "host_a"
@@ -304,10 +309,267 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual([item[0] for item in run.apps], ["app"])
 
     def test_flow_registry_is_closed_and_every_case_flow_exists(self):
-        self.assertEqual(set(scenarios.FLOWS), {"single", "failover", "denied-key"})
+        self.assertEqual(set(scenarios.FLOWS), {"single", "failover", "denied-key", "hole", "switch", "ipv6", "outage-recovery", "relay-full"})
         for spec in contract.CASES.values():
             self.assertIn(spec.get("flow", "single"), scenarios.FLOWS)
         self.assertEqual(scenarios.APP1_ATTEMPTS + scenarios.APP2_ATTEMPTS + scenarios.APP3_ATTEMPTS, 16)
+
+
+def full(**values):
+    """A complete router counter snapshot (every named counter) with the given nonzero values."""
+    return {**{name: 0 for name in network.COUNTERS}, **values}
+
+
+class PerturbTests(unittest.TestCase):
+    def run_flow(self, case, flow, counters, times, drops=DROPS, wait=0, **patches):
+        run = FakeRun(case, counters, times)
+        run.sup.wait.return_value = wait
+        installs, removals = [], []
+        with mock.patch.object(perturb.dynamic, "install", lambda cfg, tools, kind, ports, deadline: installs.append(kind) or patches.get("changed", 12.0)), \
+                mock.patch.object(perturb.dynamic, "remove", lambda cfg, tools, kind, deadline: removals.append(kind) or drops), \
+                mock.patch.object(perturb.kernel, "flap_wan", lambda cfg, tools, router, deadline: patches.get("changed", 12.0)), \
+                mock.patch.object(perturb.kernel, "switch_client_address", lambda cfg, tools, deadline: patches.get("changed", 12.0)):
+            try:
+                flow(run)
+                error = None
+            except ValueError as caught:
+                error = caught
+        return run, installs, removals, error
+
+    BEFORE = full(native_snat=10, native_new=2, udp_nat=3)
+
+    def test_nat_state_flush_records_recovery_time_and_requires_a_new_mapping(self):
+        after = full(native_snat=18, native_new=3, udp_nat=4, hole_in=2)
+        run, _, _, error = self.run_flow("hole-standby", perturb.hole, [self.BEFORE, after], [10.0, 15.5])
+        self.assertIsNone(error)
+        obs = run.ev["observations"]["perturb"]
+        self.assertEqual((obs["kind"], obs["recovery_seconds"]), ("nat-state-flush", 3.5))
+        self.assertEqual((obs["growth"]["native_new"], obs["growth"]["native_snat"], obs["growth"]["hole_in"]), (1, 8, 2))
+        self.assertEqual([(item[0], item[3]) for item in run.apps], [("app", False), ("app2", False)])
+        self.assertEqual(run.apps[1][1], int(contract.RECOVERY_SECONDS))
+        self.assertEqual(sum(item[4] for item in run.apps), 12)
+        self.assertTrue(all(item[2] == ("server", "client") for item in run.apps))
+        late = self.run_flow("hole-standby", perturb.hole, [self.BEFORE, after], [10.0, 52.5])[3]
+        self.assertIn("above the 40.0 s bound", str(late))
+        stale = self.run_flow("hole-standby", perturb.hole, [self.BEFORE, dict(after, native_new=2)], [10.0, 15.5])[3]
+        self.assertIn("old mapping was not lost", str(stale))
+        idle = self.run_flow("hole-standby", perturb.hole, [full(native_snat=0, native_new=2), after], [10.0, 15.5])[3]
+        self.assertIn("before the NAT state flush", str(idle))
+
+    def test_client_address_switch_requires_a_new_native_mapping_from_the_new_address(self):
+        after = full(native_snat=15, native_new=4, udp_nat=6)
+        run, _, _, error = self.run_flow("switch-signal", perturb.switch, [self.BEFORE, after], [10.0, 22.0], changed=14.0)
+        self.assertIsNone(error)
+        obs = run.ev["observations"]["perturb"]
+        self.assertEqual((obs["kind"], obs["recovery_seconds"], obs["growth"]["native_new"]), ("client-address-switch", 8.0, 2))
+        stale = self.run_flow("switch-signal", perturb.switch, [self.BEFORE, dict(after, native_new=2)], [10.0, 22.0])[3]
+        self.assertIn("created no new Native NAT mapping", str(stale))
+
+    def test_ipv6_only_case_runs_one_campaign_and_reads_the_block_that_was_active_the_whole_case(self):
+        run = FakeRun("ipv6-signal")
+        run.ev["observations"]["ipv6"] = {"hint": "[2001:db8:13::2]:40001"}
+        removals = []
+        with mock.patch.object(perturb.dynamic, "remove", lambda cfg, tools, kind, deadline: removals.append(kind) or DROPS):
+            perturb.ipv6(run)
+        self.assertEqual(removals, ["v4"])
+        self.assertEqual([(item[0], item[3], item[2]) for item in run.apps], [("app", False, ("server", "client"))])
+        self.assertTrue(10 <= run.apps[0][1] <= worker.MAX_DEADLINE)
+        observed = run.ev["observations"]
+        self.assertEqual(observed["ipv6"]["v4_block_drops"], DROPS[0])
+        self.assertEqual(set(observed), {"ipv6", "app_ready", "app"})
+        exhausted = FakeRun("ipv6-standby")
+        exhausted.active_end = time.monotonic() + 1
+        with self.assertRaisesRegex(ValueError, "active budget exhausted"):
+            perturb.ipv6(exhausted)
+
+    def test_outage_recovery_needs_a_failed_closed_client_then_a_fresh_client_after_both_blocks_lift(self):
+        lifted = (DROPS[0], 55.0)
+        run, installs, removals, error = self.run_flow("recover-standby", perturb.outage_recovery, [], [50.0, 63.0], drops=lifted, wait=1)
+        self.assertIsNone(error)
+        self.assertEqual((installs, removals), (["native", "ygg"], ["native", "ygg"]))
+        self.assertEqual([(item[0], item[3]) for item in run.apps], [("app", True), ("app2", False)])
+        self.assertEqual(run.apps[0][2], ("server",))
+        self.assertEqual(run.apps[1][2], ("server", "client2"))
+        self.assertIn(("product", "client2", "host_a", str(Path("/w") / "client.ktav"), "client"), run.calls)
+        obs = run.ev["observations"]["outage"]
+        self.assertEqual((obs["client1_exit"], obs["recovery_seconds"]), (1, 8.0))
+        survived = self.run_flow("recover-standby", perturb.outage_recovery, [], [50.0, 63.0], drops=lifted, wait=0)[3]
+        self.assertIn("not the typed failure status", str(survived))
+        idle = ({"rtr_a": {"packets": 0, "bytes": 0}, "rtr_b": {"packets": 0, "bytes": 0}}, 120.0)
+        self.assertIn("never observed", str(self.run_flow("recover-standby", perturb.outage_recovery, [], [50.0, 63.0], drops=idle, wait=1)[3]))
+        slow = self.run_flow("recover-standby", perturb.outage_recovery, [], [50.0, 100.0], drops=lifted, wait=1)[3]
+        self.assertIn("after the outage took", str(slow))
+
+    def test_full_relay_requires_the_typed_exit_status_inside_the_bound_and_live_fillers(self):
+        message = "shaar-server: composed startup: relay reservation failed at startup"
+        run = FakeRun("relay-full-signal")
+        run.sup.mark.return_value, run.sup.wait.return_value = message, 1
+        perturb.relay_full(run)
+        obs = run.ev["observations"]["relay_full"]
+        self.assertEqual((obs["message"], obs["server_exit"]), (message, 1))
+        run.sup.mark.assert_called_once_with(run.server, contract.RESERVE_FAIL, run.limit(perturb.RELAY_FULL_SECONDS))
+        for wait, filler_exited, expect in ((0, False, "differs from the typed failure"), (1, True, "filler ended")):
+            broken = FakeRun("relay-full-standby")
+            broken.sup.mark.return_value, broken.sup.wait.return_value = message, wait
+            broken.fillers[0].exited = filler_exited
+            with self.assertRaisesRegex(ValueError, expect):
+                perturb.relay_full(broken)
+        late = FakeRun("relay-full-standby")
+        late.sup.mark.return_value, late.sup.wait.return_value = message, 1
+        late.active_start = time.monotonic() - perturb.RELAY_FULL_SECONDS - 5
+        with self.assertRaisesRegex(ValueError, "typed Server failure took"):
+            perturb.relay_full(late)
+
+
+class NatProbeTests(unittest.TestCase):
+    def test_rules_apply_the_exact_flavor_statement_and_count_kept_versus_moved_ports(self):
+        cone = natprobe.rules(PREFIX, "cone", "10.0.1.2", "203.0.113.1")
+        self.assertIn(f"add table inet {PREFIX}_nprobe\n", cone)
+        self.assertIn("pnat ip saddr 10.0.1.2 ip protocol udp udp sport 40100 masquerade\n", cone)
+        self.assertIn("udp dport 9001-9003 udp sport 40100 ct status snat counter name kept", cone)
+        self.assertIn(f"add chain inet {PREFIX}_nprobe punchin {{ type filter hook input priority 0; policy accept; }}\n", cone)
+        self.assertIn("punchin ip daddr 203.0.113.1 udp dport 40100 drop\n", cone)
+        self.assertIn("udp dport 9001-9003 udp sport != 40100 ct status snat counter name moved", cone)
+        self.assertIn("udp sport 40100 masquerade fully-random\n", natprobe.rules(PREFIX, "random", "10.0.2.2", "203.0.113.2"))
+        self.assertEqual(natprobe.STATEMENTS["cone"], network.NAT_FLAVORS["cone"])
+        self.assertEqual(natprobe.STATEMENTS["random"], network.NAT_FLAVORS["random"])
+        for args in (("../x", "cone"), (PREFIX, "range"), (PREFIX, "symmetric")):
+            with self.assertRaises(ValueError):
+                natprobe.rules(args[0], args[1], "10.0.1.2", "203.0.113.1")
+
+    def test_counter_inventory_and_flavor_oracles_are_exact(self):
+        table = PREFIX + "_nprobe"
+        good = counter_document(table, {"kept": 3, "moved": 0})
+        self.assertEqual(natprobe.counts(good, PREFIX), {"kept": 3, "moved": 0})
+        for document in (counter_document(table, {"kept": 3}), counter_document("foreign", {"kept": 3, "moved": 0}),
+                         counter_document(table, {"kept": 3, "moved": 0, "extra": 1}), counter_document(table, {"kept": -1, "moved": 0})):
+            with self.assertRaises(ValueError):
+                natprobe.counts(document, PREFIX)
+        self.assertEqual(natprobe.check({"kept": 3, "moved": 0}, "cone"), {"kept": 3, "moved": 0})
+        self.assertEqual(natprobe.check({"kept": 0, "moved": 3}, "random"), {"kept": 0, "moved": 3})
+        for found, flavor in (({"kept": 2, "moved": 1}, "cone"), ({"kept": 0, "moved": 3}, "cone"),
+                              ({"kept": 3, "moved": 0}, "random"), ({"kept": 1, "moved": 2}, "random"), ({"kept": 3, "moved": 0}, "range")):
+            with self.assertRaises(ValueError):
+                natprobe.check(found, flavor)
+
+    def test_calibration_sends_from_the_host_and_always_removes_its_table(self):
+        cfg = dict(CFG, ip=contract.IPS)
+        for kept, ok in ((3, True), (1, False)):
+            calls = []
+            document = counter_document(PREFIX + "_nprobe", {"kept": kept, "moved": 3 - kept})
+
+            def checked(argv, deadline, data=None, what="x", calls=calls, document=document):
+                calls.append((what, argv[3]))
+                return json.dumps(document).encode() if what == "NAT probe snapshot" else b""
+
+            with self.subTest(kept=kept), mock.patch.object(natprobe.kernel, "checked", checked):
+                if ok:
+                    result = natprobe.calibrate(cfg, TOOLS, "rtr_a", "host_a", "cone", 0)
+                    self.assertEqual((result["flavor"], result["kept"], result["moved"]), ("cone", 3, 0))
+                else:
+                    with self.assertRaises(ValueError):
+                        natprobe.calibrate(cfg, TOOLS, "rtr_a", "host_a", "cone", 0)
+                self.assertEqual([item[0] for item in calls], ["NAT probe install", "NAT probe sender", "NAT probe snapshot", "NAT probe removal"])
+                self.assertEqual([item[1] for item in calls], [CFG["ns"]["rtr_a"], CFG["ns"]["host_a"], CFG["ns"]["rtr_a"], CFG["ns"]["rtr_a"]])
+
+
+class FakeProcess:
+    def __init__(self, out, code=0):
+        self.out, self.returncode = out, code
+
+    def communicate(self, timeout=None):
+        return self.out, b"boom"
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
+
+
+class PunchControlTests(unittest.TestCase):
+    GOOD = [{"host": "host_a", "sent": 20, "received": 18, "first": ["203.0.113.2", 40100]},
+            {"host": "host_b", "sent": 20, "received": 19, "first": ["203.0.113.1", 40100]}]
+
+    def test_the_worker_sends_a_fixed_small_number_of_datagrams_and_never_echoes(self):
+        code = natprobe.PUNCH % ("10.0.1.2", 40100, natprobe.PUNCH_SENDS, "203.0.113.2", 40100)
+        self.assertEqual(natprobe.PUNCH_SENDS, 20)
+        self.assertEqual(code.count("sendto"), 1)
+        self.assertIn("for _ in range(20):", code)
+        self.assertIn("s.settimeout(0.1)", code)
+        self.assertNotIn("while time", code)
+        compile(code, "punch-worker", "exec")
+
+    def test_receipts_need_both_sockets_to_hear_the_peer_public_endpoint(self):
+        self.assertEqual(natprobe.check_punch(copy.deepcopy(self.GOOD)), self.GOOD)
+        for index, field, value in ((0, "received", 0), (1, "sent", 0), (1, "sent", 50000), (0, "received", 50000), (0, "first", None),
+                                    (1, "first", ["203.0.113.2", 40100]), (0, "first", ["203.0.113.2", 41011]), (1, "host", "host_a")):
+            changed = copy.deepcopy(self.GOOD)
+            changed[index][field] = value
+            with self.subTest(index=index, field=field), self.assertRaises(ValueError):
+                natprobe.check_punch(changed)
+        with self.assertRaises(ValueError):
+            natprobe.check_punch(self.GOOD[:1])
+
+    def run_punch(self, codes, received=None):
+        calls, spawned = [], []
+        goods = copy.deepcopy(self.GOOD)
+        for item in goods:
+            item["received"] = item["received"] if received is None else received
+        outputs = [json.dumps({key: value for key, value in item.items() if key != "host"}).encode() for item in goods]
+        kwargs = {}
+
+        def checked(argv, deadline, data=None, what="x"):
+            calls.append((what, argv[3]))
+            return b""
+
+        def popen(argv, **kwargs):
+            spawned.append(argv)
+            return FakeProcess(outputs[len(spawned) - 1], codes[len(spawned) - 1])
+
+        cfg = dict(CFG, ip=contract.IPS)
+        with mock.patch.object(natprobe.kernel, "checked", checked), mock.patch.object(natprobe.subprocess, "Popen", popen):
+            try:
+                result, error = natprobe.punch(cfg, TOOLS, time.monotonic() + 10, **kwargs), None
+            except ValueError as caught:
+                result, error = None, caught
+        return result, error, calls, spawned
+
+    def test_punch_runs_one_socket_per_host_against_the_peer_router_and_always_removes_both_tables(self):
+        result, error, calls, spawned = self.run_punch((0, 0))
+        self.assertIsNone(error)
+        self.assertEqual(result, {"status": "pass", "receipts": self.GOOD})
+        a, b = CFG["ns"]["rtr_a"], CFG["ns"]["rtr_b"]
+        self.assertEqual(calls, [("punch control NAT install", a), ("punch control NAT install", b),
+                                 ("punch control NAT removal", a), ("punch control NAT removal", b)])
+        self.assertEqual([argv[3] for argv in spawned], [CFG["ns"]["host_a"], CFG["ns"]["host_b"]])
+        self.assertIn("'203.0.113.2', 40100", spawned[0][-1].replace('"', "'"))
+        self.assertIn("'203.0.113.1', 40100", spawned[1][-1].replace('"', "'"))
+        self.assertIn("'10.0.1.2', 40100", spawned[0][-1].replace('"', "'"))
+        missed = self.run_punch((0, 0), received=0)
+        self.assertIsNone(missed[1])
+        self.assertEqual(missed[0]["status"], "fail")
+        self.assertIn("did not receive from the peer's public endpoint", missed[0]["error"])
+        self.assertEqual([item[0] for item in missed[2]][-2:], ["punch control NAT removal"] * 2)
+        failed = self.run_punch((0, 1))
+        self.assertIn("punch control worker failed", str(failed[1]))
+        self.assertEqual([item[0] for item in failed[2]][-2:], ["punch control NAT removal"] * 2)
+
+
+class NewVerdictTests(unittest.TestCase):
+    def test_v4_dynamic_block_drops_only_segment_ipv4_udp_at_the_output_hook(self):
+        text = dynamic.rules(PREFIX, "v4", PORTS)
+        self.assertIn("type filter hook output priority -250", text)
+        self.assertIn("ip daddr { 203.0.113.1, 203.0.113.2 } meta l4proto udp counter name dyn_drop drop", text)
+        self.assertNotIn("tcp", text)
+        self.assertNotIn("ip6", text)
+        self.assertEqual(dynamic.table_name(PREFIX, "v4"), PREFIX + "_dv4")
+        self.assertIn("hook forward", dynamic.rules(PREFIX, "native", PORTS))
+
+    def test_unreviewed_net_classes_still_fail_and_new_ones_need_their_receipts(self):
+        for net in ("dnat", "ipv6", "relay", "recover"):
+            with self.subTest(net=net), self.assertRaises((ValueError, KeyError)):
+                checks.verify_class({"net": net, "nat": "cone", "direct": True, "mode": "signal"}, receipts(), {})
 
 
 def receipts():

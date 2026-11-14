@@ -64,6 +64,18 @@ fn peer_from_config(config: &ClientConfig) -> Result<String, std::fmt::Error> {
     Ok(hex)
 }
 
+/// Operator banner: the client's own key as `public_key`, the pinned server
+/// key separately as `server`.
+fn composed_banner(identity: &Identity, server_hex: &str, fallback: &str, hint: &str) -> String {
+    let mut own = String::with_capacity(64);
+    for byte in identity.public_key_bytes() {
+        write!(&mut own, "{byte:02x}").expect("hex formatting cannot fail");
+    }
+    format!(
+        "composed startup: public_key={own} server={server_hex} fallback={fallback} server_address={hint}"
+    )
+}
+
 async fn dial(
     endpoint: &Endpoint,
     key_hex: &str,
@@ -147,7 +159,8 @@ async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
             None => "none".to_owned(),
         };
         eprintln!(
-            "shaar-client: composed startup: public_key={key_hex} fallback={fallback} server_address={hint}"
+            "shaar-client: {}",
+            composed_banner(&identity, &key_hex, fallback, &hint)
         );
         let limits = Limits::new(1).map_err(|_| "client session limit out of range")?;
         // Truthful signal errors: a failed console handler is reported, not
@@ -175,7 +188,23 @@ async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
         // the runtime-exit drop path.
         let started = start_until_shutdown(role.start(), &mut shutdown).await;
         let mut primary: Option<shaar::startup::StartupError> = match started {
-            Some(Ok(())) => role.run(&mut shutdown).await.err(),
+            Some(Ok(())) => {
+                // Announce the bound listener while the run loop serves.
+                let mut announce = std::pin::pin!(role.listening());
+                let mut announced = false;
+                let mut run = std::pin::pin!(role.run(&mut shutdown));
+                loop {
+                    tokio::select! {
+                        result = &mut run => break result.err(),
+                        address = &mut announce, if !announced => {
+                            announced = true;
+                            if let Some(address) = address {
+                                println!("listening={address}");
+                            }
+                        }
+                    }
+                }
+            }
             Some(Err(error)) => Some(error),
             None => None,
         };
@@ -249,7 +278,17 @@ async fn shutdown_signal() -> std::io::Result<()> {
             event = ctrl_break.recv() => event.ok_or_else(|| std::io::Error::other("ctrl-break listener closed")),
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        // Service managers stop daemons with SIGTERM.
+        let mut terminate = signal(SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            event = terminate.recv() => event.ok_or_else(|| std::io::Error::other("SIGTERM listener closed")),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         tokio::signal::ctrl_c().await
     }
@@ -379,6 +418,9 @@ mod behavior_tests;
 
 #[cfg(test)]
 mod admission_tests;
+
+#[cfg(test)]
+mod operator_tests;
 
 #[cfg(test)]
 mod tests {

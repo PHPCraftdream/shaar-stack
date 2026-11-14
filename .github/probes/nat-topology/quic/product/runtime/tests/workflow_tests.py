@@ -51,6 +51,19 @@ class MatrixWorkflowTests(unittest.TestCase):
         for other in ("resolve", "direct-feedback"):
             self.assertIn("!inputs.controlled_network_matrix", jobs(self.text)[other])
 
+    def test_group_input_is_a_closed_choice_passed_only_to_the_phase_step(self):
+        header = self.text.split("\njobs:\n", 1)[0]
+        block = re.search(r"^      controlled_network_group:\n((?:        [^\n]*\n)+)", header, re.MULTILINE)[1]
+        self.assertIn("        type: choice\n", block)
+        self.assertEqual(re.findall(r"^          - (\w+)$", block, re.MULTILINE), ["base", "nat", "faults"])
+        self.assertIn("        default: base\n", block)
+        phase_step = dict(steps(self.job))["Run the bounded privileged phase (the only step using sudo)"]
+        self.assertIn("MATRIX_GROUP: ${{ inputs.controlled_network_group }}", phase_step)
+        self.assertIn('--group "$MATRIX_GROUP"', phase_step)
+        self.assertEqual(self.job.count("controlled_network_group"), 1)
+        phase = (ROOT / ".github/probes/nat-topology/quic/product/runtime/phase.py").read_text(encoding="utf-8")
+        self.assertIn('parser.add_argument("--group", choices=sorted(GROUPS), default="base")', phase)
+
     def test_job_is_fail_closed_bounded_and_privileged_only_in_one_step(self):
         self.assertIn("    runs-on: ubuntu-latest\n", self.job)
         self.assertIn("    timeout-minutes: 90\n", self.job)

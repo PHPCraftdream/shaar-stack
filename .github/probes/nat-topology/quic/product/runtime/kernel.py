@@ -125,6 +125,33 @@ def isolate_segment(cfg, tools, deadline):
                 what="LAN-side address flush " + router)
 
 
+def add_segment_v6(cfg, tools, deadline):
+    """IPv6 cases: one documentation-prefix address per segment host (no router, no forwarding, no neighbor wait)."""
+    for router, suffix in (("rtr_a", "ra0"), ("rtr_b", "rb0")):
+        checked(ns_argv(tools, cfg, router, tools["ip"], "-6", "addr", "add", network.V6[router] + "/64", "dev",
+                        cfg["prefix"] + suffix, "nodad"), deadline, what="segment IPv6 address " + router)
+
+
+def flap_wan(cfg, tools, router, deadline):
+    """Wipe the router's NAT state: cycling the WAN link makes masquerade drop every entry bound to it; then restore the route."""
+    device = cfg["prefix"] + {"rtr_a": "ra0", "rtr_b": "rb0"}[router]
+    steps = (("link", "set", "dev", device, "down"), ("link", "set", "dev", device, "up"),
+             ("route", "replace", "default", "via", contract.IPS["wan"], "dev", device))
+    for step in steps:
+        checked(ns_argv(tools, cfg, router, tools["ip"], *step), deadline, what="NAT state flush " + " ".join(step[:2]))
+    return time.monotonic()
+
+
+def switch_client_address(cfg, tools, deadline):
+    """Move the Client host from 10.0.1.2 to 10.0.1.3 on the same interface and restore its default route."""
+    device = cfg["prefix"] + "ha"
+    steps = (("addr", "del", "10.0.1.2/24", "dev", device), ("addr", "add", "10.0.1.3/24", "dev", device),
+             ("route", "replace", "default", "via", "10.0.1.1", "dev", device))
+    for step in steps:
+        checked(ns_argv(tools, cfg, "host_a", tools["ip"], *step), deadline, what="Client address switch " + " ".join(step[:2]))
+    return time.monotonic()
+
+
 def snapshot(cfg, tools, router, deadline):
     plan = network.commands(cfg, router, tools["nft"], tools["ip"])
     return json.loads(checked(plan["snapshot"], deadline, what="nft snapshot"))

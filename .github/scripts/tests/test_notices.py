@@ -616,9 +616,9 @@ class RepositoryContractTests(unittest.TestCase):
 
     def test_corpus_counts_and_reviewed_gaps(self):
         self.assertEqual(len(self.entries), 550)
-        self.assertEqual(sum(1 for e in self.entries.values() if e.complete), 532)
+        self.assertEqual(sum(1 for e in self.entries.values() if e.complete), 534)
         notices.check_gap_policy(self.policy, self.entries)
-        self.assertEqual(len(self.policy["gap_table"]), 18)
+        self.assertEqual(len(self.policy["gap_table"]), 16)
         self.assertEqual(sorted(self.policy["targets"]), [WINDOWS, LINUX])
         self.assertEqual(self.policy["products"], ["shaar-client", "shaar-server"])
 

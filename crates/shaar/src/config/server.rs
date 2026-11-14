@@ -120,6 +120,7 @@ impl ServerConfig {
             ));
         }
         let file: ServerFile = ktav::from_str(text).map_err(|e| ConfigError::from_ktav(&e))?;
+        let composed = file.network.is_some();
         let target_raw = merge(file.target, over.target.clone());
         let bind_raw = merge(file.bind, endpoint_overrides.bind.clone());
         let key_raw = merge(file.key_file.map(PathBuf::from), over.key_file.clone());
@@ -142,6 +143,14 @@ impl ServerConfig {
 
         let bind_text = bind_raw.as_deref().unwrap_or("0.0.0.0:0");
         let bind = parse_socket_addr("bind", bind_text)?;
+        // The composed startup binds its own native sockets (IPv4 wildcard
+        // plus optional IPv6); an explicit `bind` there would be ignored.
+        if composed && bind_raw.is_some() {
+            return Err(ConfigError::validation(
+                "bind",
+                ValidationKind::NotApplicable,
+            ));
+        }
 
         let key_file = key_raw.unwrap_or_else(|| PathBuf::from(DEFAULT_KEY_FILE));
         require_nonempty_path("key_file", &key_file)?;

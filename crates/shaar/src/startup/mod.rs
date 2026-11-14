@@ -15,7 +15,7 @@ mod role;
 pub(crate) mod ygg_start;
 
 pub use error::StartupError;
-pub(crate) use preflight::MAX_STARTUP_APP_PEERS;
+pub use preflight::MAX_STARTUP_APP_PEERS;
 #[cfg(test)]
 pub(crate) use preflight::{preflight_client, preflight_server};
 #[cfg(test)]

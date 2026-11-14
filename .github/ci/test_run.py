@@ -263,7 +263,7 @@ class RunnerTests(unittest.TestCase):
 class ProcessFeedbackTests(unittest.TestCase):
     def test_process_inventory_requires_exactly_the_reviewed_ignored_cases(self):
         listing = "".join(name + ": test\n" for name in RUN.PROCESS_CASES)
-        self.assertEqual(len(RUN.PROCESS_CASES), 11)
+        self.assertEqual(len(RUN.PROCESS_CASES), 12)
         self.assertEqual(RUN.process_inventory(listing, listing), list(RUN.PROCESS_CASES))
         for ordinary, ignored in (("", ""), (listing, ""),
                                   (listing + "process_smoke::real_extra: test\n", listing),

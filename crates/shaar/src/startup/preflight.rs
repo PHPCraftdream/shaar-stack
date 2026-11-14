@@ -17,7 +17,7 @@ use crate::identity::Identity;
 use super::StartupError;
 
 /// Matches the signaling admission bound (`crate::network::signaling::check_peers`).
-pub(crate) const MAX_STARTUP_APP_PEERS: usize = 16;
+pub const MAX_STARTUP_APP_PEERS: usize = 16;
 
 /// Validated composed-startup inputs; borrows the caller's data.
 #[derive(Debug)]

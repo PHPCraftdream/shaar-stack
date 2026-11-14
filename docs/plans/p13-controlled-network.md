@@ -1,9 +1,12 @@
 # P13 controlled NAT and UDP-blockade execution contract
 
-Status: **executed and accepted for the twelve product cases and the three cleanup
+Status: **executed and accepted for the twelve base product cases and the three cleanup
 controls** — the four original cases in fork workflow_dispatch run 43229756778 on
-`ca6c04a`, and all twelve in the extension run 43245366525 on `17b711c`
-(2026-11-12), phase status `pass`; see [Execution record](#execution-record-2026-11-12).
+`ca6c04a`, all twelve in the extension run 43245366525 on `17b711c`, and again unchanged in
+run 43262321962 on `31fd921` (2026-11-12), phase status `pass`; see
+[Execution record](#execution-record-2026-11-12). The sixteen remaining-row cases ran in
+the six dispatches recorded in [Remaining-row execution record](#remaining-row-execution-record-2026-11-12);
+the last change of the branch head (the fixture punch control) was not dispatched.
 This is not full P13 acceptance: the open and gated rows are listed in the P13 report,
 `docs/verification/scenarios.md` section 10.
 
@@ -140,6 +143,76 @@ Notes on the oracles.
   the three dispatches that ran the standby failover case; signal-mode fail-closed took
   5.1 s. The 10 s bound is the north-star criterion; one run is not a 95th-percentile
   claim.
+
+## Remaining-row cases (recorded 2026-11-12)
+
+This leaf closes or honestly records the remaining open rows of
+`docs/verification/scenarios.md` section 10 with the same disposable-runner,
+namespace-only scheme, normal products and dispatch job. It adds sixteen product
+cases in two new dispatch groups; the twelve accepted cases are the unchanged `base`
+group. North-star steps: 3 and 4 (hole punching after relay signaling), 5 (blockade
+fallback), 6 (allowlist denial). Non-goals: new networks, real devices, throughput,
+public peers, RFC 1918 or device LANs, NAT types other than the two below, product
+changes. Written and syntax-checked here; the execution records below say what ran.
+
+**Dispatch groups.** `workflow_dispatch` takes `controlled_network_group` (a closed
+choice `base`, `nat`, `faults`, default `base`) and passes it to `phase.py --group`.
+Every group runs its cases, then the same three cleanup controls, inside the same 20
+minute phase; the 28 cases together would not fit, so a dispatch never runs more than
+one group. Forwarded-traffic allocation per group: `base` 56 MiB (12 cases and two live
+controls, as before), `nat` 48 MiB (10 cases), `faults` 32 MiB (6 cases); each product case
+and live control keeps its own 2 MiB per router quota, so every group stays under 64 MiB.
+The in-dispatch `nft --check` still runs first and now covers every generated ruleset
+(all cases x 2 routers x {product, fault}, 2 quota probes, 2 NAT probes, the observation
+table and 3 runtime blocks).
+
+| Case | Row | Mode | Topology and rules | Acceptance (all exact) |
+| --- | --- | --- | --- | --- |
+| `dnat-cone-signal`, `dnat-cone-standby`, `dnat-cone-relay-signal`, `dnat-cone-relay-standby` | A5 | both | Client A behind Router A, Server B behind Router B, WAN segment shared. Both routers NAT UDP and TCP with plain `masquerade` (the kernel keeps the source port: endpoint-independent, port-preserving, cone-like). Native UDP allowed. Client-side router denies Ygg transit TCP (relay allowed), so APP cannot use Ygg. No private address is routed across the WAN and no record is forged. The `relay` variants drop the Client's DHT queries, so the Client has no direct candidate and must go through relay negotiation | Live NAT probe on both routers before the case: 3 of 3 datagrams from one fixed source port to three destinations keep the port; a fixture punch control is recorded. **Expectation after dispatch 43255837358 (the first version expected a punch and failed, preserved):** no direct path in either mode: terminal EOF/reset, 0 reply bytes, target accepts 0, Client exit 1, `peer_recv` 0 on both routers (no Native UDP reached the other router), `ygg_tcp` 0 on the Client-side router; relay variants additionally `dht_drop` > 0 and `relay_tcp` > 0 on the Client-side router (relay negotiation was reached) |
+| `dnat-sym-signal`, `dnat-sym-standby` | A6 | both | Same topology; both routers use `masquerade fully-random` (a new random port per flow: not endpoint-independent, symmetric-like). Ygg and relay TCP allowed | Live NAT probe: 3 of 3 datagrams change the source port. Expectation: `signal` fails closed (terminal EOF/reset, 0 reply bytes, target accepts 0, Client exit 1); `standby` succeeds exactly through the Ygg fallback (accepts 1, exit 0, `ygg_tcp` > 0). Peer counters are recorded, not forced |
+| `hole-signal`, `hole-standby` | D4 | both | Single NAT, Server in WAN, Ygg denied on the Client side so only Native can carry APP. APP 1, then Router A's WAN link is cycled down and up: masquerade drops every conntrack entry bound to that interface (no conntrack CLI is needed), and the default route is restored. Then APP 2 | APP 1 and APP 2 exact (2 accepts), APP 2 within **40 s** of the flush (fixture bound), `native_new` (new Native UDP flow admitted by the NAT chain) grows after the flush, which proves the old mapping was really gone; `hole_in` (UDP addressed to the router itself, i.e. no longer matching a mapping) is recorded |
+| `switch-signal`, `switch-standby` | D2 | both | As above, Client binds wildcard sockets, NAT matches the whole `10.0.1.0/24`. APP 1, then the Client host moves from `10.0.1.2` to `10.0.1.3` on the same interface (old address deleted, new added, default route restored), then APP 2 | Same as `hole-*`; `native_new` growth proves a new NAT mapping from the new address |
+| `relay-full-signal`, `relay-full-standby` | C5 | both | The owned relay allows two reservations. Two extra Servers (`filler1`, `filler2`, other identities, same normal binary) are started first and given 8 s to reserve (the reservation has no observable signal; a fixed bounded delay). Then the real Server starts. No Client | The real Server ends by itself with exit status 1 and the typed message `relay reservation failed at startup` within 70 s (finite, typed), fillers still alive, target accepts 0, fillers and WAN stop gracefully. Client-side exhaustion is not separately run: the Client reserves only after every direct candidate failed, so with the UDP/relay conditions of B1, B2, C4 and C4b its outcome is the already accepted one |
+| `ipv6-signal`, `ipv6-standby` | A2b | both | As the LAN cases (Client and Server are hosts on the owned segment, no NAT, no forwarding), plus documentation-prefix IPv6 addresses `2001:db8:13::1` and `2001:db8:13::2` on the two segment hosts (router IPv6 forwarding stays denied). A runtime table drops IPv4 Native UDP between the two hosts for the whole case, and the Client is given the Server's published IPv6 candidate as its `server_address` hint. The first version had both families open and switched mid-session; it was not deterministic (dispatch 43257222340, preserved) | The signed record lists the Server's IPv6 address; APP exact (accepts 1) with Client exit 0, so only IPv6 Native UDP can have carried it; `lan6_native` and `lan6_sent` > 0 on both hosts, `lan_native` (IPv4 input) 0, `ipv6_drop` 0 (no forwarding), quota 0. The hint is an explicit exception to "Client configured with only the Server key": the key-only dial tries the published IPv4 candidate first and a silent candidate consumes the attempt |
+| `denied-native-signal` | G2 | signal | Single NAT, Server in WAN, Native over the NAT, Ygg denied on the Client side | Authorized Client first (APP exact, accepts 1, exit 0); a second Client with a different valid key gets terminal EOF/reset, 0 reply bytes, target accepts stay 1, second Client exit 1, Server stays up and stops cleanly |
+| `recover-standby` | C7 | standby | Single NAT, Server in WAN. Runtime tables block Native UDP (DHT exempt) and Ygg TCP before the first APP. APP 1 fails closed and the Client ends on its own (status 1). Both blocks are removed, a fresh Client (same key) starts, APP 2 | APP 1 terminal failure, 0 reply bytes, Client exit 1; both blocks dropped packets; APP 2 exact (accepts 1 in total) within **40 s** of the block removal (includes the fresh Client's start); final Client exits 0 |
+
+Notes on the oracles.
+
+- **NAT type honesty.** The live probe is an independent oracle for the mapping flavor on
+  each router, run in a throwaway table with the same `masquerade` statement before the
+  product table exists (same pattern as the quota probe). `cone` means "port-preserving,
+  endpoint-independent for outgoing packets; Linux conntrack still filters inbound packets
+  by the contacted address and port". It is not a claim about every home router.
+  `fully-random` is symmetric-like for the purpose of this test, not a full NAT-type survey.
+- **Nothing forces green.** A5 and A6 oracles encode the expectation of the case. If the
+  product does not behave that way the dispatch fails and the execution record keeps the
+  failure; the oracle is only changed afterwards to the observed behavior, with the failed
+  run preserved and the finding written down. A5 went through exactly this: the first
+  oracle (APP exact over a punched path) failed, and the cases now record the finding.
+- **Fixture punch control.** For the cone cases the harness also lets two plain UDP sockets
+  (20 datagrams each, 0.1 s apart, never echoing) punch through both routers using the
+  public endpoints it knows. The outcome is recorded (`pass` or `fail` with receipts) and
+  never decides a product verdict; a miss means the fixture could not show a punched path in
+  that run.
+- **Counters.** New named counters: `peer_sent` (translated Native UDP leaving a router toward
+  the other router), `peer_recv` (the reverse direction, after de-translation), `native_out`
+  (any translated non-DHT UDP leaving a router, including attempts toward unroutable
+  addresses), `native_new` (new Native UDP flows seen by the NAT chain), `hole_in` (UDP
+  addressed to the router's own WAN address), `lan6_native`/`lan6_sent` (IPv6 UDP between the
+  two segment hosts, input and output hooks).
+- **Mapping probe.** `masquerade` (cone) and `masquerade fully-random` are applied in a
+  throwaway table with the same statement as the product rules; 3 datagrams from one fixed
+  source port to three destinations must all keep the port (cone) or all change it (random).
+- **Operations inside owned namespaces only.** Link down/up of a router WAN interface, delete
+  and add of the Client host address, IPv6 address add on the two router WAN interfaces, and
+  extra nft tables. No host state changes; forwarding sysctls stay as in the base contract.
+- **Process count.** `relay-full-*` runs three product processes at once (two fillers and
+  the real Server; no Client). The base text "at most two product processes per case" is
+  amended for these two cases only; total owned children stay at most 16.
+- **Dispatch budget.** At most six dispatches for these rows, each on a SHA with green ordinary
+  CI; three consecutive failed dispatches stop incremental repair in favor of one reviewed
+  consolidated repair.
 
 ## Enforceable resource and lifetime bounds
 
@@ -286,3 +359,26 @@ Fixes between dispatches were test-harness only (worker treats a reset local str
 typed transient; LAN host isolation; signal-case expectations; C2 oracle) plus extra
 diagnostics (`lan_sent` counters, neighbor and link dumps on failure). No product code
 changed. A later documentation-only commit does not alter the executed source.
+
+## Remaining-row execution record (2026-11-12)
+
+Authority: the north-star decision-log row of 2026-11-12 (remaining rows) and the user's
+grants quoted there. All six allowed dispatches were used; evidence per dispatch is kept under
+`.rush/downloads/p13-rows2-dispatchN-<runid>/` in the primary checkout (not committed). Every
+dispatch ran `nft --check` of all generated rulesets first (112, later 120).
+
+| Dispatch | Run | Source | Group | Result |
+| --- | --- | --- | --- | --- |
+| 1 | 43255837358 | `1d36cd5` | nat | fail: the two cone cases expected a punch and failed (finding); other six cases and three controls pass; phase 147.8 s, forwarded 301,560 B |
+| 2 | 43257222340 | `1d36cd5` | faults | fail: `ipv6-*` only; `denied-native-signal`, `recover-standby`, `relay-full-*` and the controls pass; phase 176.6 s |
+| 3 | 43258223283 | `6f7c0ce` | nat | pass: 10 cases and 3 controls; phase 221.7 s, forwarded 625,370 B of 48 MiB allocated. The fixture punch control looped without a bound here (about 50,000 datagrams per side in 2 s): a load defect, fixed afterwards |
+| 4 | 43262304898 | `31fd921` | faults | pass: 6 cases and 3 controls; phase 137.9 s, forwarded 172,029 B of 32 MiB allocated |
+| 5 | 43262313789 | `31fd921` | nat | fail: 8 of 10 cases and 3 controls pass; `dnat-cone-signal` and `dnat-cone-relay-signal` failed at the fixture punch control before any product started (fixture, not product) |
+| 6 | 43262321962 | `31fd921` | base | pass: the twelve accepted cases and 3 controls; phase 203.5 s, forwarded 609,232 B of 56 MiB allocated |
+
+Every group left zero leftover namespaces, unchanged host firewall and `ip_forward`, and
+artifacts below 280 KB. Fixes between dispatches were harness-only; no product code changed.
+After dispatch 5 the control became a recorded, non-decisive receipt and its probe table
+gained an input-hook drop of unsolicited UDP to the router's own port (hypothesis: such a
+packet otherwise creates a conntrack entry that takes the peer's preserved port). That change
+is **not dispatched**; one nat-group dispatch is needed to verify it.

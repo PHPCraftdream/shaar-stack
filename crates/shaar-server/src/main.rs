@@ -56,6 +56,7 @@ async fn run() -> Result<(), String> {
     // Composed startup: the shared role layer owns listeners, fallback and
     // relay negotiation; the configured fallback is genuinely honored here.
     if config.network().is_some() {
+        test_support::check_composed_limit(&keys, shaar::startup::MAX_STARTUP_APP_PEERS)?;
         let fallback = match config.fallback() {
             Fallback::Standby => "standby",
             Fallback::Signal => "signal",
@@ -93,7 +94,12 @@ async fn run() -> Result<(), String> {
         // the runtime-exit drop path.
         let started = start_until_shutdown(role.start(), &mut shutdown).await;
         let mut primary: Option<shaar::startup::StartupError> = match started {
-            Some(Ok(())) => role.run(&mut shutdown).await.err(),
+            Some(Ok(())) => {
+                if let Some(address) = role.native_addr() {
+                    println!("bound={address} public_key={key_hex}");
+                }
+                role.run(&mut shutdown).await.err()
+            }
             Some(Err(error)) => Some(error),
             None => None,
         };
@@ -172,7 +178,17 @@ async fn shutdown_signal() -> std::io::Result<()> {
             event = ctrl_break.recv() => event.ok_or_else(|| std::io::Error::other("ctrl-break listener closed")),
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        // Service managers stop daemons with SIGTERM.
+        let mut terminate = signal(SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result,
+            event = terminate.recv() => event.ok_or_else(|| std::io::Error::other("SIGTERM listener closed")),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         tokio::signal::ctrl_c().await
     }

@@ -10,6 +10,7 @@ use super::*;
 pub(super) async fn run_parts(
     parts: &mut ClientParts,
     listen: SocketAddr,
+    listening: &tokio::sync::watch::Sender<Option<SocketAddr>>,
     shutdown: &mut std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
 ) -> Result<(), StartupError> {
     #[cfg(test)]
@@ -48,6 +49,9 @@ pub(super) async fn run_parts(
                     return Err(error);
                 }
             };
+            if let Ok(address) = listener.local_addr() {
+                listening.send_replace(Some(address));
+            }
             #[cfg(test)]
             if let Ok(address) = listener.local_addr() {
                 emit(parts.events.as_ref(), RoleEvent::ListenerReady(address));

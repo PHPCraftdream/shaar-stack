@@ -52,3 +52,18 @@ fn decode_hex(text: &str) -> Option<[u8; 32]> {
     }
     Some(bytes)
 }
+
+/// Composed startup admits at most `max` distinct keys (the signaling and
+/// Yggdrasil peer set); fails before any network I/O naming the field.
+pub fn check_composed_limit(keys: &[PublicKey], max: usize) -> Result<(), String> {
+    let mut distinct = keys.to_vec();
+    distinct.sort_unstable();
+    distinct.dedup();
+    if distinct.len() > max {
+        return Err(format!(
+            "invalid configuration value for field `allowlist_path` (TooMany): {} distinct keys exceed the composed-shape limit of {max}",
+            distinct.len()
+        ));
+    }
+    Ok(())
+}

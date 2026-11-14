@@ -137,3 +137,73 @@ fn endpoint_overrides_do_not_repair_syntax_or_unknown_fields() {
     .unwrap_err();
     assert!(matches!(err, ConfigError::Parsing { kind: "schema", .. }));
 }
+
+const RELAY: &str = "12D3KooWRhxsqdyvN1Cy4HDzPjKtdscPa9XUyqoqJwHSsGY8LQTQ";
+
+fn composed_server(extra: &str) -> String {
+    format!(
+        "target: 127.0.0.1:9000\n{extra}network: {{\n    mainline: {{\n        bootstrap: [\n            192.0.2.10:6881\n        ]\n    }}\n    signaling: {{\n        relay: {RELAY}\n        relay_address: 192.0.2.20:7000\n    }}\n    ygg: {{\n        peers: [\n            tcp://127.0.0.1:9001\n        ]\n    }}\n}}\n"
+    )
+}
+
+fn bind_error(err: ConfigError) -> ValidationKind {
+    match err {
+        ConfigError::Validation {
+            field: "bind",
+            kind,
+        } => kind,
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn composed_server_rejects_a_bind_that_would_be_ignored() {
+    let err = ServerConfig::from_text(
+        &composed_server("bind: 127.0.0.1:0\n"),
+        &ServerOverrides::default(),
+    )
+    .unwrap_err();
+    assert_eq!(bind_error(err), ValidationKind::NotApplicable);
+    assert_eq!(
+        ServerConfig::from_text(
+            &composed_server("bind: 127.0.0.1:0\n"),
+            &ServerOverrides::default()
+        )
+        .unwrap_err()
+        .to_string(),
+        "invalid configuration value for field `bind` (NotApplicable)"
+    );
+
+    let err = ServerConfig::from_text_with_endpoint_overrides(
+        &composed_server(""),
+        &ServerOverrides::default(),
+        &ServerEndpointOverrides {
+            bind: Some("127.0.0.1:0".to_string()),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(bind_error(err), ValidationKind::NotApplicable);
+}
+
+#[test]
+fn invalid_bind_is_still_an_address_error_in_the_composed_shape() {
+    let err = ServerConfig::from_text(
+        &composed_server("bind: nope\n"),
+        &ServerOverrides::default(),
+    )
+    .unwrap_err();
+    assert_eq!(bind_error(err), ValidationKind::InvalidAddress);
+}
+
+#[test]
+fn bind_stays_valid_without_network_and_composed_without_bind_uses_the_default() {
+    let direct = ServerConfig::from_text(
+        "target: 127.0.0.1:9000\nbind: 127.0.0.1:0\n",
+        &ServerOverrides::default(),
+    )
+    .unwrap();
+    assert_eq!(direct.bind().to_string(), "127.0.0.1:0");
+    let composed =
+        ServerConfig::from_text(&composed_server(""), &ServerOverrides::default()).unwrap();
+    assert_eq!(composed.bind().to_string(), "0.0.0.0:0");
+}

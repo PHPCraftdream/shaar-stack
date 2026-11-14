@@ -38,6 +38,7 @@ class Entry(NamedTuple):
     complete: bool
     texts: tuple
     reason: str
+    provenance: str = ""  # non-default text provenance class; empty means the packaged revision
 
 
 def read_bounded(root, rel, cap):
@@ -144,7 +145,8 @@ def build(rows, prepared):
         if key in entries:
             raise CorpusError("duplicate corpus identity %s %s" % (name, version))
         kind = "path" if prepared else "registry"
-        entries[key] = Entry(kind, name, version, source, checksum, declared, complete, tuple(texts), reason)
+        entries[key] = Entry(kind, name, version, source, checksum, declared, complete, tuple(texts), reason,
+                             row.get("provenance_class", ""))
     return entries
 
 

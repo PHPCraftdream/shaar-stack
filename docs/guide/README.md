@@ -50,8 +50,8 @@ If something fails, [operations.md](operations.md#error-messages-and-recovery) m
 
 Same keys and allowlist (at most 16 allowlisted clients in this shape). In addition you provide: 1 to 4 numeric IPv4 Mainline bootstrap nodes, the PeerId and numeric address of a libp2p relay, and 1 to 4 Yggdrasil peer URIs. No defaults exist; nothing public has been tried.
 
-1. Server: [`examples/server-composed.ktav`](examples/server-composed.ktav) with your values, `fallback: standby` or `signal`. Start it; read `public_key=` from its stderr line.
-2. Client: [`examples/client-composed.ktav`](examples/client-composed.ktav) with `server: <that key>` and the same `network` section (no `server_address`). Choose a fixed `listen` port because the composed client does not print it.
+1. Server: [`examples/server-composed.ktav`](examples/server-composed.ktav) with your values, `fallback: standby` or `signal`. Start it; read `public_key=` from its stdout line `bound=<ip:port> public_key=<hex>` (also on its stderr startup line).
+2. Client: [`examples/client-composed.ktav`](examples/client-composed.ktav) with `server: <that key>` and the same `network` section (no `server_address`). The client prints `listening=<ip:port>` on stdout once its local listener is bound (so `listen` may use port 0).
 3. Start the client and connect to `listen`. With `standby` payload may fall back to Yggdrasil when direct QUIC is blocked; with `signal` it fails closed. Details and limits: [operations.md](operations.md#path-modes).
 
 ## Tests that keep this guide honest

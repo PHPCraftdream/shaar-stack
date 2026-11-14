@@ -13,6 +13,7 @@ mod denial;
 mod mainline_fixture;
 #[cfg(target_os = "linux")]
 mod nat;
+mod operator;
 mod outage;
 mod payload;
 #[path = "../../../../src/network/signaling/relay_fixture.rs"]
@@ -30,6 +31,7 @@ enum Case {
     Payload,
     Denial,
     Outage,
+    Operator,
 }
 
 #[tokio::test]
@@ -60,6 +62,12 @@ async fn real_composed_denied_key_never_reaches_target_in_signal_and_standby() {
 #[ignore = "requires CI-built shaar-server and shaar-client executables"]
 async fn real_composed_standby_forwards_when_dht_and_client_relay_are_unavailable() {
     run(Case::Outage).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires CI-built shaar-server and shaar-client executables"]
+async fn real_composed_operator_contract_bind_allowlist_output_and_service_stop() {
+    run(Case::Operator).await.unwrap();
 }
 
 async fn run(case: Case) -> Result<(), String> {
@@ -100,6 +108,9 @@ async fn run(case: Case) -> Result<(), String> {
                     payload::scenario(&temp, &mut processes, &mut tasks, &relay.address, &uri).await
                 }
                 Case::Outage => outage::scenario(&temp, &mut processes, &relay.address, &uri).await,
+                Case::Operator => {
+                    operator::scenario(&temp, &mut processes, &relay.address, &uri).await
+                }
             }
         },
     ))
