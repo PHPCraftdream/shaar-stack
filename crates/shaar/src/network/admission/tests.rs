@@ -286,10 +286,9 @@ async fn dropped_accept_retains_the_in_flight_handshake() {
                 }
             }
         });
-        let (accepted, connected) = tokio::time::timeout(
-            Duration::from_secs(20),
-            tokio::join!(server.accept(), &mut attempt),
-        )
+        let (accepted, connected) = tokio::time::timeout(Duration::from_secs(20), async {
+            tokio::join!(server.accept(), &mut attempt)
+        })
         .await
         .expect("retained handshake completes after the accept future was dropped");
         let accepted = accepted.unwrap();
@@ -326,10 +325,9 @@ async fn silent_initial_does_not_stall_a_second_peer() {
         // The legitimate peer is admitted while the silent handshake is parked,
         // far below the 10 s handshake deadline; the serial accept first awaited
         // the silent handshake's Deadline and failed this bound.
-        let (accepted, connected) = tokio::time::timeout(
-            Duration::from_secs(5),
-            tokio::join!(server.accept(), legit.connect(key(67), address)),
-        )
+        let (accepted, connected) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(server.accept(), legit.connect(key(67), address))
+        })
         .await
         .expect("second peer admitted below the handshake deadline");
         let accepted = accepted.unwrap();
@@ -359,13 +357,18 @@ async fn pending_handshake_cap_bounds_silent_initials() {
             let client = bind(seed, &[], 1).await;
             let proxy = UdpSocket::bind("127.0.0.1:0").await.unwrap();
             let mut packet = [0u8; 2048];
-            let mut attempt = Box::pin(client.connect(key(67), proxy.local_addr().unwrap()));
-            let size = tokio::select! {
-                result = &mut attempt => panic!("completed before any peer response: {result:?}"),
-                packet = proxy.recv_from(&mut packet) => packet.unwrap().0,
-            };
-            proxy.send_to(&packet[..size], address).await.unwrap();
-            silent_peers.push((client, proxy, attempt));
+            {
+                // The Initial is out once it is relayed; the dropped attempt sends
+                // nothing the server could see, because the proxy relays no more.
+                let mut attempt =
+                    Box::pin(client.connect(key(67), proxy.local_addr().unwrap()));
+                let size = tokio::select! {
+                    result = &mut attempt => panic!("completed before any peer response: {result:?}"),
+                    packet = proxy.recv_from(&mut packet) => packet.unwrap().0,
+                };
+                proxy.send_to(&packet[..size], address).await.unwrap();
+            }
+            silent_peers.push((client, proxy));
         }
         // The accept loop parks up to the cap and refuses the excess instead of
         // queueing memory.
