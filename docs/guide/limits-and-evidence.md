@@ -46,6 +46,20 @@ This page separates what was written, what ran in GitHub CI, and what has no evi
 - The client listener does not authenticate local applications: any local process that can reach `listen` uses the client's access. The listener is loopback-only; protect the host.
 - Legal notices of third-party material are incomplete (`docs/legal/`); this guide gives no license clearance, and no release has been made.
 
+## Platforms
+
+The dispatch workflow "Platform build evidence" builds release executables of both products for the targets below, and its job summary states plainly that the result is build-only evidence.
+
+| Target | Built in CI | Executed in CI | Devices |
+|---|---|---|---|
+| x86_64-unknown-linux-gnu | yes; run evidence: _to be filled after the first dispatch_ | Ordinary CI compiles and executes the selected unit, SDK and real-process tests on Ubuntu runners | Never run on devices |
+| x86_64-pc-windows-msvc | yes; run evidence: _to be filled after the first dispatch_ | Ordinary CI compiles and executes the selected tests on Windows runners | Never run on devices |
+| aarch64-apple-darwin | built in CI only; run evidence: _to be filled after the first dispatch_ | Nothing — macOS has never executed anything in this repository's CI | Never |
+| x86_64-apple-darwin | built in CI only; run evidence: _to be filled after the first dispatch_ | Nothing | Never |
+| aarch64-linux-android | built in CI only; run evidence: _to be filled after the first dispatch_ | Nothing | Never |
+
+No GUI, no APK, no system packages, no installers, and no release publication are produced; the separate first-run effort is out of scope here.
+
 ## Checks actually performed
 
 All runs below are GitHub Actions runs on the owner's CI; "executed" means the test case ran and passed in the cited log or receipt.
