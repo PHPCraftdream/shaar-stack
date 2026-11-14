@@ -401,13 +401,15 @@ Product findings worth keeping:
 
 ## 11. P14 resources, complexity and performance (2026-11-12)
 
-Status: static review written; findings 2, 3 fixed (CI-verified) and findings 1, 5 fixed with their tests written but not yet compiled or run (see 11.1).
-Measurement dispatches 43628161108 and 43630351232 (source 3be11f9) ran both
-cases: composed passed all 19 rows; direct passed its first 10 rows and failed
-in the "memory per concurrent stream" phase on finding 12. Finding 12 is fixed
-with a regression test written, but nothing is compiled or re-measured yet, so
-no measurement is accepted. Budgets below are proposals awaiting the user's
-approval. Nothing here claims optimal complexity or lock-freedom.
+Status: measurement accepted at source `c84d9a6` (loopback, one GitHub-hosted runner, one run).
+Dispatch 43642328666 passed all 19 rows of the direct case and all 19 rows of the composed
+case (11.5). The owner approved the proposed budgets on 2026-11-14 as provisional ceilings
+(decision log); they are tightened later from recorded values, not now. Earlier dispatches
+43628161108 and 43630351232 (source `3be11f9`) passed the composed case and failed the direct case
+in the "memory per concurrent stream" phase on finding 12 (a QUIC `MAX_STREAMS` credit
+defect, fixed in `c84d9a6` with a regression test executed in CI on Linux and Windows).
+Findings 1, 2, 3, 5 and 12 are fixed and CI-verified; findings 4 and 6 to 10 are open.
+Nothing here claims optimal complexity or lock-freedom.
 
 Step advanced: end-to-end step 6 (server forwards to the fixed target) and the
 efficiency criterion "bounded resource use per connection and per resolver".
@@ -447,7 +449,7 @@ window, 16 streams, so at most 32 sessions times 2 MiB = 64 MiB of QUIC window p
 about 8 MiB of copy buffers and the Ygg queues (at most 32 datagrams sending and
 256 receiving, each up to the carrier MTU). These are bounds, not measurements.
 
-### 11.2 Proposed budgets (to be approved before any run)
+### 11.2 Budgets (proposed 2026-11-12, approved 2026-11-14 as provisional ceilings)
 
 Environment: one GitHub-hosted `ubuntu-latest` runner, release build, loopback
 only, `/proc` sampling, 20 warm-up exchanges first. Idle window 30 s (direct) or 65 s
@@ -487,10 +489,29 @@ any row violates its budget or a report is empty, and uploads `target/ci-resourc
 
 ### 11.4 Non-claims
 
-The dispatches at source 3be11f9 produced figures only for the composed case (19
-rows) and the first 10 direct rows before finding 12 stopped the direct case; no
-run is accepted while the direct case fails, and the budgets remain proposals.
-Signal-mode composed, Yggdrasil-carried payload throughput, IPv6 and long-duration
-(hours) behavior are not covered by the run. Findings 4 and 6 to 10 are open;
-findings 1, 5 and 12 are fixed with tests written but not yet compiled or run by
-CI (see 11.1).
+The accepted measurement is one dispatch at source `c84d9a6` on one shared GitHub-hosted
+runner over loopback: it is a pass/fail check against provisional ceilings, not a 95th
+percentile or a capacity claim. Signal-mode composed, Yggdrasil-carried payload
+throughput, IPv6, public-network and long-duration (hours) behavior are not covered.
+Findings 4 and 6 to 10 are open (see 11.1).
+
+### 11.5 Results (dispatch 43642328666, source `c84d9a6`, both cases passed)
+
+| Measure | Direct | Composed standby | Ceiling (direct / composed) |
+|---|---|---|---|
+| Steady RSS, server / client (MiB) | 15.8 / 16.1 | 22.8 / 22.5 | 48 / 96 |
+| Peak RSS after 64 MiB echo, server / client (MiB) | 18.2 / 18.8 | 24.5 / 24.1 | 96 / 160 |
+| Server RSS added by the first session (MiB) | 1.46 | 1.04 | 4 |
+| Idle CPU, server / client (%) | 0.07 / 0.03 | 0.06 / 0.14 | 1 / 2 |
+| New-connection round trip p50 / p95 (ms) | 0.53 / 0.58 | 0.54 / 0.60 | p95 100 |
+| Bulk echo throughput (MiB/s) | 135.8 | 73.9 | at least 20 |
+| RSS per held stream, server / client (KiB) | 0 / 0.75 | 0 / 0 | 512 |
+| Bytes accepted by a never-reading target (MiB) | 8.25 | 8.38 | 32 |
+| RSS growth during that stall (MiB) | 0 / 0 | 0.004 / 0 | 12 |
+| Server growth after 15 (direct) or 6 (composed) client restarts: fds / threads / RSS (MiB) | 0 / 0 / 0.85 | 0 / 0 / 0.22 | 2 / 2 / 4 |
+| Server stop to exit (ms) | 2.8 | 4.0 | 5000 |
+
+Every value is far inside its provisional ceiling, so the ceilings can be tightened by a
+large factor once more runs exist; this section does not tighten them. The first two
+dispatches also show that composed values are stable between runs (steady RSS 22.8 to 25.4 MiB,
+p95 0.41 to 0.60 ms). The raw reports are the `resource-budget` artifact of the dispatch.
