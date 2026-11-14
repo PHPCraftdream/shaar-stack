@@ -39,9 +39,16 @@ impl Drop for Stream {
     }
 }
 
+/// Small request/response flows must not wait on Nagle's algorithm.
+fn tuned(tcp: TcpStream) -> TcpStream {
+    let _ = tcp.set_nodelay(true);
+    tcp
+}
+
 /// cancel-safe: NO — terminal cancellation resets both QUIC directions and drops
 /// the owned TCP stream. Partially copied data must never be replayed on this pair.
-pub(super) async fn pump(stream: Stream, mut tcp: TcpStream) -> Result<ForwardStats, ForwardError> {
+pub(super) async fn pump(stream: Stream, tcp: TcpStream) -> Result<ForwardStats, ForwardError> {
+    let mut tcp = tuned(tcp);
     let (read, write) = tcp.split();
     copy_halves(stream, read, write).await
 }
@@ -78,4 +85,21 @@ where
     let (to_peer, from_peer) = tokio::try_join!(up, down)?;
     stream.finished = true;
     Ok(ForwardStats { to_peer, from_peer })
+}
+
+#[cfg(test)]
+mod tuning_tests {
+    use super::tuned;
+    use tokio::net::{TcpListener, TcpStream};
+
+    #[tokio::test]
+    async fn forwarded_tcp_sockets_disable_nagle_delay() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (connected, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+        let (connected, (accepted, _)) = (connected.unwrap(), accepted.unwrap());
+        assert!(!connected.nodelay().unwrap(), "fresh sockets use Nagle");
+        assert!(tuned(connected).nodelay().unwrap());
+        assert!(tuned(accepted).nodelay().unwrap());
+    }
 }

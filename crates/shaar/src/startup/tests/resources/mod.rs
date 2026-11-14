@@ -13,6 +13,7 @@ mod status_tests;
 mod ygg_tests;
 
 use std::net::{SocketAddr, SocketAddrV4, TcpListener, UdpSocket};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use libp2p_identity::PeerId;
@@ -81,16 +82,51 @@ fn hex_32(text: &str) -> [u8; 32] {
     out
 }
 
-pub(super) fn reserve_tcp_port() -> u16 {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("reserve a loopback TCP port");
-    listener.local_addr().expect("local address").port()
+// Reserved ports come from a range below the OS ephemeral ranges (Linux 32768+,
+// Windows 49152+), so outbound sockets of parallel tests cannot own them, and
+// each number is handed out once per process.
+const RESERVED_LOW: u32 = 12_000;
+const RESERVED_SPAN: u32 = 18_000;
+static NEXT_RESERVED: AtomicU32 = AtomicU32::new(0);
+
+fn next_reserved_port() -> u16 {
+    let step = NEXT_RESERVED.fetch_add(1, Ordering::Relaxed);
+    let start = std::process::id() % RESERVED_SPAN;
+    u16::try_from(RESERVED_LOW + (start + step) % RESERVED_SPAN).expect("reserved range fits u16")
 }
 
-/// Pick a free UDP port by bind+drop of an ephemeral socket; the port is
+/// Pick a currently free loopback TCP port that no parallel test can also hold.
+pub(super) fn reserve_tcp_port() -> u16 {
+    (0..RESERVED_SPAN)
+        .map(|_| next_reserved_port())
+        .find(|port| TcpListener::bind(("127.0.0.1", *port)).is_ok())
+        .expect("a free loopback TCP port in the reserved range")
+}
+
+/// Pick a free UDP port from the reserved range (see above); the port is
 /// still observable for configuring a mainline bind.
 pub(super) fn reserve_udp_port() -> u16 {
-    let socket = UdpSocket::bind(("127.0.0.1", 0)).expect("reserve a loopback UDP port");
-    socket.local_addr().expect("local address").port()
+    (0..RESERVED_SPAN)
+        .map(|_| next_reserved_port())
+        .find(|port| UdpSocket::bind(("127.0.0.1", *port)).is_ok())
+        .expect("a free loopback UDP port in the reserved range")
+}
+
+#[test]
+fn reserved_ports_are_unique_free_and_below_the_ephemeral_ranges() {
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..64 {
+        let (tcp, udp) = (reserve_tcp_port(), reserve_udp_port());
+        for port in [tcp, udp] {
+            assert!(
+                (12_000..30_000).contains(&port),
+                "port {port} left the reserved range"
+            );
+            assert!(seen.insert(port), "port {port} was handed out twice");
+        }
+        assert!(TcpListener::bind(("127.0.0.1", tcp)).is_ok());
+        assert!(UdpSocket::bind(("127.0.0.1", udp)).is_ok());
+    }
 }
 
 /// Server config text with explicit binds; `bootstrap` 1..=4 entries.

@@ -18,6 +18,8 @@ mod outage;
 mod payload;
 #[path = "../../../../src/network/signaling/relay_fixture.rs"]
 mod relay_fixture;
+#[cfg(target_os = "linux")]
+mod resources;
 
 #[derive(Clone, Copy)]
 enum Role {
@@ -32,6 +34,8 @@ enum Case {
     Denial,
     Outage,
     Operator,
+    #[cfg(target_os = "linux")]
+    Resources,
 }
 
 #[tokio::test]
@@ -91,10 +95,11 @@ async fn run(case: Case) -> Result<(), String> {
     let mut processes = Processes::default();
     let mut tasks = JoinSet::new();
     let result = std::panic::AssertUnwindSafe(timeout(
-        Duration::from_secs(if matches!(case, Case::Lifecycle(_)) {
-            120
-        } else {
-            240
+        Duration::from_secs(match case {
+            Case::Lifecycle(_) => 120,
+            #[cfg(target_os = "linux")]
+            Case::Resources => 540,
+            _ => 240,
         }),
         async {
             match case {
@@ -110,6 +115,11 @@ async fn run(case: Case) -> Result<(), String> {
                 Case::Outage => outage::scenario(&temp, &mut processes, &relay.address, &uri).await,
                 Case::Operator => {
                     operator::scenario(&temp, &mut processes, &relay.address, &uri).await
+                }
+                #[cfg(target_os = "linux")]
+                Case::Resources => {
+                    resources::composed(&temp, &mut processes, &mut tasks, &relay.address, &uri)
+                        .await
                 }
             }
         },

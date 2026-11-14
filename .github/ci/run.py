@@ -381,6 +381,94 @@ def product_manifest():
     print("Product manifest recorded for", revision, sorted(products))
 
 
+RESOURCE_DIR = ROOT / "target/ci-resources"
+RESOURCE_CASES = (
+    "process_smoke::composed::resources::measure_resource_budget_direct",
+    "process_smoke::composed::resources::measure_resource_budget_composed",
+)
+
+
+def check_resource_report(text):
+    """Every recorded budget row must pass; an empty report is not evidence."""
+    report = json.loads(text)
+    rows = report.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("resource report has no measured rows")
+    failed = [row.get("name") for row in rows if row.get("ok") is not True]
+    if failed:
+        raise ValueError("resource budgets violated: " + ", ".join(map(str, failed)))
+    return len(rows)
+
+
+def resource_build():
+    """Release products and the ignored harness binary; compiles only, executes nothing."""
+    RESOURCE_DIR.mkdir(parents=True, exist_ok=True)
+    build, status = capture(
+        ["cargo", "build", "--release", "--locked", "-p", "shaar-server", "-p", "shaar-client", "--message-format=json"],
+        RESOURCE_DIR / "products.build.jsonl", stderr=RESOURCE_DIR / "products.build.stderr")
+    if status:
+        raise ValueError("resource product build failed: " + str(status))
+    products = {}
+    for name in ("shaar-server", "shaar-client"):
+        binary = product_executable(build, name)
+        with binary.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        products[name] = {"executable": str(binary), "sha256": digest, "bytes": binary.stat().st_size}
+    arguments = ["cargo", "test", "--locked", "-p", "shaar", "--test", "identity"]
+    messages, status = capture(arguments + ["--no-run", "--message-format=json"],
+                               RESOURCE_DIR / "identity.build.jsonl", stderr=RESOURCE_DIR / "identity.build.stderr")
+    if status:
+        raise ValueError("resource harness compilation failed: " + str(status))
+    harness = executable(messages, POLICY.target("shaar", kind="test", name="identity"))
+    ignored, status = capture([str(harness), "--list", "--ignored", "--format=terse"], RESOURCE_DIR / "identity.ignored.log")
+    if status or not set(RESOURCE_CASES) <= set(VERIFY.parse_listing(ignored, "")):
+        raise ValueError("resource harness cases are not ignored tests of the compiled binary")
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("resource source revision is not an exact SHA")
+    receipt = {"head": revision, "profile": "release", "products": products, "harness": str(harness),
+               "cases": list(RESOURCE_CASES)}
+    (RESOURCE_DIR / "build.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    print("Resource products and harness built for", revision)
+
+
+def resource_run():
+    """Runs the two measurement cases one at a time; the step timeout owns the 15 minute cap."""
+    receipt = json.loads((RESOURCE_DIR / "build.json").read_text(encoding="utf-8"))
+    reports = RESOURCE_DIR / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    environment = {
+        "SHAAR_SERVER_EXE": receipt["products"]["shaar-server"]["executable"],
+        "SHAAR_CLIENT_EXE": receipt["products"]["shaar-client"]["executable"],
+        "SHAAR_RESOURCE_REPORT_DIR": str(reports),
+        "SHAAR_RESOURCE_PROFILE": receipt["profile"],
+    }
+    summary = {"head": receipt["head"], "cases": {}}
+    errors = []
+    for index, case in enumerate(receipt["cases"]):
+        if case not in RESOURCE_CASES:
+            raise ValueError("unreviewed resource case")
+        output, status = capture(
+            [receipt["harness"], "--ignored", "--exact", "--nocapture", "--test-threads=1", case],
+            RESOURCE_DIR / f"run-{index}.log", stderr=RESOURCE_DIR / f"run-{index}.stderr.log",
+            extra_env=environment)
+        mode = case.rsplit("_", 1)[-1]
+        entry = {"exit_code": status, "rows": 0}
+        try:
+            if status or "1 passed; 0 failed" not in output:
+                raise ValueError("measurement case did not pass exactly once: " + str(status))
+            entry["rows"] = check_resource_report((reports / (mode + ".json")).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            entry["error"] = str(error)
+            errors.append(case + ": " + str(error))
+        summary["cases"][case] = entry
+    summary["status"] = "failed" if errors else "passed"
+    (RESOURCE_DIR / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    if errors:
+        raise ValueError("; ".join(errors))
+    print("Resource budgets verified:", {case: entry["rows"] for case, entry in summary["cases"].items()})
+
+
 def main():
     mode = sys.argv[1]
     if mode == "product-manifest":
@@ -388,6 +476,12 @@ def main():
         return
     if mode == "process-feedback":
         process_feedback()
+        return
+    if mode == "resource-build":
+        resource_build()
+        return
+    if mode == "resource-run":
+        resource_run()
         return
     if mode == "self-test":
         self_test()
