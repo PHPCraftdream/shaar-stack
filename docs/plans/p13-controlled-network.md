@@ -383,53 +383,72 @@ gained an input-hook drop of unsolicited UDP to the router's own port (hypothesi
 packet otherwise creates a conntrack entry that takes the peer's preserved port). That change
 is **not dispatched**; one nat-group dispatch is needed to verify it.
 
-## Reflexive address source for double-NAT punching (proposal)
+## Reflexive address source and hole punching without a helper server (design)
 
-Status: **proposal, not implemented** (written 2026-11-14). It answers the A5 finding
+Status: **design, not implemented** (rewritten 2026-11-14). It answers the A5 finding
 (scenarios.md §10.2, row A5): with a port-preserving cone NAT on each router and Yggdrasil
 denied, neither product direction punches; the signed record lists only the Server's private
 address, the Client spends its whole attempt budget on that silent candidate, and relay-first
 negotiation still produces no direct path. This section changes no product code and no oracle.
+
+**Superseded recommendation.** The earlier revision of this section recommended an owned
+iroh-relay QAD server (its mechanisms M1 and R1) and, as an alternative, an own UDP reflector
+(M5). Both are superseded by the **owner decision of 2026-11-14**: the public (reflexive)
+address of a device and the coordination of a hole punch must come from what the products
+already use — the Mainline DHT, Yggdrasil, libp2p signaling (signaling only, never application
+data) and QUIC itself; there is **no dedicated helper or relay server**. The same day, the
+first public smoke (run 43629141158) showed a public libp2p bootstrap used as the signaling
+relay accepting TCP while the Server never completed its reservation (3 connections about 13 s
+apart, then the harness stopped it on the relay-connection budget); public Yggdrasil peers and
+DHT bootstrap nodes worked. The owner decided that **DHT and Yggdrasil are the only helper
+infrastructure**, which adds relay-optional composed startup as an explicit early leaf (L0).
+Still-valid evidence and mechanisms of the earlier revision are kept below (§1; the QUIC
+observed-address mechanism M2 becomes D3; the counter logic in §4 is unchanged).
+
 Claims are labeled: **read** = read in source or in a recorded run receipt; **inferred** =
 derived from that reading, not separately proven; **unknown** = not establishable here.
 
 References: `repo` = this repository. `iroh 1.3.0`, `noq-proto 1.3.0` and `iroh-relay 1.3.0`
-are the pinned upstream sources, read from the already-prepared local DATA (extracted
-crates.io bytes kept under the primary checkout's `.rush/downloads`; CI preparation applies
-the reviewed `prepare.py`/`policy.py`/`runtime.py` edits on top of exactly these bytes — the
-`replace()` anchors in those scripts prove the cited lines exist in the prepared trees too).
+are the pinned upstream sources. `n0-mainline 0.7.0` is the pinned source whose reviewed local
+adapter (`.github/scripts/p2p/discovery/mainline/prepare.py` injecting `owner.rs`) is compiled
+as `target/native-graph/n0-mainline-0.7.0` (workspace `Cargo.toml:26`). All are read from the
+already-prepared local DATA (extracted crates.io bytes kept under the primary checkout's
+`.rush/downloads`; CI preparation applies the reviewed `prepare.py`/`policy.py`/`runtime.py`
+edits on top of exactly these bytes — the `replace()` anchors in those scripts prove the cited
+lines exist in the prepared trees too).
 
 ### 1. What the products do today (read)
 
 **Endpoint construction.** `bind_custom_shared` builds the native endpoint with
-`iroh::Endpoint::builder(presets::Minimal)` (repo `crates/shaar/src/network/admission/mod.rs:129`),
-`clear_ip_transports()` plus one explicit `bind_addr` (`:132-133`), `PortmapperConfig::Disabled`
-(`:146`) and `NetReportConfig::minimal()` (`:147`). The QUIC transport config (`:116-127`) sets
-filters, windows and stream limits but never enables observed-address reporting. In pinned
-iroh, `presets::Minimal` sets only the TLS crypto provider (`iroh 1.3.0 src/endpoint/presets.rs:57-79`),
-and the empty builder defaults to "no address lookup services" with `RelayMode::Disabled`
-(`iroh 1.3.0 src/endpoint.rs:192`).
+`iroh::Endpoint::builder(presets::Minimal)` (repo
+`crates/shaar/src/network/admission/mod.rs:197`), `clear_ip_transports()` plus one explicit
+`bind_addr` (`:200-202`), `PortmapperConfig::Disabled` (`:214`) and
+`NetReportConfig::minimal()` (`:215`). The QUIC transport config (`:184-196`) sets filters,
+windows and stream limits but never enables observed-address reporting. In pinned iroh,
+`presets::Minimal` sets only the TLS crypto provider (`iroh 1.3.0
+src/endpoint/presets.rs:57-79`), and the empty builder defaults to "no address lookup
+services" with `RelayMode::Disabled` (`iroh 1.3.0 src/endpoint.rs:192`).
 
 **Why nothing reflexive is learned.** iroh's net_report client — the only component that
 derives reflexive addresses — skips entirely on an empty relay map (`iroh 1.3.0
-src/socket.rs:794`, "skipping net_report, empty RelayMap"), and its QAD probes additionally
-require IP transports (`src/socket.rs:1036-1049`). The products configure no iroh relay, so
-`update_direct_addresses` (`src/socket.rs:1801-1877`) can only ever merge `Portmapped` entries
-(disabled), `Local` entries (bound/interface addresses, `:1881-1955`) and `Config` entries
-(explicitly injected, `:1870-1872`). `watch_addr()` (`src/endpoint.rs:1289-1301`) is what the
-SDK publishes from; with no relay it yields only local addresses. For the A5 Server, bound to
-one specific private address, `collect_local_addresses` adds exactly that entry. This
-confirms the recorded fact that the record lists only `10.0.2.2:<port>`.
+src/socket.rs:794`), and its QAD probes additionally require IP transports
+(`src/socket.rs:1036-1049`). The products configure no iroh relay, so
+`update_direct_addresses` (`src/socket.rs:1801-1877`) can only ever merge `Portmapped`
+entries (disabled), `Local` entries (bound/interface addresses) and `Config` entries
+(explicitly injected). `watch_addr()` (`src/endpoint.rs:1289-1301`) is what the SDK publishes
+from; with no relay it yields only local addresses (repo watcher:
+`crates/shaar/src/network/admission/mod.rs:267-269`). For the A5 Server, bound to one
+specific private address, the record lists exactly that entry.
 
 **Publication.** Startup maintenance feeds the record publisher from the endpoint's address
 watcher: `crates/shaar/src/startup/resources/start.rs:496` →
 `crates/shaar/src/startup/resources/maintain.rs:269`, bounded to 4 `TransportAddr::Ip`
 entries (`crates/shaar/src/startup/resources/mod.rs:39`;
-`crates/shaar/src/native_discovery/address.rs:8,25-40` — `Relay`/`Custom` entries are
-rejected, `:32-38`). Whatever iroh reports in `watch_addr()` therefore becomes the signed
-Mainline record; a reflexive address would flow into the record with no publisher change.
-The record carries bare socket addresses only — the reflexive/local distinction is not
-serialized (`crates/shaar/src/native_discovery/runtime/publisher.rs:171-180`).
+`crates/shaar/src/native_discovery/address.rs:8,25-41` — `Relay`/`Custom` entries are
+rejected, `:33-36`). The record carries bare socket addresses only; the reflexive/local
+distinction is not serialized
+(`crates/shaar/src/native_discovery/runtime/publisher.rs:168-185`, the `EndpointData` of
+`TransportAddr::Ip` at `:180`).
 
 **Candidate dialing and the ordering defect.** `NativeDialer::dial`
 (`crates/shaar/src/startup/role/dialers.rs:150-201`) resolves the record into at most 4
@@ -437,25 +456,43 @@ candidates (`:27`, `:90-117`; resolve budget 5 s at `:30`) and dials them sequen
 under the full remaining attempt deadline (`:163`). A silently dropped candidate (unroutable
 private address) neither errors nor completes: the timeout arm returns `Err(DialError)` and
 ends the whole attempt (`:179`); `candidates.remove(0)` runs only for typed errors (`:177`),
-and the kept list survives across attempts (`:91-93`), so every retry burns on the same
-silent candidate. One native attempt is 3 s (`crates/shaar/src/path/model.rs:83,99`), up to 6
-attempts (`:102`), then the Client ends with "no usable path remained within the attempt
-budget" (`crates/shaar/src/startup/error.rs:71`) — matching the recorded 32.6 s A5 exit.
-Relay negotiation (`dialers.rs:183-201`) sits after the candidate loop, so direct-first never
+and the list survives across policy attempts until observed loss (`:91-93`, `:206-211`), so
+every retry burns on the same silent candidate. One native attempt is 3 s
+(`crates/shaar/src/path/model.rs:83,99`), up to 6 attempts (`:102`), then the Client ends
+with "no usable path remained within the attempt budget"
+(`crates/shaar/src/startup/error.rs:71`) — matching the recorded 32.6 s A5 exit. Relay
+negotiation (`dialers.rs:183-201`) sits after the candidate loop, so direct-first never
 reaches it; relay-first (empty candidate list, DHT dropped) reaches it and did exchange
 signaling (`relay_tcp` about 290-300 per router, scenarios.md §10.2 row A5).
 
-**What signaling exchanges today.** The libp2p carrier runs a relay client, a control
+**Rendezvous infrastructure today.** The libp2p carrier runs a relay client, a control
 behavior and a request-response datagram protocol
-(`crates/shaar-p2p/src/carrier/driver/mod.rs:99-103`). The control behavior runs identify and
-kad with listen addrs hidden and the peer-address cache disabled
-(`crates/shaar-p2p/src/carrier/driver/runtime/protocols/mod.rs:60-65`); no native candidate
+(`crates/shaar-p2p/src/carrier/driver/mod.rs:99-103`; datagrams bounded to 1500 B,
+`crates/shaar-p2p/src/packet.rs:7-28`; delivered only on authenticated, allowlisted
+application connections, `driver/mod.rs:592-600`), with identify/kad control that hides
+listen addrs and disables the address cache
+(`crates/shaar-p2p/src/carrier/driver/runtime/protocols/mod.rs:59-66`); no native candidate
 list is exchanged over signaling. `connect_via` mints a per-link synthetic `CustomAddr`
-(`crates/shaar-p2p/src/bridge/mod.rs:58,76-81`) and the custom transport fabricates `RecvInfo`
-sources from that minted address (`:170-178`), so a QUIC connection carried over the relay
+(`crates/shaar-p2p/src/bridge/mod.rs:74-81`) and the custom transport fabricates `RecvInfo`
+sources from that minted address (`:178`), so a QUIC connection carried over the relay
 observes synthetic addresses, never a NAT mapping. `native_ready` waits for any eligible
-Native IP path on the connection (`crates/shaar/src/network/session.rs:33-49`; `native_ip`
-admits every IPv4 address, `crates/shaar/src/network/admission/policy.rs:60-66`).
+Native IP path on the connection (`crates/shaar/src/network/session.rs:31-47`; `native_ip`
+admits every IPv4 address, `crates/shaar/src/network/admission/policy.rs:60-66`). The
+Yggdrasil bridge pairs allowlisted peers by their 32-byte keys and carries bounded datagrams
+plus a probe (`crates/shaar-ygg/src/bridge/mod.rs:204,264,273`), but the standby owner never
+dials the Ygg side in signal mode (fallback dials 0, Ygg accepts 0 —
+`crates/shaar/src/network/admission/ygg/standby_tests/forwarding.rs:345-395`;
+`crates/shaar/src/startup/role/dialers.rs:268-287`).
+
+**The relay is mandatory today.** The ktav schema requires both `network.signaling.relay`
+and `network.signaling.relay_address`
+(`crates/shaar/src/config/network/mod.rs:276-305`, `MissingRequired` at `:285-297`), the
+Server retries relay reservations at startup and exits with `RelayReserve` when they fail
+(`crates/shaar/src/startup/role/server.rs:420-434`, `:430`), and the Client dialer is
+constructed with a validated relay address taken from the signaling settings
+(`dialers.rs:53-59,124-135`). A zero-configuration first run therefore has no usable
+signaling path when no relay is configured, and the public smoke above failed exactly at the
+reservation step.
 
 **Verdict on the probable cause.** Confirmed as the primary cause: neither endpoint has any
 source of its own reflexive (NAT-mapped) UDP address, so the record cannot carry a dialable
@@ -464,206 +501,269 @@ endpoint. The A5 relay-variant counters (`native_out` 7/8 with `peer_recv` 0 on 
 are consistent with both endpoints emitting translated Native UDP toward unusable
 destinations — inferred; the exact targets are unknown (not logged by the harness).
 
-### 2. Mechanisms actually available in the pinned stack
+### 2. Mechanisms without a helper server
 
-For each mechanism: what it needs, whether it fits "libp2p is signaling only, never
-application data", whether it needs infrastructure beyond an owned relay (no n0), and its
-failure modes.
+**D1 — Mainline DHT as the reflexive-address source.** The pinned `n0-mainline 0.7.0`
+already implements BEP 42 end to end: every KRPC response can carry the `ip` field, parsed
+into `requester_ip: Option<SocketAddrV4>` (`src/common/messages.rs:25`, parse `:498-499`,
+`bytes_to_sockaddr` `:807-818`, reply serialization `:273-274`); every response to an
+iterative query casts a vote (`src/core/handle_response.rs:70-71` →
+`src/core/iterative_query.rs:152-156`); the most-voted address wins (`best_address`,
+`iterative_query.rs:129-141`); votes are collected from finished GET queries
+(`src/core.rs:180-200`) and overwrite `public_address` after each query (`core.rs:388-389`).
+The value is exposed: upstream `Dht::info()` (`src/dht.rs:172`) → `Info::public_address()`
+(`src/actor/info.rs:35-37,76`), and the reviewed adapter exposes the same through the owned
+API (`OwnedDhtHandle::info()`,
+`.github/scripts/p2p/discovery/mainline/owner.rs:222-233`), which the products already hold
+(`crates/shaar/src/native_discovery/runtime/owner/mod.rs:12,158,406`). So: parse yes, vote
+yes, expose yes — the SDK only has to read it.
 
-- **M1 — iroh net_report QAD against an owned iroh-relay.** Pinned iroh runs QAD probes
-  (QUIC Address Discovery, draft-ietf-quic-address-discovery) as part of net_report whenever
-  the relay map is non-empty (`iroh 1.3.0 src/socket.rs:794`); `NetReportConfig::minimal()`
-  only disables the HTTPS and captive-portal probes, not QAD
-  (`src/net_report.rs:88-121,115-121`). Probe results land in
-  `update_direct_addresses` as `DirectAddrType::Qad` (`src/socket.rs:1832-1837`, plus the
-  hard-NAT `Qad4LocalPort` guess `:1845-1862`) and then flow into `watch_addr()` → the
-  Mainline record automatically. The server side of QAD exists in pinned `iroh-relay 1.3.0`
-  (`src/quic.rs`: ALPN `"/iroh-qad/0"`, per-connection handler, self-signed TLS server cert;
-  the crate archive is part of the authorized 2026-11-09 registry acquisition, record #187).
-  Needs: one owned iroh-relay process on the WAN fixture host with a QUIC (UDP) port, and a
-  product-side builder change (`relay_mode(RelayMode::Custom(map))` +
-  `clear_relay_transports()`, `iroh 1.3.0 src/endpoint.rs:568-578,517-522` — inferred
-  composition: the relay map keeps driving net_report while the relay transport is removed,
-  so the iroh relay can never carry payload; must be verified in CI). No n0 infrastructure.
-  Fits signaling-only libp2p (the iroh relay is not libp2p and carries only QAD control).
-  Failure modes: relay unreachable → no report → record stays local-only (today's behavior);
-  first report latency delays the record update (full report interval 5 min,
-  `src/net_report.rs:132`, event-driven on network change); no STUN is involved.
-- **M2 — QUIC observed-address reports between the two endpoints.** Pinned noq-proto
-  implements draft-seemann-quic-address-discovery end to end: `src/address_discovery.rs`
-  (roles, `OBSERVED_ADDRESS`), transport-parameter negotiation
-  (`src/transport_parameters.rs:118,148,198`), and `TransportConfig`
-  `send/receive_observed_address_reports` toggles, default disabled
-  (`src/config/transport.rs:369-385,590`). iroh already tolerates the resulting
-  `NoqPathEvent::ObservedAddr` events but discards them
-  (`iroh 1.3.0 src/socket/remote_map/remote_state.rs:635`). Caveat (read): over the product's
-  custom transport the observed source is the minted `CustomAddr`
-  (`crates/shaar-p2p/src/bridge/mod.rs:170-178`), so reports on a relay-carried connection
-  would carry synthetic addresses, not NAT mappings. The mechanism is useful on true UDP
-  paths (verification of a punch, in-band refresh), not for creating one. No new
-  infrastructure; fits signaling-only (frames ride inside the existing QUIC connection).
-  Failure modes: none beyond frame bytes if enabled on IP paths; misleading synthetic
-  addresses if consumed on custom paths — a consumer must filter by transport kind.
-- **M3 — libp2p identify observed addresses.** libp2p-identify 0.48.0 is in the lock and the
-  behavior is running (`crates/shaar-p2p/src/carrier/driver/runtime/protocols/mod.rs:60-65`),
-  but over a circuit-relayed TCP connection the observed address is the TCP/circuit view,
-  not a UDP mapping; the repository additionally hides listen addrs and caches nothing.
-  Does not fit the goal (wrong address family and path); no changes recommended.
-- **M4 — AutoNAT / DCUtR.** `libp2p-autonat` and `libp2p-dcutr` are absent from
-  `Cargo.lock`; adding them is a new dependency (a separate permission per project rules) and
-  both are TCP-dial-back mechanisms that never produce UDP mappings for QUIC. Not proposed.
-- **M5 — external injection via `Endpoint::add_external_addr` / `Builder::external_addr`.**
-  Pinned iroh exposes explicit injection (`iroh 1.3.0 src/endpoint.rs:660-664,1026-1033`) →
-  `DirectAddrType::Config` (`src/socket.rs:1870-1872`) → record. Usable with a tiny owned UDP
-  reflector fixture (request/reply "your address is X") instead of iroh-relay: less pinned
-  code reused, but a new product protocol module (client, refresh policy, bounds) and config.
-  An alternative to M1, not an addition; owner's choice.
-- **M6 — client record + server-side resolve.** The Server could resolve the Client's own
-  signed record and dial its reflexive address. No wire change, but the Client must publish
-  (extra Mainline writes) and the Server gains a dial path it does not have today; M1/M5 are
-  still needed for the Client to have a reflexive address to publish.
-- **Explicitly out:** iroh portmapper (NAT-PMP/PCP/UPnP changes the router; forbidden by the
-  project rules and already disabled, `crates/shaar/src/network/admission/mod.rs:146`);
-  noq's n0 NAT traversal frames (`noq-proto 1.3.0 src/n0_nat_traversal.rs`,
-  `AddAddress`/`ReachOut`) exist in the pinned source but are unreferenced anywhere in
-  pinned iroh — dead code for this composition (read).
+Reliability and caveats: `best_address` is a per-query majority with nondeterministic tie
+breaking (HashMap iteration, `iterative_query.rs:133-139`); the "changed address → confirm by
+pinging" branch is dead in this pinned version (the overwrite at `core.rs:389` precedes the
+comparison at `:391-408`), so `firewalled()` (`actor/info.rs:43-45`, cleared only by the
+self-ping path, `src/core/handle_request.rs:93-118`) must not gate any product decision —
+read. Client-side votes arrive with the normal record resolve (a GET query); on the Server
+side only GET queries vote and publication is a PUT (`core.rs:194-199`), so whether any
+current Server operation yields fresh votes is **unknown** — L2 must add one bounded periodic
+self-lookup (for example resolving the Server's own key) and measure freshness. The observed
+address is the mapping of the **DHT socket**, which `OwnedDht::new` binds separately
+(`owner.rs:469-485`; repo bind at
+`crates/shaar/src/native_discovery/runtime/owner/mod.rs:191`) from the QUIC socket
+(`admission/mod.rs:201-202`) — inferred from the socket topology, consistent with the
+config surface (`bind: <ip>:0`, harness `runtime/configs.py:31-33`). What can safely be
+derived: the **public IP** (a per-router property shared by sibling sockets — inferred); the
+**port never directly** (it is the DHT socket's own port); the QUIC port only under a
+port-preserving mapping (D2).
 
-### 3. Recommended minimal design
+**D2 — The QUIC socket's external port.** Under port-preserving cone NAT the external port of
+the QUIC socket equals its local port, which the product already knows (`local_addr`,
+`admission/mod.rs:253-255`; `bound_sockets`, `:227-237`). The derived punch candidate is
+therefore `(DHT-voted IP, QUIC local port)` — a guess that is wrong only when the port was
+taken or the mapping is not port-preserving. Fixture flavors (read: `network.py:42` —
+`range` maps to `:41010-41020`, `cone` preserves the source port, `random` is
+`masquerade fully-random`; measured by `flows/natprobe.py:9-14` kept/moved counters and the
+A5/A6 live probes: cone 3/3 kept, random 0/3): `cone` → candidate exact; `range` → an
+11-port candidate set could be probed birthday-style, but a product cannot know a router's
+configured range, so multi-port prediction is **out of scope**; `random` → prediction
+impossible within any bounded budget, punch not attempted, today's behavior preserved (A6
+stays fail closed). Probe bursts are the QUIC Initials themselves: the candidate list is
+bounded (≤4), so the burst is bounded; no extra datagram protocol on the data path.
 
-R1 (**reflexive source**, M1): configure an owned-relay `RelayMode::Custom` map carrying only
-the fixture relay, immediately followed by `clear_relay_transports()`; keep
-`PortmapperConfig::Disabled` and `NetReportConfig::minimal()`. The record gains `Qad` IPv4
-entries with no publisher or dialer data-shape change. Relay address and its TLS cert reach
-the products through configuration (new optional ktav field — schema question, below);
-the feature is default-off, so behavior without configuration is exactly today's.
+**D3 — QUIC observed-address frames between the endpoints (kept from M2).** Pinned noq-proto
+implements draft-seemann-quic-address-discovery end to end (`src/address_discovery.rs`;
+transport parameters `src/transport_parameters.rs:118,148,198`; `TransportConfig` toggles
+default-off, `src/config/transport.rs:369-385,590`), and iroh tolerates but discards the
+events (`src/socket/remote_map/remote_state.rs:635`). Useful on true UDP paths to verify a
+punch in band and refresh mappings; over the custom transport the observed source is the
+minted `CustomAddr` (`bridge/mod.rs:178`), so a consumer must filter by transport kind. No
+new infrastructure; a secondary refinement, not the reflexive source.
 
-R2 (**server-side poke**): on establishing a relay-negotiated custom link, the Server sends
-one bounded native dial (existing `Endpoint::connect`) toward the Client's reflexive endpoint
-learned via R3, with a short self-imposed deadline. Purpose: create Router B's outbound
-mapping so the Client's concurrent Initial can traverse. The poke creates no target TCP
-connection and passes through the unchanged allowlist admission.
+**Explicitly out.** Owned-relay QAD (M1) and the own UDP reflector (M5): superseded — each is
+a helper server. libp2p identify observed addresses (M3): over a relayed TCP circuit the view
+is not a UDP mapping (kept as before). AutoNAT/DCUtR (M4): absent from `Cargo.lock` and
+TCP-dial-back — not proposed. Portmapper (NAT-PMP/PCP/UPnP): forbidden by the project rules
+and already disabled (`admission/mod.rs:214`). noq's n0 NAT-traversal frames
+(`noq-proto 1.3.0 src/n0_nat_traversal.rs`) are unreferenced in pinned iroh — dead code for
+this composition (read). The compile-witness dependency `iroh-mainline-address-lookup 0.6.1`
+publishes self-declared endpoint data and does not consume `ip` votes
+(`selected-source/iroh-mainline-address-lookup/src/lib.rs:265-356`; used only as a trait
+witness, `.github/probes/native-graph/fixture/witness.rs:9,13,55`) — it stays a witness, not
+a mechanism.
 
-R3 (**signaling exchange**): extend the carrier's authenticated link with one small typed
-message carrying the sender's current UDP reflexive endpoints (at most 4, ~100 B, sent on
-link establishment and on change). Receivers use peer endpoints only as dial/poke targets —
-never for publication into the signer's own record (no poisoning). On the wire this rides
-the existing request-response carrier channel; no Mainline record format change (still ≤4
-`TransportAddr::Ip` entries).
+### 3. Recommended design (R1-R5)
 
-R4 (**ordering fix**, the silent-first-candidate defect): in
-`crates/shaar/src/startup/role/dialers.rs`, classify candidates (reflexive/public-scope
-first, private/local last), and bound each non-reflexive candidate's connect to a fixed
-slice (for example 1 s) instead of the whole attempt deadline, so a silent candidate can
-neither consume the 3 s attempt nor block relay negotiation; remove a timed-out candidate
-from the list. Total attempt budget, retry/backoff policy and the `Exhausted` exit path stay
-unchanged. Scope classification is heuristic on the dialer side because the record does not
-carry address types (read, §1): treat RFC 1918, CGNAT 100.64/10, loopback, link-local and
-the synthetic fabric prefix as "local"; everything else as "reflexive".
+**R1 — dial-ordering fix (first leaf).** In
+`crates/shaar/src/startup/role/dialers.rs`: classify candidates (public/reflexive scope
+first, private/local scope last — RFC 1918, CGNAT 100.64/10, loopback, link-local and the
+synthetic fabric prefix count as "local"; inferred heuristic, the record carries no address
+types), bound each candidate's `connect` to `min(remaining deadline, 1 s)` instead of the
+whole attempt deadline (`:163`), drop a timed-out candidate from the list instead of ending
+the attempt (`:179`), and keep typed-error handling (`:174-178`), the total budget, backoff
+and the `Exhausted` exit (`model.rs:83,99,102`; `error.rs:71`) unchanged. With four
+candidates the worst case spends about 4 s inside one attempt, so relay/punch negotiation is
+reached within the same attempt instead of never. P10 interaction: the policy keeps owning
+attempts and fallback; the slice only bounds work inside one attempt, so the first-byte
+criterion (3 s with a known address — a good first candidate still connects immediately; a
+silent first candidate costs its 1 s slice and the second candidate still lands inside 3 s)
+and the 10 s failover criterion are not weakened.
 
-Security considerations: peer-claimed reflexive addresses are used only as poke/dial targets
-for already-authenticated, allowlisted keys, bounded to a few small datagrams per negotiation
-(amplification bound: an attacker client can direct at most a handful of ≤1200 B pokes while
-its own authenticated link is live); locally observed QAD/Config/Local addresses are the only
-ones ever published; the reflexive address in the signed record exposes the site's public
-mapping to anyone resolving the key (already the case for private addresses today — recorded
-as a consideration, not a blocker); spoofed QAD replies are impossible unless the owned relay
-is compromised (it is owner infrastructure); the iroh relay cannot carry payload
-(`clear_relay_transports()` + the publisher's `Relay` rejection,
-`crates/shaar/src/native_discovery/address.rs:32-38`), preserving "libp2p is signaling only"
-and no n0.
+**R2 — relay-optional composed startup (early leaf L0).** Parse the relay pair as optional:
+`SignalingNetwork` carries the relay as `Option<(PeerId, SocketAddr)>` instead of required
+fields (`config/network/mod.rs:128-152,276-305`); absent fields validate cleanly, present
+fields behave byte-identically to today. With no relay: the Server skips reservation entirely
+(`server.rs:420-434` — no attempts, no `RelayReserve`), the Client constructs `NativeDialer`
+without a relay lease (`dialers.rs:124-135` skipped), and negotiation rides the Yggdrasil
+bridge (R5). With a relay configured, nothing changes: the carrier keeps its relay client and
+the signaling-only rule — the relayed carrier QUIC still never carries application data (C8
+evidence stands; the publisher still rejects `Relay` entries, `address.rs:33-36`), so
+optionality does not weaken signaling-only.
 
-Resource bounds: one extra fixture process per dispatch; net_report cadence 5 min full plus
-event-driven runs (`iroh 1.3.0 src/net_report.rs:132-133`); at most 4 reflexive endpoints per
-message and record; pokes bounded per negotiation; no per-packet allocations on the data path.
+**R3 — DHT reflexive-IP exposure (read-only).** Extend the discovery runtime owner to poll
+`OwnedDhtHandle::info()` (adapter `owner.rs:222-233`) and publish the voted public IP through
+a bounded watcher; add one bounded periodic self-lookup so votes stay fresh (the Server has no
+GET query today — D1); no record or wire change. The vote source is untrusted, so the value
+is advisory input to R4/R5, never an address the product treats as authenticated.
 
-Non-goals: no symmetric-NAT punching claim (A6 stays fail-closed in signal mode: with
-`masquerade fully-random` the reflector-observed mapping differs from the peer-directed
-mapping); no public STUN, no n0, no router configuration, no new dependencies; no IPv6 NAT
-acceptance; no change to Yggdrasil standby semantics; no product behavior change when the
-reflexive source is unavailable (fail closed / standby fallback exactly as recorded today).
+**R4 — record-carried reflexive candidate (flagged, default-off).** The publisher may add
+one extra entry `(voted IP, QUIC local port)` to the ≤4 record addresses
+(`publisher.rs:168-185`; validation `address.rs:25-41` unchanged — still bare
+`TransportAddr::Ip`), behind an explicit ktav flag; default-off keeps today's record bytes
+exactly. Purpose: the cold-start path (north-star steps 3-4, 10 s cold criterion) needs a
+dialable public candidate even when no rendezvous channel exists (A5 had Ygg denied), and it
+alone suffices when the Server's NAT admits unsolicited inbound to its mapped endpoint; the
+exchange (R5) covers stricter filtering. The disclosure trade-off (the site's public IP
+becomes resolvable under the key) and the spoofing bound (wrong votes publish a wrong address
+that cannot authenticate) are recorded in §6; the default is an owner decision.
+
+**R5 — punch coordination over an authenticated rendezvous.** Channel: the Yggdrasil bridge
+when Ygg peers are configured (datagrams bounded by the bridge queues,
+`shaar-ygg/src/bridge/mod.rs:264`; peers allowlisted by 32-byte key, `:204`; the probe at
+`:273` pre-measures RTT to size the timing window), else the relay carrier datagrams when a
+relay is configured (≤1500 B, authenticated application connections only,
+`shaar-p2p/src/carrier/driver/mod.rs:592-600`, send at `:417`). Message: one small typed
+datagram `version | punch epoch | ≤4 candidate endpoints | flags`, well under the 1500 B
+budget. Who initiates: only the authenticated dialing side (Client) on dial start and on
+candidate change; the Server answers once with its own candidate set and starts its punch
+burst on sending that reply, the Client on receiving it, so both mappings open within one RTT
+plus a bounded jitter window; the Server never emits datagrams toward a candidate it did not
+learn from an authenticated, allowlisted peer link (no unsolicited poking). Both sides then
+fire a bounded burst of QUIC Initials at each other's candidates (iroh completes whichever
+direction arrives first; a received Initial is answered from its observed source, so a
+mapping-preserving Server needs no pre-knowledge of the Client endpoint — inferred). Timing:
+exchanges ride the existing attempt cadence (≤6 attempts, `model.rs:102`), one exchange per
+direction per attempt; per-candidate slices (R1) bound the punch wait; the whole punch stays
+inside the native attempt, so direct-first priority and the 10 s failover envelope are
+unchanged. Order inside one attempt: record candidates → exchange+punch (bounded) → relay
+negotiation (if configured) → attempt ends; policy retries as today. Modes: in `signal` the
+Ygg bridge carries only these control datagrams (payload stays Native; the bridge already
+proves negotiation without sessions, `forwarding.rs:345-395`); in `standby` the Ygg payload
+fallback is unchanged and policy returns payload to Native after the punch (existing
+`stable_hold` semantics).
+
+Security and bounds: peer-claimed endpoints are dial/punch targets only for
+already-authenticated allowlisted peers and are **never published** — the record is fed only
+by the local endpoint watcher chain (`admission/mod.rs:267-269` → `maintain.rs:269`) and R4
+adds only locally derived values; a spoofed DHT vote worst case publishes a wrong candidate
+that cannot complete a handshake (cert bound to the Server key) and costs one bounded slice;
+amplification is bounded to one ≤1500 B exchange per direction per attempt plus ≤4 Initial
+bursts per candidate set; allowlist checks precede any target connection (G1/G2 evidence
+unchanged); binding of exchange datagrams to the authenticated link reuses the carrier/bridge
+admission gates; resource caps: ≤4 candidates per message and record (`resources/mod.rs:39`,
+`address.rs:8`), existing queue bounds unchanged, no per-packet allocations on the data path.
+When the toolkit has no information (no votes, no exchange), candidates are exactly today's
+record addresses and behavior degrades to today's outcomes (A5 fail closed in signal, A6
+standby fallback).
+
+Non-goals: no symmetric-NAT punching claim (random mappings stay fail closed / standby); no
+public STUN, no n0, no helper or relay server, no router configuration, no new dependencies;
+no IPv6 NAT acceptance; no change to Yggdrasil standby semantics; no product behavior change
+when the reflexive sources are unavailable.
 
 ### 4. Test plan against the existing namespace harness
 
-Existing cases whose oracles flip once R1-R4 are implemented (each flip is a new hypothesis
-needing its own executed evidence — see the dispatch question below):
+Oracles expected to flip once R1-R5 are implemented (each flip is a new hypothesis needing
+its own executed evidence): `dnat-cone-signal`, `dnat-cone-relay-signal`,
+`dnat-cone-standby`, `dnat-cone-relay-standby` (A5) expect a direct path — exact APP, target
+accepts 1, Client exit 0, `peer_sent`/`peer_recv` > 0 on both routers, `ygg_tcp` 0 on the
+Client-side router. The relay variants additionally keep `dht_drop` > 0 and `relay_tcp` > 0,
+proving negotiation came from signaling, not the record; with R2 a new `dnat-cone-norelay-*`
+case proves the punch with **no `network.signaling.*` relay fields at all** (rendezvous over
+Ygg). `dnat-sym-signal`/`dnat-sym-standby` (A6) deliberately do NOT flip — they remain the
+negative control. New negative guards: cone with DHT responses denied on the Client side must
+fail closed again (proves the flip depends on the reflexive source, not harness accident);
+`relay-absent-startup` (standby, no relay config): the Server starts, Ygg carries payload,
+exit 0 — the L0 acceptance; a Server config that still names a relay must produce startup
+behavior and counters identical to today (regression control).
 
-- `dnat-cone-signal`, `dnat-cone-relay-signal` (A5): expect a direct path — exact APP, target
-  accepts 1, Client exit 0, `peer_sent`/`peer_recv` > 0 on both routers, `ygg_tcp` 0 on the
-  Client-side router. The relay variants additionally keep `dht_drop` > 0 and
-  `relay_tcp` > 0, proving the punch came from relay negotiation (R3), not from the record.
-- `dnat-cone-standby`, `dnat-cone-relay-standby` (A5): same direct-path oracle with
-  `ygg_tcp` 0, so standby also proves the punch rather than the Yggdrasil fallback.
-- `dnat-sym-signal` / `dnat-sym-standby` (A6): deliberately NOT flipped — they remain the
-  negative control showing symmetric-like mapping still fails closed / falls back.
-
-New cases needed:
-- `dnat-cone-noqad-signal` (regression guard): QAD fixture UDP denied on the Client side;
-  the whole case must reproduce today's recorded fail-closed outcome (exit 1, `peer_recv` 0).
-  This proves the flipped oracles depend on the reflexive source, not on harness accident.
-- `dnat-cone-reflx-only-standby` (R3 proof): QAD denied on the Server side, so the record
-  has no dialable candidate; the Client advertises its reflexive endpoint over signaling and
-  the Server's poke (R2) opens the server-side mapping. Punch must still complete.
-- Optional: `dnat-sym-reflx-signal` — symmetric mapping with the feature on, expected still
-  fail closed (guards against over-claiming).
+Fixture changes: the owned Mainline fixture (bootstrap at `wan:dht`,
+`runtime/configs.py:31-33`) must include the BEP 42 `ip` field in its KRPC responses and
+report the per-peer observed addresses in its status output, so the oracle can assert what
+each product learned; the in-process responder fixture
+(`crates/shaar/src/native_discovery/runtime/tests/fixture/wire.rs`) is the unit-level seam
+for vote-parsing tests. Touch points (no code written yet): case entries in
+`runtime/phase.py` `GROUPS` (`:56-61`, `--group` at `:296`), roles in `flows/scenarios.py`
+and `processes.py`, budgets in `contract.py`; `flows/` holds 6 items (one new module
+allowed), `runtime/` holds 7 (must not grow). Every new owned source enters the ordinary
+impact map (`.github/ci/policy.py`); the per-group 20-minute phase and 2 MiB/router quotas
+are unchanged.
 
 How counters prove direct data without relay or Yggdrasil payload: `peer_recv` > 0 on both
 routers is the only counter that grows when translated Native UDP actually reaches the other
-router (the A5 failure had `native_out` 7/8 with `peer_recv` 0); direct-path acceptance
-therefore asserts `peer_sent`/`peer_recv` > 0 on both routers together with exact APP bytes
-and target accepts 1, while `ygg_tcp` 0 excludes the Ygg path. Relay payload exclusion: the
-relay is libp2p TCP, so payload over it would show as continued `relay_tcp` growth with
+router (the A5 failure had `native_out` 7/8 with `peer_recv` 0); a direct-path oracle asserts
+`peer_sent`/`peer_recv` growth consistent with the APP transaction on both routers together
+with exact APP bytes and target accepts 1, while `ygg_tcp` 0 excludes the Ygg path. Relay
+payload exclusion: payload over the relay would show as continued `relay_tcp` growth with
 `peer_recv` static; the flipped oracles require `peer_recv` growth consistent with the APP
-transaction, matching the accepted `dht-drop-signal` oracle pattern that reads `relay_tcp`
-as signaling traffic. The fixture punch control stays recorded and non-decisive
-(this document's §Remaining-row notes, dispatch-5 amendment still un-dispatched).
+transaction, matching the accepted `dht-drop-signal` oracle pattern that reads `relay_tcp` as
+signaling traffic. The fixture punch control stays recorded and non-decisive (its
+un-dispatched amendment still needs its own dispatch).
 
-Harness touch points (no code written yet): case definitions and fixtures live under
-`.github/probes/nat-topology/quic/product/` — new role wiring in `flows/scenarios.py` and
-`processes.py`, case entries in `runtime/phase.py` `GROUPS` (`:56-61`, `--group` at `:296`),
-budgets in `contract.py`; a new QAD relay role likely needs one new module in `flows/` (6
-items today — the 7-item directory limit allows exactly one more; `runtime/` is already at
-7 items and must not grow). Every new owned source must enter the ordinary impact map
-(`.github/ci/policy.py`). The per-group 20-minute phase and 2 MiB/router quotas are
-unchanged; a new dispatch group (or an amended `nat` group) fits only if case count stays
-within the existing arithmetic noted in this file's dispatch-group section.
+### 5. Leaves, effort, parallelism
 
-### 5. Effort, risks, and what cannot be established here
+Each leaf has authored tests and ordinary CI; no local build/test per project rules.
+Privileged = needs its own namespace dispatch grant (the six-dispatch remaining-row budget is
+fully used; the punch-control amendment is still un-dispatched).
 
-Effort estimate in leaves (each leaf with authored tests and ordinary CI; no local
-build/test per project rules): L1 — SDK: owned-relay QAD wiring (config field, builder
-change, default-off, unit tests); L2 — SDK: dialer ordering fix R4 with candidate
-classification tests; L3 — SDK: carrier reflexive-endpoint exchange R3 plus server poke R2
-with tests; L4 — harness: QAD relay fixture role, new cases, impact map; L5 — oracle flips
-and the first verification dispatch. Order L2 early: it is independent of R1-R3 and alone
-fixes the "relay negotiation never reached" defect (signal mode would fail closed faster and
-reach negotiation), but cannot produce a punch by itself.
+- **L1 (first) — dial ordering** (R1). Files: `crates/shaar/src/startup/role/dialers.rs` and
+  its tests. Acceptance: with a record whose first candidate is silent and a second dialable,
+  the dial reaches the second candidate inside one attempt, timed-out candidates are dropped
+  from the list, and the Client exits through the unchanged `Exhausted` path when nothing
+  works. Ordinary CI; effort S. Blocks L0 (same file) — run sequentially.
+- **L0 (early) — relay-optional startup** (R2). Files:
+  `crates/shaar/src/config/network/mod.rs`, `crates/shaar/src/startup/role/server.rs`,
+  `crates/shaar/src/startup/role/dialers.rs`, startup resources wiring, config tests.
+  Acceptance: a composed Server and Client with **no** `network.signaling.relay*` fields
+  start, negotiate over Yggdrasil and complete the standby payload exchange; with the relay
+  fields present, behavior is identical to today (the typed `RelayReserve` failure on a dead
+  relay is preserved). Ordinary CI; effort M.
+- **L2 — DHT reflexive exposure** (R3). Files:
+  `crates/shaar/src/native_discovery/runtime/owner/mod.rs` plus seam/wiring tests (the
+  `owner/` directory holds 7 items — extend existing files, add none). Acceptance: a fixture
+  responder casting `ip` votes yields the majority address through the owner watcher, and one
+  bounded self-lookup keeps it fresh. Ordinary CI; effort S-M. Independent of L1/L0 (disjoint
+  files) — can run in a separate worktree in parallel.
+- **L3 — record-carried reflexive candidate** (R4). Files:
+  `crates/shaar/src/native_discovery/runtime/publisher.rs`,
+  `crates/shaar/src/native_discovery/address.rs`, startup resources wiring, ktav flag tests.
+  Acceptance: with the flag on and votes present, the record gains exactly one extra entry
+  (voted IP, local QUIC port), still bounded to 4; with the flag off the record bytes equal
+  today's. Ordinary CI for units; depends on L2; owner decision gate on the default.
+- **L4 — punch coordination** (R5). Files: `crates/shaar/src/network/signaling/` extensions
+  (7 items — extend, add none or restructure), `crates/shaar-ygg/src/bridge/` extensions
+  (7 items — same constraint), `crates/shaar/src/startup/role/` wiring. Acceptance: two
+  products behind double port-preserving cone NAT with the DHT denied and no relay configured
+  exchange candidates over the Ygg bridge and complete an exact-APP exchange over Native with
+  zero Ygg payload in signal mode. Units in ordinary CI; the namespace proof needs a
+  privileged dispatch. Depends on L0 (no-relay path); independent of L3. Effort L.
+- **L5 — harness**: DHT fixture `ip` votes plus observed-address reporting, the new cases and
+  oracle flips (`flows/scenarios.py`, one new `flows/` module, `processes.py`,
+  `runtime/phase.py`, `contract.py`, impact map). The fixture vote support is independent of
+  product code and can start in parallel; the flipped oracles land only with L3/L4.
+  Privileged dispatch; effort M-L.
+- **L6 — verification dispatch**: operator-run, after a new dispatch grant; produces the
+  receipts that move scenarios.md §10.2 rows A5/A6.
 
-Risks: the `relay_mode` + `clear_relay_transports` composition (R1) is inferred from source,
-not executed — net_report may still require the relay transport in some path; iroh-relay TLS
-cert distribution to products needs a config decision; QAD latency may delay the first
-record publication (the 3 s known-address criterion applies to dialing, not to record
-freshness; the cold-lookup 10 s criterion bounds the first useful record); OBSERVED_ADDRESS
-events over custom transports carry synthetic addresses and must be filtered by transport
-kind; Linux conntrack `masquerade` is not every home router (this file's NAT-type honesty
-note), and the fixture punch control itself missed 2 of 4 cases in one dispatch for
-unestablished reasons.
+Parallel sets (disjoint file sets): {L2} ∥ {L1 → L0} ∥ {L5 fixture part}. L3 after L2; L4
+after L0; L5 oracle flips and L6 last.
 
-Not establishable without real devices: home-router NAT flavors beyond the two conntrack
-mappings (port-restricted, full cone per RFC 4787 classes), CGNAT, real Mainline DHT and
-relay latencies, Windows/macOS behavior (the namespace harness is Linux-only), and 95th
-percentile timing claims (one dispatch run per case is one run).
+### 6. Honest limits and owner decisions
 
-Open questions for the project owner (scope decisions are the owner's):
-1. Dispatch authority: the remaining-row budget of six dispatches is fully used (this file's
-   execution records). Flipping A5-derived oracles and adding the new cases needs a new
-   explicit dispatch grant; the still-un-dispatched punch-control amendment should be
-   sequenced with it.
-2. Config surface: an optional owned-QAD-relay address + TLS certificate in the ktav 0.8.*
-   schema — allowed, and which field shape?
-3. M1 (iroh-relay QAD, maximal reuse of pinned code) vs M5 (own UDP reflector +
-   `add_external_addr`, minimal trusted-code surface but a new small protocol) — owner's
-   preference.
-4. Should the Client also publish its own reflexive record (M6) as a signaling-free
-   alternative for the server-side poke, accepting extra Mainline writes?
-5. Confirm standby policy wording: when a punched direct path exists, standby mode still
-   prefers it over Yggdrasil (north-star step 4), with Yggdrasil kept as fallback only.
+Not establishable without real devices: RFC 4787 mapping/filtering flavors beyond the two
+conntrack mappings, port-overload and port-reuse behavior, hairpinning, CGNAT, mobile and
+IPv6-only networks, real Mainline DHT vote reliability and latency (the fixture has one DHT
+node — a single respondent, no majority), Windows/macOS behavior, and any 95th-percentile
+timing claim (one dispatch run per case). The pinned vote pipeline has known softness: the
+confirm-by-ping branch is dead (`core.rs:391-408`), tie breaking is nondeterministic, and
+`firewalled()` must not be trusted; a wrong-but-consistent set of respondents can shift the
+voted address, which the design bounds but does not eliminate.
+
+Owner decisions still open (scope decisions are the owner's): (1) the default of R4 —
+publish the reflexive guess in the signed record vs exchange-only, accepting the public-IP
+disclosure trade-off; (2) a new privileged dispatch grant for the flipped oracles and the
+punch cases, sequenced with the still-un-dispatched punch-control amendment; (3) whether the
+periodic self-lookup (L2) and the punch probe bursts fit the efficiency budget (bounded: one
+lookup per refresh window, ≤4 candidates per attempt); (4) the exact ktav field shape for the
+R4 flag, reviewed together with the L0 schema change that makes the signaling relay pair
+optional; (5) confirm that a punched direct path always outranks standby Yggdrasil payload
+(north-star step 4) once a punch exists.
