@@ -112,8 +112,9 @@ impl NativeServer {
                 tokio::select! {
                     biased;
                     _ = &mut stopped => break,
-                    // A handshake consumed by a cancelled accept is not replayed;
-                    // acceptable because the server is stopping.
+                    // The native accept arm is cancel-safe: an attempt parked
+                    // by a cancelled accept is completed by the next call; the
+                    // joined close releases whatever remains.
                     result = endpoint.accept() => match result {
                         Ok(session) => serving.admit(session),
                         Err(NetworkError::Closed) => break,

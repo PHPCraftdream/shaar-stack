@@ -26,11 +26,11 @@ Cancellation: unless an item says otherwise, **dropping a future is not a clean 
 ## `shaar::network` (direct native layer)
 
 - `ALPN = b"shaar/tcp/1"`.
-- `Limits::new(sessions: usize)`: 1 to 32, else `NetworkError::InvalidLimits`; `Limits::default()` is 32. The slots are shared by outbound handshakes and returned sessions.
+- `Limits::new(sessions: usize)`: 1 to 32, else `NetworkError::InvalidLimits`; `Limits::default()` is 32. The slots are shared by outbound handshakes and returned sessions. The same limit is the per-endpoint cap for concurrently driven inbound handshakes before authentication; parked handshakes hold no slots.
 - `Allowlist::new(&[iroh_base::PublicKey])`: at most 256 input entries (`AllowlistTooLarge`), sorted and deduplicated; `Allowlist::default()` is empty and denies everyone. Note that `PublicKey` is the `iroh-base` type (pinned `=1.3.0`, feature `key`).
 - `Endpoint::bind(&Identity, SocketAddr, Allowlist, Limits).await`: one native socket, no n0 services, no port mapping; the address must be usable unicast. `id()`, `local_addr()`.
 - `Endpoint::connect(peer: PublicKey, SocketAddr).await -> Session`: pins the exact server key; success proves the TLS identity, not that a later TCP request will be accepted.
-- `Endpoint::accept(&mut self).await -> Session`: returns only fully handshaken, allowlisted peers. Each started handshake has a 10 s deadline.
+- `Endpoint::accept(&mut self).await -> Session`: returns only fully handshaken, allowlisted peers. Inbound handshakes are driven concurrently in a pending set capped at the configured session limit, separate from the slot pool: a parked (silent or unauthenticated) Initial holds no slot and never delays another peer; attempts beyond the cap are refused, and so are attempts that arrive while the session pool is saturated (`Capacity`); a peer that authenticates after the pool filled up meanwhile is closed with `Capacity`. Each handshake has a 10 s deadline. `accept` is cancel-safe: dropping the future parks in-flight attempts in the endpoint and a later call completes them.
 - `Endpoint::close(self).await`: waits for backend shutdown; sessions may still exist.
 - `Session::peer_id()`, `closed().await`, `close(self)`.
 - `Session::forward(&self, TcpStream).await -> ForwardStats`: client side. One local TCP socket and one QUIC stream; at most 16 concurrent calls (`ForwardError::Capacity` otherwise, no queue). No application byte is read before the server status succeeded.

@@ -401,7 +401,7 @@ Product findings worth keeping:
 
 ## 11. P14 resources, complexity and performance (2026-11-12)
 
-Status: static review written; two defects fixed (compiled and tested only by CI,
+Status: static review written; findings 2, 3 fixed (CI-verified) and findings 1, 5 fixed with their tests written but not yet compiled or run (see 11.1),
 see the run list in the delivery report); **no measurement has been executed**.
 Budgets below are proposals awaiting the user's approval. Nothing here claims
 optimal complexity or lock-freedom.
@@ -423,11 +423,11 @@ publication refresh and the 1 s retry of a pending close).
 
 | # | Severity | Location | Finding | State |
 |---|---|---|---|---|
-| 1 | High | `crates/shaar/src/network/admission/mod.rs:295-318`, `startup/role/server.rs:586` | `Endpoint::accept` awaits the whole inbound handshake (up to 10 s) before the next `Incoming` is taken, and charges a shared admission slot before authentication. One unvalidated or silent Initial stalls every new connection for up to 10 s (`admission/tests.rs:179` shows the 10 s deadline); a few packets per second keep it stalled or exhaust the 32-slot pool. Pre-auth availability, not a data leak. | reported |
+| 1 | High | `crates/shaar/src/network/admission/mod.rs:295-318`, `startup/role/server.rs:586` | `Endpoint::accept` awaits the whole inbound handshake (up to 10 s) before the next `Incoming` is taken, and charges a shared admission slot before authentication. One unvalidated or silent Initial stalls every new connection for up to 10 s (`admission/tests.rs:179` shows the 10 s deadline); a few packets per second keep it stalled or exhaust the 32-slot pool. Pre-auth availability, not a data leak. | fixed, tests written (compile and CI evidence pending): accept drives inbound handshakes concurrently in a per-endpoint pending set capped at the session limit, separate from the slot pool — a parked Initial holds no slot and never delays another peer; over-cap attempts are refused; slots are charged only after authentication. Tests in `admission/tests.rs`: `silent_initial_does_not_stall_a_second_peer` (second peer admitted within a 5 s bound while a silent Initial is parked; failed on the serial accept), `pending_handshake_cap_bounds_silent_initials` (pending set capped at `pending_cap`, zero slots held by silent peers, over-cap attempt refused within 3 s) and the rewritten `dropped_accept_retains_the_in_flight_handshake`. Not proven: behavior under real multi-attacker load or non-loopback timing. |
 | 2 | Medium | `startup/role/client/run_loop.rs` local accept arm | A failing local `accept` (descriptor exhaustion fails again at once) re-entered the loop with no pause: busy loop plus a log line per iteration. | fixed: 10 ms doubling to 1 s, reset on success, shutdown stays responsive; unit tests `accept_backoff_tests` |
 | 3 | Medium | `network/forwarding/pump.rs` (`pump`) | Forwarded TCP sockets kept Nagle enabled, adding delayed-ACK latency to small interactive writes in both directions. | fixed: `set_nodelay(true)` on both the client-accepted and the server-connected socket; test `tuning_tests` (the helper contract; wiring by review) |
 | 4 | Medium | `crates/shaar-ygg/src/bridge/carrier_pump.rs:77-88` | One writer task serves all peers; a 1 s send timeout for one peer ends the writer and closes the whole carrier (`shared.close()`), so one stuck peer takes down the Yggdrasil path for all. Peers are allowlisted, so availability only. | reported |
-| 5 | Low | `startup/role/server.rs:253-322` | The loop rebuilds the native `accept()` each iteration; when another arm wins (Ygg accept, pump end) an in-flight native handshake is dropped (documented cancel-unsafe contract). Fix belongs with finding 1. | reported |
+| 5 | Low | `startup/role/server.rs:253-322` | The loop rebuilds the native `accept()` each iteration; when another arm wins (Ygg accept, pump end) an in-flight native handshake is dropped (documented cancel-unsafe contract). Fix belongs with finding 1. | fixed, tests written (compile and CI evidence pending): fixed with finding 1 — native `Endpoint::accept` is cancel-safe per its doc contract, so a losing select arm parks the polled attempt in the endpoint and the next loop iteration completes it; no accept-future retention is needed. Covered by `dropped_accept_retains_the_in_flight_handshake` (same handshake completes after the accept future is dropped). The Yggdrasil accept arm keeps its cancel-unsafe contract. |
 | 6 | Low | `startup/role/server.rs:611,619,622,648,650`; `crates/shaar-server/src/main.rs:284` | One blocking `eprintln!` per failed or rejected handshake on an executor thread, unbounded rate under a handshake flood. | reported |
 | 7 | Low | `shaar-ygg/src/bridge/carrier_state.rs:226`, `shaar-p2p/src/bridge/state.rs:260` | `next()` rebuilds the 64-slot waiter array (about 1 KiB write) and scans it for every dequeued datagram even with no waiters: O(64) per packet. Candidate: waiter counter; measure first. | reported |
 | 8 | Low | `carrier_state.rs:193`, `datagrams.rs:102,305`, `shaar-p2p/src/bridge/state.rs:226` | One heap copy per datagram at queue admission, one for the carrier envelope and one at delivery (about three per Ygg datagram); bounded by the queues above, standby path only. | reported |
@@ -485,5 +485,6 @@ any row violates its budget or a report is empty, and uploads `target/ci-resourc
 
 No RSS, CPU, latency or leak figure has been measured; the budgets are proposals.
 Signal-mode composed, Yggdrasil-carried payload throughput, IPv6 and long-duration
-(hours) behavior are not covered by the proposed run. Findings 1, 4 and 5 to 10 are
-open.
+(hours) behavior are not covered by the proposed run. Findings 4 and 6 to 10 are
+open; findings 1 and 5 are fixed with tests written but not yet compiled or run
+by CI (see 11.1).

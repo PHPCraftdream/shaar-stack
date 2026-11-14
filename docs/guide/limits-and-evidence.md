@@ -37,7 +37,7 @@ This page separates what was written, what ran in GitHub CI, and what has no evi
 
 ### Resources and performance
 
-- Bounds that exist in code: 1 MiB config, 256 allowlist entries (16 in the composed shape), 32 server sessions, 1 client session, 16 streams per session, 16 local client workers, at most 4 bootstrap nodes, 4 Yggdrasil peers and 4 published addresses.
+- Bounds that exist in code: 1 MiB config, 256 allowlist entries (16 in the composed shape), 32 server sessions, 1 client session, 16 streams per session, 16 local client workers, a per-endpoint pending-handshake cap equal to the session limit (kept separate from the slot pool), at most 4 bootstrap nodes, 4 Yggdrasil peers and 4 published addresses.
 - **No performance, load, long-duration or efficiency claims are made.** The agreed efficiency criteria in `docs/plans/north-star.md` (first byte, failover time, direct share) are targets measured in controlled fixtures only; P14 (resources and performance) has not been run, so idle CPU, memory growth and leak behaviour are **Unverified**.
 
 ### Other
