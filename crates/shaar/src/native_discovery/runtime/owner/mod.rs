@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use n0_mainline::{MutableItem, OwnedDht, OwnedDhtHandle, OwnedPutAdmissionError, OwnedPutError};
+#[cfg(test)]
+use n0_mainline::OwnedDhtHandle;
+use n0_mainline::{MutableItem, OwnedDht, OwnedPutAdmissionError, OwnedPutError};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
