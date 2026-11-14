@@ -60,12 +60,11 @@ async fn start_owner(
     )
     .expect("actual runtime owner");
     let watch = owner.public_address_watch();
-    // Let the spawned reflexive task consume its immediate first tick and arm
-    // the window timer before any test pauses the clock; otherwise the first
-    // advance would only create the interval and swallow window 1.
-    for _ in 0..4 {
-        tokio::task::yield_now().await;
-    }
+    // Real-time settle: the spawned reflexive task must consume its immediate
+    // first tick (a timer entry that fires on the next driver turn) and arm the
+    // window timer before any test pauses the clock; otherwise the first
+    // advance only fires that immediate tick and swallows window 1.
+    tokio::time::sleep(Duration::from_millis(50)).await;
     (owner, watch)
 }
 
@@ -141,8 +140,8 @@ fn tally_split_ring_keeps_incumbent() {
     assert_eq!(tally.observe(Some(a)), None);
     assert_eq!(tally.observe(Some(a)), Some(a));
     assert_eq!(tally.observe(Some(b)), Some(a));
-    assert_eq!(tally.observe(None), Some(a));
-    assert_eq!(tally.observe(Some(b)), Some(a));
+    assert_eq!(tally.observe(None), Some(a)); // [None,A,B]: no majority
+    assert_eq!(tally.observe(Some(b)), Some(b)); // [None,B,B]: two agreeing windows
 }
 
 #[test]
@@ -173,7 +172,7 @@ fn tally_eviction_surfaces_change_after_two_agreeing_windows() {
     let mut tally = ReflexiveTally::new();
     let a: IpAddr = "203.0.113.5".parse().expect("ip");
     let b: IpAddr = "203.0.113.6".parse().expect("ip");
-    assert_eq!(tally.observe(Some(a)), Some(a));
+    assert_eq!(tally.observe(Some(a)), None);
     assert_eq!(tally.observe(Some(a)), Some(a));
     assert_eq!(tally.observe(Some(a)), Some(a));
     assert_eq!(tally.observe(Some(b)), Some(a)); // [A,A,B]
