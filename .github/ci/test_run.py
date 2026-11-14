@@ -567,10 +567,10 @@ class PlatformBuildTests(unittest.TestCase):
                                      "target": {"name": "iroh"}}])
             without_iroh = payload_capture([{"reason": "compiler-artifact", "profile": {"test": False},
                                              "target": {"kind": ["bin"], "name": "shaar-server"}}])
-            for label, lines in (("gate", gate), ("iroh", without_iroh)):
+            for label, fixture in (("gate", gate), ("iroh", without_iroh)):
                 with self.subTest(case=label), \
                      patch.object(RUN, "ROOT", root), \
-                     patch.object(RUN, "capture", side_effect=payload_capture(lines)), \
+                     patch.object(RUN, "capture", side_effect=fixture), \
                      patch.object(RUN.subprocess, "check_output", side_effect=toolchain), \
                      self.assertRaisesRegex(ValueError, "native packet gate feature OFF"):
                     RUN.platform_build("x86_64-pc-windows-msvc")
