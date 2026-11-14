@@ -16,7 +16,8 @@ This page separates what was written, what ran in GitHub CI, and what has no evi
 
 - Direct QUIC is attempted to the published or hinted addresses; relay negotiation helps hole punching. Nothing guarantees a direct path.
 - **Verified** (fixture): one NAT in front of the client with Native data in both modes; two NATs with all forwarded UDP denied, where `standby` carries exact bytes over Yggdrasil and `signal` fails closed.
-- **Not established**: hole punching through arbitrary double NAT, symmetric NAT, carrier-grade NAT, IPv6 firewall or NAT behaviour (the fixture denied IPv6 forwarding), NAT keepalive over long periods on real devices, real home or mobile networks.
+- **Negative result** (fixture, `docs/verification/scenarios.md` §10 A5 and A6): with a cone NAT on each side, or with fully random NAT ports, and Yggdrasil denied, the products do **not** establish a direct path: the Client ends with "no usable path remained within the attempt budget" and the target accepts nothing. A published but silent candidate can consume the whole 3 s native attempt before relay negotiation starts. With Yggdrasil available, `standby` still delivers exact bytes (1.2 s in the random-port case). Expect the Yggdrasil path, not hole punching, to carry traffic behind two NATs.
+- **Not established**: hole punching through any double NAT (see above), carrier-grade NAT, other NAT types, key-only IPv6 discovery (the IPv6-only case worked only with an explicit `server_address` hint), NAT keepalive over long periods on real devices, real home or mobile networks.
 - No port mapping (UPnP/NAT-PMP) is used, and no n0 infrastructure.
 
 ### Relay (libp2p)
@@ -57,11 +58,12 @@ All runs below are GitHub Actions runs on the owner's CI; "executed" means the t
 | Yggdrasil adapter | `efa5c62`, run 42035672563 (16 library and 13 exchange tests per OS) | Loopback pairs; recorded in `docs/plans/v1-focus.md`. |
 | Composed Server and Client as real processes: key-only discovery, exact bytes, server-only restart with the same live client, in `signal` and `standby` | Fork runs 43068220334 (ordinary) and 43068389482 (manual process lane) at `c9916375b5ac8881bf151651afcf01f6f5848bf0`; receipts in `docs/checkpoints/2026-11-11-1858.md` | Owned DHT, relay and transit fixtures. Related merged proofs (composed allowlist denial `14d3aed`, standby through DHT and relay outage `3aa2f22`, composed lifecycle `d535d7a`) were merged as verified; their run identifiers were not re-read for this guide. |
 | P13 controlled NAT and UDP blockade, normal CI-built products | Fork dispatch 43229756778 on `ca6c04a`: four product cases and three cleanup controls passed; upstream CI 43231417573 green on `6e730b1` (merge `1844247`) | Linux namespaces on a disposable runner, owned addresses only: single NAT Native in both modes, double NAT with UDP blocked gives Yggdrasil payload in `standby` and fail-closed in `signal`. Contract: `docs/plans/p13-controlled-network.md`. |
+| P13 remaining rows (double NAT, NAT types, NAT state loss, address switch, relay exhaustion, IPv6, signal denial, outage recovery) | Fork dispatches on `31fd921`/`6f7c0ce` (fork branch before integration): base 43262321962 (12 cases, pass), faults 43262304898 (6 cases, pass), nat 43258223283 (10 cases, pass); nat 43262313789 failed at the harness-side punch control in two cases before any product started | Same fixture limits as above. The verdicts for A5/A6 are negative results. The final head change (record-only punch control) was not dispatched. See `docs/verification/scenarios.md` §10. |
 | Examples and messages of this guide | Tests `config::guide_examples_tests` (crates/shaar), `tests::allowlist::documented_*` (crates/shaar-server), `guide_keygen_*` in `crates/shaar/tests/sdk_network.rs`, and the CI selection test in `.github/ci/test_run.py` | Written together with the guide. Their CI execution is reported in the P15 delivery record, not here. They check parsing, validation messages and the key example, not network behaviour. |
 
 ## Not performed (explicitly open)
 
 - Public-network interoperability and smoke (public DHT, public relay, public Yggdrasil peers): needs the owner's approval of exact targets and budgets.
-- Real home, mobile or LAN device tests; arbitrary double-NAT hole punching.
+- Real home, mobile or LAN device tests; a product mechanism that learns public (reflexive) addresses, without which double-NAT hole punching does not happen (§10 A5).
 - P14 resource and performance measurements; P16 first-version readiness; notices and license corpus completion.
 - Building outside the CI recipes, running under a service manager (SIGTERM is handled but no unit file or manager was exercised), packaging and releases.
