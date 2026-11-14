@@ -530,7 +530,7 @@ class WorkflowTests(unittest.TestCase):
     def test_capture_helper_contract_rejects_missing_stderr_wait(self):
         helper = (ROOT / ".github/actions/prepare-sources/capture.sh").read_text(encoding="utf-8")
         validate_capture_helper(helper)
-        old = '    wait "$stderr_pid" || tee_status=$?\n'
+        old = '    capture_wait "$stderr_pid" || tee_status=$?\n'
         self.assertIn(old, helper)
         with self.assertRaises(AssertionError):
             validate_capture_helper(helper.replace(old, "", 1))
