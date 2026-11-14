@@ -184,11 +184,15 @@ def edits() -> dict[str, list[tuple[str, str]]]:
         .map_err(|err| n0_error::e!(EncodingError::FailedBuildingPacket, err))
     }'''
     root_attr = "#![deny(missing_docs, rustdoc::broken_intra_doc_links, unreachable_pub)]"
+    # Upstream dns.rs gates its JNI unsafe by target_os = "android" and keeps the
+    # declaration visible under cfg(doc) for the documented example; forbid stays
+    # unconditional in effect on every other target and for ordinary cargo builds.
+    root_forbid = '#![cfg_attr(not(any(target_os = "android", doc)), forbid(unsafe_code))]\n'
     return {
         "src/pkarr.rs": [(old_constructor, new_constructor), (old_now, new_now)],
         "src/attrs.rs": [(old_encoding, new_encoding)],
         "src/endpoint_info.rs": [(old_api, new_api)],
-        "src/lib.rs": [(root_attr, "#![forbid(unsafe_code)]\n" + root_attr)],
+        "src/lib.rs": [(root_attr, root_forbid + root_attr)],
     }
 
 

@@ -35,6 +35,11 @@ PINS = {
     "src/caching_client.rs": "fc36dd569763eaa04669321cc05ffe9bbeb77b004cb58963715a3f3a96778c2e",
 }
 
+# Upstream hickory-resolver ships cfg-gated platform unsafe (system_conf/apple.rs
+# core-foundation under target_vendor = "apple", system_conf/android.rs JNI under
+# target_os = "android"); forbid stays unconditional in effect on every other target.
+FORBID_ATTR = b"#![cfg_attr(not(any(target_vendor = \"apple\", target_os = \"android\")), forbid(unsafe_code))]\n"
+
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -101,7 +106,7 @@ def transform(files):
     if reverse(dict(files, **changed)) != files:
         raise ValueError("resolver original-byte reverse mismatch")
     changed["Cargo.toml"] = files["Cargo.toml"] + b"\n[workspace]\n"
-    changed["src/lib.rs"] = b"#![forbid(unsafe_code)]\n" + files["src/lib.rs"]
+    changed["src/lib.rs"] = FORBID_ATTR + files["src/lib.rs"]
     return changed
 
 
@@ -143,10 +148,10 @@ def verify(root):
     if hashes(files) != record["prepared_files"]:
         raise ValueError("resolver prepared source drift")
     restored = reverse(files)
-    if not restored["Cargo.toml"].endswith(b"\n[workspace]\n") or not restored["src/lib.rs"].startswith(b"#![forbid(unsafe_code)]\n"):
+    if not restored["Cargo.toml"].endswith(b"\n[workspace]\n") or not restored["src/lib.rs"].startswith(FORBID_ATTR):
         raise ValueError("resolver preparation boundary changed")
     restored["Cargo.toml"] = restored["Cargo.toml"].removesuffix(b"\n[workspace]\n")
-    restored["src/lib.rs"] = restored["src/lib.rs"].removeprefix(b"#![forbid(unsafe_code)]\n")
+    restored["src/lib.rs"] = restored["src/lib.rs"].removeprefix(FORBID_ATTR)
     originals(restored)
     expected = dict(restored, **transform(restored))
     if files != expected or record != receipt(restored, expected):

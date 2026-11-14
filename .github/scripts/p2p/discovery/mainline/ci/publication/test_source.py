@@ -179,6 +179,15 @@ class RecipeIntegrity(unittest.TestCase):
         self.assertIn("Copyright 2026 PHPCraftdream", rust)
         self.assertIn("MIT OR Apache-2.0", rust)
 
+    def test_lib_root_forbid_is_target_conditional(self):
+        (old, new) = prepare.edits()["src/lib.rs"][0]
+        self.assertEqual(old, "#![deny(missing_docs, rustdoc::broken_intra_doc_links, unreachable_pub)]")
+        self.assertTrue(new.startswith('#![cfg_attr(not(any(target_os = "android", doc)), forbid(unsafe_code))]\n'))
+        self.assertEqual(new.count("forbid(unsafe_code)"), 1)
+        self.assertTrue(new.endswith(old))
+        text = "notice\n" + old + "\nbody"
+        self.assertEqual(text.replace(old, new, 1).replace(new, old, 1), text)
+
 
 if __name__ == "__main__":
     unittest.main()

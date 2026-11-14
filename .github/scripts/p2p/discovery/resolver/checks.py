@@ -31,12 +31,13 @@ class PreparationChecks(unittest.TestCase):
     def test_original_source_license_manifest_lock_and_exact_reversal(self):
         original = resolver.archive_files(ARCHIVE)
         prepared = resolver.verify(SOURCE)
+        self.assertTrue(prepared["src/lib.rs"].startswith(resolver.FORBID_ATTR))
         record = json.loads((SOURCE.parent / "provenance.json").read_text())
         self.assertEqual(record["original_files"], resolver.hashes(original))
         self.assertEqual(record["changed_files"], ["Cargo.toml", "src/cache.rs", "src/caching_client.rs", "src/lib.rs", "src/name_server.rs", "src/name_server_pool.rs"])
         reversed_files = resolver.reverse(prepared)
         reversed_files["Cargo.toml"] = reversed_files["Cargo.toml"].removesuffix(b"\n[workspace]\n")
-        reversed_files["src/lib.rs"] = reversed_files["src/lib.rs"].removeprefix(b"#![forbid(unsafe_code)]\n")
+        reversed_files["src/lib.rs"] = reversed_files["src/lib.rs"].removeprefix(resolver.FORBID_ATTR)
         self.assertEqual(reversed_files, original)
         self.assertFalse(record["resolver_lifecycle_acceptance"])
 
