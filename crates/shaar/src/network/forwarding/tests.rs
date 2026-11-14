@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use futures::future::try_join_all;
 use iroh_base::PublicKey;
 use std::{future::pending, sync::Arc, time::Duration};
 use tokio::{
@@ -418,4 +419,79 @@ async fn cancelled_forward_resets_its_stream_and_returns_its_permit() {
         assert!(report.failed + report.cancelled >= 1);
         tokio::join!(server.close(), client.close());
     }).await.expect("forward cancellation deadline");
+}
+
+/// Regression for the transport stream window (P14 finding 12): after a
+/// drained stream, quinn's MAX_STREAMS announcement hysteresis must not
+/// shrink the announced budget below the promised limit. With the window at
+/// exactly STREAM_LIMIT, the last held forward blocks in `open_bi` with no
+/// credit and fails at the 10 s setup deadline.
+#[tokio::test(flavor = "multi_thread")]
+async fn sixteen_concurrent_streams_open_after_a_drained_stream() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (server, client, mut accepted, connected) = sessions().await;
+        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = target.local_addr().unwrap();
+        let (stop, stopped) = oneshot::channel();
+        // Echo target: one connection per stream, echoes until closed.
+        let _service = tokio::spawn(async move {
+            for _ in 0..(1 + usize::from(STREAM_LIMIT)) {
+                let (tcp, _) = target.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let (mut read, mut write) = tcp.into_split();
+                    let _ = tokio::io::copy(&mut read, &mut write).await;
+                    let _ = write.shutdown().await;
+                });
+            }
+        });
+        let application = async {
+            // One fully closed stream first: this is the drain history that
+            // the announcement hysteresis must survive.
+            exchange(&connected, b"drain history").await;
+            // Hold STREAM_LIMIT streams open at once: each proves its echo and
+            // then all close together, so no stream frees while another is
+            // still opening.
+            let connected = &connected;
+            let gate = Arc::new(Barrier::new(usize::from(STREAM_LIMIT)));
+            let held = (0..usize::from(STREAM_LIMIT))
+                .map(|index| {
+                    let gate = Arc::clone(&gate);
+                    async move {
+                        let (mut app, bridge) = tcp_pair().await;
+                        let marker = [b'E', b'0' + u8::try_from(index).unwrap()];
+                        let hold = async {
+                            app.write_all(&marker).await.unwrap();
+                            let mut echoed = [0];
+                            app.read_exact(&mut echoed).await.unwrap();
+                            assert_eq!(echoed[0], marker[0]);
+                            gate.wait().await;
+                            app.shutdown().await.unwrap();
+                        };
+                        let (forwarded, ()) = tokio::join!(connected.forward(bridge), hold);
+                        forwarded
+                    }
+                })
+                .collect::<Vec<_>>();
+            let reports = try_join_all(held).await.unwrap();
+            assert_eq!(reports.len(), usize::from(STREAM_LIMIT));
+            assert!(
+                reports
+                    .iter()
+                    .all(|report| report.to_peer == 2 && report.from_peer == 2)
+            );
+            stop.send(()).unwrap();
+        };
+        let (report, ()) = tokio::join!(
+            accepted.serve(address, async {
+                stopped.await.unwrap();
+            }),
+            application
+        );
+        let report = report.unwrap();
+        // One drained exchange plus the held forwards.
+        assert_eq!(report.completed + report.failed + report.cancelled, 17);
+        tokio::join!(server.close(), client.close());
+    })
+    .await
+    .expect("stream window regression deadline");
 }

@@ -11,7 +11,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::identity::Identity;
 
-use super::{ALPN, NetworkError, STREAM_LIMIT, Session, session::ACCESS_DENIED};
+use super::{
+    ALPN, NetworkError, STREAM_LIMIT, STREAM_TRANSPORT_LIMIT, Session, session::ACCESS_DENIED,
+};
 
 mod policy;
 pub(super) use policy::native_ip;
@@ -186,7 +188,7 @@ impl Endpoint {
             .max_idle_timeout(Some(VarInt::from_u32(NATIVE_IDLE_TIMEOUT_MS).into()))
             .default_path_max_idle_timeout(NATIVE_PATH_IDLE_TIMEOUT)
             .default_path_keep_alive_interval(NATIVE_PATH_KEEPALIVE)
-            .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_LIMIT)))
+            .max_concurrent_bidi_streams(VarInt::from_u32(u32::from(STREAM_TRANSPORT_LIMIT)))
             .max_concurrent_uni_streams(VarInt::from_u32(0))
             .stream_receive_window(VarInt::from_u32(256 * 1024))
             .receive_window(VarInt::from_u32(1024 * 1024))

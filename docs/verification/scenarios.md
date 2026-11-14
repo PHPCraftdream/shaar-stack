@@ -401,10 +401,13 @@ Product findings worth keeping:
 
 ## 11. P14 resources, complexity and performance (2026-11-12)
 
-Status: static review written; findings 2, 3 fixed (CI-verified) and findings 1, 5 fixed with their tests written but not yet compiled or run (see 11.1),
-see the run list in the delivery report); **no measurement has been executed**.
-Budgets below are proposals awaiting the user's approval. Nothing here claims
-optimal complexity or lock-freedom.
+Status: static review written; findings 2, 3 fixed (CI-verified) and findings 1, 5 fixed with their tests written but not yet compiled or run (see 11.1).
+Measurement dispatches 43628161108 and 43630351232 (source 3be11f9) ran both
+cases: composed passed all 19 rows; direct passed its first 10 rows and failed
+in the "memory per concurrent stream" phase on finding 12. Finding 12 is fixed
+with a regression test written, but nothing is compiled or re-measured yet, so
+no measurement is accepted. Budgets below are proposals awaiting the user's
+approval. Nothing here claims optimal complexity or lock-freedom.
 
 Step advanced: end-to-end step 6 (server forwards to the fixed target) and the
 efficiency criterion "bounded resource use per connection and per resolver".
@@ -434,6 +437,7 @@ publication refresh and the 1 s retry of a pending close).
 | 9 | Low | `shaar-ygg/src/bridge/mod.rs:137` | The single reader answers an allowed peer's ping inline for up to 500 ms, delaying datagram reads. | reported |
 | 10 | Low | `crates/shaar-client/src/main.rs:318` | The legacy coordinator dials inside its select arm (up to attempts times 10 s), so worker reaping and session-loss detection pause meanwhile; shutdown is still observed. | reported |
 | 11 | Info | `network/forwarding/pump.rs`, `protocol.rs` | Per stream two 8 KiB `tokio::io::copy` buffers; setup is bounded to 10 s, an established stream has no idle deadline (bounded by 16 streams per session and the 5 s native QUIC idle timeout). | accepted |
+| 12 | High | `crates/shaar/src/network/admission/mod.rs` transport config; `crates/shaar/src/network/admission/ygg/mod.rs` (same line) | quinn announces `MAX_STREAMS` credit with a 1/8-window hysteresis (`queue_max_stream_id`), so the peer's announced stream budget trails freed streams by up to `window / 8`. Advertising exactly `STREAM_LIMIT` (16) let the announced budget sit at 14 credits in the direct measurement: 221 drained streams (20 warm-up + 200 latency + 1 bulk) put the last announcement at free 219, so one held stream blocked in `open_bi` with no credit, hit the 10 s setup deadline, and the client reset the local connection (`forwarding setup deadline exceeded`, then `smoke: Connection reset by peer`; dispatches 43628161108 and 43630351232 at 3be11f9). Composed passed because its one extra drained exchange (the `b"first"` probe) landed the trail at 0 and announced exactly 16 credits — the direct and composed forwarding paths are equivalent; the asymmetry was stream-count arithmetic, not a product path difference. Not finding 10: no dial occurred inside the failure window. The harness retry (10 s) cannot cover a full 10 s client setup deadline, so the harness cannot mask this class and no budget changes. | fixed, test written (compile and CI evidence pending): the advertised window is `STREAM_LIMIT + 2` (`window - window / 8 >= STREAM_LIMIT`; app-level semaphore and the `serve` gate stay at 16); regression test `sixteen_concurrent_streams_open_after_a_drained_stream` (one drained stream, then 16 held concurrent forwards over real loopback endpoints) fails on the bare 16 window and passes with the margin. Proven so far: the mechanism from the quinn-proto 0.11.12 source and both dispatches' timings (the failing phase consumed one 10 s deadline in both). Not yet proven: the regression test run and the fixed direct measurement passing all rows in CI. |
 
 Hot-path complexity: per forwarded byte the SDK adds no per-packet work on Native
 (copy loop and QUIC only); admission and allowlist lookups are O(log n) with n at
@@ -467,7 +471,7 @@ are ceilings with roughly 2x margin and will be tightened from recorded values.
 Task count is observed through threads and descriptors only (a tokio task count is
 not visible from outside the process).
 
-### 11.3 Harness (not yet dispatched)
+### 11.3 Harness (dispatched by the resource measurement workflow)
 
 `crates/shaar/tests/identity/process_smoke/composed/resources/` holds two ignored
 tests, `measure_resource_budget_direct` (legacy direct config) and
@@ -479,12 +483,14 @@ traffic helpers with their own unit tests. They run only through
 other modes; ubuntu only; unprivileged, no public network, no lock generation). Hard
 caps: 300 s and 540 s test deadlines, 16 minute step timeout, 64 MiB bulk, 96 MiB
 stall cap, loopback addresses only. Each case writes `<mode>.json`; the job fails if
-any row violates its budget or a report is empty, and uploads `target/ci-resources/`.
+any row violates its budget or a report is empty, and uploads `target/ci-resources/`. Two dispatches ran at source 3be11f9; their status is recorded at the section top.
 
 ### 11.4 Non-claims
 
-No RSS, CPU, latency or leak figure has been measured; the budgets are proposals.
+The dispatches at source 3be11f9 produced figures only for the composed case (19
+rows) and the first 10 direct rows before finding 12 stopped the direct case; no
+run is accepted while the direct case fails, and the budgets remain proposals.
 Signal-mode composed, Yggdrasil-carried payload throughput, IPv6 and long-duration
-(hours) behavior are not covered by the proposed run. Findings 4 and 6 to 10 are
-open; findings 1 and 5 are fixed with tests written but not yet compiled or run
-by CI (see 11.1).
+(hours) behavior are not covered by the run. Findings 4 and 6 to 10 are open;
+findings 1, 5 and 12 are fixed with tests written but not yet compiled or run by
+CI (see 11.1).
