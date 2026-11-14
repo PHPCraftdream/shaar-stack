@@ -11,7 +11,7 @@ Claims are tagged where it matters. **Verified** means exercised by tests that r
 One 32-byte Ed25519 seed is one identity. The same seed yields the QUIC endpoint key, the libp2p PeerId and the Yggdrasil address (`Identity::ygg_address`), so anyone who knows the public key can link all four.
 
 - File format: exactly 32 raw bytes. No text, no hex, no header. A file of any other size is rejected.
-- The binaries only **load** keys. They cannot create a key and `shaar-client` never prints its own public key. Create keys with the public SDK: [`examples/keygen.rs`](examples/keygen.rs) is a complete program (`keygen create <file>` prints the 64-hex public key, `keygen show <file>` prints it again). It is compiled and executed verbatim by tests in `crates/shaar/tests/sdk_network.rs`. **Unverified**: building it as a separate crate outside the workspace.
+- The binaries can now also **create** keys: both binaries provision a `shaar.key` identity on first run (see [First run](#first-run)). `shaar-client` also prints its own public key in the first-run output. If you prefer explicit key files, create them with the public SDK: [`examples/keygen.rs`](examples/keygen.rs) is a complete program (`keygen create <file>` prints the 64-hex public key, `keygen show <file>` prints it again). It is compiled and executed verbatim by tests in `crates/shaar/tests/sdk_network.rs`. **Unverified**: building it as a separate crate outside the workspace.
 - `create` never overwrites (`identity key file already exists`). On Unix the file is created with mode 0600 in one step; on Windows with an owner-only ACL before the first byte is written (exercised by the identity test suites in Linux and Windows CI).
 - Loading rejects a non-regular file, a wrong size, and (Unix) any group/other permission bit or (Windows) an ACL that is not owner-only. A rejected key is never repaired, regenerated or overwritten. On other platforms only the type and size checks apply.
 - Protect the parent directory yourself: the checks cover the file, not its directory. Back the key up: a lost seed is a lost identity, a leaked seed allows impersonation of that identity.
@@ -26,9 +26,53 @@ One 32-byte Ed25519 seed is one identity. The same seed yields the QUIC endpoint
 - Admission order: handshake authenticates the client key, the key is checked against the allowlist, and only then may a target TCP connection be opened. A key that is not listed never causes a target connection (**Verified** in both fallback modes for the composed server and for the direct-only server).
 - Errors printed by the server: `could not read allowlist`, `allowlist file exceeds 16896 bytes`, `allowlist exceeds 256 entries`, `invalid allowlist key on line N` (N counts comments and blank lines; the key text is never printed).
 
+## First run
+
+Both binaries can now set themselves up with zero configuration. Label: **Source** — read from the code (`crates/shaar/src/identity/provision/` and the binaries' first-run tests; the ignored process case `process_smoke::startup::real_first_run_bootstrap_without_arguments` is run by CI's process-feedback job).
+
+### CLI grammar
+
+- `shaar-server` — provision only, no target: prints the next step and exits 1. A bare run never guesses the TCP forward target.
+- `shaar-server <target>` — provision, then serve; the positional target overrides the config file value for that run (the file is untouched).
+- `shaar-server --config <path.ktav>` — explicit config, as before. Mixing the forms is a usage error: `usage: shaar-server [--config <path.ktav> | <target>]`.
+- `shaar-client` — if `./client.ktav` exists in the working directory it is used exactly as before (legacy behavior preserved); otherwise the client role is provisioned under the data directory and the next step is printed, exiting 1.
+- `shaar-client <server-key> [server-address]` — provision once; the server key (and address, if given) are persisted into the generated `client.ktav` at first generation only; later positional values act as per-run overrides. With a key but no address the client exits 1 after printing `no server address configured` (direct-only needs the numeric address).
+- `shaar-client --config <path>` — explicit config, as before. Usage: `usage: shaar-client [--config PATH] | [server-key [server-address]]`.
+
+### Data directory
+
+- Windows: `%APPDATA%\shaar`. Unix: `$XDG_DATA_HOME/shaar` when `XDG_DATA_HOME` is non-empty and absolute, otherwise `$HOME/.local/share/shaar` (this works on macOS and on Termux/Android, which only set `HOME`).
+- Only the environment variables `APPDATA` (Windows) and `XDG_DATA_HOME` and `HOME` (Unix) are read; none of them are set by default anywhere. If none is usable the binary fails with `first run: no per-user data directory: set ...`.
+- The role directory (`server/` or `client/`) is created with owner-only permissions on Unix (`0o700`, recursive) at creation time. An **existing** directory is reused and its permissions are never silently changed. On Windows `create_dir_all` inherits the per-user profile ACL (no new FFI).
+
+### Files created per role
+
+| Role | Files |
+|---|---|
+| `shaar-server` | `server.ktav` (ktav 0.8 template **without** a `target:` line; comments explain that `target:` must be added), `shaar.key` (Ed25519 identity), `allowed.txt` (comment-only allowlist template; an empty allowlist denies everyone) |
+| `shaar-client` | `client.ktav`, `shaar.key` (no allowlist file) |
+
+`shaar.key` is created only if missing and never overwritten; on Unix it is created with mode 0600, on Windows with an owner-only ACL. Existing files are **never overwritten**: an existing key, config or allowlist is left byte-for-byte untouched and reported as `kept:`. Second runs are idempotent — same identity, `reused` directory. A key file that exists but is corrupt or has too-broad permissions is an error (never repaired, regenerated or overwritten). The generated configs are direct-only (no `network` object). See [configuration.md](configuration.md#generated-first-run-files) for the exact file shapes.
+
+### Stdout contract
+
+The readiness line is printed **first**, the operator block after it:
+
+- `shaar-server <target>`: `bound=<ip:port> public_key=<hex>`, then the summary lines (`first run data directory: <dir> (created|reused)`, one `created:`/`kept:` line per file, `public_key=<64 lowercase hex>`), then `clients connect direct: give each client this public key and this machine's address with the bound port`, then either `allowlist <path>: empty - append each client's public key as one line, then restart the server to admit it` or `allowlist <path>: <N> client key(s) loaded; edits apply after a restart`, then `forward target: <target>`.
+- `shaar-client <server-key> <server-address>`: `listening=<ip:port>` first, then the summary lines, then `your public key for the server allowlist: public_key=<own hex>`, `pinned server: public_key=<server hex> address=<addr>`, `add your key as one line to the server allowlist file, then restart the server`.
+- Bare runs (`shaar-server`, `shaar-client` without a key, `shaar-client <key>` without an address) print only the summary block, the relevant `no ... configured` line and a `next step: ...` line, then a `first run: ...` error on **stderr** and exit status 1. With `--config` the binary behaves as before and does not provision the data directory.
+
+### Allowlist restart rule
+
+The allowlist is read once at startup. Append each client's public key as one line to `<data>/server/allowed.txt` and restart the server to admit the client; later edits also apply only after a restart.
+
+### What the first run does not do today
+
+The generated configs are direct-only (no `network` object), and that is deliberate: the composed shape requires a libp2p relay reservation and cannot start without one, and public relays proved unreliable. **No default relay, bootstrap or Yggdrasil peers are invented** — none exist and none will be added. A `relay-optional startup` leaf (owned by the NAT task) is planned to make the composed shape work without a relay. Until it lands, the first run **cannot publish a DHT record**, the server **cannot be found by key alone**, and the client **cannot hole-punch**: the client needs the server's numeric address, UDP must flow between them, and `fallback` stays inactive.
+
 ## Startup
 
-Prepare keys and configs ([configuration.md](configuration.md)), start the fixed target service, then the server, then the client.
+With no arguments, both binaries now bootstrap themselves ([First run](#first-run)); the forms below still work unchanged. Prepare keys and configs ([configuration.md](configuration.md)), start the fixed target service, then the server, then the client.
 
 ### Direct-only shape (no `network` object)
 
@@ -74,10 +118,15 @@ Consequences for the operator: the record is public to everyone who can query th
 
 ## Error messages and recovery
 
-Messages are printed on stderr as `shaar-server: ...` / `shaar-client: ...`; exit status 1. Redaction: key bytes, peer URIs and upstream I/O text never appear.
+Messages are printed on stderr as `shaar-server: ...` / `shaar-client: ...`; exit status 1. The first-run guidance lines (`no ... configured`, `next step: ...`) are the exception: they are printed on stdout and describe what to do next, not an error; only the accompanying `first run: ...` line goes to stderr. Redaction: key bytes, peer URIs and upstream I/O text never appear.
 
 | Message | Cause and action |
 |---|---|
+| `first run: no per-user data directory: set ...` | None of `APPDATA` (Windows) or `XDG_DATA_HOME` / `HOME` (Unix) is usable. Set one and retry. |
+| `first run: ...` (other first-run provisioning errors) | The data directory or a file could not be provisioned (for example a corrupt key or too-broad key permissions; the key is never repaired, regenerated or overwritten). Fix the cause and retry; existing files are never overwritten. |
+| `no forward target configured` / `next step: run shaar-server <target:port> or set target: in <config path>` | Bare `shaar-server`: it provisioned but has no forward target. Pass the target as a positional argument or add `target:` to the generated `server.ktav`. |
+| `no server key configured` / `next step: run shaar-client <server-public-key> <server-address>` | Bare `shaar-client`: it provisioned but has no pinned server key. Run it again with the server's public key and address. |
+| `no server address configured` / `next step: run shaar-client <hex> <server-address>` | `shaar-client <server-key>` without an address: direct-only needs the numeric server address. |
 | `could not load configured identity key` (server) | Missing file, not a regular file, size not 32, or group/other-accessible permissions. The server hides the reason; check with `keygen show`. The client prints the specific reason (`identity key file must be exactly 32 raw bytes`, `identity key file permissions are too broad`, `identity key path is not a regular file`, `identity key file I/O error: ...`). |
 | `configuration: ...` / client config error | See [configuration.md](configuration.md). Fix the named field and restart. |
 | `endpoint bind failed: ...` (server, direct-only) | The `bind` address is unusable or taken (`a usable native unicast address is required`, `native endpoint bind failed`). |

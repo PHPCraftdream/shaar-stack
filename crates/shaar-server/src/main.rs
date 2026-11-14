@@ -1,13 +1,25 @@
 #![forbid(unsafe_code)]
 
-use std::{env, fmt::Write as _, path::PathBuf, process::ExitCode};
+use std::{
+    env,
+    fmt::Write as _,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
+use iroh_base::PublicKey;
 use shaar::{
-    config::{Fallback, ServerOverrides, load_server},
-    identity::Identity,
+    config::{ConfigError, Fallback, ServerOverrides, ValidationKind, load_server},
+    identity::{
+        Identity,
+        provision::{Role, first_run_summary_lines, provision},
+    },
     network::{Allowlist, Endpoint, ForwardError, Limits, ServeReport},
 };
 use tokio::{sync::watch, task::JoinSet};
+
+#[cfg(test)]
+mod first_run_tests;
 
 #[cfg(test)]
 mod startup_tests;
@@ -31,9 +43,46 @@ async fn start_until_shutdown<T>(
     }
 }
 
+enum Invocation {
+    Config(PathBuf),
+    FirstRun { target: Option<String> },
+}
+
+fn parse_invocation(
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<Invocation, String> {
+    const USAGE: &str = "usage: shaar-server [--config <path.ktav> | <target>]";
+    let mut args = args.into_iter();
+    let _program = args.next();
+    match (args.next(), args.next()) {
+        (Some(flag), Some(path)) if flag == "--config" && args.next().is_none() => {
+            Ok(Invocation::Config(path.into()))
+        }
+        (None, None) => Ok(Invocation::FirstRun { target: None }),
+        (Some(arg), None) if !arg.to_string_lossy().starts_with('-') => {
+            let text = arg.to_str().ok_or_else(|| USAGE.to_owned())?;
+            Ok(Invocation::FirstRun {
+                target: Some(text.to_owned()),
+            })
+        }
+        _ => Err(USAGE.to_owned()),
+    }
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
-    match run().await {
+    let invocation = match parse_invocation(env::args_os()) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            eprintln!("shaar-server: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = match invocation {
+        Invocation::Config(path) => run_from_config(path).await,
+        Invocation::FirstRun { target } => run_first_run(target).await,
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("shaar-server: {error}");
@@ -42,15 +91,117 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run() -> Result<(), String> {
-    let path = config_path()?;
-    let config = load_server(path, &ServerOverrides::default())
+async fn run_from_config(config_path: PathBuf) -> Result<(), String> {
+    let config = load_server(config_path, &ServerOverrides::default())
         .await
         .map_err(|error| format!("configuration: {error}"))?;
     let identity = Identity::load(config.key_file())
         .await
         .map_err(|_| "could not load configured identity key".to_owned())?;
     let keys = test_support::read_allowlist(config.allowlist_path()).await?;
+    run_configured(config, identity, keys, None).await
+}
+
+enum FirstRunState {
+    Ready {
+        config: shaar::config::ServerConfig,
+        identity: Identity,
+        keys: Vec<PublicKey>,
+        block: Vec<String>,
+    },
+    MissingTarget {
+        block: Vec<String>,
+        config_path: PathBuf,
+        error: String,
+    },
+}
+
+async fn first_run_state(base: &Path, target: Option<String>) -> Result<FirstRunState, String> {
+    let provisioned = provision(Role::Server, base, None, None)
+        .await
+        .map_err(|error| format!("first run: {error}"))?;
+    let report = &provisioned.report;
+    let identity = provisioned.identity;
+    let overrides = ServerOverrides {
+        target: target.clone(),
+        ..ServerOverrides::default()
+    };
+    let config = match load_server(&report.paths.config, &overrides).await {
+        Err(ConfigError::Validation {
+            field: "target",
+            kind: ValidationKind::MissingRequired,
+        }) => {
+            let mut block = first_run_summary_lines(Role::Server, report, &identity);
+            block.push("no forward target configured".to_owned());
+            block.push(format!(
+                "next step: run shaar-server <target:port> or set target: in {}",
+                report.paths.config.display()
+            ));
+            return Ok(FirstRunState::MissingTarget {
+                block,
+                config_path: report.paths.config.clone(),
+                error: ConfigError::Validation {
+                    field: "target",
+                    kind: ValidationKind::MissingRequired,
+                }
+                .to_string(),
+            });
+        }
+        Err(other) => return Err(format!("configuration: {other}")),
+        Ok(config) => config,
+    };
+    let keys = test_support::read_allowlist(config.allowlist_path()).await?;
+    let mut block = first_run_summary_lines(Role::Server, report, &identity);
+    block.push(
+        "clients connect direct: give each client this public key and this machine's address with the bound port"
+            .to_owned(),
+    );
+    block.push(if keys.is_empty() {
+        format!(
+            "allowlist {}: empty - append each client's public key as one line, then restart the server to admit it",
+            config.allowlist_path().display()
+        )
+    } else {
+        format!(
+            "allowlist {}: {} client key(s) loaded; edits apply after a restart",
+            config.allowlist_path().display(),
+            keys.len()
+        )
+    });
+    block.push(format!("forward target: {}", config.target()));
+    Ok(FirstRunState::Ready {
+        config,
+        identity,
+        keys,
+        block,
+    })
+}
+
+async fn run_first_run(target: Option<String>) -> Result<(), String> {
+    let base =
+        shaar::identity::default_data_dir().map_err(|error| format!("first run: {error}"))?;
+    match first_run_state(&base, target).await? {
+        FirstRunState::MissingTarget { block, error, .. } => {
+            for line in &block {
+                println!("{line}");
+            }
+            Err(error)
+        }
+        FirstRunState::Ready {
+            config,
+            identity,
+            keys,
+            block,
+        } => run_configured(config, identity, keys, Some(&block)).await,
+    }
+}
+
+async fn run_configured(
+    config: shaar::config::ServerConfig,
+    identity: Identity,
+    keys: Vec<PublicKey>,
+    announce: Option<&[String]>,
+) -> Result<(), String> {
     let allowlist =
         Allowlist::new(&keys).map_err(|_| "allowlist exceeds 256 entries".to_owned())?;
     // Composed startup: the shared role layer owns listeners, fallback and
@@ -97,6 +248,11 @@ async fn run() -> Result<(), String> {
             Some(Ok(())) => {
                 if let Some(address) = role.native_addr() {
                     println!("bound={address} public_key={key_hex}");
+                    if let Some(announce) = announce {
+                        for line in announce {
+                            println!("{line}");
+                        }
+                    }
                 }
                 role.run(&mut shutdown).await.err()
             }
@@ -160,6 +316,11 @@ async fn run() -> Result<(), String> {
         endpoint.local_addr(),
         endpoint.id()
     );
+    if let Some(announce) = announce {
+        for line in announce {
+            println!("{line}");
+        }
+    }
 
     let target = config.target();
     let mut shutdown = Box::pin(shutdown_signal());
@@ -340,13 +501,4 @@ fn direct_only_notice(fallback: Fallback) -> String {
     format!(
         "no composed network settings; running direct-only; configured fallback {fallback} is not active"
     )
-}
-
-fn config_path() -> Result<PathBuf, String> {
-    let mut args = env::args_os();
-    let _program = args.next();
-    match (args.next(), args.next()) {
-        (Some(flag), Some(path)) if flag == "--config" && args.next().is_none() => Ok(path.into()),
-        _ => Err("usage: shaar-server --config <path.ktav>".into()),
-    }
 }

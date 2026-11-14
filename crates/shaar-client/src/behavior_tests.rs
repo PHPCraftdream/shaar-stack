@@ -1,6 +1,13 @@
 use super::*;
+use std::fmt::Write as _;
+use std::net::SocketAddr;
 use std::time::Duration;
-use tokio::{net::TcpListener, sync::oneshot, time::timeout};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+    sync::oneshot,
+    time::timeout,
+};
 
 #[tokio::test]
 async fn shutdown_releases_listener_port() {
@@ -125,10 +132,16 @@ async fn binary_run_reports_an_occupied_local_listener() {
         "server: {server_key}\nserver_address: 127.0.0.1:9\nlisten: {address}\nkey_file: {key_path}\n"
     );
     std::fs::write(&config_path, text).unwrap();
-    let parsed = read_config(&config_path).await.unwrap();
+    let parsed = read_config(
+        &config_path,
+        &ClientOverrides::default(),
+        &ClientEndpointOverrides::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(parsed.key_file(), std::path::Path::new(&key_path));
     Identity::load(parsed.key_file()).await.unwrap();
-    let result = timeout(Duration::from_secs(10), run(config_path)).await;
+    let result = timeout(Duration::from_secs(10), run_from_config(config_path)).await;
     std::fs::remove_dir_all(directory).unwrap();
     let error = result
         .expect("busy listener must fail promptly")
@@ -153,4 +166,123 @@ fn invalid_configuration_text_is_rejected() {
         &ClientEndpointOverrides::default(),
     );
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn coordinator_forwards_and_reconnects_after_session_loss() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let client_identity = Identity::from_seed([91; 32]);
+        let server_identity = Identity::from_seed([92; 32]);
+        let client = Endpoint::bind(
+            &client_identity,
+            "127.0.0.1:0".parse().unwrap(),
+            Allowlist::default(),
+            Limits::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
+        let mut server = Endpoint::bind(
+            &server_identity,
+            "127.0.0.1:0".parse().unwrap(),
+            Allowlist::new(&[client.id()]).unwrap(),
+            Limits::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
+        let server_address = server.local_addr();
+        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_address = target.local_addr().unwrap();
+        let (close_first, close_first_rx) = oneshot::channel::<()>();
+        let (first_done, first_done_rx) = oneshot::channel::<()>();
+        let (first_finished, first_finished_rx) = oneshot::channel::<()>();
+        let target_task = tokio::spawn(async move {
+            let mut tasks = JoinSet::new();
+            let mut first_done = Some(first_done);
+            for index in 0..2 {
+                let (mut stream, _) = target.accept().await.unwrap();
+                let done = if index == 0 { first_done.take() } else { None };
+                tasks.spawn(async move {
+                    let mut bytes = Vec::new();
+                    stream.read_to_end(&mut bytes).await.unwrap();
+                    stream.write_all(&bytes).await.unwrap();
+                    stream.shutdown().await.unwrap();
+                    if let Some(done) = done {
+                        let _ = done.send(());
+                    }
+                });
+            }
+            while let Some(result) = tasks.join_next().await {
+                result.unwrap();
+            }
+        });
+        let server_task = tokio::spawn(async move {
+            let mut first = server.accept().await.unwrap();
+            first
+                .serve(target_address, async {
+                    let _ = close_first_rx.await;
+                })
+                .await
+                .unwrap();
+            drop(first);
+            let _ = first_finished.send(());
+            let mut second = server.accept().await.unwrap();
+            let result = second.serve(target_address, std::future::pending()).await;
+            assert!(matches!(
+                result,
+                Err(shaar::network::ForwardError::PathUnavailable)
+            ));
+            drop(second);
+            server
+        });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local = listener.local_addr().unwrap();
+        let (shutdown, shutdown_rx) = oneshot::channel::<()>();
+        let coordinator = tokio::spawn(coordinate_until(
+            listener,
+            client,
+            server_key(&server_identity),
+            server_address,
+            async move {
+                let _ = shutdown_rx.await;
+                Ok(())
+            },
+        ));
+        let mut first_app = tcp_connect(local).await;
+        first_app.write_all(b"first stream").await.unwrap();
+        first_app.shutdown().await.unwrap();
+        let mut first_response = Vec::new();
+        first_app.read_to_end(&mut first_response).await.unwrap();
+        assert_eq!(first_response, b"first stream");
+        let _ = first_done_rx.await;
+        let _ = close_first.send(());
+        let _ = first_finished_rx.await;
+        let mut next_app = tcp_connect(local).await;
+        next_app
+            .write_all(b"new stream after session loss")
+            .await
+            .unwrap();
+        next_app.shutdown().await.unwrap();
+        let mut next_response = Vec::new();
+        next_app.read_to_end(&mut next_response).await.unwrap();
+        assert_eq!(next_response, b"new stream after session loss");
+        drop(first_app);
+        drop(next_app);
+        let _ = shutdown.send(());
+        coordinator.await.unwrap().unwrap();
+        target_task.await.unwrap();
+        server_task.await.unwrap().close().await;
+    })
+    .await
+    .expect("coordinator integration deadline");
+}
+
+fn server_key(identity: &Identity) -> String {
+    let mut result = String::new();
+    for byte in identity.public_key_bytes() {
+        write!(&mut result, "{byte:02x}").unwrap();
+    }
+    result
+}
+async fn tcp_connect(address: SocketAddr) -> TcpStream {
+    TcpStream::connect(address).await.unwrap()
 }

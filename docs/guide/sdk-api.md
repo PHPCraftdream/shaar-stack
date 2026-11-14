@@ -19,6 +19,25 @@ Cancellation: unless an item says otherwise, **dropping a future is not a clean 
 
 `IdentityError`: `AlreadyExists`, `Io(std::io::Error)`, `InvalidFormat`, `InsecurePermissions`, `NotARegularFile`. `Debug` output of `Identity` is redacted and there is no seed accessor. A complete key-creation program is [`examples/keygen.rs`](examples/keygen.rs).
 
+## `shaar::identity::provision`
+
+The first-run layer of the binaries, re-exported at `shaar::identity` (`pub use provision::{...}`). Source: `crates/shaar/src/identity/provision/`. Items:
+
+- `Role`: `Server` or `Client`.
+- `ProvisionPaths`: the resolved `dir`, `config`, `key` and (server only) `allowlist` paths.
+- `FileState`: `Created` or `Kept` (an existing file or directory was left untouched).
+- `ProvisionReport`: per-file `FileState` values plus `ProvisionPaths`.
+- `Provisioned`: the loaded or created `Identity` and its `ProvisionReport`.
+- `ProvisionError`: `Io { context, source }`, `PathNotUtf8`, `PathControlChars`, `MissingEnv(&'static str)` and `Key(IdentityError)`; no variant ever carries key material.
+- `role_dir(base, role)`: `<base>/server/` or `<base>/client/`.
+- `resolve_data_dir(env)`: resolves the per-user data directory from an **injected** environment accessor, so it is testable without the process environment; Windows uses `APPDATA`, Unix uses `XDG_DATA_HOME` (only when non-empty and absolute) or `HOME`. `default_data_dir()` is the convenience wrapper over the real process environment. Errors on no usable variable.
+- `path_as_config_value(path)`: validates that a path can be embedded in a ktav config as a `::` literal-string value.
+- `provision(role, base, server_key, server_address).await -> Result<Provisioned, ProvisionError>`: validates the embedded paths before any filesystem write, creates the role directory (`0o700` on Unix, recursive; an **existing** directory is kept without chmod; on Windows `create_dir_all` inherits the per-user profile ACL), loads or creates the identity key via `Identity::load_or_create`, and writes the config (and, for the server, the comment-only allowlist template) only when missing. **Never overwrites** an existing file. For the client, the optional `server_key` / `server_address` strings are embedded as `server::` / `server_address::` lines at first generation only.
+- `server_config_text(paths)`, `client_config_text(paths, server_key, server_address)`, `allowlist_template_text()`: the exact generated file texts (see [configuration.md](configuration.md#generated-first-run-files)); the generated configs are direct-only (no `network` object).
+- `first_run_summary_lines(role, report, identity)`: the human-readable summary lines printed by the binaries (`first run data directory: <dir> (created|reused)`, one `created:`/`kept:` line per file, `public_key=<64 lowercase hex>`); no trailing newlines.
+
+The binaries wire this into their zero-configuration first runs; the stdout contract and what the first run deliberately does not do are described in [operations.md](operations.md#first-run).
+
 ## `shaar::config`
 
 `ServerConfig::from_text(&str, &ServerOverrides)` and `ClientConfig::from_text(&str, &ClientOverrides)` parse and validate ktav text; `load_server`/`load_client` (and the `*_with_endpoint_overrides` variants) do the same from a file with a bounded asynchronous read. Getters: `ServerConfig::{target, bind, key_file, allowlist_path, fallback, network}`, `ClientConfig::{server_key_bytes, listen, server_address, key_file, fallback, network}`. `NetworkSettings` exposes `mainline()`, `signaling()` and `ygg()` (`MainlineNetwork`, `SignalingNetwork`, `YggNetwork`). `Fallback::{Signal, Standby}` (default `Standby`). `ConfigError::{Loading, Parsing, Validation}` with `ValidationKind`; its `Display` and `Debug` are identical and redacted. `MAX_CONFIG_BYTES` is 1 MiB. Override structs let a caller (for example a CLI) replace file values before validation; a typed override can repair an invalid file value. Fields and messages: [configuration.md](configuration.md).
