@@ -244,6 +244,35 @@ impl LoopbackPeer {
             .await;
     }
 
+    /// Sends a well-formed GET response (`r={id, token}`) plus the top-level
+    /// BEP 42 `ip` field as 6 bytes (IPv4 octets + BE port, fixed 6881) when
+    /// `vote` is `Some` — exactly the shape the pinned parser reads
+    /// (`bytes_to_sockaddr`, messages.rs:807-818).
+    #[allow(dead_code)] // Used by the owner seam tests; the composed #[path] inclusion does not call it.
+    pub(crate) async fn reply_get_vote(
+        &self,
+        source: SocketAddr,
+        transaction: &[u8],
+        vote: Option<std::net::Ipv4Addr>,
+    ) {
+        let mut top = vec![
+            (b"r".as_slice(), response_dict()),
+            (b"t".as_slice(), Value::Bytes(transaction.to_vec())),
+            (b"y".as_slice(), Value::Bytes(b"r".to_vec())),
+        ];
+        if let Some(vote) = vote {
+            let mut ip = Vec::with_capacity(6);
+            ip.extend_from_slice(&vote.octets());
+            ip.extend_from_slice(&6881_u16.to_be_bytes());
+            top.push((b"ip".as_slice(), Value::Bytes(ip)));
+        }
+        let packet = encode(&dict(top));
+        self.socket
+            .send_to(&packet, source)
+            .await
+            .expect("voting GET response");
+    }
+
     pub(crate) async fn reply_get(
         &self,
         source: SocketAddr,
@@ -451,6 +480,13 @@ impl CapturedPut {
         iroh_dns::pkarr::SignedPacket::from_bytes(&self.signed_envelope())
             .expect("captured signature verifies")
     }
+}
+
+fn response_dict() -> Value {
+    dict([
+        (b"id".as_slice(), Value::Bytes(NODE_ID.to_vec())),
+        (b"token".as_slice(), Value::Bytes(TOKEN.to_vec())),
+    ])
 }
 
 enum ReplyKind {

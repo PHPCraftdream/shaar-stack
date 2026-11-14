@@ -7,6 +7,7 @@ mod connect_cancel;
 mod deadline_sharing;
 mod dropped_resolve;
 mod ordering;
+mod reflexive;
 
 use super::tests::fixture::LoopbackPeer;
 use super::{RuntimeError, RuntimeOwner, endpoint_key, to_mutable};

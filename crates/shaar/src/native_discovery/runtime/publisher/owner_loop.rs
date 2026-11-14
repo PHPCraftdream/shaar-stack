@@ -19,7 +19,9 @@ use super::flight::{
 use crate::identity::Identity;
 use iroh_base::EndpointId;
 
-const REFRESH: Duration = Duration::from_secs(60);
+/// Single source of truth for the publication refresh window; the reflexive
+/// self-lookup in the owner aligns to it.
+pub(super) const REFRESH: Duration = Duration::from_secs(60);
 
 enum Event {
     Command(Option<Command>),
