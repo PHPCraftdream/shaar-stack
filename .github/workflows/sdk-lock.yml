@@ -31,6 +31,16 @@ on:
           - nat
           - faults
         default: base
+      public_smoke:
+        description: Bounded live smoke over public networks (needs a recorded approval, a pinned relay and the contract digest below)
+        required: false
+        type: boolean
+        default: false
+      public_smoke_contract_sha256:
+        description: SHA-256 of .github/probes/public-smoke/contract.json at source_revision
+        required: false
+        type: string
+        default: ''
       resource_measurement:
         description: Run the bounded P14 loopback resource measurement of release products (no lock, no public network)
         required: false
@@ -42,7 +52,7 @@ permissions:
 
 jobs:
   resolve:
-    if: ${{ !inputs.direct_feedback && !inputs.controlled_network_preflight && !inputs.controlled_network_matrix && !inputs.resource_measurement }}
+    if: ${{ !inputs.direct_feedback && !inputs.controlled_network_preflight && !inputs.controlled_network_matrix && !inputs.resource_measurement && !inputs.public_smoke }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -68,7 +78,7 @@ jobs:
           if-no-files-found: error
 
   direct-feedback:
-    if: ${{ inputs.direct_feedback && !inputs.controlled_network_preflight && !inputs.controlled_network_matrix }}
+    if: ${{ inputs.direct_feedback && !inputs.controlled_network_preflight && !inputs.controlled_network_matrix && !inputs.public_smoke }}
     name: Process feedback (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -222,8 +232,200 @@ jobs:
             target/controlled-network-tools/report.json
           if-no-files-found: error
 
+  public-smoke-plan:
+    if: ${{ inputs.public_smoke }}
+    name: Public smoke plan (validation only; no public network contact)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate the exact dispatch inputs
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          CONTRACT_SHA256: ${{ inputs.public_smoke_contract_sha256 }}
+          DIRECT_FEEDBACK: ${{ inputs.direct_feedback }}
+          PREFLIGHT: ${{ inputs.controlled_network_preflight }}
+          MATRIX: ${{ inputs.controlled_network_matrix }}
+        run: |
+          python3 -I - <<'PYTHON'
+          import os
+          import re
+          if not re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_REVISION"]):
+              raise SystemExit("source_revision must be an exact reviewed 40-hex SHA")
+          if os.environ["GITHUB_RUN_ATTEMPT"] != "1":
+              raise SystemExit("re-running is forbidden: one run per dispatch")
+          if any(os.environ[name] != "false" for name in ("DIRECT_FEEDBACK", "PREFLIGHT", "MATRIX")):
+              raise SystemExit("the public smoke excludes the other dispatch modes")
+          if not re.fullmatch(r"[0-9a-f]{64}", os.environ["CONTRACT_SHA256"]):
+              raise SystemExit("public_smoke_contract_sha256 must be 64 lowercase hex characters")
+          PYTHON
+      - name: Checkout the exact reviewed source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - name: Verify checked-out source revision
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Unit-test the smoke harness (pure; no network)
+        run: python -I -m unittest discover -s .github/probes/public-smoke -p "test_*.py"
+      - name: Validate the contract, recorded approval, relay target and meter availability
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          CONTRACT_SHA256: ${{ inputs.public_smoke_contract_sha256 }}
+          PUBLIC_SMOKE: ${{ inputs.public_smoke }}
+          DIRECT_FEEDBACK: ${{ inputs.direct_feedback }}
+          PREFLIGHT: ${{ inputs.controlled_network_preflight }}
+          MATRIX: ${{ inputs.controlled_network_matrix }}
+        run: python -I .github/probes/public-smoke/run.py validate
+
+  public-smoke-build:
+    needs: public-smoke-plan
+    if: ${{ inputs.public_smoke }}
+    name: Public smoke build (normal products, native gate OFF; no public network contact)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.1"
+    outputs:
+      t0: ${{ steps.epoch.outputs.t0 }}
+    steps:
+      - name: Checkout the exact reviewed source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - name: Verify checked-out source revision
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Install Rust 1.99.1
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Prepare current reviewed product sources without lock generation
+        uses: ./.github/actions/prepare-sources
+        with:
+          selection: '{"relay": false, "dns": false, "resolver": false, "kad": false}'
+          resolve_only: "false"
+      - name: Compile normal products and record provenance
+        run: python -I .github/ci/run.py product-manifest
+      - name: Stage the two products and their manifest (no keys, no configs)
+        run: |
+          python3 -I - <<'PYTHON'
+          import json
+          import pathlib
+          import shutil
+          manifest = json.loads(pathlib.Path("target/ci-product/manifest.json").read_text(encoding="utf-8"))
+          stage = pathlib.Path("target/public-smoke/stage")
+          stage.mkdir(parents=True)
+          for name in ("shaar-server", "shaar-client"):
+              shutil.copy2(manifest["products"][name]["executable"], stage / name)
+          shutil.copy2("target/ci-product/manifest.json", stage / "manifest.json")
+          PYTHON
+      - name: Preserve the staged products for the two runners
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: public-smoke-binaries
+          path: target/public-smoke/stage/
+          retention-days: 1
+          if-no-files-found: error
+      - name: Fix the shared window origin (now plus a 90 s runner setup margin)
+        id: epoch
+        run: echo "t0=$(( $(date +%s) + 90 ))" >> "$GITHUB_OUTPUT"
+
+  public-smoke-server:
+    needs: public-smoke-build
+    if: ${{ inputs.public_smoke }}
+    name: Public smoke Server (runner A; single run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout the exact reviewed source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: public-smoke-binaries
+          path: target/public-smoke/stage
+      - name: Run the Server role under the enforced caps
+        timeout-minutes: 5
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          CONTRACT_SHA256: ${{ inputs.public_smoke_contract_sha256 }}
+          PUBLIC_SMOKE: ${{ inputs.public_smoke }}
+          DIRECT_FEEDBACK: ${{ inputs.direct_feedback }}
+          PREFLIGHT: ${{ inputs.controlled_network_preflight }}
+          MATRIX: ${{ inputs.controlled_network_matrix }}
+          T0: ${{ needs.public-smoke-build.outputs.t0 }}
+        run: |
+          set -euo pipefail
+          chmod 0700 target/public-smoke/stage/shaar-server
+          python -I .github/probes/public-smoke/run.py server --manifest "$PWD/target/public-smoke/stage/manifest.json" \
+            --bin "$PWD/target/public-smoke/stage/shaar-server" --workdir "$PWD/target/public-smoke/server-work" --t0 "$T0"
+      - name: Preserve the Server evidence (no keys, no configs)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: public-smoke-server-evidence
+          path: target/public-smoke/server-evidence/
+          retention-days: 14
+          if-no-files-found: warn
+
+  public-smoke-client:
+    needs: public-smoke-build
+    if: ${{ inputs.public_smoke }}
+    name: Public smoke Client (runner B; single run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout the exact reviewed source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: public-smoke-binaries
+          path: target/public-smoke/stage
+      - name: Run the Client role under the enforced caps
+        timeout-minutes: 5
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          CONTRACT_SHA256: ${{ inputs.public_smoke_contract_sha256 }}
+          PUBLIC_SMOKE: ${{ inputs.public_smoke }}
+          DIRECT_FEEDBACK: ${{ inputs.direct_feedback }}
+          PREFLIGHT: ${{ inputs.controlled_network_preflight }}
+          MATRIX: ${{ inputs.controlled_network_matrix }}
+          T0: ${{ needs.public-smoke-build.outputs.t0 }}
+        run: |
+          set -euo pipefail
+          chmod 0700 target/public-smoke/stage/shaar-client
+          python -I .github/probes/public-smoke/run.py client --manifest "$PWD/target/public-smoke/stage/manifest.json" \
+            --bin "$PWD/target/public-smoke/stage/shaar-client" --workdir "$PWD/target/public-smoke/client-work" --t0 "$T0"
+      - name: Preserve the Client evidence (no keys, no configs)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: public-smoke-client-evidence
+          path: target/public-smoke/client-evidence/
+          retention-days: 14
+          if-no-files-found: warn
+
   resource-budget:
-    if: ${{ inputs.resource_measurement && !inputs.direct_feedback && !inputs.controlled_network_preflight && !inputs.controlled_network_matrix }}
+    if: ${{ inputs.resource_measurement && !inputs.direct_feedback && !inputs.controlled_network_preflight && !inputs.controlled_network_matrix && !inputs.public_smoke }}
     name: P14 resource budgets (loopback only; release products)
     runs-on: ubuntu-latest
     timeout-minutes: 75

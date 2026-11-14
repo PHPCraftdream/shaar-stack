@@ -105,6 +105,7 @@ PROOFS = (
     (".github/probes/native-graph-multibase/", "native_graph"),
     (".github/probes/native-graph/", "native_graph"),
     (".github/probes/ygg/", "ygg"),
+    (".github/probes/public-smoke/", "ci_policy"),
     (".github/probes/iroh-paths/carrier/", "carrier_frames"),
     (".github/probes/iroh-paths/gate/bridge/support/packet_identity.py", "carrier_frames"),
     (".github/scripts/p2p/carrier-wire-proof/", "carrier"),
