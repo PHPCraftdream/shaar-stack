@@ -15,7 +15,7 @@ from urllib.parse import quote
 RECEIPT_SHA = "f88dd58897b88c2a964c6b6d00ba5e7ca6c2109c70680a98f7e76124f00b4ff1"
 RECEIPT_BYTES = 243217
 ARCHIVE_COUNT = 515
-LOCKED_IDENTITY_COUNT = 533
+LOCKED_IDENTITY_COUNT = 532
 COMPRESSED_CAP = 64 * 1024 * 1024
 DECODED_CAP = 256 * 1024 * 1024
 TOTAL_DECODED_CAP = 2 * 1024 * 1024 * 1024
@@ -88,6 +88,7 @@ def parse_archive(compressed, identity, expected_member_count, requested_members
     expected_root = f"{identity['name']}-{identity['version']}"
     seen_paths = set()
     members = {}
+    member_names = set()
     member_count = 0
     regular_bytes = 0
     evidence_bytes = 0
@@ -105,6 +106,7 @@ def parse_archive(compressed, identity, expected_member_count, requested_members
             seen_paths.add(folded)
             if member.isdir():
                 continue
+            member_names.add(normalized)
             if member.size < 0 or member.size > MEMBER_CAP:
                 raise ValueError(f"Regular member size bound exceeded: {member.name}")
             regular_bytes += member.size
@@ -127,7 +129,7 @@ def parse_archive(compressed, identity, expected_member_count, requested_members
                 members[normalized] = data
     if expected_member_count is not None and member_count != expected_member_count:
         raise ValueError(f"Member count mismatch for {identity['name']}@{identity['version']}: {member_count}")
-    return decoded, member_count, regular_bytes, members
+    return decoded, member_count, regular_bytes, members, member_names
 
 
 def validate_terms_evidence(row):
@@ -295,6 +297,33 @@ def main():
     if len(identities_by_key) != LOCKED_IDENTITY_COUNT or set(identities_by_index) != set(range(ARCHIVE_COUNT)):
         raise ValueError("Inventory identity or exact archive count mismatch")
 
+    retired_indexes = set()
+    for row in inventory.get("retired_identities", []):
+        name, version = row["name"], row["version"]
+        if row.get("root_lock") is not False or row.get("nested_lock") is not False:
+            raise ValueError(f"Retired identity must keep both lock booleans false: {name}@{version}")
+        if not row.get("retired_reason"):
+            raise ValueError(f"Retired identity must state its retired_reason: {name}@{version}")
+        archive_items = row.get("archive_data", [])
+        if len(archive_items) != 1 or "receipt_index" not in archive_items[0]:
+            raise ValueError(f"Retired identity must carry exactly one receipt-bound archive: {name}@{version}")
+        index = archive_items[0]["receipt_index"]
+        if type(index) is not int or index not in range(ARCHIVE_COUNT):
+            raise ValueError(f"Retired archive receipt index out of range: {name}@{version}")
+        if index in identities_by_index:
+            raise ValueError(f"Retired archive receipt index collides with a current identity: {index}")
+        receipt = receipt_by_index[index]
+        record = archive_items[0]
+        if (record.get("url") != receipt.get("url") or record.get("bytes") != receipt.get("bytes")
+                or record.get("sha256") != receipt.get("actual_sha256")
+                or record.get("sha256") != receipt.get("expected_sha256")):
+            raise ValueError(f"Retired archive handoff differs from its receipt record: {name}@{version}")
+        held = bounded_regular(no_link_path(data_root, record["path"]), COMPRESSED_CAP)
+        if len(held) != record["bytes"] or digest(held) != record["sha256"]:
+            raise ValueError(f"Retired held archive size or checksum mismatch: {name}@{version}")
+        identities_by_index[index] = row
+        retired_indexes.add(index)
+
     receipt_urls = set()
     archive_bytes = 0
     totals = {"decoded": 0, "members": 0, "regular_bytes": 0, "evidence_bytes": 0}
@@ -304,7 +333,9 @@ def main():
     raw_count = raw_bytes = raw_packages = 0
     gap_count = gap_bytes = gap_packages = 0
     blocker_count = blocker_bytes = blocker_packages = index_rows = 0
+    elected_count = elected_bytes = elected_packages = 0
     pinned_blocker_receipt = blocker_sources.blocker_receipt(registry)
+    pinned_elected_receipt = blocker_sources.elected_receipt(registry)
     pinned_raw_receipt = raw_sources.raw_receipt(registry)
     status_counts = {}
     for index in range(ARCHIVE_COUNT):
@@ -313,7 +344,7 @@ def main():
         validate_terms_evidence(row)
         identity = row
         key = (identity["source"], identity["name"], identity["version"], identity["checksum"])
-        if identities_by_key.get(key) is not row:
+        if index not in retired_indexes and identities_by_key.get(key) is not row:
             raise ValueError(f"Inventory archive identity mismatch: {index}")
         encoded_name = quote(identity["name"], safe="")
         encoded_version = quote(identity["version"], safe="")
@@ -355,7 +386,7 @@ def main():
         if row.get("raw_source_binding") or row.get("raw_materials"):
             for item in row.get("raw_source_binding", {}).get("archive_metadata", {}).values():
                 requested.add(item["archive_member"])
-        decoded, actual_members, _, source_members = parse_archive(compressed, identity, row["archive_member_count"], requested, totals)
+        decoded, actual_members, _, source_members, member_names = parse_archive(compressed, identity, row["archive_member_count"], requested, totals)
         if len(decoded) != row["decoded_tar_bytes"]:
             raise ValueError(f"Archive decoded size mismatch: {index}")
         manifest_rows = row.get("manifest_evidence", [])
@@ -373,7 +404,13 @@ def main():
             raise ValueError(f"Cargo.toml package identity mismatch: {index}")
         if package.get("license") != row["declared_license"] or package.get("license_file") != manifest.get("license_file"):
             raise ValueError(f"Cargo.toml declaration mismatch: {index}")
-        if row.get("raw_source_binding") or row.get("raw_materials"):
+        if (identity["name"], identity["version"]) in blocker_sources.ELECTED:
+            count, size = blocker_sources.validate_elected(row, registry, source_members, member_names,
+                                                           pinned_elected_receipt)
+            elected_count += count
+            elected_bytes += size
+            elected_packages += 1
+        elif row.get("raw_source_binding") or row.get("raw_materials"):
             if (identity["name"], identity["version"]) in raw_sources.GAP_PACKAGES:
                 count, size = raw_sources.validate_gap_binding(row, registry, source_members, pinned_raw_receipt)
                 gap_count += count
@@ -432,6 +469,8 @@ def main():
     supplement = inventory.get("raw_source_supplement", {})
     if (blocker_count, blocker_bytes, blocker_packages) != blocker_sources.TOTALS or index_rows != sum(len(pin["maps"]) for pin in blocker_sources.INDEX.values()):
         raise ValueError("Blocker replay totals mismatch")
+    if (elected_count, elected_bytes, elected_packages) != blocker_sources.ELECTED_TOTALS:
+        raise ValueError("Elected canonical replay totals mismatch")
     if (raw_count, raw_bytes, raw_packages) != (8, 38580, 5):
         raise ValueError("Raw supplement replay totals mismatch")
     if (gap_count, gap_bytes, gap_packages) != raw_sources.GAP_TOTALS:
@@ -458,7 +497,15 @@ def main():
             or supplement.get("blocker_material_bytes") != blocker_bytes
             or supplement.get("blocker_package_count") != blocker_packages
             or supplement.get("blocker_index_rows") != len(blocker_sources.INDEX)
-            or supplement.get("no_license_choice_or_legal_clearance") is not True):
+            or supplement.get("elected_receipt_path") != blocker_sources.ELECTED_RECEIPT_REL
+            or supplement.get("elected_receipt_sha256") != blocker_sources.ELECTED_RECEIPT_SHA
+            or supplement.get("elected_receipt_bytes") != blocker_sources.ELECTED_RECEIPT_BYTES
+            or supplement.get("elected_material_count") != 2
+            or supplement.get("elected_material_bytes") != 22716
+            or supplement.get("elected_package_count") != 2
+            or supplement.get("elected_provenance_class") != blocker_sources.CLASS_ELECTED
+            or supplement.get("no_legal_clearance") is not True
+            or supplement.get("or_election_recorded") is not True):
         raise ValueError("Raw supplement inventory mismatch")
     root_locks = lock_identities(worktree / "Cargo.lock")
     nested_locks = lock_identities(worktree / "crates/shaar-ygg-core/Cargo.lock")
@@ -472,8 +519,8 @@ def main():
         if row["root_lock"] != (key in root_locks) or row["nested_lock"] != (key in nested_locks):
             raise ValueError(f"Lock membership booleans changed: {row['name']}@{row['version']}")
     counts = inventory["counts"]
-    if root_count != 513 or nested_count != 215 or shared_count != 195 or len(expected_identities) != 533:
-        raise ValueError("Lock membership totals differ from exact 533-identity baseline")
+    if root_count != 512 or nested_count != 215 or shared_count != 195 or len(expected_identities) != 532:
+        raise ValueError("Lock membership totals differ from exact 532-identity baseline")
     if material_rows != 917 or old_material_rows != 23 or material_archive_rows != 894 or material_bytes != 4505353:
         raise ValueError(f"Material row/byte totals unexpected: rows={material_rows}, old={old_material_rows}, new={material_archive_rows}, bytes={material_bytes}")
     if counts.get("current_pass_material_file_count") != 894 or counts.get("current_pass_material_bytes") != 4421514:

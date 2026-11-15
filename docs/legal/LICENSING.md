@@ -23,7 +23,12 @@ base256emoji emoji alphabet table could not be established; the product must not
 This is a compatibility reduction: multibase strings with the emoji code point no longer
 decode through this library, while every other multibase encoding the product uses
 (base58btc, base64, base64url, base32, and the generic decode path used by multiaddr) is
-unchanged. The upstream MIT license text of multibase is retained in the prepared tree, and
+unchanged. The same reviewed patch also removes the unused Base45 encoding and the `base45` 3.2.0
+dependency (the product code never uses Base45 or enumerates Base variants), with the same
+compatibility-reduction reasoning: multibase strings with the Base45 code point no longer decode
+through this library. As with `base256emoji`, the same upstream MIT text retention and
+provenance-receipt identification apply to this removal. The upstream MIT license text of
+multibase is retained in the prepared tree, and
 the modification is identified by the generated provenance receipt; the patched crate remains
 upstream MIT and is not relicensed by this project. Upstream's own development `Cargo.lock`
 inside the archive still lists the removed crates; Cargo never reads a dependency's lock
@@ -35,5 +40,8 @@ collection, and review of third-party terms remain separate obligations.
 
 Per-target `THIRD-PARTY-NOTICES` files for `shaar-server` and `shaar-client` are generated
 by `.github/actions/dependency-license/notices/notices.py` from the verified corpus under
-`docs/legal/notices-material/`. Five linked packages still lack authentic license text, so
-no bundle is releasable yet; see `docs/legal/notice-evidence.md`.
+`docs/legal/notices-material/`. The bundles now assemble with zero distributed blockers on the
+elected corpus (`enum-assoc` and `if-watch` under the `elected-canonical-text` class, `base45`
+retired from the graph), and `notices.py check --release` reports none; legal clearance is still
+absent and release permission stays gated; `docs/legal/notice-evidence.md` records the provenance
+classes.

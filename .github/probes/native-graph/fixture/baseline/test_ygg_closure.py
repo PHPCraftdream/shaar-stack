@@ -108,6 +108,7 @@ def _parsed(edges, feats):
 
 _BASE_EDGES = [(("shaar", "0.1.0"), ("tokio", "1.54.1")), (("shaar", "0.1.0"), ("hex", "0.4.3")),
                (("base256emoji", "1.0.2"), ("const-str", "0.4.3")), (("shaar", "0.1.0"), ("base256emoji", "1.0.2")),
+               (("multibase", "0.9.3"), ("base45", "3.2.0")),
                (("shaar", "0.1.0"), ("shaar-ygg", "0.1.0"))]
 
 
@@ -117,11 +118,12 @@ class CheckEdgesTests(unittest.TestCase):
         kept = [edge for edge in _BASE_EDGES if edge not in removed]
         y.check_edges(before, _parsed(kept + list(added), {}))
 
-    def test_closure_declared_and_emoji_changes_are_admitted(self):
+    def test_closure_declared_and_multibase_drop_changes_are_admitted(self):
         self.check(added=[(("shaar", "0.1.0"), ("shaar-ygg-core", "0.1.0")),
                           (("tokio", "1.54.1"), ("parking_lot", "0.12.5")),
                           (("shaar-ygg", "0.1.0"), ("tokio", "1.54.1"))],
-                   removed=[(("base256emoji", "1.0.2"), ("const-str", "0.4.3"))])
+                   removed=[(("base256emoji", "1.0.2"), ("const-str", "0.4.3")),
+                            (("multibase", "0.9.3"), ("base45", "3.2.0"))])
 
     def test_undeclared_edge_between_existing_packages_is_rejected(self):
         with self.assertRaisesRegex(AuditError, "unapproved dependency edge: hex"):

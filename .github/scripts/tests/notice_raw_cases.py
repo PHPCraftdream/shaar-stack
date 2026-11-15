@@ -1,11 +1,14 @@
 """CI-only raw-source receipt and binding contracts, loaded by test_notice_evidence."""
 
 import copy
+import gzip
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
+import tarfile
 import unittest
 from unittest import mock
 
@@ -332,15 +335,14 @@ class RegistryGapBindingTests(unittest.TestCase):
         registry_rows = inventory["identities"]
         path_rows = prepared["identities"]
         available = sum(r["classification"] in complete for r in registry_rows)
-        self.assertEqual((available, len(registry_rows)), (517, 533))
-        self.assertEqual(inventory["counts"]["registry_text_available_identities"], 517)
+        self.assertEqual((available, len(registry_rows)), (519, 532))
+        self.assertEqual(inventory["counts"]["registry_text_available_identities"], 519)
         self.assertEqual(len(path_rows), 17)
         self.assertTrue(all(r.get("classification", "package-complete") == "package-complete" for r in path_rows))
         remaining = sorted(r["name"] + "@" + r["version"] for r in registry_rows if r["classification"] not in complete)
         self.assertEqual(remaining, sorted([
-            "base45@3.2.0", "block2@0.6.2", "dispatch2@0.3.1", "enum-assoc@1.4.1",
-            "if-watch@3.2.2", "objc2@0.6.5", "objc2-core-foundation@0.3.2", "objc2-core-wlan@0.3.2",
-            "objc2-encode@4.1.0", "objc2-foundation@0.3.2", "objc2-security@0.3.2",
+            "block2@0.6.2", "dispatch2@0.3.1", "objc2@0.6.5", "objc2-core-foundation@0.3.2",
+            "objc2-core-wlan@0.3.2", "objc2-encode@4.1.0", "objc2-foundation@0.3.2", "objc2-security@0.3.2",
             "objc2-security-foundation@0.3.2", "objc2-system-configuration@0.3.2", "pharos@0.5.3",
             "winapi-i686-pc-windows-gnu@0.4.0", "winapi-x86_64-pc-windows-gnu@0.4.0"]))
         prefix = "docs/legal/notices-material/registry/"
@@ -569,7 +571,8 @@ class RegistryBlockerBindingTests(unittest.TestCase):
                 sys.modules[name] = loaded[name]
                 spec.loader.exec_module(loaded[name])
         entries, _ = loaded["notice_corpus"].load(root)
-        expected = {("futures-bounded", "0.3.0"): "predecessor-repository", ("ring", "0.17.14"): "package-license-index"}
+        expected = {("futures-bounded", "0.3.0"): "predecessor-repository", ("ring", "0.17.14"): "package-license-index",
+                    ("enum-assoc", "1.4.1"): "elected-canonical-text", ("if-watch", "3.2.2"): "elected-canonical-text"}
         classes = {(e.name, e.version): e.provenance for e in entries.values() if e.provenance}
         self.assertEqual(classes, expected)
         found = [e for e in entries.values() if (e.name, e.version) in expected]
@@ -581,3 +584,85 @@ class RegistryBlockerBindingTests(unittest.TestCase):
         for (name, version), cls in expected.items():
             self.assertIn(f"{name} {version} | ".encode(), text)
             self.assertIn(f"registry provenance={cls} |".encode(), text)
+
+
+class RegistryElectedBindingTests(unittest.TestCase):
+    """Elected Apache-2.0 alternatives bind the canonical text, its receipt and the held archives."""
+
+    def setUp(self):
+        root = Path(__file__).resolve().parents[3]
+        self.data = root / "../../.rush/downloads"
+        self.registry = root / "docs/legal/notices-material/registry"
+        spec = importlib.util.spec_from_file_location("elected_registry_replay", self.registry / "replay.py")
+        replay = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(replay)
+        self.sources = replay.blocker_sources
+        rows = json.loads((self.registry / "inventory.json").read_bytes())["identities"]
+        self.rows = [r for r in rows if r.get("provenance_class") == self.sources.CLASS_ELECTED]
+        self.assertEqual({(r["name"], r["version"]) for r in self.rows}, set(self.sources.ELECTED))
+
+    def decoded(self, row):
+        relative = row["archive_data"][0]["path"]
+        if not (self.data / relative).is_file():
+            self.skipTest("held archive DATA unavailable")
+        compressed = (self.data / relative).read_bytes()
+        self.assertEqual(hashlib.sha256(compressed).hexdigest(), row["checksum"])
+        return gzip.decompress(compressed)
+
+    def members(self, row):
+        member = f"{row['name']}-{row['version']}/Cargo.toml"
+        with tarfile.open(fileobj=io.BytesIO(self.decoded(row)), mode="r:") as archive:
+            content = archive.extractfile(member).read()
+        self.assertEqual((len(content), hashlib.sha256(content).hexdigest()),
+                         (row["manifest_evidence"][0]["bytes"], row["manifest_evidence"][0]["sha256"]))
+        return {member: content}
+
+    def member_names(self, row):
+        with tarfile.open(fileobj=io.BytesIO(self.decoded(row)), mode="r:") as archive:
+            return {item.name for item in archive if item.isfile()}
+
+    def test_elected_rows_validate_against_the_pinned_canonical_text_and_receipt(self):
+        receipt = self.sources.elected_receipt(self.registry)
+        for row in self.rows:
+            with self.subTest(package=row["name"]):
+                self.assertEqual(self.sources.validate_elected(row, self.registry, self.members(row),
+                                                               self.member_names(row), receipt), (1, 11358))
+                self.assertEqual(row["provenance_class"], self.sources.CLASS_ELECTED)
+                self.assertEqual(row["classification"], "package-complete")
+        self.assertEqual(self.sources.ELECTED_TOTALS, (2, 22716, 2))
+
+    def test_elected_binding_rejects_identity_text_member_and_receipt_mutations(self):
+        receipt = self.sources.elected_receipt(self.registry)
+        original = next(r for r in self.rows if r["name"] == "enum-assoc")
+        read = self.sources.data_io.bounded_regular
+        for label, mutate in (
+            ("provenance_class", lambda row, names: row.pop("provenance_class")),
+            ("checksum", lambda row, names: row.update(checksum="0" * 64)),
+            ("declared_license", lambda row, names: row.update(declared_license="MIT")),
+            ("license_member", lambda row, names: names | {"LICENSE"}),
+            ("missing_member", lambda row, names: names - {next(iter(names))}),
+            ("role", lambda row, names: row["raw_materials"][0].update(role="reference_context")),
+            ("material_sha256", lambda row, names: row["raw_materials"][0].update(material_sha256="0" * 64)),
+            ("url", lambda row, names: row["raw_materials"][0].update(
+                url=row["raw_materials"][0]["url"] + "-other")),
+        ):
+            row, names = copy.deepcopy(original), self.member_names(original)
+            mutate(row, names)
+            with self.subTest(mutation=label), self.assertRaises(ValueError):
+                self.sources.validate_elected(row, self.registry, self.members(original), names, receipt)
+        for label, mutate in (
+            ("receipt_identities", lambda doc: doc["records"][0].update(identities=["jni@0.22.4"])),
+            ("receipt_bytes", lambda doc: doc["records"][0].update(bytes=11359)
+             or doc.update(body_bytes_total=11359)),
+        ):
+            changed = copy.deepcopy(receipt)
+            mutate(changed)
+            with self.subTest(mutation=label), self.assertRaises(ValueError):
+                self.sources.validate_elected(original, self.registry, self.members(original),
+                                              self.member_names(original), changed)
+        with mock.patch.object(self.sources.data_io, "bounded_regular", side_effect=lambda path, cap: (
+                read(path, cap) + b"x" if str(path).replace("\\", "/").endswith("LICENSE-APACHE")
+                else read(path, cap))):
+            with self.assertRaises(ValueError):
+                self.sources.validate_elected(original, self.registry, self.members(original),
+                                              self.member_names(original), receipt)

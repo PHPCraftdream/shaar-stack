@@ -145,7 +145,11 @@ are compared directly. Without the closure strict equality is unchanged.
 
 The product removes `base256emoji` 1.0.2 (emoji-table license/notice provenance could not be
 established) via a reviewed same-version prepared patch of `multibase` 0.9.3; multiaddr keeps
-working with Base58Btc, Base64, Base32Lower, Base64Url and generic multibase decode. The
+working with Base58Btc, Base64, Base32Lower, Base64Url and generic multibase decode. The same
+reviewed patch also removes the unused `Base45` encoding and drops the `base45` 3.2.0
+dependency: no product code references `Base45` or any `Base::` variant (an
+`rg 'Base45|Base::' crates --type rust` scan returns no matches), so removing them cannot
+change product behavior. The
 recipe module `.github/probes/native-graph-multibase/prepare.py` is loaded by `prepare.py`
 through the fixed-module mechanism; it pins registry archive SHA-256
 `7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6`, changes exactly six files
@@ -156,12 +160,14 @@ retained; the modification is identified by the provenance receipt; the prepared
 receipt live under ignored `target/native-graph/`. Root `Cargo.toml` gains the
 `[patch.crates-io]` path entry like the other native-graph patches, and the preparation action
 fetches the pinned archive. The expected lock transition (multibase registry -> path with the
-`base256emoji` edge dropped; `base256emoji` 1.0.2, `const-str` 0.4.3, `match-lookup` 0.1.3
-removed) is produced by CI resolution only; the CI-generated candidate lock bytes are pending
+`base256emoji` edge and the `base45` edge dropped; `base256emoji` 1.0.2, `const-str` 0.4.3,
+`match-lookup` 0.1.3 and the `base45` 3.2.0 registry row removed) is produced by CI resolution
+only; the CI-generated candidate lock bytes are pending
 and must not be invented. The committed lock shows the emoji chain is reachable only through
 multibase. The three-proof comparison admits exactly this one new control-to-candidate
 transition; historical BASE `516b023` and the pinned control lock `b2f1d5f` stay untouched,
-and the lock-delta audit requires the chain removal to be complete and exclusive. Product
+and the lock-delta audit requires the combined chain and base45 removal to be complete and
+exclusive. Product
 regressions in `crates/shaar-p2p/tests/multibase_base58.rs` cover base58btc PeerId text,
 `/p2p/` text and binary, z-prefixed multibase decode (empty, zero-prefixed, arbitrary,
 malformed), the now-failing emoji prefix, and Base64/Base32Lower/Base64Url preservation; the

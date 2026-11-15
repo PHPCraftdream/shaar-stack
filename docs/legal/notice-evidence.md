@@ -442,7 +442,7 @@ every row; a contract test pins this).
   `dlopen2` 0.8.2, gated by `cfg(target_os = "android")` (and the gated `netdev`
   versions); the evaluation also excludes them on `x86_64-pc-windows-gnu`.
 
-### Distributed blockers (5 at first generation, 3 after the 2026-11-12 blocker pass below; both targets; confirmed by Cargo's own tree)
+### Distributed blockers (5 at first generation, 3 after the 2026-11-12 blocker pass below; both targets; confirmed by Cargo's own tree) — closed on 2026-11-14, see the final section.
 
 Not filled; the generated bundle lists them under `RELEASE BLOCKERS` and
 `notices.py check --release` fails while any remain.
@@ -456,7 +456,8 @@ Not filled; the generated bundle lists them under `RELEASE BLOCKERS` and
 | `ring` 0.17.14 | Apache-2.0 AND ISC | component texts retained; no package-level Apache-2.0 text at the dirty pinned revision (since reclassified, see the blocker pass below) |
 
 Current state: three remain (`base45`, `enum-assoc`, `if-watch`); the generated-file figures below
-are superseded by the blocker pass at the end of this document.
+are superseded by the blocker pass at the end of this document. Superseded on 2026-11-14: the
+three blockers are closed, see the final section.
 
 ### Generated files
 
@@ -606,3 +607,75 @@ including the new blocker totals (1 predecessor text / 1,074 bytes, 1 license-in
 module `registry/blocker_sources.py`; the CI notice tests add `RegistryBlockerBindingTests` (5 test
 methods). Test execution evidence is CI only. This records text availability and provenance, not
 legal sufficiency, clearance, election or release permission.
+
+## Three remaining distributed notice blockers closed — 2026-11-14
+
+Authorization: the 2026-11-14 decision-log row. On the owner's delegation to research and decide
+("Погугли, посмотри их github"; "не знаю, подумай и реши сам, главное чтобы законно всё было."),
+the two remaining `MIT OR Apache-2.0` blockers are resolved by electing the Apache-2.0
+alternative from canonical text, and the third blocker (`base45`) leaves the graph through the
+reviewed multibase preparation. This is an engineering election on that delegation, not legal
+advice, not license clearance, and no release authority is claimed.
+
+### The elected-canonical-text class (`enum-assoc` 1.4.1, `if-watch` 3.2.2)
+
+New provenance class `elected-canonical-text`: both packages' archived manifests declare
+`MIT OR Apache-2.0`, both archives carry no license-named member, and the Apache-2.0 alternative
+is covered by the canonical Apache-2.0 text retained once for the corpus. The canonical
+acquisition is one GET on 2026-11-14 of `https://www.apache.org/licenses/LICENSE-2.0.txt`
+(HTTP 200, no redirect, 11,358 bytes, SHA-256
+`cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`), retained at
+registry-relative `raw-sources/canonical/LICENSE-APACHE` with receipt
+`raw-sources/receipts/apache-canonical-receipt.json` (1,717 bytes, SHA-256
+`d1d45a8baf42cc1b6b7716c3fa61b61f398fb399de74e9b5e65ee33308c7a1db`). The replay machine-checks
+the class through `blocker_sources.validate_elected`. Generated notices label the rows honestly:
+the PREAMBLE defines the elected class and each elected package carries the note line "Elected
+under the declared MIT OR Apache-2.0 alternatives; the package ships no license file; the text
+is the canonical Apache-2.0 license."
+
+### `base45` 3.2.0 retired from the graph
+
+The reviewed multibase 0.9.3 prepared-source recipe now also drops the `base45` dependency and
+the Base45 encoding — the same mechanism as the earlier `base256emoji` removal; the product code
+never uses Base45. The `.github/probes/native-graph/prepare.py` witnesses admit the combined
+lock delta. Pending step: the operator must still adopt the CI-resolved candidate lock; the
+committed `Cargo.lock` still lists `base45` until then. The inventory carries a
+`retired_identities` record for `base45@3.2.0` with its retained archive evidence (receipt index
+20), so no held evidence is deleted.
+
+### Corpus and manifest state
+
+Corpus counts moved from 550 to 549 third-party identities (532 registry + 17 path), from 534 to
+536 complete, and from 16 reviewed gaps (3 of them distributed blockers) to 13 not distributed:
+distributed blockers 3 → 0. Per-target manifests were regenerated from the held CI artifacts of
+the `license-blockers-1112` artifact set with the reviewed single-identity `base45` delta applied
+(one package, one resolve node, one multibase→base45 edge, one tree line per target; derivation
+assertions observed). Each target reports 371 linked packages, 0 release blockers and 13 reviewed
+gaps not distributed; `notices.py check --release` exits 0 on both derived inputs and
+`release_ready` is true in both committed manifests. The manifest files carry no run id —
+regeneration was local from held artifacts; re-verification by each CI job against its own host
+tree is the authoritative acceptance, and no CI run is claimed here.
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `manifest-x86_64-unknown-linux-gnu.json` (committed) | 129,152 | `a1c3dde01f170be0ecdc07231b26be28a157bb851fdaf37d764d66c3ee2f6175` |
+| `manifest-x86_64-pc-windows-msvc.json` (committed) | 130,676 | `2461d50d76317e222dffc5cccb17d77098ac0bc3f9bba2da19218f99f7c63272` |
+
+The regenerated notice texts themselves are uncommitted `--manifest-only` outputs; the committed
+manifests pin them in their `notices` fields:
+
+| File | Bytes | Texts | SHA-256 |
+|---|---|---|---|
+| `THIRD-PARTY-NOTICES-x86_64-unknown-linux-gnu.txt` | 928,256 | 279 | `72453caf881d35fc9ba0b44743232e9f7cc6d2bf459fbc486b8d941c2e11888d` |
+| `THIRD-PARTY-NOTICES-x86_64-pc-windows-msvc.txt` | 973,046 | 282 | `3ccb2d3174cb4162ab0fff2be8065a65bd6992094b1ceec0c1dce40930a4fd72` |
+
+### Verified locally, and not verified
+
+Verified locally: `python -I` DATA reads of both committed manifests (bytes, SHA-256, counts,
+`release_ready`, pinned notice-text hashes), of the canonical text and its receipt, and of the
+inventory's `retired_identities` row; plus the generator and `notices.py check --release` runs on
+derived inputs. Not verified locally: no unittest runs, no Cargo, no CI. The archive-member
+replay of the elected rows is executed only by the CI tests. Standing non-claims: the
+`elected-canonical-text` rows are an engineering election on the owner's delegation; none of this
+is legal advice or license clearance; no release authority is claimed; no license text was ever
+synthesized.

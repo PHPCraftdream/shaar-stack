@@ -8,7 +8,10 @@ additions awaiting CI evidence. The closure is all or nothing.
 import json
 
 _REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
-_EMOJI = frozenset({"base256emoji", "const-str", "match-lookup"})
+# Edge-removal tolerances of the approved multibase transition. The Yggdrasil
+# closure itself is root-lock agnostic; base45 only ever appears in the root
+# lock (registry multibase dependency) and never in the nested closure below.
+_EMOJI = frozenset({"base256emoji", "const-str", "match-lookup", "base45"})
 _VOLATILE = ("features", "dependencies", "owner", "sha256")
 PREPARED = {"ironwood": "0.2.1", "yggdrasil": "0.3.1"}
 WORKSPACE = ("shaar-ygg-core", "0.1.0")

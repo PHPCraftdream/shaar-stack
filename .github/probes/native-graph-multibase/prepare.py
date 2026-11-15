@@ -1,10 +1,10 @@
 # Copyright 2026 PHPCraftdream
 # SPDX-License-Identifier: MIT OR Apache-2.0
-"""Prepare the pinned multibase 0.9.3 source without base256emoji."""
+"""Prepare the pinned multibase 0.9.3 source without base256emoji and base45."""
 
-# The emoji doc/alphabet lines are anchored structurally (prefix/suffix/length
-# bounds plus the archive and receipt hashes) rather than re-transcribed, to
-# avoid byte drift against the vendored upstream source.
+# The emoji and Base45 doc/alphabet lines are anchored structurally
+# (prefix/suffix/length bounds plus the archive and receipt hashes) rather than
+# re-transcribed, to avoid byte drift against the vendored upstream source.
 
 from __future__ import annotations
 
@@ -38,6 +38,10 @@ EMOJI_DOC_PREFIX = b"/// Base256Emoji (alphabet: " + ROCKET
 EMOJI_DOC_SUFFIX = b"\xf0\x9f\xa5\x82)\n"
 DOC_MIN = 900
 DOC_MAX = 1300
+BASE45_DOC_PREFIX = b"/// Base45, rfc9285 (alphabet: "
+BASE45_DOC_SUFFIX = b").\n"
+BASE45_DOC_MIN = 40
+BASE45_DOC_MAX = 200
 
 
 def digest(data: bytes) -> str:
@@ -139,6 +143,19 @@ def _doc_shape(name: str, line: bytes) -> None:
         raise ValueError("multibase emoji doc line shape mismatch in " + name)
 
 
+def _b45_doc(name: str, lines: list[bytes], indent: bytes) -> int:
+    """Locate the unique Base45 doc line with the expected shape; return its index."""
+    docs = [i for i, line in enumerate(lines)
+            if line.startswith(indent + BASE45_DOC_PREFIX)
+            and line.endswith(BASE45_DOC_SUFFIX)]
+    if len(docs) != 1:
+        raise ValueError("unique multibase base45 doc line mismatch in " + name)
+    line = lines[docs[0]]
+    if not (BASE45_DOC_MIN < len(line) < BASE45_DOC_MAX) or line.count(b"Base45") != 1:
+        raise ValueError("multibase base45 doc line shape mismatch in " + name)
+    return docs[0]
+
+
 def _unique(lines: list[bytes], name: str, needle: bytes) -> int:
     hits = [i for i, line in enumerate(lines) if line == needle]
     if len(hits) != 1:
@@ -147,7 +164,7 @@ def _unique(lines: list[bytes], name: str, needle: bytes) -> int:
 
 
 def _removals(name: str, data: bytes) -> list[int]:
-    """Return the sorted indices of the anchored base256emoji lines to delete."""
+    """Return the sorted indices of the anchored base256emoji and base45 lines to delete."""
     lines = _lines(name, data)
     drop: list[int] = []
     if name == "Cargo.toml":
@@ -158,8 +175,19 @@ def _removals(name: str, data: bytes) -> list[int]:
         if lines[start + 3] != b"[dependencies.base45]\n":
             raise ValueError("multibase base256emoji block trailer mismatch")
         drop = [start, start + 1, start + 2]
+        drop.append(_unique(lines, name, b'    "base45/std",\n'))
+        block45 = [b"[dependencies.base45]\n", b'version = "3.2.0"\n',
+                   b"default-features = false\n"]
+        start45 = _unique(lines, name, block45[0])
+        if lines[start45:start45 + 3] != block45:
+            raise ValueError("multibase base45 dependency block mismatch")
+        if lines[start45 + 3] != b"\n":
+            raise ValueError("multibase base45 dependency block trailer mismatch")
+        drop.extend((start45, start45 + 1, start45 + 2, start45 + 3))
     elif name == "Cargo.toml.orig":
-        drop = [_unique(lines, name, b'base256emoji = "1.0.2"\n')]
+        drop = [_unique(lines, name, b'base256emoji = "1.0.2"\n'),
+                _unique(lines, name,
+                        b'base45 = { version = "3.2.0", default-features = false }\n')]
     elif name == "src/error.rs":
         block = [
             b"impl From<base256emoji::DecodeError> for Error {\n",
@@ -173,6 +201,19 @@ def _removals(name: str, data: bytes) -> list[int]:
         if lines[start:start + 6] != block:
             raise ValueError("multibase base256emoji From impl block mismatch")
         drop = [start + i for i in range(6)]
+        block45 = [
+            b"impl From<base45::DecodeError> for Error {\n",
+            b"    fn from(_: base45::DecodeError) -> Self {\n",
+            b"        Self::InvalidBaseString\n",
+            b"    }\n",
+            b"}\n",
+        ]
+        start45 = _unique(lines, name, block45[0])
+        if start45 == 0 or lines[start45 - 1] != b"\n":
+            raise ValueError("multibase error.rs base45 block predecessor mismatch")
+        if start45 + 5 != len(lines) or lines[start45:start45 + 5] != block45:
+            raise ValueError("multibase base45 From impl block mismatch")
+        drop.extend(range(start45 - 1, start45 + 5))
     elif name == "src/base.rs":
         anchor = _unique(lines, name, b"    'U' => Base64UrlPad,\n")
         if not (anchor + 3 < len(lines)):
@@ -183,6 +224,10 @@ def _removals(name: str, data: bytes) -> list[int]:
         if lines[anchor + 3] != b"}\n":
             raise ValueError("multibase base.rs emoji block trailer mismatch")
         drop = [anchor + 1, anchor + 2]
+        start45 = _b45_doc(name, lines, b"    ")
+        if lines[start45 + 1] != b"    'R' => Base45,\n":
+            raise ValueError("multibase base.rs base45 variant line mismatch")
+        drop.extend((start45, start45 + 1))
     elif name == "src/impls.rs":
         drop.append(_unique(lines, name, b"use base256emoji::{Base, Emoji};\n"))
         docs = [i for i, line in enumerate(lines)
@@ -212,6 +257,26 @@ def _removals(name: str, data: bytes) -> list[int]:
         if lines[start + 14] != b"derive_base_encoding! {\n":
             raise ValueError("multibase impls.rs emoji block trailer mismatch")
         drop.extend(range(start, start + 14))
+        start45 = _b45_doc(name, lines, b"")
+        if start45 == 0 or lines[start45 - 1] != b"\n":
+            raise ValueError("multibase impls.rs base45 doc predecessor mismatch")
+        tail45 = (
+            b"pub(crate) struct Base45;\n",
+            b"\n",
+            b"impl BaseCodec for Base45 {\n",
+            b"    fn encode<I: AsRef<[u8]>>(input: I) -> String {\n",
+            b"        base45::encode(input.as_ref())\n",
+            b"    }\n",
+            b"\n",
+            b"    fn decode<I: AsRef<str>>(input: I) -> Result<Vec<u8>> {\n",
+            b"        let uppercased = input.as_ref().to_ascii_uppercase();\n",
+            b"        Ok(base45::decode(&uppercased)?)\n",
+            b"    }\n",
+            b"}\n",
+        )
+        if start45 + 13 != len(lines) or tuple(lines[start45 + 1:start45 + 13]) != tail45:
+            raise ValueError("multibase impls.rs Base45 block mismatch")
+        drop.extend(range(start45 - 1, start45 + 13))
     elif name == "tests/lib.rs":
         hits = [i for i, line in enumerate(lines)
                 if line.startswith(b'        (Base256Emoji, "' + ROCKET)
@@ -219,26 +284,46 @@ def _removals(name: str, data: bytes) -> list[int]:
         if len(hits) != 3:
             raise ValueError("multibase tests/lib.rs emoji case count mismatch")
         drop = hits
+        hits45 = [i for i, line in enumerate(lines)
+                  if line.startswith(b'        (Base45, "') and line.endswith(b'",\n')]
+        if len(hits45) != 4:
+            raise ValueError("multibase tests/lib.rs base45 case count mismatch")
+        drop.extend(hits45)
     else:
         raise ValueError("multibase recipe has no anchor plan for " + name)
     return sorted(drop)
 
 
+def _replacements(name: str, data: bytes) -> dict[int, bytes]:
+    """Return the anchored base45 std-feature line replacement, if any."""
+    if name != "Cargo.toml.orig":
+        return {}
+    lines = _lines(name, data)
+    source = _unique(lines, name, b'std = ["data-encoding/std", "base45/std"]\n')
+    return {source: b'std = ["data-encoding/std"]\n'}
+
+
 def _apply(original: dict[str, bytes]) -> dict[str, bytes]:
-    """Deterministic anchored removal of every base256emoji reference."""
+    """Deterministic anchored removal of every base256emoji and base45 reference."""
     changed = dict(original)
     for name in CHANGE_FILES:
         lines = _lines(name, original[name])
         drop = set(_removals(name, original[name]))
+        edits = _replacements(name, original[name])
+        if set(edits) & drop:
+            raise ValueError("multibase replacement/removal overlap in " + name)
         changed[name] = b"".join(
-            line for i, line in enumerate(lines) if i not in drop)
+            edits.get(i, line) for i, line in enumerate(lines) if i not in drop)
     manifest = tomllib.loads(changed["Cargo.toml"].decode("utf-8"))
     dependencies = manifest.get("dependencies", {})
-    if "base256emoji" in dependencies:
-        raise ValueError("multibase prepared Cargo.toml still lists base256emoji")
-    for name in ("base-x", "base45", "data-encoding", "data-encoding-macro"):
+    for name in ("base256emoji", "base45"):
+        if name in dependencies:
+            raise ValueError("multibase prepared Cargo.toml still lists " + name)
+    for name in ("base-x", "data-encoding", "data-encoding-macro"):
         if name not in dependencies:
             raise ValueError("multibase prepared Cargo.toml lost dependency " + name)
+    if manifest.get("features", {}).get("std") != ["data-encoding/std"]:
+        raise ValueError("multibase prepared Cargo.toml std feature mismatch")
     tree = dict(original)
     tree.update(changed)
     for name, data in tree.items():
@@ -246,6 +331,8 @@ def _apply(original: dict[str, bytes]) -> dict[str, bytes]:
             continue
         if b"base256emoji" in data.lower():
             raise ValueError("multibase prepared tree still references base256emoji in " + name)
+        if b"base45" in data.lower():
+            raise ValueError("multibase prepared tree still references base45 in " + name)
         if ROCKET in data:
             raise ValueError("multibase prepared tree still contains the emoji code char in " + name)
     return {name: data for name, data in changed.items() if original[name] != data}
@@ -270,13 +357,19 @@ def reverse(original: dict[str, bytes], changed: dict[str, bytes]) -> dict[str, 
     for name in CHANGE_FILES:
         original_lines = _lines(name, original[name])
         drop = sorted(_removals(name, original[name]))
+        edits = _replacements(name, original[name])
+        if set(edits) & set(drop):
+            raise ValueError("multibase replacement/removal overlap in " + name)
         changed_lines = _lines(name, changed[name])
-        keep = [line for i, line in enumerate(original_lines) if i not in set(drop)]
+        keep = [edits.get(i, line) for i, line in enumerate(original_lines)
+                if i not in set(drop)]
         if keep != changed_lines:
-            raise ValueError("multibase changed content is not the anchored removal in " + name)
+            raise ValueError("multibase changed content is not the anchored edit in " + name)
         rebuilt = list(changed_lines)
         for index in drop:
             rebuilt.insert(index, original_lines[index])
+        for index, line in edits.items():
+            rebuilt[index] = original_lines[index]
         recovered[name] = b"".join(rebuilt)
     if recovered != original:
         raise ValueError("multibase reverse reassembly does not match the originals")
