@@ -48,11 +48,19 @@ def evidence(case):
             result_extra["punch_control"] = {"status": "pass", "receipts": [
                 {"host": "host_a", "sent": 20, "received": 18, "first": ["203.0.113.2", 40100]},
                 {"host": "host_b", "sent": 20, "received": 19, "first": ["203.0.113.1", 40100]}]}
+        if spec.get("direct"):
+            result_extra["markers"] = {"client": "composed startup: server_address=none",
+                                       "client_lines": {contract.PUNCH_TRACE: contract.PUNCH_TRACE + "2 outcome=direct elapsed_ms=120",
+                                                        contract.ROUTE_LINE: contract.ROUTE_LINE + " via 203.0.113.10"}}
+        if spec.get("dht_denied"):
+            routers["rtr_a"]["counters"]["dht_drop"]["packets"] = 3
         if spec["direct"]:
             for router in routers:
                 routers[router]["counters"]["peer_sent"]["packets"] = 5
                 routers[router]["counters"]["peer_recv"]["packets"] = 6
         elif not spec["ygg_client_blocked"] and spec["mode"] == "standby":
+            routers["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 9
+        if spec.get("norelay"):
             routers["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 9
         if spec.get("relay_first"):
             routers["rtr_a"]["counters"]["dht_drop"]["packets"] = 3
@@ -201,6 +209,18 @@ def mutate(case, name):
         counters["rtr_a"]["counters"]["relay_tcp"]["packets"] = 0
     elif name == "no-dht-drop-seen":
         counters["rtr_a"]["counters"]["dht_drop"]["packets"] = 0
+    elif name == "no-route-line":
+        del result["markers"]["client_lines"][contract.ROUTE_LINE]
+    elif name == "no-punch-line":
+        del result["markers"]["client_lines"][contract.PUNCH_TRACE]
+    elif name == "no-markers":
+        del result["markers"]
+    elif name == "route-relay":
+        result["markers"]["client_lines"][contract.ROUTE_LINE] = contract.ROUTE_LINE.replace("native", "relay")
+    elif name == "punch-fallback":
+        result["markers"]["client_lines"][contract.PUNCH_TRACE] = contract.PUNCH_TRACE + "2 outcome=fallback elapsed_ms=120"
+    elif name == "punch-zero":
+        result["markers"]["client_lines"][contract.PUNCH_TRACE] = contract.PUNCH_TRACE + "0 outcome=direct elapsed_ms=120"
     elif name == "ygg-used":
         counters["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 1
     elif name == "ygg-missing":
@@ -272,11 +292,13 @@ class EvidenceTests(unittest.TestCase):
                 names += ("block-escape",) if spec["mode"] == "signal" else ("slow-failover", "slow-recovery", "no-ygg")
                 names += ("signal-reply",) if spec["mode"] == "signal" else ()
             if spec["net"] == "dnat":
-                names += ("peer-recv", "peer-sent", "ygg-used") if spec["direct"] else ("direct-path",)
+                names += ("peer-recv", "peer-sent", "ygg-missing" if spec.get("norelay") else "ygg-used") if spec["direct"] else ("direct-path",)
+                names += ("no-route-line", "no-punch-line", "punch-fallback", "punch-zero", "no-markers", "route-relay") if spec["direct"] else ()
                 names += ("ygg-missing",) if not spec["ygg_client_blocked"] and spec["mode"] == "standby" else ()
                 names += ("ygg-used",) if spec["ygg_client_blocked"] and not spec["direct"] else ()
                 names += ("punch-missing", "punch-garbled", "punch-unknown-status") if spec["nat"] == "cone" else ()
                 names += ("no-relay-negotiation", "no-dht-drop-seen") if spec.get("relay_first") else ()
+                names += ("no-dht-drop-seen",) if spec.get("dht_denied") else ()
             names += MUTATIONS.get("flow:" + spec.get("flow", "single"), ())
             if spec.get("flow") == "denied-key":
                 names += ("denied-reply", "control-exit")
@@ -303,7 +325,7 @@ class PlanTests(unittest.TestCase):
         products = sum(1 for entry in phase.PLAN if entry[1] == "product")
         controls = len(phase.PLAN) - products
         self.assertEqual((products, controls), (12, 3))
-        self.assertEqual(len(contract.CASES), 28)
+        self.assertEqual(len(contract.CASES), 31)
         # The worst case of every case at its ceiling does not fit 20 minutes; admission control refuses a case
         # that cannot finish, and the expected total (about 8 minutes) leaves the margin recorded in the contract.
         self.assertGreater(products * contract.CASE_SECONDS, contract.PHASE_SECONDS)
@@ -316,7 +338,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(flags["live-failure"], ("--fault-inject-fixture",))
 
     def test_groups_cover_every_case_once_and_each_fits_the_privileged_budgets(self):
-        self.assertEqual(set(phase.GROUPS), {"base", "nat", "faults"})
+        self.assertEqual(set(phase.GROUPS), {"base", "nat", "faults", "punch"})
         self.assertIs(phase.GROUPS["base"], phase.PLAN)
         covered = []
         for group, plan in phase.GROUPS.items():
@@ -330,6 +352,12 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(len(covered), len(contract.CASES))
         self.assertEqual(phase.allocated(phase.GROUPS["nat"]), 48 * 1024 * 1024)
         self.assertEqual(phase.allocated(phase.GROUPS["faults"]), 32 * 1024 * 1024)
+        self.assertEqual(phase.allocated(phase.GROUPS["punch"]), 20 * 1024 * 1024)
+        punch_names = [entry[0] for entry in phase.GROUPS["punch"] if entry[1] == "product"]
+        self.assertEqual(punch_names, list(phase.PUNCH_CASES))
+        self.assertEqual([entry[2] for entry in phase.GROUPS["nat"] if entry[1] == "product"], list(phase.NAT_CASES))
+        self.assertTrue({"dnat-cone-signal", "dnat-cone-standby"} <= set(phase.NAT_CASES))
+        self.assertFalse({"dnat-cone-signal", "dnat-cone-standby"} & set(punch_names))
         # The slowest-by-design cases (outage recovery, typed Server failures) run last in their group.
         self.assertEqual([entry[0] for entry in phase.GROUPS["faults"]][-5:-2], ["recover-standby", "relay-full-signal", "relay-full-standby"])
 

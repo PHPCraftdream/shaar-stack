@@ -1,6 +1,7 @@
 """Strict, per-class conclusions over raw case evidence; never trusts a bare exit status."""
 
 from pathlib import Path
+import re
 import sys
 
 HERE = Path(__file__).resolve().parent
@@ -110,11 +111,25 @@ def dnat(spec, counters, result):
     if spec["nat"] == "cone":
         punch_control(result)
     if spec["direct"]:
+        # Flipped oracle: encodes the EXPECTED behaviour after the merged L4 punch; flipped only after a preserved
+        # FAILED privileged run, never to force green.
         for router in counters:
             contract.require(packets(counters, router, "peer_sent") > 0 and packets(counters, router, "peer_recv") > 0,
                              f"{router} saw no translated Native UDP both ways between the routers (no hole punching)")
-        contract.require(packets(counters, "rtr_a", "ygg_tcp") == 0, "Ygg TCP carried traffic although it was denied")
+        if spec.get("norelay"):
+            contract.require(packets(counters, "rtr_a", "ygg_tcp") > 0, "no Ygg TCP rendezvous traffic although the case has no relay")
+        else:
+            contract.require(packets(counters, "rtr_a", "ygg_tcp") == 0, "Ygg TCP carried traffic although it was denied")
+        lines = (result.get("markers") or {}).get("client_lines") or {}
+        contract.require(contract.ROUTE_LINE in lines, "Client log lacks the native route line")
+        contract.require("path=native" in lines[contract.ROUTE_LINE], "Client log lacks the native route line")
+        contract.require(contract.PUNCH_TRACE in lines, "Client log lacks the punch candidate trace")
+        contract.require(contract.PUNCH_DIRECT in lines[contract.PUNCH_TRACE], "Client punch did not end on the direct path")
+        found = re.search(r"candidates=(\d+)", lines[contract.PUNCH_TRACE])
+        contract.require(found is not None and int(found.group(1)) >= 1, "Client punch had no candidates to dial")
         return
+    # The relay variants keep today's fail-closed oracle on purpose: they are the regression control that a Server
+    # config still naming a relay produces today's behaviour (fail-closed expectation belongs to the later leaf L4b).
     for router in counters:
         contract.require(packets(counters, router, "peer_recv") == 0, f"{router} received Native UDP from the other router: a direct path formed")
     ygg = packets(counters, "rtr_a", "ygg_tcp")
@@ -125,6 +140,8 @@ def dnat(spec, counters, result):
     if spec.get("relay_first"):
         contract.require(packets(counters, "rtr_a", "dht_drop") > 0 and packets(counters, "rtr_a", "relay_tcp") > 0,
                          "the Client did not reach relay negotiation with its DHT queries dropped")
+    if spec.get("dht_denied"):
+        contract.require(packets(counters, "rtr_a", "dht_drop") > 0, "the DHT block never observed a query in the fail-closed guard")
 
 
 def recover(result):

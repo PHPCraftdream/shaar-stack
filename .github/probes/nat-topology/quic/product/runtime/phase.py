@@ -53,14 +53,18 @@ def product(name):
     return (name, "product", name, ())
 
 
-# Dispatch groups (selected by --group): the 12 accepted cases, and two groups for the remaining P13 rows. The cases of all
+# Dispatch groups (selected by --group): the 12 accepted cases, and groups for the remaining P13 rows. The cases of all
 # groups together would not fit the 20 minute phase, so each dispatch runs one group with the same three cleanup controls.
+# The nat group keeps its accepted 10 cases within the phase; the three new punch cases get their own dispatch group
+# under the same PHASE_SECONDS budget (allocated 3*2*2 MiB + 2*2*2 MiB = 20 MiB, well under 64 MiB).
 NAT_CASES = ("dnat-cone-signal", "dnat-cone-standby", "dnat-cone-relay-signal", "dnat-cone-relay-standby", "dnat-sym-signal", "dnat-sym-standby",
              "hole-signal", "hole-standby", "switch-signal", "switch-standby")
 FAULT_CASES = ("ipv6-signal", "ipv6-standby", "denied-native-signal", "recover-standby", "relay-full-signal", "relay-full-standby")
+PUNCH_CASES = ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal")
 GROUPS = {"base": PLAN,
           "nat": (PLAN[0], *map(product, NAT_CASES), *PLAN[-2:]),
-          "faults": (PLAN[0], *map(product, FAULT_CASES), *PLAN[-2:])}
+          "faults": (PLAN[0], *map(product, FAULT_CASES), *PLAN[-2:]),
+          "punch": (PLAN[0], *map(product, PUNCH_CASES), *PLAN[-2:])}
 
 
 def allocated(plan):

@@ -65,13 +65,12 @@ class PrivilegeTests(unittest.TestCase):
             command(config, product="relative-client")
 
     def test_environment_cannot_inherit_loader_or_interpreter_overrides(self):
-        environment = processes.child_environment({"SHAAR_NAT_ROLE": "wan"})
-        self.assertEqual(environment["SHAAR_NAT_ROLE"], "wan")
-        self.assertEqual(set(environment), {"PATH", "LANG", "LC_ALL", "SHAAR_NAT_ROLE"})
+        environment = processes.child_environment({"SHAAR_NAT_ROLE": "wan", "SHAAR_NAT_DHT_OBSERVED": "1"})
+        self.assertEqual(environment["SHAAR_NAT_DHT_OBSERVED"], "1")
+        self.assertEqual(set(environment), {"PATH", "LANG", "LC_ALL", "SHAAR_NAT_ROLE", "SHAAR_NAT_DHT_OBSERVED"})
         for extra in ({"LD_PRELOAD": "/foreign.so"}, {"PYTHONPATH": "/foreign"},
                       {"SHAAR_NAT_ROLE": "x" * 4097}, {"SHAAR_NAT_NONCE": "\0"},
-                      # The recorded L5 DHT observed-address option is not an owned child variable yet.
-                      {"SHAAR_NAT_DHT_OBSERVED": "1"}):
+                      {"SHAAR_NAT_DHT_OBSERVED": "0" * 4097}):
             with self.assertRaises(ValueError):
                 processes.child_environment(extra)
 
