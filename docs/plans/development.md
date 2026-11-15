@@ -47,10 +47,12 @@ legal and public-network gates remain explicit. Server and Client startup config
 use ktav 0.8.*.
 
 Not included: UDP forwarding, multiple published services on the server, a GUI,
-a single CLI replacing separate Server and Client, DHT record encryption,
-system packages, and automated release publication. Torrent-style file exchange
-is future work over the completed channel, not a v1 requirement. New modes,
-parameters and dependencies require agreed acceptance criteria. An in-house
+a single CLI replacing separate Server and Client, DHT record encryption
+(except the opt-in encrypted reflexive address of the 2026-11-15 decision in
+`north-star.md`), system packages, and automated release publication.
+Torrent-style file exchange is future work over the completed channel, not a v1
+requirement. New modes, parameters and dependencies require agreed acceptance
+criteria. An in-house
 Yggdrasil implementation is not permitted; P07 requires a reviewed external Rust core.
 
 ## 2. Normative rules and source materials
