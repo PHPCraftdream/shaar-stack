@@ -6,7 +6,7 @@
 - P13: the namespace matrix ran in three passes (E4 base, E8 extension, E9 remaining rows; report in scenarios section 10). Row A5 (direct path through double cone NAT) is a recorded **negative finding**, not a pass; it is the reason for the NAT toolkit below. Still open inside closed rows: key-only IPv6 discovery, circuit and Client-side relay exhaustion, other NAT types, long-period keepalive. Gated: real home/mobile/cafe devices.
 - Platform scope (2026-11-14): the products compile in CI for Linux, Windows, macOS and Android; the zero-configuration first run is executed in CI on Ubuntu and Windows only. macOS and Android are compiled, never executed; no real device was used.
 - NAT toolkit without a helper server (north-star step 4, design in [P13 controlled network](p13-controlled-network.md)): merged L1 (dial ordering), L0 (relay-optional composed startup), L2 (DHT-voted reflexive IP through the owner watcher) and the L5 fixture part. In progress: L4 (punch coordination over Yggdrasil signaling) and route observability in the product logs. Not started: L3 (reflexive address in the record as a setting; its encrypted mode waits for an owner-approved threat model), L4b (candidate exchange over the libp2p relay carrier when a relay is configured), the L5 cases and oracle flips, the L6 dispatches (six authorized on 2026-11-14).
-- Live network: two bounded smokes ran (43629141158 failed at the public relay reservation; relay-less 43671098240 passed over Yggdrasil standby with the route inferred by exclusion). **No direct path and no hole punch has been observed on a public network.**
+- Live network: three bounded smokes ran (43629141158 failed at the public relay reservation; relay-less 43671098240 passed over Yggdrasil standby with the route inferred by exclusion; 43751396899 passed over Yggdrasil standby with the route observed and no punch exchange). **No direct path and no hole punch has been observed on a public network.**
 - Notices: N1 corpus and N2 build/checks are in place; the three remaining gaps (`base45`, `enum-assoc`, `if-watch`) are closed on a branch that is in full-scope CI and not merged. No legal clearance, no release authority.
 - Next steps, in order: land L4 and route observability → L3 plain setting → L4b → L5 cases and the L6 dispatches → one live smoke with a direct-path attempt (contract amendment first) → re-measure the P10 efficiency criteria and the P14 resources on the final SHA → P16.
 - Blockers and gates: the owner's approval of the threat model for the encrypted address; device access for real networks; legal clearance and release; no publication, version change, commit or push beyond explicit user requests.
@@ -1851,6 +1851,26 @@ exchange succeeding by key alone); no direct path, no hole punching and no NAT t
 exercised; one run on two GitHub-hosted runners is not acceptance of the end-to-end claim,
 and real devices were not involved. The evidence artifacts are `public-smoke-server-evidence`
 and `public-smoke-client-evidence` of that run.
+
+**Third run, direct-path attempt (2026-11-15, fork run 43751396899, source 5d43914197e8, contract
+SHA-256 ba8a28f77f06a85200569051d58f29d3b7f2adf18ec7c1886b737a1c42c5acf3):** the plan, build, Server
+(runner A) and Client (runner B) jobs passed. The Client, configured with the server key only,
+completed one exact application exchange (43 byte request and reply, first byte and total 0.88 s)
+through the Server's fixed target over Yggdrasil standby: each role logged one `ygg-standby` route
+and session line, held two Yggdrasil connections and no relay or unlisted connection, and both
+products exited with code 0. Metered per job: NIC 316,420 B (Client) and 351,922 B (Server) of
+5 MiB, DHT UDP 282,512 B and 317,044 B of 1.5 MiB, zero violations. **Direct-path observation: none,
+and no punch exchange took place.** The Client printed six punch attempts, every one with
+`candidates=0` (it knew no public address of its own), four of them lasting 0 ms; the Server
+printed no punch line (an Offer without candidates starts no probe burst). The cause of the 0 ms
+attempts is **not established**: the trace carries no end reason. Hypotheses from the code, none
+observed: the 3 s attempt deadline was already spent by the DHT lookup before the punch phase began
+(`started >= deadline`), or the control datagram path refused or closed the send. The first
+reflexive vote also arrives seconds after start, so early attempts offered no candidate. The next
+step is an end-reason token on the punch trace (task NAT-L4e), so that the next live run can tell
+these apart. None of this says anything about the cloud NAT: no cloud-NAT punch has been tried
+yet. What this does not prove: any direct path,
+any hole punching or NAT traversal on a public network, or acceptance of the end-to-end claim.
 
 ### Native is not blocked (third run onward): the direct attempt
 
