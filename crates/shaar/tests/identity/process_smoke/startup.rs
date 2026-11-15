@@ -117,7 +117,8 @@ async fn run_first_run() -> Result<(), String> {
 }
 
 /// Spawns an executable with explicit arguments (possibly none) and pins the
-/// per-user data root by setting APPDATA, HOME and XDG_DATA_HOME on the child.
+/// per-user data root by setting LOCALAPPDATA, HOME and XDG_DATA_HOME on the
+/// child.
 async fn spawn_first_run(
     exe: &str,
     args: &[String],
@@ -128,7 +129,7 @@ async fn spawn_first_run(
     command
         .args(args)
         .current_dir(working_dir)
-        .env("APPDATA", data_root)
+        .env("LOCALAPPDATA", data_root)
         .env("HOME", data_root)
         .env("XDG_DATA_HOME", data_root)
         .stdout(Stdio::piped())

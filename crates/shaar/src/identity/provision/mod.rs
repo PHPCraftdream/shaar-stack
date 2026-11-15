@@ -142,7 +142,9 @@ pub fn role_dir(base: &Path, role: Role) -> PathBuf {
 /// Resolves the per-user data directory from the injected env accessor.
 ///
 /// Platform rules (empty values count as unset):
-/// - Windows: `%APPDATA%\shaar`; missing/empty `APPDATA` is an error.
+/// - Windows: `%LOCALAPPDATA%\shaar`; missing/empty `LOCALAPPDATA` is an
+///   error (`APPDATA` is never read, so the key never lands in the roaming
+///   profile).
 /// - Unix: `$XDG_DATA_HOME/shaar` when `XDG_DATA_HOME` is non-empty AND
 ///   absolute (a relative value is ignored per the XDG spec); else
 ///   `$HOME/.local/share/shaar`; else an error.
@@ -157,9 +159,9 @@ pub fn resolve_data_dir(
     };
     #[cfg(windows)]
     {
-        non_empty("APPDATA")
+        non_empty("LOCALAPPDATA")
             .map(|p| p.join("shaar"))
-            .ok_or(ProvisionError::MissingEnv("APPDATA"))
+            .ok_or(ProvisionError::MissingEnv("LOCALAPPDATA"))
     }
     #[cfg(not(windows))]
     {
