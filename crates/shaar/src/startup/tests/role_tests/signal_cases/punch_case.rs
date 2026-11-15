@@ -31,8 +31,9 @@ use crate::startup::role::server_close::set_punch_candidates_for_tests;
 use crate::startup::role::{ClientRole, RoleEvent, ServerRole};
 
 use super::super::fixtures::{
-    ROLE_BUDGET, echo_target, identity, probe_claim_free, pub_key_hex, reserve_tcp_port,
-    reserve_udp_port, role_logs, server_role_config_without_relay, start_listener, tuned_policy,
+    ROLE_BUDGET, echo_target, forward_and_echo, identity, probe_claim_free, pub_key_hex,
+    reserve_tcp_port, reserve_udp_port, role_logs, server_role_config_without_relay,
+    start_listener, tuned_policy,
 };
 
 /// Client role config text WITHOUT signaling relay fields: mirrors

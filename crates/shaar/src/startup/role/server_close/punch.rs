@@ -281,19 +281,24 @@ mod tests {
 
     const PEER: [u8; 32] = [7u8; 32];
 
+    /// The candidates every `offer` claims: private LAN, because the probe
+    /// gate denies documentation ranges. A batch carries THESE (the peer's
+    /// claimed addresses), never the provider's own candidates.
+    fn offered() -> Vec<SocketAddr> {
+        vec!["10.0.0.1:4433".parse().unwrap()]
+    }
+
     fn offer(epoch: u32) -> Vec<u8> {
         encode(&PunchMessage {
             kind: Kind::Offer,
             epoch,
-            // Private LAN offer: the Finding 2 probe gate denies the former
-            // documentation-range candidate, so this is an honest data swap
-            // that keeps the batch assertions meaningful.
-            candidates: vec!["10.0.0.1:4433".parse().unwrap()],
+            candidates: offered(),
         })
         .unwrap()
     }
 
-    fn answer(raw: Vec<u8>) -> PunchMessage {
+    fn answer(raw: Option<Vec<u8>>) -> PunchMessage {
+        let raw = raw.expect("answer datagram");
         let message = punch::decode(&raw).expect("decoded answer");
         assert_eq!(message.kind, Kind::Answer);
         message
@@ -346,9 +351,44 @@ mod tests {
         assert_eq!(answer.candidates, candidates);
         let batch = timeout(Duration::from_secs(1), batches.recv())
             .await
-            .unwrap();
+            .unwrap()
+            .expect("batch");
         assert_eq!(batch.peer, PEER);
-        assert_eq!(batch.candidates, candidates);
+        assert_eq!(batch.candidates, offered());
+        // Exactly one batch for one offer (the same-LAN path stays open).
+        no_batch(&mut batches).await;
+    }
+
+    fn offer_with(epoch: u32, candidates: Vec<SocketAddr>) -> Vec<u8> {
+        encode(&PunchMessage {
+            kind: Kind::Offer,
+            epoch,
+            candidates,
+        })
+        .unwrap()
+    }
+
+    /// Finding 2: an offer whose candidates are all special-range (link-local
+    /// and documentation) is still ANSWERED with the provider's candidates but
+    /// starts NO probe batch. Fails on the code that forwarded every offered
+    /// candidate.
+    #[tokio::test]
+    async fn link_local_and_documentation_offers_are_answered_but_start_no_batch() {
+        let provider: Vec<SocketAddr> = vec!["10.0.0.9:4433".parse().unwrap()];
+        let (in_tx, mut out_rx, mut batches) = serve_with(provider.clone(), 4).await;
+        let claimed = vec![
+            "169.254.9.9:4433".parse().unwrap(),
+            "203.0.113.10:4433".parse().unwrap(),
+        ];
+        in_tx.send(offer_with(1, claimed)).await.unwrap();
+        let reply = answer(
+            timeout(Duration::from_secs(1), out_rx.recv())
+                .await
+                .unwrap(),
+        );
+        assert_eq!(reply.epoch, 1);
+        assert_eq!(reply.candidates, provider);
+        no_batch(&mut batches).await;
     }
 
     #[tokio::test(start_paused = true)]
@@ -358,8 +398,9 @@ mod tests {
         in_tx.send(offer(1)).await.unwrap();
         let first = timeout(Duration::from_secs(1), batches.recv())
             .await
-            .unwrap();
-        assert_eq!(first.candidates, candidates);
+            .unwrap()
+            .expect("batch");
+        assert_eq!(first.candidates, offered());
         // Same epoch again: answered, but no second batch.
         in_tx.send(offer(1)).await.unwrap();
         no_batch(&mut batches).await;
@@ -369,7 +410,8 @@ mod tests {
         in_tx.send(offer(2)).await.unwrap();
         let second = timeout(Duration::from_secs(1), batches.recv())
             .await
-            .unwrap();
+            .unwrap()
+            .expect("batch");
         assert_eq!(second.peer, PEER);
     }
 
@@ -386,7 +428,8 @@ mod tests {
         }
         let first = timeout(Duration::from_secs(1), batches.recv())
             .await
-            .unwrap();
+            .unwrap()
+            .expect("batch");
         assert_eq!(first.peer, PEER);
         no_batch(&mut batches).await;
         // Just inside the interval: still suppressed.
@@ -398,7 +441,8 @@ mod tests {
         in_tx.send(offer(5)).await.unwrap();
         let second = timeout(Duration::from_secs(1), batches.recv())
             .await
-            .unwrap();
+            .unwrap()
+            .expect("batch");
         assert_eq!(second.peer, PEER);
         // Immediately after: suppressed again.
         in_tx.send(offer(6)).await.unwrap();
@@ -426,7 +470,8 @@ mod tests {
         // answered without a burst.
         let batch = timeout(Duration::from_secs(1), batches.recv())
             .await
-            .unwrap();
+            .unwrap()
+            .expect("batch");
         assert_eq!(batch.peer, PEER);
         no_batch(&mut batches).await;
     }
@@ -462,7 +507,7 @@ mod tests {
                 started.fetch_add(1, Ordering::SeqCst);
                 let _guard = Guard(std::sync::Arc::clone(&running));
                 running.fetch_add(1, Ordering::SeqCst);
-                tokio::time::sleep(Duration::from_secs(30)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }));
         for _ in 0..5u32 {
@@ -539,7 +584,8 @@ mod tests {
         // Exactly one batch was queued (the first); the second was skipped.
         let queued = timeout(Duration::from_secs(1), batches.recv())
             .await
-            .unwrap();
+            .unwrap()
+            .expect("batch");
         assert_eq!(queued.peer, PEER);
         no_batch(&mut batches).await;
     }

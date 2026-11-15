@@ -1,7 +1,8 @@
 //! Unit tests for the peer-claimed probe gate (leaf L4 review Finding 2):
-//! the pure denial predicate, the serve_peer batch gate, and the client
-//! probe gate. Owns a small fake `PunchLink` over tokio mpsc channels;
-//! `punch_tests.rs` items are private to that module and are NOT reused.
+//! the pure denial predicate and the client probe gate (the responder-side
+//! gate tests live next to `serve_peer`). Owns a small fake `PunchLink`
+//! over tokio mpsc channels; `punch_tests.rs` items are private to that
+//! module and are NOT reused.
 //! The success path needs one real loopback QUIC session (see
 //! `direct_session`, replicated from `punch_tests.rs` as written there).
 
@@ -13,12 +14,11 @@ use std::{
 
 use iroh_base::PublicKey;
 use tokio::sync::mpsc;
-use tokio::time::{Instant, timeout};
+use tokio::time::Instant;
 
 use super::{
-    EXCHANGE_BUDGET, Kind, NetworkError, OfferBatch, PROBE_WINDOW, PunchLink, PunchMessage,
-    Session, client_attempt, decode, encode, peer_claimed_probe_allowed, peer_claimed_probe_denied,
-    serve_peer,
+    EXCHANGE_BUDGET, Kind, NetworkError, PROBE_WINDOW, PunchLink, PunchMessage, Session,
+    client_attempt, decode, encode, peer_claimed_probe_allowed, peer_claimed_probe_denied,
 };
 
 fn v4(a: [u8; 4], port: u16) -> SocketAddr {
@@ -117,8 +117,8 @@ fn production_filter_denies_special_ranges_and_allows_private_lan() {
 
 // ------------------------------------------------------------ serve_peer ----
 
-/// Fake link over bounded mpsc channels: `tx` carries datagrams the server
-/// sends, `rx` carries datagrams the test feeds the server.
+/// Fake link over bounded mpsc channels: `tx` carries the datagrams this side
+/// sends, `rx` the datagrams fed to it.
 struct FakeLink {
     tx: mpsc::Sender<Vec<u8>>,
     rx: mpsc::Receiver<Vec<u8>>,
@@ -133,106 +133,6 @@ impl PunchLink for FakeLink {
     async fn recv_raw(&mut self) -> Option<Vec<u8>> {
         self.rx.recv().await
     }
-}
-
-const PEER: [u8; 32] = [7u8; 32];
-
-fn offer_bytes(epoch: u32, candidates: Vec<SocketAddr>) -> Vec<u8> {
-    encode(&PunchMessage {
-        kind: Kind::Offer,
-        epoch,
-        candidates,
-    })
-    .unwrap()
-}
-
-fn decoded_answer(raw: Vec<u8>) -> PunchMessage {
-    let message = decode(&raw).expect("decoded answer");
-    assert_eq!(message.kind, Kind::Answer);
-    message
-}
-
-/// Starts `serve_peer` with a fixed provider list; returns the feed-in,
-/// answer-out and batch receivers.
-async fn serve_with(
-    candidates: Vec<SocketAddr>,
-) -> (
-    mpsc::Sender<Vec<u8>>,
-    mpsc::Receiver<Vec<u8>>,
-    mpsc::Receiver<OfferBatch>,
-) {
-    let (in_tx, in_rx) = mpsc::channel(4);
-    let (out_tx, out_rx) = mpsc::channel(4);
-    let (batch_tx, batch_rx) = mpsc::channel(4);
-    let link = FakeLink {
-        tx: out_tx,
-        rx: in_rx,
-    };
-    tokio::spawn(serve_peer(PEER, move || candidates.clone(), batch_tx, link));
-    (in_tx, out_rx, batch_rx)
-}
-
-/// A special-range (link-local + documentation) offer is still ANSWERED —
-/// the Answer carries the provider's own candidates — but it starts NO
-/// probe batch: both offered candidates are denied by the Finding 2 gate.
-/// Fails on the pre-fix code, which forwarded every offer candidate into
-/// the batch.
-#[tokio::test]
-async fn link_local_and_documentation_offers_are_answered_but_start_no_batch() {
-    let provider = vec![v4([10, 0, 0, 9], 4433)];
-    let (in_tx, mut out_rx, mut batches) = serve_with(provider.clone()).await;
-    in_tx
-        .send(offer_bytes(
-            1,
-            vec![v4([169, 254, 9, 9], 4433), v4([203, 0, 113, 10], 4433)],
-        ))
-        .await
-        .unwrap();
-    let answer = decoded_answer(
-        timeout(Duration::from_secs(1), out_rx.recv())
-            .await
-            .expect("answer arrives")
-            .expect("answer bytes"),
-    );
-    assert_eq!(answer.epoch, 1);
-    assert_eq!(answer.candidates, provider);
-    assert!(
-        timeout(Duration::from_millis(100), batches.recv())
-            .await
-            .is_err(),
-        "no batch for fully-denied offer"
-    );
-}
-
-/// A private-LAN offer passes the gate: the Answer is sent and exactly one
-/// batch carries the offered candidate. Fails only conceptually on current
-/// code (it passed everything, including denied ranges); this pins the
-/// legitimate same-LAN path stays open after the gate.
-#[tokio::test]
-async fn private_lan_offer_still_produces_a_batch() {
-    let (in_tx, mut out_rx, mut batches) = serve_with(vec![v4([10, 0, 0, 9], 4433)]).await;
-    in_tx
-        .send(offer_bytes(2, vec![v4([10, 0, 0, 1], 4433)]))
-        .await
-        .unwrap();
-    let answer = decoded_answer(
-        timeout(Duration::from_secs(1), out_rx.recv())
-            .await
-            .expect("answer arrives")
-            .expect("answer bytes"),
-    );
-    assert_eq!(answer.epoch, 2);
-    let batch = timeout(Duration::from_secs(1), batches.recv())
-        .await
-        .expect("batch arrives");
-    assert_eq!(batch.peer, PEER);
-    assert_eq!(batch.candidates, vec![v4([10, 0, 0, 1], 4433)]);
-    assert!(
-        timeout(Duration::from_millis(100), batches.recv())
-            .await
-            .is_err(),
-        "exactly one batch"
-    );
 }
 
 // ---------------------------------------------------------- client gate ----
@@ -292,7 +192,7 @@ async fn client_probes_skip_link_local_but_keep_loopback_and_private_lan_under_t
         } else {
             let taken = session.lock().expect("session lock").take();
             Box::pin(async move {
-                tokio::task::yield_once().await;
+                tokio::task::yield_now().await;
                 Ok(taken.expect("one stored loopback session"))
             }) as ConnectFuture
         }

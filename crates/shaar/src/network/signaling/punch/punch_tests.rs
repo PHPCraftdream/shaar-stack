@@ -122,11 +122,11 @@ fn malformed_lengths_decode_none() {
     let mut long = good.clone();
     long.push(0);
     assert_eq!(decode(&long), None, "trailing byte");
-    let mut lie = good;
+    let mut lie = good.clone();
     lie[10] = 2;
     assert_eq!(decode(&lie), None, "count lie");
     assert_eq!(decode(&[]), None, "empty");
-    let mut magic = good;
+    let mut magic = good.clone();
     magic[0] = b'x';
     assert_eq!(decode(&magic), None, "wrong magic");
     let mut version = good;
@@ -352,7 +352,7 @@ fn seam(
             let taken = session.lock().expect("session lock").take();
             let completions = Arc::clone(&completions);
             Box::pin(async move {
-                tokio::task::yield_once().await;
+                tokio::task::yield_now().await;
                 completions.lock().expect("completions lock").push(address);
                 Ok(taken.expect("one stored loopback session"))
             }) as ConnectFuture
@@ -364,7 +364,7 @@ fn empty_seam() -> impl Fn(SocketAddr) -> ConnectFuture {
     |_| Box::pin(std::future::pending::<Result<Session, NetworkError>>()) as ConnectFuture
 }
 
-const ATTEMPT_BOUND: Duration = EXCHANGE_BUDGET + PROBE_WINDOW;
+const ATTEMPT_BOUND: Duration = EXCHANGE_BUDGET.saturating_add(PROBE_WINDOW);
 
 #[tokio::test(start_paused = true)]
 async fn both_sides_probe_within_the_bound() {
@@ -378,6 +378,7 @@ async fn both_sides_probe_within_the_bound() {
     // Server task: records offer arrival, answers, starts its own probe seam.
     let server_events = Arc::clone(&events);
     let server_candidates = client_candidates.clone();
+    let server_answer = answer_candidates.clone();
     let server = tokio::spawn(async move {
         let mut peer_link = peer_link;
         let raw = peer_link.recv_raw().await.expect("offer received");
@@ -392,7 +393,7 @@ async fn both_sides_probe_within_the_bound() {
         let answer = PunchMessage {
             kind: Kind::Answer,
             epoch,
-            candidates: answer_candidates.clone(),
+            candidates: server_answer,
         };
         peer_link
             .send(&answer, EXCHANGE_BUDGET)
