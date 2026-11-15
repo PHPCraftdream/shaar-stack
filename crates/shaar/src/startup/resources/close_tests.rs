@@ -349,8 +349,8 @@ async fn public_address_follows_the_vote_watch_once_the_owner_moved_into_mainten
     let mut maintenance = Maintenance::spawn_failing_for_tests();
     let (votes_tx, votes) = watch::channel::<Option<std::net::IpAddr>>(None);
     maintenance.votes = votes;
-    let (owner_commands, _requests) = mpsc::channel(1);
-    let resources = SharedResources {
+    let (owner_commands, _requests) = tokio::sync::mpsc::channel(1);
+    let resources = super::super::SharedResources {
         shared: shared_with(StartupResources {
             endpoint: None,
             native_transferred: false,
