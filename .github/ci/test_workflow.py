@@ -621,8 +621,8 @@ def load_tests(loader, tests, pattern):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     tests.addTests(loader.loadTestsFromModule(module))
-    for filename in ("test_contract.py", "test_budget.py"):
-        path = ROOT / ".github/probes/public-smoke" / filename
+    for filename in ("test_contract.py", "test_budget.py", "test_launch.py"):
+        path = ROOT / ".github/probes/public-smoke/tests" / filename
         spec = importlib.util.spec_from_file_location("public_smoke_" + path.stem, path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

@@ -9,7 +9,7 @@ import stat
 import tempfile
 import unittest
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]
 ROOT = HERE.parents[2]
 SPEC = importlib.util.spec_from_file_location("smoke_run_for_contract_tests", HERE / "run.py")
 RUN = importlib.util.module_from_spec(SPEC)
@@ -355,7 +355,8 @@ class WorkflowTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("smoke_policy", ROOT / ".github/ci/policy.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        for name in ("run.py", "contract.py", "contract.json", "budget.py", "test_budget.py"):
+        for name in ("run.py", "contract.py", "contract.json", "budget.py", "launch.py", "tests/test_budget.py",
+                     "tests/test_launch.py"):
             selected = module.select([".github/probes/public-smoke/" + name])
             self.assertEqual((selected["suites"], selected["targets"]), (["ci_policy"], []), name)
 

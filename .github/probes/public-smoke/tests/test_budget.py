@@ -16,7 +16,7 @@ import time
 import unittest
 from unittest import mock
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("smoke_run_for_budget_tests", HERE / "run.py")
 RUN = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUN)

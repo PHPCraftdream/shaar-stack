@@ -272,7 +272,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Unit-test the smoke harness (pure; no network)
-        run: python -I -m unittest discover -s .github/probes/public-smoke -p "test_*.py"
+        run: python -I -m unittest discover -s .github/probes/public-smoke/tests -p "test_*.py"
       - name: Validate the contract, recorded approval and meter availability
         env:
           SOURCE_REVISION: ${{ inputs.source_revision }}
