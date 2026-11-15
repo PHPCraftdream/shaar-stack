@@ -42,18 +42,13 @@ impl PunchLink for FakeLink {
 /// Refuses the first `refusals` sends (cold path), then delivers like `FakeLink`.
 struct FlakyLink {
     inner: FakeLink,
-    refusals: AtomicUsize,
+    refusals: usize,
+    sent: AtomicUsize,
 }
 
 impl PunchLink for FlakyLink {
     async fn send(&self, message: &PunchMessage, budget: Duration) -> Result<(), SendError> {
-        let refused = self
-            .refusals
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
-                left.checked_sub(1)
-            })
-            .is_ok();
-        if refused {
+        if self.sent.fetch_add(1, Ordering::SeqCst) < self.refusals {
             return Err(SendError::Refused);
         }
         self.inner.send(message, budget).await
@@ -166,7 +161,8 @@ async fn refused_first_offer_is_retried_inside_the_window() {
     let (client_half, mut peer_link) = link_pair();
     let mut client_link = FlakyLink {
         inner: client_half,
-        refusals: AtomicUsize::new(1),
+        refusals: 1,
+        sent: AtomicUsize::new(0),
     };
     let answered: SocketAddr = "10.0.0.3:1".parse().unwrap();
     let server = tokio::spawn(async move {
@@ -213,7 +209,8 @@ async fn all_copies_refused_end_at_the_window_without_delivery() {
     let (client_half, mut peer_link) = link_pair();
     let mut client_link = FlakyLink {
         inner: client_half,
-        refusals: AtomicUsize::new(usize::MAX),
+        refusals: usize::MAX,
+        sent: AtomicUsize::new(0),
     };
     let started = Instant::now();
     let result = client_attempt(

@@ -614,18 +614,13 @@ mod tests {
     /// Refuses the first `refusals` sends (cold Yggdrasil path), then delivers.
     struct RefusingLink {
         inner: FakeLink,
-        refusals: AtomicUsize,
+        refusals: usize,
+        sent: AtomicUsize,
     }
 
     impl PunchLink for RefusingLink {
         async fn send(&self, message: &PunchMessage, budget: Duration) -> Result<(), SendError> {
-            let refused = self
-                .refusals
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
-                    left.checked_sub(1)
-                })
-                .is_ok();
-            if refused {
+            if self.sent.fetch_add(1, Ordering::SeqCst) < self.refusals {
                 return Err(SendError::Refused);
             }
             self.inner.send(message, budget).await
@@ -648,7 +643,8 @@ mod tests {
                 tx: out_tx,
                 rx: in_rx,
             },
-            refusals: AtomicUsize::new(1),
+            refusals: 1,
+            sent: AtomicUsize::new(0),
         };
         let provider: Vec<SocketAddr> = vec!["198.51.100.9:4433".parse().unwrap()];
         tokio::spawn(serve_peer(PEER, move || provider.clone(), batch_tx, link));
