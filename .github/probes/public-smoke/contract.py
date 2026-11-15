@@ -273,6 +273,8 @@ ROUTE_LINE = re.compile(
     r"^shaar-(client|server): route path=(native|ygg-signal|ygg-standby) "
     r"candidates=record:([0-9]{1,10}),hint:([0-9]{1,10}) "
     r"resolve=(found|not-found|timeout|cached) elapsed_ms=([0-9]{1,10})$")
+# The server logs only the path when a session is accepted.
+SERVER_ROUTE_LINE = re.compile(r"^shaar-server: route path=(native|ygg-signal|ygg-standby)$")
 SESSION_LINE = re.compile(
     r"^shaar-(server|client): session path=(native|ygg-signal|ygg-standby) result=(ok|error)"
     r"(?: error=(invalid-target|capacity|access-denied|path-unavailable|target-unavailable|"
@@ -290,6 +292,10 @@ NOT_OBSERVED = ("not observable: the products log nothing about resolution; "
 
 
 def parse_route_line(line):
+    short = SERVER_ROUTE_LINE.fullmatch(line.strip())
+    if short:
+        return {"role": "server", "path": short[1], "record": None, "hint": None,
+                "resolve": None, "elapsed_ms": None}
     match = ROUTE_LINE.fullmatch(line.strip())
     if not match:
         return None

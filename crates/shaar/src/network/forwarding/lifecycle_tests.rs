@@ -390,9 +390,9 @@ async fn a_clean_peer_close_ends_the_served_session_ok_with_completed_stream_byt
         const REPLY: usize = 7;
         let target_io = async {
             let (mut tcp, _) = target.accept().await.unwrap();
-            let mut received = vec![0u8; PAYLOAD];
+            let mut received = [0u8; PAYLOAD];
             tcp.read_exact(&mut received).await.unwrap();
-            tcp.write_all(&vec![0x21; REPLY]).await.unwrap();
+            tcp.write_all(&[0x21u8; REPLY]).await.unwrap();
             tcp.shutdown().await.unwrap();
         };
         let (report, (), ()) = tokio::join!(
@@ -400,7 +400,7 @@ async fn a_clean_peer_close_ends_the_served_session_ok_with_completed_stream_byt
             async move {
                 let (mut app, bridge) = tcp_pair().await;
                 let (stats, ()) = tokio::join!(connected.forward(bridge), async {
-                    app.write_all(&vec![0x42u8; PAYLOAD]).await.unwrap();
+                    app.write_all(&[0x42u8; PAYLOAD]).await.unwrap();
                     app.shutdown().await.unwrap();
                     let mut reply = Vec::new();
                     app.read_to_end(&mut reply).await.unwrap();

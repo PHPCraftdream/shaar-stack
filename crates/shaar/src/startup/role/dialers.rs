@@ -426,11 +426,8 @@ impl Dialer for YggDialer {
             Ok(Ok(session)) => {
                 // The standby fallback never consults the record itself: its
                 // line reports the last native resolve observation, or none.
-                let observation = self
-                    .note
-                    .borrow()
-                    .clone()
-                    .unwrap_or_else(|| ResolveObservation::cached(0, 0));
+                let observation =
+                    (*self.note.borrow()).unwrap_or_else(|| ResolveObservation::cached(0, 0));
                 emit(client_route(
                     RoutePath::YggStandby,
                     observation,

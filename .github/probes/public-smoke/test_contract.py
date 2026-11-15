@@ -381,6 +381,16 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(server, {"role": "server", "path": "ygg-standby", "record": 7, "hint": 9,
                                   "resolve": "cached", "elapsed_ms": 1})
 
+    def test_server_route_line_carries_only_the_path(self):
+        for path in ("native", "ygg-signal", "ygg-standby"):
+            self.assertEqual(CONTRACT.parse_route_line(f"shaar-server: route path={path}"),
+                             {"role": "server", "path": path, "record": None, "hint": None,
+                              "resolve": None, "elapsed_ms": None})
+        self.assertIsNone(CONTRACT.parse_route_line("shaar-server: route path=bogus"))
+        self.assertIsNone(CONTRACT.parse_route_line("shaar-client: route path=native"))
+        route, _ = CONTRACT.scan_product_lines("noise\nshaar-server: route path=ygg-standby\n", "server")
+        self.assertEqual(route["path"], "ygg-standby")
+
     def test_session_line_round_trips_all_values(self):
         for role in ("server", "client"):
             for path in ("native", "ygg-signal", "ygg-standby"):
