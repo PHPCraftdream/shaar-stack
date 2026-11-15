@@ -72,6 +72,20 @@ const PUNCH_TRANSIT: u8 = 0x74;
 /// Covers two full dial attempts (`max_attempts: 2`), each bounded by the
 /// 1.5 s punch exchange and the 2 s client probe window, plus startup.
 const PUNCH_BUDGET: Duration = Duration::from_secs(90);
+/// Deadline of the Ygg path warm-up probe (same value as the signal cases).
+const PROBE_BUDGET: Duration = Duration::from_secs(10);
+
+/// Bridge counters for failure messages: where did the exchange stop?
+fn counters(who: &str, bridge: &shaar_ygg::YggBridge) -> String {
+    format!(
+        "{who} bridge: carrier_submitted={} control={} queued={} dropped={} ignored={}",
+        bridge.carrier_submitted_datagrams(),
+        bridge.control_datagrams(),
+        bridge.queued_datagrams(),
+        bridge.dropped_datagrams(),
+        bridge.ignored_frames()
+    )
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero() {
@@ -158,6 +172,15 @@ async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero()
             .ygg_bridge_for_tests()
             .expect("started client retains its Ygg bridge");
 
+        // Warm the Yggdrasil path in both directions with the bridge's own
+        // authenticated Ping/Pong (it retransmits until answered): cold path
+        // discovery is Yggdrasil's convergence, not the punch exchange under
+        // test. Bridge tasks run on their own, so no role loop is needed yet.
+        client_bridge
+            .probe(server_identity.public_key_bytes(), PROBE_BUDGET)
+            .await
+            .expect("real authenticated Ygg Ping/Pong warms the path");
+
         // Pinned role loops and shutdown waiters live only in this lexical
         // scope; it ends before shutdown reborrows either role. Role futures
         // are driven in-body (they are not Send; nothing is spawned).
@@ -181,16 +204,30 @@ async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero()
             let route = tokio::time::timeout(ROLE_BUDGET, async {
                 tokio::select! {
                     result = &mut server_run => {
-                        panic!("server ended awaiting the punch route: {result:?}")
+                        panic!(
+                            "server ended awaiting the punch route: {result:?}; {}; {}",
+                            counters("server", &server_bridge),
+                            counters("client", &client_bridge)
+                        )
                     }
                     result = &mut client_run => {
-                        panic!("client ended awaiting the punch route: {result:?}")
+                        panic!(
+                            "client ended awaiting the punch route: {result:?}; {}; {}",
+                            counters("server", &server_bridge),
+                            counters("client", &client_bridge)
+                        )
                     }
                     event = client_log.wait(&route_active_native) => event,
                 }
             })
             .await
-            .expect("client establishes the punch-coordinated native route");
+            .unwrap_or_else(|_| {
+                panic!(
+                    "client never established the punch-coordinated native route; {}; {}",
+                    counters("server", &server_bridge),
+                    counters("client", &client_bridge)
+                )
+            });
             assert_eq!(route, RoleEvent::RouteActive(PathKind::Native));
 
             let listener_ready = |event: &RoleEvent| matches!(event, RoleEvent::ListenerReady(_));
@@ -295,9 +332,12 @@ async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero()
         // rode the control channel (control datagrams plus the carrier
         // envelopes the punch exchange itself submitted).
         let echo_counts = |who: &'static str, bridge: &std::sync::Arc<shaar_ygg::YggBridge>| {
+            // The payload table admitted nothing. `dropped` is not asserted: an
+            // Offer that reaches a peer before it registered its control
+            // capability is legitimately refused by both tables.
             assert_eq!(
-                (bridge.queued_datagrams(), bridge.dropped_datagrams()),
-                (0, 0),
+                bridge.queued_datagrams(),
+                0,
                 "{who} admitted no carrier payload in signal mode"
             );
             assert!(
@@ -331,11 +371,7 @@ async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero()
                 bridge.carrier_submitted_datagrams(),
                 bridge.control_datagrams(),
             );
-            assert_eq!(
-                (after.0, after.1),
-                (0, 0),
-                "{who} admitted no carrier payload at all"
-            );
+            assert_eq!(after.0, 0, "{who} admitted no carrier payload at all");
             assert!(
                 after.2 >= at_echo.2 && after.3 >= at_echo.3,
                 "{who} exchange counters never shrink: {after:?}"

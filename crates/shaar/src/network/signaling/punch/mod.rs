@@ -34,6 +34,10 @@ pub(crate) const MAX_MESSAGE_BYTES: usize = 96;
 pub(crate) const OPEN_BUDGET: Duration = Duration::from_secs(1);
 /// Budget for one offer/answer exchange.
 pub(crate) const EXCHANGE_BUDGET: Duration = Duration::from_millis(1500);
+/// Interval between copies of the same Offer inside one exchange window: the
+/// first datagram to a cold Yggdrasil path (or to a peer that has not yet
+/// registered its control capability) can be lost.
+pub(crate) const OFFER_RESEND: Duration = Duration::from_millis(500);
 /// Window bounding the whole probe burst.
 pub(crate) const PROBE_WINDOW: Duration = Duration::from_secs(2);
 /// Per-candidate probe slice on the server side.
@@ -258,6 +262,8 @@ pub(crate) trait PunchLink {
         message: &PunchMessage,
         budget: Duration,
     ) -> impl Future<Output = Result<(), ()>> + Send;
+    /// Receives one raw datagram; `None` when the link is closed. Must be
+    /// cancel-safe: callers bound it with timeouts and call it again.
     fn recv_raw(&mut self) -> impl Future<Output = Option<Vec<u8>>> + Send;
 }
 
@@ -331,14 +337,27 @@ where
         candidates,
     };
     let exchange_end = deadline.min(started + EXCHANGE_BUDGET);
-    let sent = timeout_at(exchange_end, channel.send(&offer, EXCHANGE_BUDGET)).await;
-    if sent.is_err() || matches!(sent, Ok(Err(()))) {
-        trace_attempt(role, offer.candidates.len(), false, started);
-        return None;
-    }
+    // The Offer is repeated every `OFFER_RESEND` until the matching Answer or
+    // the end of the window; the responder answers every copy and starts at
+    // most one probe burst per epoch, so copies are idempotent.
+    let mut resend_at = started;
     let answer = loop {
-        match timeout_at(exchange_end, channel.recv_raw()).await {
-            Err(_) | Ok(None) => {
+        if Instant::now() >= resend_at {
+            let sent = timeout_at(exchange_end, channel.send(&offer, EXCHANGE_BUDGET)).await;
+            if sent.is_err() || matches!(sent, Ok(Err(()))) {
+                trace_attempt(role, offer.candidates.len(), false, started);
+                return None;
+            }
+            resend_at = Instant::now() + OFFER_RESEND;
+        }
+        match timeout_at(resend_at.min(exchange_end), channel.recv_raw()).await {
+            Err(_) if Instant::now() >= exchange_end => {
+                trace_attempt(role, offer.candidates.len(), false, started);
+                return None;
+            }
+            // Resend interval elapsed inside the window: send the next copy.
+            Err(_) => continue,
+            Ok(None) => {
                 trace_attempt(role, offer.candidates.len(), false, started);
                 return None;
             }
@@ -429,3 +448,6 @@ mod punch_tests;
 
 #[cfg(test)]
 mod punch_rules_tests;
+
+#[cfg(test)]
+mod punch_resend_tests;

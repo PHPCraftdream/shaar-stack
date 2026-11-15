@@ -333,6 +333,14 @@ impl Registry {
         deliver_to(&self.control, peer, bytes)
     }
 
+    /// Offers one datagram to both tables and reports which accepted it.
+    pub(super) fn deliver_both(&self, peer: &[u8; 32], bytes: &[u8]) -> Delivery {
+        Delivery {
+            payload: self.deliver(peer, bytes),
+            control: self.deliver_control(peer, bytes),
+        }
+    }
+
     pub(super) fn close(&mut self) {
         for entry in self.peers.values() {
             entry.live.store(false, Ordering::Release);
@@ -342,6 +350,20 @@ impl Registry {
             entry.live.store(false, Ordering::Release);
         }
         self.control.clear();
+    }
+}
+
+/// Outcome of offering one datagram to the payload and control tables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Delivery {
+    pub(super) payload: bool,
+    pub(super) control: bool,
+}
+
+impl Delivery {
+    /// Refused only when NEITHER table took it; a control-only delivery is not a drop.
+    pub(super) fn refused(self) -> bool {
+        !self.payload && !self.control
     }
 }
 
@@ -368,6 +390,26 @@ mod tests {
 
     fn request(peer: u8) -> (Register, Arc<AtomicBool>, mpsc::Receiver<Vec<u8>>, Reply) {
         request_with(peer, false)
+    }
+
+    #[test]
+    fn delivery_is_refused_only_when_neither_table_accepts() {
+        let mut registry = Registry::default();
+        let peer = [4u8; 32];
+        let none = registry.deliver_both(&peer, b"x");
+        assert!(none.refused() && !none.payload && !none.control);
+
+        let (control, _live, _rx, _reply) = request_with(4, true);
+        registry.register(control, false);
+        let only_control = registry.deliver_both(&peer, b"x");
+        assert_eq!((only_control.payload, only_control.control), (false, true));
+        assert!(!only_control.refused(), "a control delivery is not a drop");
+
+        let (payload, _live2, _rx2, _reply2) = request_with(4, false);
+        registry.register(payload, false);
+        let both = registry.deliver_both(&peer, b"x");
+        assert_eq!((both.payload, both.control), (true, true));
+        assert!(!both.refused());
     }
 
     fn request_with(

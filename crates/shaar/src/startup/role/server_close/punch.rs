@@ -326,8 +326,10 @@ mod tests {
         mpsc::Receiver<Vec<u8>>,
         mpsc::Receiver<OfferBatch>,
     ) {
-        let (in_tx, in_rx) = mpsc::channel(4);
-        let (out_tx, out_rx) = mpsc::channel(4);
+        let (in_tx, in_rx) = mpsc::channel(16);
+        // Room for every answer of the longest test: a full answer queue would
+        // block the responder in `send` and starve later offers.
+        let (out_tx, out_rx) = mpsc::channel(16);
         let (batch_tx, batch_rx) = mpsc::channel(capacity);
         let link = FakeLink {
             tx: out_tx,

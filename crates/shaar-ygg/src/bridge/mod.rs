@@ -117,14 +117,15 @@ impl Shared {
             return;
         }
         if let Some(inner) = codec::decode(bytes) {
-            let counter = if registry.deliver(&from, inner) {
-                &self.queued_datagrams
-            } else {
-                &self.dropped_datagrams
-            };
-            counter.fetch_add(1, Ordering::Relaxed);
-            if registry.deliver_control(&from, inner) {
+            let delivery = registry.deliver_both(&from, inner);
+            if delivery.payload {
+                self.queued_datagrams.fetch_add(1, Ordering::Relaxed);
+            }
+            if delivery.control {
                 self.control_datagrams.fetch_add(1, Ordering::Relaxed);
+            }
+            if delivery.refused() {
+                self.dropped_datagrams.fetch_add(1, Ordering::Relaxed);
             }
             return;
         }
@@ -256,7 +257,7 @@ impl YggBridge {
         self.shared.control_datagrams.load(Ordering::Relaxed)
     }
 
-    /// Valid envelopes refused for missing/revoked registration or a full receiver.
+    /// Valid envelopes refused by BOTH tables (missing/revoked registration or a full receiver).
     pub fn dropped_datagrams(&self) -> u64 {
         self.shared.dropped_datagrams.load(Ordering::Relaxed)
     }

@@ -75,11 +75,12 @@ fn roundtrip_matches_golden_wire_prefix() {
     assert_eq!(bytes[5], 1);
     assert_eq!(bytes[6..10], 7u32.to_le_bytes());
     assert_eq!(bytes[10], 2);
-    // family 4 + 4 address bytes + big-endian port per candidate.
-    assert_eq!(&bytes[11..15], &[4, 203, 0, 113, 10]);
-    assert_eq!(&bytes[15..17], &1u16.to_be_bytes());
-    assert_eq!(&bytes[17..22], &[4, 127, 0, 0, 1]);
-    assert_eq!(&bytes[22..24], &4242u16.to_be_bytes());
+    // family 4 + 4 address bytes + big-endian port per candidate (7 bytes each).
+    assert_eq!(&bytes[11..16], &[4, 203, 0, 113, 10]);
+    assert_eq!(&bytes[16..18], &1u16.to_be_bytes());
+    assert_eq!(&bytes[18..23], &[4, 127, 0, 0, 1]);
+    assert_eq!(&bytes[23..25], &4242u16.to_be_bytes());
+    assert_eq!(bytes.len(), 25);
     assert_eq!(decode(&bytes), Some(message));
 }
 
@@ -244,15 +245,17 @@ fn reflexive_none_offers_local_only() {
     assert_eq!(local_candidates(local, None), vec![local]);
 }
 
+/// A wildcard bind is never offered itself; with a reflexive guess the guess
+/// plus the local port is still a valid, useful candidate.
 #[test]
 fn wildcard_local_is_never_offered() {
     assert!(local_candidates(v4([0, 0, 0, 0], 7777), None).is_empty());
-    assert!(
+    assert_eq!(
         local_candidates(
             v4([0, 0, 0, 0], 7777),
             Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)))
-        )
-        .is_empty()
+        ),
+        vec![v4([8, 8, 8, 8], 7777)]
     );
 }
 
