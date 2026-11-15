@@ -238,12 +238,13 @@ def render_network(bootstrap_ips, relay_peer=None, relay_address=None, peers=())
         raise ContractError("render_network: the relay peer and address must be given together")
     lines = ["network: {", "    mainline: {", "        bootstrap: ["]
     lines += ["            " + item for item in bootstrap_ips]
-    lines += ["        ]", "    }", "    signaling: {"]
+    lines += ["        ]", "    }"]
     if relay_peer is not None:
-        lines += ["        relay: " + relay_peer, "        relay_address: " + relay_address]
+        lines += ["    signaling: {", "        relay: " + relay_peer,
+                  "        relay_address: " + relay_address, "    }"]
     else:
-        lines[-1] = "    signaling: {}"
-    lines += ["    }", "    ygg: {", "        peers: ["]
+        lines.append("    signaling: {}")
+    lines += ["    ygg: {", "        peers: ["]
     lines += ["            " + item for item in peers]
     lines += ["        ]", "    }", "}"]
     return "\n".join(lines) + "\n"
