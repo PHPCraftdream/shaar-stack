@@ -601,7 +601,7 @@ mod control_table {
 
     use tokio::sync::{mpsc, oneshot};
 
-    use super::super::super::datagrams::{Register, Registry};
+    use super::super::datagrams::{Register, Registry};
     use super::super::{DATAGRAM_QUEUE_CAPACITY, DatagramError, MAX_DATAGRAM_PEERS};
 
     type Reply = oneshot::Receiver<Result<(), DatagramError>>;
@@ -669,15 +669,16 @@ mod control_table {
     #[test]
     fn prune_frees_revoked_control_slots_and_close_revokes_both_tables() {
         let mut registry = Registry::default();
-        let (control_live, mut control_rx) = admit(&mut registry, 3, true);
+        let (control_live, _old_rx) = admit(&mut registry, 3, true);
         let (payload_live, _payload_rx) = admit(&mut registry, 4, false);
         control_live.store(false, Ordering::Release);
         registry.prune();
-        admit(&mut registry, 3, true);
+        // The revoked slot is free again: peer 3 registers a fresh capability.
+        let (fresh_live, mut fresh_rx) = admit(&mut registry, 3, true);
         assert!(registry.deliver_control(&[3; 32], b"fresh control"));
-        assert_eq!(control_rx.try_recv(), Ok(b"fresh control".to_vec()));
+        assert_eq!(fresh_rx.try_recv(), Ok(b"fresh control".to_vec()));
         registry.close();
-        assert!(!control_live.load(Ordering::Acquire));
+        assert!(!fresh_live.load(Ordering::Acquire));
         assert!(!payload_live.load(Ordering::Acquire));
     }
 
@@ -690,7 +691,7 @@ mod control_table {
             assert!(registry.deliver_control(&[9; 32], b"fill control queue"));
         }
         assert!(!registry.deliver_control(&[9; 32], b"control overflow"));
-        assert!(registry.deliver(&[9; 32], b"payload still accepted"));
+        assert!(registry.deliver(&[9; 32], b"payload ok"));
         assert_eq!(payload_rx.try_recv(), Ok(b"payload ok".to_vec()));
         control_rx.try_recv().expect("drained control slot");
         assert!(registry.deliver_control(&[9; 32], b"control space recovered"));
