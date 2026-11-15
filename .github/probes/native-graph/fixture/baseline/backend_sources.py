@@ -4,9 +4,14 @@
 Fingerprints are retained by both OS proofs of CI 42894735758 and 42905449848.
 Original proof bindings and digests remain unchanged; no arbitrary source drift
 is normalized. Backend reversal controls independently validate the gate patch.
+
+hickory-resolver 0.26.3 carries the target-conditional forbid(unsafe_code) of the
+platform build leaf; its digests are read from the proofs of full CI run
+43672795289 and keep their own version and recipe digests.
 """
 OLD_RECIPE = "331d95d85eb52c0f6262e755a89e00f85fd4dc0f53c0b88938a7588b1e6b73a3"
 NEW_RECIPE = "a0c72a29554aafee6327fddc7cc6b5a7a095982ee175f9b7dca82f7bab33e3bb"
+DEFAULT_VERSION = "1.3.0"
 SOURCES = {
     "iroh": {
         "archive": "885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833",
@@ -29,14 +34,31 @@ SOURCES = {
         "old_manifest": "eb3d46d3486b825d9671b410de97613da59ef6c98365c89d83363e5569307dcb",
         "new_manifest": "eb3d46d3486b825d9671b410de97613da59ef6c98365c89d83363e5569307dcb",
     },
+    "hickory-resolver": {
+        "version": "0.26.3",
+        "archive": "3f3da5255c95d5a716857d54b5b8f4e8d67c3484d3beaaaae2ce25063b3ba981",
+        "old_tree": "43bc8a184a781928828d3008196ccf16d422c5d4ee8ebdc70cc113418a247b17",
+        "new_tree": "e20ad23d32bfac805e37681c094ee58454665c7cea35782f2f1d95e9525f9833",
+        "old_manifest": "48a0056985f6acc707df022ce46da2e510a5b909fc5ec6cbdf842748e1523cbd",
+        "new_manifest": "48a0056985f6acc707df022ce46da2e510a5b909fc5ec6cbdf842748e1523cbd",
+        "old_recipe": "a1d7f5e10abd7b412822776eb6dfbb23a85399a4b6b586461e03979a512b0c55",
+        "new_recipe": "6fe4847f188dd9c8ecbfe96f09ee61f8039032f401a8dee549cb047473431b97",
+    },
 }
+
+
+def version(name):
+    return SOURCES[name].get("version", DEFAULT_VERSION)
+
+
+def recipe(name, side):
+    return SOURCES[name].get(side + "_recipe", OLD_RECIPE if side == "old" else NEW_RECIPE)
 
 
 def key(name, side):
     source = SOURCES[name]
-    recipe = OLD_RECIPE if side == "old" else NEW_RECIPE
-    return (name, "1.3.0", f"path:prepared:{name}@1.3.0:archive={source['archive']}:"
-            f"tree={source[side + '_tree']}:recipe={recipe}")
+    return (name, version(name), f"path:prepared:{name}@{version(name)}:archive={source['archive']}:"
+            f"tree={source[side + '_tree']}:recipe={recipe(name, side)}")
 
 
 def comparison_mapping(control, candidate, control_bindings, candidate_bindings):
@@ -54,10 +76,10 @@ def comparison_mapping(control, candidate, control_bindings, candidate_bindings)
         for bindings, side in ((control_bindings, "old"), (candidate_bindings, "new")):
             matches = [b for b in bindings.values() if b.get("package") == name]
             expected = {
-                "identity": "prepared", "package": name, "version": "1.3.0",
+                "identity": "prepared", "package": name, "version": version(name),
                 "archive_sha256": source["archive"], "tree_sha256": source[side + "_tree"],
                 "manifest_sha256": source[side + "_manifest"],
-                "recipe_sha256": OLD_RECIPE if side == "old" else NEW_RECIPE,
+                "recipe_sha256": recipe(name, side),
             }
             if len(matches) != 1 or any(matches[0].get(k) != v for k, v in expected.items()):
                 raise AuditError("unapproved backend source binding: " + name)
