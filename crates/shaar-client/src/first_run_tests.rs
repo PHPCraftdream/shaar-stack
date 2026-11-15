@@ -85,6 +85,7 @@ fn parse_flag_in_positional_pair_is_a_usage_error() {
 #[tokio::test]
 async fn legacy_config_present_detects_existing_and_missing_files() {
     let dir = FixtureDir::new();
+    std::fs::create_dir_all(dir.client_dir()).expect("client dir");
     std::fs::write(dir.config_path(), b"").expect("write legacy config");
     assert!(legacy_config_present(&dir.config_path()).await.unwrap());
     let absent = dir.client_dir().join("absent.ktav");
@@ -117,7 +118,7 @@ async fn first_run_without_arguments_reports_missing_key() {
     let text = String::from_utf8(dir.read_bytes()).expect("utf-8 template");
     let expected = format!(
         "key_file:: {}",
-        ktav_value(&dir.client_dir().join("shaar.key"))
+        dir.client_dir().join("shaar.key").display()
     );
     assert!(
         text.lines().any(|line| line == expected),
@@ -282,12 +283,13 @@ async fn first_run_rejects_an_invalid_server_key() {
 }
 
 #[tokio::test]
-async fn first_run_rejects_a_digit_only_server_key() {
+async fn first_run_keeps_a_digit_only_server_key_as_a_string() {
     let dir = FixtureDir::new();
-    let Err(error) =
-        first_run_state(&dir.0, Some("1".repeat(64)), Some("127.0.0.1:9".to_owned())).await
-    else {
-        panic!("digit-only key must fail Ed25519 validation");
+    let state = first_run_state(&dir.0, Some("1".repeat(64)), Some("127.0.0.1:9".to_owned()))
+        .await
+        .expect("digit-only key is a valid 32-byte hex key");
+    let FirstRunState::Ready { config, .. } = state else {
+        panic!("expected Ready");
     };
-    assert!(error.contains("field `server`"), "unexpected: {error}");
+    assert_eq!(config.server_key_bytes(), &[0x11; 32]);
 }
