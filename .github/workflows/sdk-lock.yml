@@ -30,6 +30,7 @@ on:
           - base
           - nat
           - faults
+          - punch
         default: base
       public_smoke:
         description: Bounded live smoke over public networks (needs a recorded approval and the contract digest below; the libp2p relay is optional and the products run relay-less over DHT and Yggdrasil without one)
