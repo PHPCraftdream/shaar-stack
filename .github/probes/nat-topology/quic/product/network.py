@@ -10,8 +10,12 @@ _BLOCKED = {"udp": "blocked", "tcp_a": ("transit",)}
 _FAILOVER = {"udp": "runtime", "tcp_a": ("relay", "transit")}
 # Optional profile keys: "nat" ("range" default, "cone" = port-preserving, "random" = fully random ports), "peer" (count translated
 # Native UDP between the two routers), "subnet" (NAT the whole LAN /24), "native_new" (count new Native UDP flows), "hole"
-# (count UDP that reaches the router itself), "lan" (hosts share the WAN segment), "v6" (also count IPv6 on the segment).
+# (count UDP that reaches the router itself), "stateful" (also drop it, as a gateway firewall does), "lan" (hosts share the WAN
+# segment), "v6" (also count IPv6 on the segment).
 _DNAT = {"udp": "open", "peer": True}
+# Punch cases: a stateful gateway. A UDP packet addressed to the router is unsolicited (replies are de-translated and forwarded),
+# and one that is accepted leaves a conntrack entry that moves the port a later outbound mapping would keep (dispatch 43742025339).
+_PUNCH = {**_DNAT, "tcp_a": ("transit",), "nat": "cone", "stateful": True}
 PROFILES = {
     "native-signal": _NATIVE, "native-standby": _NATIVE,
     "blocked-standby": _BLOCKED, "blocked-signal": _BLOCKED,
@@ -25,9 +29,8 @@ PROFILES = {
     "dnat-cone-standby": {**_DNAT, "tcp_a": ("relay",), "nat": "cone"},
     "dnat-cone-relay-signal": {**_DNAT, "tcp_a": ("relay",), "nat": "cone", "dht_drop": True},
     "dnat-cone-relay-standby": {**_DNAT, "tcp_a": ("relay",), "nat": "cone", "dht_drop": True},
-    "dnat-cone-norelay-signal": {**_DNAT, "tcp_a": ("transit",), "nat": "cone"},
-    "dnat-cone-norelay-standby": {**_DNAT, "tcp_a": ("transit",), "nat": "cone"},
-    "dnat-cone-dhtdrop-signal": {**_DNAT, "tcp_a": ("transit",), "nat": "cone", "dht_drop": True},
+    "dnat-cone-norelay-signal": _PUNCH, "dnat-cone-norelay-standby": _PUNCH,
+    "dnat-cone-dhtdrop-signal": {**_PUNCH, "dht_drop": True},
     "dnat-sym-signal": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},
     "dnat-sym-standby": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},
     "hole-signal": {**_NATIVE, "native_new": True, "hole": True}, "hole-standby": {**_NATIVE, "native_new": True, "hole": True},
@@ -119,6 +122,9 @@ def rules(prefix, router, case, ports, purpose="product"):
     if profile.get("hole"):
         # UDP addressed to the router itself: a reply that no longer matches a NAT entry (the hole is gone).
         lines.append(f"add rule inet {table} lanin ip daddr {wan_ip} meta l4proto udp counter name hole_in comment \"p13-hole-in\"")
+    if profile.get("stateful"):
+        # Dropped before conntrack confirmation, so an early peer packet creates no entry; counted with the hole observation.
+        lines.append(f"add rule inet {table} lanin ip daddr {wan_ip} meta l4proto udp counter name hole_in drop comment \"p13-stateful-in\"")
     if profile.get("lan"):
         # LAN: Client (rtr_a ns) and Server (rtr_b ns) share one segment; count it on input, block the Client's Ygg dial on output.
         source, target = ("203.0.113.2", "203.0.113.1") if router == "rtr_a" else ("203.0.113.1", "203.0.113.2")

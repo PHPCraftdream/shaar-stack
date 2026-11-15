@@ -334,6 +334,14 @@ class NetworkContractTests(unittest.TestCase):
         self.assertIn("natout ip saddr 10.0.1.0/24 ip protocol udp counter name udp_nat masquerade to :41010-41020 comment", switch)
         self.assertIn("natout ip saddr 10.0.1.0/24 meta l4proto tcp counter name tcp_nat masquerade comment", switch)
         self.assertNotIn("counter name hole_in", switch)
+        stateful = 'lanin ip daddr %s meta l4proto udp counter name hole_in drop comment "p13-stateful-in"'
+        for case in ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal"):
+            self.assertIn(stateful % "203.0.113.1", rules("rtr_a", case), case)
+            self.assertIn(stateful % "203.0.113.2", rules("rtr_b", case), case)
+            self.assertNotIn("ct state", rules("rtr_a", case), case)
+        for case in ("dnat-cone-signal", "dnat-cone-relay-signal", "dnat-sym-signal", "hole-signal", "native-signal"):
+            self.assertNotIn("p13-stateful-in", rules("rtr_a", case), case)
+        self.assertIn("counter name hole_in comment", hole)
         v6a, v6b = rules("rtr_a", "ipv6-signal"), rules("rtr_b", "ipv6-standby")
         self.assertIn("lanin ip6 saddr 2001:db8:13::2 ip6 daddr 2001:db8:13::1 meta l4proto udp counter name lan6_native", v6a)
         self.assertIn("lanout ip6 saddr 2001:db8:13::1 ip6 daddr 2001:db8:13::2 meta l4proto udp counter name lan6_sent", v6a)

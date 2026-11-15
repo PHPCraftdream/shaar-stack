@@ -195,6 +195,15 @@ Notes on the oracles.
   public endpoints it knows. The outcome is recorded (`pass` or `fail` with receipts) and
   never decides a product verdict; a miss means the fixture could not show a punched path in
   that run.
+- **Stateful gateway for the punch group.** The three `dnat-cone-norelay-*`/`dhtdrop` cases
+  drop UDP addressed to the router itself on input (counter `hole_in`, rule `p13-stateful-in`),
+  as a gateway firewall does. Without it, dispatch 43742025339 (preserved) failed with both
+  routers reporting `peer_recv` 0 although the products exchanged Offer and Answer and
+  probed each other: an early peer packet that the router accepted left a conntrack entry that
+  moved the port of the later outbound mapping, so neither direction matched. The same race is
+  the likely cause of the two fixture-control misses of dispatch 43262313789. Replies are
+  de-translated and forwarded, so the rule only ever sees unsolicited packets; `hole_in` now
+  counts how many arrived early.
 - **Counters.** New named counters: `peer_sent` (translated Native UDP leaving a router toward
   the other router), `peer_recv` (the reverse direction, after de-translation), `native_out`
   (any translated non-DHT UDP leaving a router, including attempts toward unroutable
