@@ -370,17 +370,17 @@ mod tests {
         .unwrap()
     }
 
-    /// Finding 2: an offer whose candidates are all special-range (link-local
-    /// and multicast) is still ANSWERED with the provider's candidates but
+    /// Finding 2: an offer whose candidates are all special-range (v4 and v6
+    /// link-local) is still ANSWERED with the provider's candidates but
     /// starts NO probe batch. Fails on the code that forwarded every offered
     /// candidate.
     #[tokio::test]
-    async fn link_local_and_multicast_offers_are_answered_but_start_no_batch() {
+    async fn link_local_offers_are_answered_but_start_no_batch() {
         let provider: Vec<SocketAddr> = vec!["10.0.0.9:4433".parse().unwrap()];
         let (in_tx, mut out_rx, mut batches) = serve_with(provider.clone(), 4).await;
         let claimed = vec![
             "169.254.9.9:4433".parse().unwrap(),
-            "224.0.0.1:4433".parse().unwrap(),
+            "[fe80::1]:4433".parse().unwrap(),
         ];
         in_tx.send(offer_with(1, claimed)).await.unwrap();
         let reply = answer(
