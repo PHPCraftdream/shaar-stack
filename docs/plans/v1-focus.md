@@ -6,7 +6,7 @@
 - P13: the namespace matrix ran in three passes (E4 base, E8 extension, E9 remaining rows; report in scenarios section 10). Row A5 (direct path through double cone NAT) is a recorded **negative finding**, not a pass; it is the reason for the NAT toolkit below. Still open inside closed rows: key-only IPv6 discovery, circuit and Client-side relay exhaustion, other NAT types, long-period keepalive. Gated: real home/mobile/cafe devices.
 - Platform scope (2026-11-14): the products compile in CI for Linux, Windows, macOS and Android; the zero-configuration first run is executed in CI on Ubuntu and Windows only. macOS and Android are compiled, never executed; no real device was used.
 - NAT toolkit without a helper server (north-star step 4, design in [P13 controlled network](p13-controlled-network.md)): merged L1 (dial ordering), L0 (relay-optional composed startup), L2 (DHT-voted reflexive IP through the owner watcher) and the L5 fixture part. In progress: L4 (punch coordination over Yggdrasil signaling) and route observability in the product logs. Not started: L3 (reflexive address in the record as a setting; its encrypted mode waits for an owner-approved threat model), L4b (candidate exchange over the libp2p relay carrier when a relay is configured), the L5 cases and oracle flips, the L6 dispatches (six authorized on 2026-11-14).
-- Live network: three bounded smokes ran (43629141158 failed at the public relay reservation; relay-less 43671098240 passed over Yggdrasil standby with the route inferred by exclusion; 43751396899 passed over Yggdrasil standby with the route observed and no punch exchange). **No direct path and no hole punch has been observed on a public network.**
+- Live network: three bounded smokes ran (43629141158 failed at the public relay reservation; relay-less 43671098240 passed over Yggdrasil standby with the route inferred by exclusion; 43751396899 passed over Yggdrasil standby with the route observed and no punch exchange; 43772367278 on `745076f` passed again, and its traces show neither side ever learned a public address, so no punch was offered; two dispatches in between failed to start inside their windows). **No direct path and no hole punch has been observed on a public network.**
 - Notices: N1 corpus and N2 build/checks are in place; the three remaining gaps (`base45`, `enum-assoc`, `if-watch`) are closed on a branch that is in full-scope CI and not merged. No legal clearance, no release authority.
 - Next steps, in order: land L4 and route observability → L3 plain setting → L4b → L5 cases and the L6 dispatches → one live smoke with a direct-path attempt (contract amendment first) → re-measure the P10 efficiency criteria and the P14 resources on the final SHA → P16.
 - Blockers and gates: the owner's approval of the threat model for the encrypted address; device access for real networks; legal clearance and release; no publication, version change, commit or push beyond explicit user requests.
@@ -1871,6 +1871,29 @@ step is an end-reason token on the punch trace (task NAT-L4e), so that the next 
 these apart. None of this says anything about the cloud NAT: no cloud-NAT punch has been tried
 yet. What this does not prove: any direct path,
 any hole punching or NAT traversal on a public network, or acceptance of the end-to-end claim.
+
+**Fourth to sixth dispatches, traced binary (2026-11-15, upstream runs 43760623868, 43762751996 and
+43772367278, sources `a2abd4a` and `745076f`, same contract digest):** the first two ended before
+any exchange because GitHub started a role job after its window had closed (the Server in the
+first, both roles in the second, 1 s to 6 min after the shared origin that then carried a 90 s
+margin); the late role refused before any public contact and no evidence was written in the second
+run. The window origin margin was then widened to 600 s for the idle wait only. The third
+(`745076f`) passed: the Client, configured with the server key only, completed one exact exchange
+(43 byte request and reply, 6.67 s) through the Server's fixed target over Yggdrasil standby,
+both roles logged one `ygg-standby` route and session line, two Yggdrasil connections each, no
+relay, zero violations. **Direct-path observation: none, and still no punch exchange.** What the
+traces now establish: the Client printed eight punch attempts, every one with `candidates=0`
+(`deadline` 2, `no-answer` 6); the Server received eighteen Offers, every one with no candidates,
+and answered none; the reflexive watcher of each role never produced an observation, all windows
+`skipped` (Client 7, Server 4), so neither side learned a public address in about 33 and 39
+seconds. The cloud NAT was therefore never attempted: a punch with nothing to offer cannot start.
+The first dispatch's Client alone showed the same (four of four windows skipped). The Client's
+windows after the first ended within 0.4 s each, the Server's took roughly 3 to 9 s, so the
+skips are not all the 10 s bound. **Not established:** why every window is skipped (lookup error,
+no network answer or the 10 s bound; the line did not say). The next leaf step reads
+`info().public_address()` even when the window's own lookup did not complete, because the pinned
+crate sets that address on any finished query that collected a vote, and adds the lookup and info
+tokens to the window line so the following smoke can tell the causes apart.
 
 ### Native is not blocked (third run onward): the direct attempt
 

@@ -234,59 +234,112 @@ pub(super) const REFLEXIVE_LOOKUP_BOUND: Duration = Duration::from_secs(10);
 pub(super) const FAST_START_INTERVAL: Duration = Duration::from_secs(5);
 pub(super) const FAST_START_WINDOW: Duration = Duration::from_secs(30);
 
-/// Result of one bounded self-lookup.
-enum Probe {
-    Stopped,
-    Skipped,
-    Observed(Option<IpAddr>),
+/// Bound on the `info()` read that follows the window's own lookup.
+const INFO_READ_BOUND: Duration = Duration::from_secs(2);
+
+/// How a window's own self-lookup ended (a trace token, never an address).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Lookup {
+    Completed,
+    Incomplete,
+    Bounded,
+    Failed(n0_mainline::ResourceError),
 }
 
-/// One self-lookup plus the `info()` read, raced against `stop` and a single
-/// `REFLEXIVE_LOOKUP_BOUND`. Lookup or `info()` errors skip the probe.
+impl std::fmt::Display for Lookup {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Completed => out.write_str("ok"),
+            Self::Incomplete => out.write_str("incomplete"),
+            Self::Bounded => out.write_str("bounded"),
+            Self::Failed(error) => write!(out, "failed:{error:?}"),
+        }
+    }
+}
+
+/// One window: the lookup outcome and the `info()` read (`None` when the read failed or
+/// was bounded out; `Some(None)` when no vote has been collected yet).
+pub(super) struct Window {
+    pub(super) lookup: Lookup,
+    pub(super) info: Option<Option<IpAddr>>,
+}
+
+impl Window {
+    /// The observation this window feeds the tally, if any. A completed lookup counts
+    /// whatever it read, including "no vote". A lookup that did not complete counts only
+    /// an address already learned from other finished queries of the same DHT actor
+    /// (the pinned crate sets `public_address` on every finished query that collected a
+    /// vote), never an absent vote: no network answer is not evidence of "no address".
+    pub(super) fn observation(&self) -> Option<Option<IpAddr>> {
+        match (self.lookup, self.info) {
+            (_, None) => None,
+            (Lookup::Completed, Some(address)) => Some(address),
+            (_, Some(Some(address))) => Some(Some(address)),
+            (_, Some(None)) => None,
+        }
+    }
+
+    fn note(&self, start: tokio::time::Instant) {
+        let (outcome, info) = match (self.observation(), self.info) {
+            (Some(None), _) => ("empty", "none"),
+            (Some(Some(_)), _) => ("observed", "some"),
+            (None, Some(_)) => ("skipped", "none"),
+            (None, None) => ("skipped", "failed"),
+        };
+        eprintln!(
+            "{}",
+            probe_line(outcome, &self.lookup, info, start.elapsed().as_millis())
+        );
+    }
+}
+
+/// One self-lookup, then the `info()` read, each raced against `stop` and its own bound
+/// (`REFLEXIVE_LOOKUP_BOUND`, `INFO_READ_BOUND`). `None` means the watcher was stopped.
 async fn reflexive_probe(
     handle: &OwnedDhtHandle,
     target: n0_mainline::Id,
     stop: &mut oneshot::Receiver<()>,
-) -> Probe {
+) -> Option<Window> {
     let bound = tokio::time::Instant::now() + REFLEXIVE_LOOKUP_BOUND;
-    let work = async {
-        let completion = handle.resolve_mutable(target).await.ok()?;
-        if !completion.network_completed() {
-            return None;
-        }
-        drop(completion);
-        let info = handle.info().await.ok()?;
-        Some(
-            info.public_address()
-                .map(|address| IpAddr::V4(*address.ip())),
-        )
-    };
-    let observed = tokio::select! {
+    let lookup = tokio::select! {
         biased;
-        _ = &mut *stop => return Probe::Stopped,
-        _ = tokio::time::sleep_until(bound) => None,
-        observed = work => observed,
+        _ = &mut *stop => return None,
+        _ = tokio::time::sleep_until(bound) => Lookup::Bounded,
+        done = handle.resolve_mutable(target) => match done {
+            Ok(completion) if completion.network_completed() => Lookup::Completed,
+            Ok(_) => Lookup::Incomplete,
+            Err(error) => Lookup::Failed(error),
+        },
     };
-    match observed {
-        Some(observed) => Probe::Observed(observed),
-        None => Probe::Skipped,
-    }
+    let info_bound = tokio::time::Instant::now() + INFO_READ_BOUND;
+    let info = tokio::select! {
+        biased;
+        _ = &mut *stop => return None,
+        _ = tokio::time::sleep_until(info_bound) => None,
+        read = handle.info() => read.ok().map(|info| {
+            info.public_address().map(|address| IpAddr::V4(*address.ip()))
+        }),
+    };
+    Some(Window { lookup, info })
 }
 
-/// The trace line of one reflexive window: only an outcome token and the time since
-/// the watcher started, never an address. `exposed` marks the first majority.
+/// The trace line of the first exposed majority: an outcome token and the time since the
+/// watcher started, never an address.
 pub(crate) fn window_line(outcome: &str, elapsed_ms: u128) -> String {
     format!("shaar: reflexive window outcome={outcome} elapsed_ms={elapsed_ms}")
 }
 
-fn note_window(start: tokio::time::Instant, probe: &Probe) {
-    let outcome = match probe {
-        Probe::Stopped => return,
-        Probe::Skipped => "skipped",
-        Probe::Observed(None) => "empty",
-        Probe::Observed(Some(_)) => "observed",
-    };
-    eprintln!("{}", window_line(outcome, start.elapsed().as_millis()));
+/// The trace line of one window: outcome, how the lookup ended and what `info()` held
+/// (`some`, `none` or `failed`); tokens only, never an address.
+pub(crate) fn probe_line(
+    outcome: &str,
+    lookup: &impl std::fmt::Display,
+    info: &str,
+    elapsed_ms: u128,
+) -> String {
+    format!(
+        "shaar: reflexive window outcome={outcome} lookup={lookup} info={info} elapsed_ms={elapsed_ms}"
+    )
 }
 
 /// Pure majority filter over a fixed 3-window observation ring.
@@ -358,16 +411,17 @@ impl ReflexiveTally {
 /// Cancel-safety: the outer loop exits promptly on `stop`; a stop mid-lookup
 /// drops the in-flight future (adapter-documented cancel behavior: the
 /// request lease is released by a drop guard, actor-side cleanup is not
-/// joined) — this is the shutdown cancel path. The whole window work — the
-/// self-lookup AND the subsequent `info()` read — races `stop` first
-/// (biased) against a single `REFLEXIVE_LOOKUP_BOUND` per window, so
-/// shutdown cancels cleanly even while `info()` is in flight. Lookup or
-/// `info()` errors skip the window (no observation): `resolve_mutable` runs
-/// a real iterative GET (votes collected on every response,
-/// handle_response.rs:70-71); observing requires `network_completed()`
-/// (resolver.rs:138 pattern), and the pinned crate overwrites
-/// `public_address` only when the finished GET collected at least one vote
-/// (core.rs:386-409).
+/// joined) — this is the shutdown cancel path. The self-lookup races `stop`
+/// first (biased) against `REFLEXIVE_LOOKUP_BOUND` and the subsequent `info()`
+/// read against `INFO_READ_BOUND`, so shutdown cancels cleanly even while
+/// `info()` is in flight. `resolve_mutable` runs a real iterative GET (votes
+/// collected on every response, handle_response.rs:70-71) and the pinned crate
+/// overwrites `public_address` whenever ANY finished query collected at least
+/// one vote (core.rs:386-409). A lookup that completed counts whatever `info()`
+/// holds; one that failed, was bounded out or got no network answer still
+/// counts an address another finished query already learned, because the first
+/// live smokes showed every own lookup ending without a completion while the
+/// address stayed unknown (see `Window::observation`).
 pub(super) async fn reflexive_loop(
     handle: OwnedDhtHandle,
     target: n0_mainline::Id,
@@ -381,18 +435,16 @@ pub(super) async fn reflexive_loop(
     if fast_start {
         let deadline = start + FAST_START_WINDOW;
         loop {
-            let probe = reflexive_probe(&handle, target, &mut stop).await;
-            note_window(start, &probe);
-            match probe {
-                Probe::Stopped => return,
-                Probe::Skipped => {}
-                Probe::Observed(observed) => {
-                    let value = tally.observe(observed);
-                    if value != sent {
-                        sender.send_replace(value);
-                        sent = value;
-                        eprintln!("{}", window_line("exposed", start.elapsed().as_millis()));
-                    }
+            let Some(probe) = reflexive_probe(&handle, target, &mut stop).await else {
+                return;
+            };
+            probe.note(start);
+            if let Some(observed) = probe.observation() {
+                let value = tally.observe(observed);
+                if value != sent {
+                    sender.send_replace(value);
+                    sent = value;
+                    eprintln!("{}", window_line("exposed", start.elapsed().as_millis()));
                 }
             }
             if sent.is_some() || tokio::time::Instant::now() >= deadline {
@@ -415,13 +467,13 @@ pub(super) async fn reflexive_loop(
             biased;
             _ = &mut stop => return,
             _ = window.tick() => {
-                let probe = reflexive_probe(&handle, target, &mut stop).await;
-                note_window(start, &probe);
-                let observed = match probe {
-                    Probe::Stopped => return,
-                    // Bounded out or skipped; no observation this window.
-                    Probe::Skipped => continue,
-                    Probe::Observed(observed) => observed,
+                let Some(probe) = reflexive_probe(&handle, target, &mut stop).await else {
+                    return;
+                };
+                probe.note(start);
+                // No observation this window (bounded out, failed or no vote learned).
+                let Some(observed) = probe.observation() else {
+                    continue;
                 };
                 let value = tally.observe(observed);
                 if value != sent {
@@ -436,7 +488,20 @@ pub(super) async fn reflexive_loop(
 
 #[cfg(test)]
 mod window_line_tests {
-    use super::window_line;
+    use super::{Lookup, ReflexiveTally, Window, probe_line, window_line};
+    use n0_mainline::ResourceError;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    const ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
+    const MISSES: [Lookup; 3] = [
+        Lookup::Incomplete,
+        Lookup::Bounded,
+        Lookup::Failed(ResourceError::DeadlineExceeded),
+    ];
+
+    fn window(lookup: Lookup, info: Option<Option<IpAddr>>) -> Window {
+        Window { lookup, info }
+    }
 
     #[test]
     fn the_window_line_carries_an_outcome_and_a_time_only() {
@@ -448,5 +513,59 @@ mod window_line_tests {
             window_line("exposed", 0),
             "shaar: reflexive window outcome=exposed elapsed_ms=0"
         );
+    }
+
+    #[test]
+    fn a_probe_line_carries_tokens_and_a_time_only() {
+        assert_eq!(
+            probe_line("skipped", &Lookup::Incomplete, "none", 1001),
+            "shaar: reflexive window outcome=skipped lookup=incomplete info=none elapsed_ms=1001"
+        );
+        let failed = Lookup::Failed(ResourceError::DeadlineExceeded);
+        assert_eq!(
+            probe_line("observed", &failed, "some", 7),
+            "shaar: reflexive window outcome=observed lookup=failed:DeadlineExceeded info=some elapsed_ms=7"
+        );
+        assert_eq!(Lookup::Completed.to_string(), "ok");
+        assert_eq!(Lookup::Bounded.to_string(), "bounded");
+    }
+
+    #[test]
+    fn a_completed_lookup_counts_whatever_the_info_read_holds() {
+        let completed = |info| window(Lookup::Completed, info).observation();
+        assert_eq!(completed(Some(Some(ADDRESS))), Some(Some(ADDRESS)));
+        assert_eq!(completed(Some(None)), Some(None));
+        assert_eq!(completed(None), None);
+    }
+
+    #[test]
+    fn an_address_learned_elsewhere_counts_when_the_own_lookup_did_not_complete() {
+        for lookup in MISSES {
+            assert_eq!(
+                window(lookup, Some(Some(ADDRESS))).observation(),
+                Some(Some(ADDRESS)),
+                "{lookup:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_network_answer_is_never_evidence_of_no_address() {
+        for lookup in MISSES {
+            assert_eq!(window(lookup, Some(None)).observation(), None, "{lookup:?}");
+            assert_eq!(window(lookup, None).observation(), None, "{lookup:?}");
+        }
+    }
+
+    #[test]
+    fn a_learned_address_still_needs_two_agreeing_windows_to_be_exposed() {
+        let mut tally = ReflexiveTally::new();
+        let learned = || {
+            window(Lookup::Incomplete, Some(Some(ADDRESS)))
+                .observation()
+                .expect("an address learned elsewhere is an observation")
+        };
+        assert_eq!(tally.observe(learned()), None);
+        assert_eq!(tally.observe(learned()), Some(ADDRESS));
     }
 }
