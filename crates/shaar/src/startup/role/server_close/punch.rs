@@ -14,7 +14,7 @@ use iroh_base::PublicKey;
 use tokio::sync::mpsc;
 
 use crate::network::signaling::punch::{
-    self, Kind, OfferBatch, PunchChannel, PunchLink, PunchMessage,
+    self, Kind, OfferBatch, PunchChannel, PunchLink, PunchMessage, SendError,
 };
 use crate::startup::role::server::ServerParts;
 
@@ -150,8 +150,9 @@ pub(in crate::startup::role) fn spawn_responder(
 /// decision; the Answer still carries the provider's own candidates
 /// regardless of what the peer offered. Offers INSIDE the interval are
 /// STILL ANSWERED — only the burst handover is suppressed. Malformed or
-/// hostile input is silently discarded; a send error or link death ends the
-/// worker (peer punching disabled).
+/// hostile input is silently discarded; a closed link ends the worker (peer
+/// punching disabled), while a refused Answer is left to the peer's next Offer
+/// copy.
 async fn serve_peer<L, P>(
     peer: [u8; 32],
     provider: P,
@@ -195,9 +196,11 @@ async fn serve_peer<L, P>(
             .copied()
             .filter(|candidate| punch::peer_claimed_probe_allowed(*candidate))
             .collect();
-        // A failed answer send disables this peer's punching.
-        if channel.send(&answer, punch::EXCHANGE_BUDGET).await.is_err() {
-            return;
+        match channel.send(&answer, punch::EXCHANGE_BUDGET).await {
+            Ok(()) => {}
+            // Transient: epoch and burst state stay untouched for the retry.
+            Err(SendError::Refused) => continue,
+            Err(SendError::Closed) => return,
         }
         // One burst per peer per `punch::BURST_MIN_INTERVAL`; a full channel
         // skips the batch. Special-range offers start no batch (nothing safe
@@ -256,6 +259,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -269,9 +273,9 @@ mod tests {
     }
 
     impl PunchLink for FakeLink {
-        async fn send(&self, message: &PunchMessage, _budget: Duration) -> Result<(), ()> {
-            let bytes = encode(message).ok_or(())?;
-            self.tx.send(bytes).await.map_err(|_| ())
+        async fn send(&self, message: &PunchMessage, _budget: Duration) -> Result<(), SendError> {
+            let bytes = encode(message).ok_or(SendError::Closed)?;
+            self.tx.send(bytes).await.map_err(|_| SendError::Closed)
         }
 
         async fn recv_raw(&mut self) -> Option<Vec<u8>> {
@@ -605,5 +609,81 @@ mod tests {
         in_tx.send(datagram).await.unwrap();
         no_answer(&mut out_rx).await;
         no_batch(&mut batches).await;
+    }
+
+    /// Refuses the first `refusals` sends (cold Yggdrasil path), then delivers.
+    struct RefusingLink {
+        inner: FakeLink,
+        refusals: usize,
+        sent: AtomicUsize,
+    }
+
+    impl PunchLink for RefusingLink {
+        async fn send(&self, message: &PunchMessage, budget: Duration) -> Result<(), SendError> {
+            if self.sent.fetch_add(1, Ordering::SeqCst) < self.refusals {
+                return Err(SendError::Refused);
+            }
+            self.inner.send(message, budget).await
+        }
+
+        async fn recv_raw(&mut self) -> Option<Vec<u8>> {
+            self.inner.recv_raw().await
+        }
+    }
+
+    /// A refused Answer must not end the worker: the peer's next Offer copy is
+    /// answered and starts the one burst of that epoch.
+    #[tokio::test]
+    async fn refused_answer_is_retried_by_the_next_offer_copy() {
+        let (in_tx, in_rx) = mpsc::channel(16);
+        let (out_tx, mut out_rx) = mpsc::channel(16);
+        let (batch_tx, mut batches) = mpsc::channel(4);
+        let link = RefusingLink {
+            inner: FakeLink {
+                tx: out_tx,
+                rx: in_rx,
+            },
+            refusals: 1,
+            sent: AtomicUsize::new(0),
+        };
+        let provider: Vec<SocketAddr> = vec!["198.51.100.9:4433".parse().unwrap()];
+        tokio::spawn(serve_peer(PEER, move || provider.clone(), batch_tx, link));
+        in_tx.send(offer(1)).await.unwrap();
+        no_answer(&mut out_rx).await;
+        no_batch(&mut batches).await;
+        in_tx.send(offer(1)).await.unwrap();
+        let answer = answer(
+            timeout(Duration::from_secs(1), out_rx.recv())
+                .await
+                .unwrap(),
+        );
+        assert_eq!(answer.epoch, 1);
+        let batch = timeout(Duration::from_secs(1), batches.recv())
+            .await
+            .unwrap()
+            .expect("batch");
+        assert_eq!(batch.candidates, offered());
+        no_batch(&mut batches).await;
+    }
+
+    /// A closed link still ends the worker (peer punching disabled).
+    #[tokio::test]
+    async fn closed_answer_link_ends_the_worker() {
+        let (in_tx, in_rx) = mpsc::channel(16);
+        let (out_tx, out_rx) = mpsc::channel(16);
+        let (batch_tx, _batches) = mpsc::channel(4);
+        // Answers can no longer be delivered once the receiving half is gone.
+        drop(out_rx);
+        let link = FakeLink {
+            tx: out_tx,
+            rx: in_rx,
+        };
+        let provider: Vec<SocketAddr> = vec!["198.51.100.9:4433".parse().unwrap()];
+        let worker = tokio::spawn(serve_peer(PEER, move || provider.clone(), batch_tx, link));
+        in_tx.send(offer(1)).await.unwrap();
+        timeout(Duration::from_secs(1), worker)
+            .await
+            .expect("the worker ends")
+            .expect("no panic");
     }
 }
