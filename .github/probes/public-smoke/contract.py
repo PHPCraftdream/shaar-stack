@@ -357,22 +357,30 @@ def scan_punch(text, role):
 
 
 # Reflexive-address watcher and Server Offer traces (leaf NAT-L4e): tokens and counts only, never addresses.
-REFLEXIVE_LINE = re.compile(r"^shaar: reflexive window outcome=(skipped|empty|observed|exposed) elapsed_ms=([0-9]{1,10})$")
+# The lookup and info tokens are optional so that an older binary's line still parses.
+REFLEXIVE_LINE = re.compile(
+    r"^shaar: reflexive window outcome=(skipped|empty|observed|exposed)"
+    r"(?: lookup=(ok|incomplete|bounded|failed:[A-Za-z]{1,40}) info=(some|none|failed))?"
+    r" elapsed_ms=([0-9]{1,10})$")
 OFFER_LINE = re.compile(r"^shaar: server punch offer candidates=([0-9]{1,3}) answer=(sent|none|refused)$")
 
 
 def scan_reflexive(text):
-    """Windows of the DHT reflexive watcher by outcome and when the first majority was exposed (ms or None)."""
-    found = {"windows": {}, "exposed_ms": None}
+    """Windows of the DHT reflexive watcher by outcome, how each own lookup ended, what info() held, and when
+    the first majority was exposed (ms or None)."""
+    found = {"windows": {}, "lookups": {}, "info": {}, "exposed_ms": None}
     for line in text.splitlines():
         match = REFLEXIVE_LINE.fullmatch(line.strip())
         if not match:
             continue
         if match[1] == "exposed":
             if found["exposed_ms"] is None:
-                found["exposed_ms"] = int(match[2])
-        else:
-            found["windows"][match[1]] = found["windows"].get(match[1], 0) + 1
+                found["exposed_ms"] = int(match[4])
+            continue
+        found["windows"][match[1]] = found["windows"].get(match[1], 0) + 1
+        for key, token in (("lookups", match[2]), ("info", match[3])):
+            if token is not None:
+                found[key][token] = found[key].get(token, 0) + 1
     return found
 
 

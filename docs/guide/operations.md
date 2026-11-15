@@ -145,6 +145,19 @@ Values:
 - Classification rule: only the peer's APPLICATION-level close is a clean end; locally-closed teardown, transport failures and timeouts remain typed errors.
 - `bytes_in`/`bytes_out` are totals over FULLY completed streams only: at the server, `bytes_in` counts bytes received from the peer (forwarded toward the target) and `bytes_out` the bytes sent back; cancelled or interrupted streams contribute nothing; a session that ended before any stream completed reports zeros.
 
+Hole-punch diagnostics — tokens and counts only, never an address:
+
+```text
+shaar: <client|server> punch candidates=<N> outcome=<direct|fallback> reason=<direct|deadline|no-answer|closed|probe> elapsed_ms=<MS>
+shaar: server punch offer candidates=<N> answer=<sent|none|refused>
+shaar: reflexive window outcome=<skipped|empty|observed> lookup=<ok|incomplete|bounded|failed:<ERROR>> info=<some|none|failed> elapsed_ms=<MS>
+shaar: reflexive window outcome=exposed elapsed_ms=<MS>
+```
+
+- A punch attempt names why it ended. `candidates` counts what this side offered; a side that does not yet know its public address offers none.
+- The Server answers an Offer only when it has candidates of its own; `answer=none` means it had none to answer with.
+- One reflexive window is one lookup of the DHT address watcher. `lookup` says how the window's own lookup ended (`ok` completed; `incomplete` finished without a network answer; `bounded` hit the 10 s bound; `failed:<ERROR>` carried a typed error) and `info` what the DHT actor held afterwards (`some` an address, `none` no vote yet, `failed` the read did not finish). A completed lookup counts whatever it read; any other lookup still counts an address that another finished query already learned, and never counts "no vote" as evidence. `exposed` marks the first majority of two agreeing windows, which is what the punch offers as a candidate.
+
 Consumers: the public smoke harness (`.github/probes/public-smoke/`) reads these lines from the product stderr and fails a run whose observed path contradicts its expectation. Absence of the lines (older binaries) keeps the previous inferred wording.
 
 ## What the DHT record discloses

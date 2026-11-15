@@ -505,13 +505,21 @@ class ObservabilityTests(unittest.TestCase):
             "shaar: reflexive window outcome=exposed elapsed_ms=90000",
             "shaar: reflexive window outcome=bogus elapsed_ms=1",
             "shaar: reflexive window outcome=observed elapsed_ms=1 203.0.113.9",
+            "shaar: reflexive window outcome=skipped lookup=incomplete info=none elapsed_ms=1001",
+            "shaar: reflexive window outcome=skipped lookup=failed:DeadlineExceeded info=failed elapsed_ms=6000",
+            "shaar: reflexive window outcome=observed lookup=bounded info=some elapsed_ms=11000",
+            "shaar: reflexive window outcome=empty lookup=ok info=none elapsed_ms=16000",
+            "shaar: reflexive window outcome=skipped lookup=weird info=none elapsed_ms=1",
+            "shaar: reflexive window outcome=skipped lookup=ok info=203.0.113.9 elapsed_ms=1",
             "shaar: server punch offer candidates=0 answer=none",
             "shaar: server punch offer candidates=1 answer=sent",
             "shaar: server punch offer candidates=2 answer=refused",
             "shaar: server punch offer candidates=1 answer=maybe"])
         self.assertEqual(CONTRACT.scan_reflexive(text),
-                         {"windows": {"skipped": 1, "empty": 1, "observed": 2}, "exposed_ms": 26001})
-        self.assertEqual(CONTRACT.scan_reflexive(""), {"windows": {}, "exposed_ms": None})
+                         {"windows": {"skipped": 3, "empty": 2, "observed": 3}, "exposed_ms": 26001,
+                          "lookups": {"incomplete": 1, "failed:DeadlineExceeded": 1, "bounded": 1, "ok": 1},
+                          "info": {"none": 2, "failed": 1, "some": 1}})
+        self.assertEqual(CONTRACT.scan_reflexive(""), {"windows": {}, "lookups": {}, "info": {}, "exposed_ms": None})
         self.assertEqual(CONTRACT.scan_offers(text),
                          {"received": 3, "with_candidates": 2, "answers": {"none": 1, "sent": 1, "refused": 1}})
         self.assertEqual(CONTRACT.scan_offers(""), {"received": 0, "with_candidates": 0, "answers": {}})
