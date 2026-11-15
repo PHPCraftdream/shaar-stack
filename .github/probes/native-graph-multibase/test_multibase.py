@@ -62,14 +62,15 @@ def original_files() -> dict[str, bytes]:
         b"impl From<base45::DecodeError> for Error {\n    fn from(_: base45::DecodeError) -> Self {\n"
         b"        Self::InvalidBaseString\n    }\n}\n"
     )
+    # Real layout: the Base45 pair sits among the early variants, the emoji pair closes the enum.
     base_rs = (
         b"build_base_enum! {\n"
-        b"    'u' => Base64Url,\n"
-        b"    'U' => Base64UrlPad,\n"
-        + DOC_LINE
-        + b"    '" + recipe.ROCKET + b"' => Base256Emoji,\n"
         + b"    " + BASE45_DOC
         + b"    'R' => Base45,\n"
+        + b"    'u' => Base64Url,\n"
+        + b"    'U' => Base64UrlPad,\n"
+        + DOC_LINE
+        + b"    '" + recipe.ROCKET + b"' => Base256Emoji,\n"
         + b"}\n"
     )
     impls_rs = (
