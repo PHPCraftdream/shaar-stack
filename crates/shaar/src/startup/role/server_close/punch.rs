@@ -181,6 +181,7 @@ async fn serve_peer<L, P>(
         let candidates = provider();
         // Nothing to answer: skip without touching the epoch state.
         if candidates.is_empty() {
+            punch::trace_offer(offer.candidates.len(), "none");
             continue;
         }
         let answer = PunchMessage {
@@ -197,9 +198,12 @@ async fn serve_peer<L, P>(
             .filter(|candidate| punch::peer_claimed_probe_allowed(*candidate))
             .collect();
         match channel.send(&answer, punch::EXCHANGE_BUDGET).await {
-            Ok(()) => {}
+            Ok(()) => punch::trace_offer(offer.candidates.len(), "sent"),
             // Transient: epoch and burst state stay untouched for the retry.
-            Err(SendError::Refused) => continue,
+            Err(SendError::Refused) => {
+                punch::trace_offer(offer.candidates.len(), "refused");
+                continue;
+            }
             Err(SendError::Closed) => return,
         }
         // One burst per peer per `punch::BURST_MIN_INTERVAL`; a full channel

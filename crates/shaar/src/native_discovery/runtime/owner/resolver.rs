@@ -273,6 +273,22 @@ async fn reflexive_probe(
     }
 }
 
+/// The trace line of one reflexive window: only an outcome token and the time since
+/// the watcher started, never an address. `exposed` marks the first majority.
+pub(crate) fn window_line(outcome: &str, elapsed_ms: u128) -> String {
+    format!("shaar: reflexive window outcome={outcome} elapsed_ms={elapsed_ms}")
+}
+
+fn note_window(start: tokio::time::Instant, probe: &Probe) {
+    let outcome = match probe {
+        Probe::Stopped => return,
+        Probe::Skipped => "skipped",
+        Probe::Observed(None) => "empty",
+        Probe::Observed(Some(_)) => "observed",
+    };
+    eprintln!("{}", window_line(outcome, start.elapsed().as_millis()));
+}
+
 /// Pure majority filter over a fixed 3-window observation ring.
 ///
 /// Resource bound: exactly 3 fixed slots, no heap allocation. Determinism:
@@ -361,10 +377,13 @@ pub(super) async fn reflexive_loop(
     fast_start: bool,
 ) {
     let mut sent: Option<IpAddr> = None;
+    let start = tokio::time::Instant::now();
     if fast_start {
-        let deadline = tokio::time::Instant::now() + FAST_START_WINDOW;
+        let deadline = start + FAST_START_WINDOW;
         loop {
-            match reflexive_probe(&handle, target, &mut stop).await {
+            let probe = reflexive_probe(&handle, target, &mut stop).await;
+            note_window(start, &probe);
+            match probe {
                 Probe::Stopped => return,
                 Probe::Skipped => {}
                 Probe::Observed(observed) => {
@@ -372,6 +391,7 @@ pub(super) async fn reflexive_loop(
                     if value != sent {
                         sender.send_replace(value);
                         sent = value;
+                        eprintln!("{}", window_line("exposed", start.elapsed().as_millis()));
                     }
                 }
             }
@@ -395,7 +415,9 @@ pub(super) async fn reflexive_loop(
             biased;
             _ = &mut stop => return,
             _ = window.tick() => {
-                let observed = match reflexive_probe(&handle, target, &mut stop).await {
+                let probe = reflexive_probe(&handle, target, &mut stop).await;
+                note_window(start, &probe);
+                let observed = match probe {
                     Probe::Stopped => return,
                     // Bounded out or skipped; no observation this window.
                     Probe::Skipped => continue,
@@ -405,8 +427,26 @@ pub(super) async fn reflexive_loop(
                 if value != sent {
                     sender.send_replace(value);
                     sent = value;
+                    eprintln!("{}", window_line("exposed", start.elapsed().as_millis()));
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod window_line_tests {
+    use super::window_line;
+
+    #[test]
+    fn the_window_line_carries_an_outcome_and_a_time_only() {
+        assert_eq!(
+            window_line("observed", 21_000),
+            "shaar: reflexive window outcome=observed elapsed_ms=21000"
+        );
+        assert_eq!(
+            window_line("exposed", 0),
+            "shaar: reflexive window outcome=exposed elapsed_ms=0"
+        );
     }
 }

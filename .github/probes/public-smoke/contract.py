@@ -356,6 +356,38 @@ def scan_punch(text, role):
     return found
 
 
+# Reflexive-address watcher and Server Offer traces (leaf NAT-L4e): tokens and counts only, never addresses.
+REFLEXIVE_LINE = re.compile(r"^shaar: reflexive window outcome=(skipped|empty|observed|exposed) elapsed_ms=([0-9]{1,10})$")
+OFFER_LINE = re.compile(r"^shaar: server punch offer candidates=([0-9]{1,3}) answer=(sent|none|refused)$")
+
+
+def scan_reflexive(text):
+    """Windows of the DHT reflexive watcher by outcome and when the first majority was exposed (ms or None)."""
+    found = {"windows": {}, "exposed_ms": None}
+    for line in text.splitlines():
+        match = REFLEXIVE_LINE.fullmatch(line.strip())
+        if not match:
+            continue
+        if match[1] == "exposed":
+            if found["exposed_ms"] is None:
+                found["exposed_ms"] = int(match[2])
+        else:
+            found["windows"][match[1]] = found["windows"].get(match[1], 0) + 1
+    return found
+
+
+def scan_offers(text):
+    """Offers the Server received: how many, how many carried candidates, and what became of the Answer."""
+    found = {"received": 0, "with_candidates": 0, "answers": {}}
+    for line in text.splitlines():
+        match = OFFER_LINE.fullmatch(line.strip())
+        if match:
+            found["received"] += 1
+            found["with_candidates"] += 1 if int(match[1]) > 0 else 0
+            found["answers"][match[2]] = found["answers"].get(match[2], 0) + 1
+    return found
+
+
 def path_violations(paths):
     """Every observed route path must be inside the allowed set."""
     allowed = " or ".join(ALLOWED_ROUTES)

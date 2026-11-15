@@ -149,3 +149,13 @@ fn the_trace_line_carries_counts_reason_and_timing_only() {
         );
     }
 }
+
+#[test]
+fn the_offer_line_carries_counts_and_the_answer_fate_only() {
+    for answer in ["sent", "none", "refused"] {
+        assert_eq!(
+            super::offer_line(3, answer),
+            format!("shaar: server punch offer candidates=3 answer={answer}")
+        );
+    }
+}
