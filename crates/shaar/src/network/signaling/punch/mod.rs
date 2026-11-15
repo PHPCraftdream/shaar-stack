@@ -273,11 +273,6 @@ impl PunchChannel {
             receiver: datagrams,
         })
     }
-
-    /// The allowlisted peer key this channel is bound to.
-    pub(crate) fn peer_key(&self) -> [u8; 32] {
-        self.receiver.peer_key()
-    }
 }
 
 impl PunchLink for PunchChannel {

@@ -248,9 +248,7 @@ where
                     None => break,
                 }
             }
-            joined = running.next(), if !running.is_empty() => {
-                drop(joined);
-            }
+            _ = running.next(), if !running.is_empty() => {}
         }
     }
 }
