@@ -335,8 +335,13 @@ async fn first_run_scenario(
 
     // Step 5: positional target run keeps serving; parse readiness, then the
     // operator block with the empty allowlist line.
-    let mut child =
-        spawn_first_run(&server_exe, &[forward_target.clone()], &temp.0, &temp.0).await?;
+    let mut child = spawn_first_run(
+        &server_exe,
+        std::slice::from_ref(&forward_target),
+        &temp.0,
+        &temp.0,
+    )
+    .await?;
     let stdout = child.stdout.take().ok_or("piped stdout unavailable")?;
     processes.0.push(Process {
         child,
@@ -409,8 +414,13 @@ async fn first_run_scenario(
             .map_err(|_| "server restart kill deadline")?
             .map_err(|error| error.to_string())?;
     }
-    let mut child =
-        spawn_first_run(&server_exe, &[forward_target.clone()], &temp.0, &temp.0).await?;
+    let mut child = spawn_first_run(
+        &server_exe,
+        std::slice::from_ref(&forward_target),
+        &temp.0,
+        &temp.0,
+    )
+    .await?;
     let stdout = child.stdout.take().ok_or("piped stdout unavailable")?;
     processes.0.push(Process {
         child,
