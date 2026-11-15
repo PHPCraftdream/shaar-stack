@@ -123,9 +123,9 @@ def dnat(spec, counters, result):
         lines = (result.get("markers") or {}).get("client_lines") or {}
         contract.require(contract.ROUTE_LINE in lines, "Client log lacks the native route line")
         contract.require("path=native" in lines[contract.ROUTE_LINE], "Client log lacks the native route line")
-        contract.require(contract.PUNCH_TRACE in lines, "Client log lacks the punch candidate trace")
-        contract.require(contract.PUNCH_DIRECT in lines[contract.PUNCH_TRACE], "Client punch did not end on the direct path")
-        found = re.search(r"candidates=(\d+)", lines[contract.PUNCH_TRACE])
+        contract.require(contract.PUNCH_DIRECT in lines, "Client log lacks a punch attempt that ended on the direct path")
+        contract.require(contract.PUNCH_DIRECT in lines[contract.PUNCH_DIRECT], "Client punch did not end on the direct path")
+        found = re.search(r"candidates=(\d+)", lines[contract.PUNCH_DIRECT])
         contract.require(found is not None and int(found.group(1)) >= 1, "Client punch had no candidates to dial")
         return
     # The relay variants keep today's fail-closed oracle on purpose: they are the regression control that a Server

@@ -353,9 +353,9 @@ class CaseTests(unittest.TestCase):
         run = self.collector("dnat-cone-norelay-signal")
         run.collect_client_lines()
         self.assertEqual(run.ev["markers"]["client_lines"], {
-            contract.PUNCH_TRACE: "line:" + contract.PUNCH_TRACE, contract.ROUTE_LINE: "line:" + contract.ROUTE_LINE})
+            contract.PUNCH_DIRECT: "line:" + contract.PUNCH_DIRECT, contract.ROUTE_LINE: "line:" + contract.ROUTE_LINE})
         calls = run.sup.mark.call_args_list
-        self.assertEqual([c.args[1] for c in calls], [contract.PUNCH_TRACE.encode(), contract.ROUTE_LINE.encode()])
+        self.assertEqual([c.args[1] for c in calls], [contract.PUNCH_DIRECT.encode(), contract.ROUTE_LINE.encode()])
         self.assertTrue(all(c.args[0] is run.client and c.args[2] <= run.hard for c in calls))
         idle = self.collector("blocked-signal")
         idle.collect_client_lines()

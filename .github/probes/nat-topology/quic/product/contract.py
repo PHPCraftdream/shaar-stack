@@ -118,6 +118,8 @@ REPLY_PREFIX = b"shaar-fixed-target-reply:"
 DHT_OBSERVED_KEY = "dht_observed"
 DHT_OBSERVED_ENV = "SHAAR_NAT_DHT_OBSERVED"
 # Client stdout markers of the L4 punch (candidates line ending on the direct outcome) and the chosen route.
+# Every attempt prints PUNCH_TRACE + "<n> outcome=direct|fallback ..."; early attempts may end on fallback (no candidates
+# before the first reflexive vote), so the harness records the first line that ENDED direct (needle PUNCH_DIRECT).
 PUNCH_TRACE = "shaar: client punch candidates="
 PUNCH_DIRECT = "outcome=direct"
 ROUTE_LINE = "shaar-client: route path=native"

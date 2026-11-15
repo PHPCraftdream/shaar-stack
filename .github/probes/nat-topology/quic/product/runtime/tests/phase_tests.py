@@ -50,7 +50,7 @@ def evidence(case):
                 {"host": "host_b", "sent": 20, "received": 19, "first": ["203.0.113.1", 40100]}]}
         if spec.get("direct"):
             result_extra["markers"] = {"client": "composed startup: server_address=none",
-                                       "client_lines": {contract.PUNCH_TRACE: contract.PUNCH_TRACE + "2 outcome=direct elapsed_ms=120",
+                                       "client_lines": {contract.PUNCH_DIRECT: contract.PUNCH_TRACE + "2 outcome=direct elapsed_ms=120",
                                                         contract.ROUTE_LINE: contract.ROUTE_LINE + " via 203.0.113.10"}}
         if spec.get("dht_denied"):
             routers["rtr_a"]["counters"]["dht_drop"]["packets"] = 3
@@ -212,15 +212,15 @@ def mutate(case, name):
     elif name == "no-route-line":
         del result["markers"]["client_lines"][contract.ROUTE_LINE]
     elif name == "no-punch-line":
-        del result["markers"]["client_lines"][contract.PUNCH_TRACE]
+        del result["markers"]["client_lines"][contract.PUNCH_DIRECT]
     elif name == "no-markers":
         del result["markers"]
     elif name == "route-relay":
         result["markers"]["client_lines"][contract.ROUTE_LINE] = contract.ROUTE_LINE.replace("native", "relay")
     elif name == "punch-fallback":
-        result["markers"]["client_lines"][contract.PUNCH_TRACE] = contract.PUNCH_TRACE + "2 outcome=fallback elapsed_ms=120"
+        result["markers"]["client_lines"][contract.PUNCH_DIRECT] = contract.PUNCH_TRACE + "2 outcome=fallback elapsed_ms=120"
     elif name == "punch-zero":
-        result["markers"]["client_lines"][contract.PUNCH_TRACE] = contract.PUNCH_TRACE + "0 outcome=direct elapsed_ms=120"
+        result["markers"]["client_lines"][contract.PUNCH_DIRECT] = contract.PUNCH_TRACE + "0 outcome=direct elapsed_ms=120"
     elif name == "ygg-used":
         counters["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 1
     elif name == "ygg-missing":

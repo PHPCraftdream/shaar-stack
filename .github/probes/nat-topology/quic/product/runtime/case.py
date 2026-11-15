@@ -140,7 +140,7 @@ class Run:
         """Direct-path cases: the Client's punch trace and route line appear when the APP dials, so they are read after the flow."""
         if not self.spec.get("direct"):
             return
-        for needle in (contract.PUNCH_TRACE, contract.ROUTE_LINE):
+        for needle in (contract.PUNCH_DIRECT, contract.ROUTE_LINE):
             line = self.sup.mark(self.client, needle.encode("ascii"), self.limit(15))
             self.ev["markers"].setdefault("client_lines", {})[needle] = line
 
@@ -325,7 +325,7 @@ class Run:
         hint = self.client_hint()
         client_cfg = self.owned_file("client.ktav", configs.client_text(
             self.case, self.server_key, str(self.work / "keys/client.key"), self.ports, self.relay, hint))
-        punch = (contract.PUNCH_TRACE.encode("ascii"), contract.ROUTE_LINE.encode("ascii")) if spec.get("direct") else ()
+        punch = (contract.PUNCH_DIRECT.encode("ascii"), contract.ROUTE_LINE.encode("ascii")) if spec.get("direct") else ()
         self.client = self.product("client", self.client_ns, client_cfg, extra=punch)
         contract.require(("server_address=" + (hint or "none")) in ev["markers"]["client"],
                          "Client must be configured with the Server key only (plus the IPv6 hint of the IPv6 cases)")

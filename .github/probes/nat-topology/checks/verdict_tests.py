@@ -46,7 +46,7 @@ def direct_result(lines=True):
               "observe_calibration": [{"detected": {"outside_fwd": 2, "outside_out": 2}}] * 2}
     if lines:
         result["markers"] = {"client": "composed startup: server_address=none",
-                             "client_lines": {contract.PUNCH_TRACE: contract.PUNCH_TRACE + "2 outcome=direct elapsed_ms=120",
+                             "client_lines": {contract.PUNCH_DIRECT: contract.PUNCH_TRACE + "2 outcome=direct elapsed_ms=120",
                                               contract.ROUTE_LINE: contract.ROUTE_LINE + " via 203.0.113.10"}}
     return result
 
@@ -82,9 +82,9 @@ class DirectConeVerdictTests(unittest.TestCase):
             elif mutation == "route-relay":
                 result["markers"]["client_lines"][contract.ROUTE_LINE] = contract.ROUTE_LINE.replace("native", "relay")
             elif mutation == "punch-fallback":
-                result["markers"]["client_lines"][contract.PUNCH_TRACE] = contract.PUNCH_TRACE + "2 outcome=fallback"
+                result["markers"]["client_lines"][contract.PUNCH_DIRECT] = contract.PUNCH_TRACE + "2 outcome=fallback"
             else:
-                result["markers"]["client_lines"][contract.PUNCH_TRACE] = contract.PUNCH_TRACE + "0 outcome=direct"
+                result["markers"]["client_lines"][contract.PUNCH_DIRECT] = contract.PUNCH_TRACE + "0 outcome=direct"
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 verdicts.dnat(contract.CASES["dnat-cone-norelay-signal"], counters, result)
 
