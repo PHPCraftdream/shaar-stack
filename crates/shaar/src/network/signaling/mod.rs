@@ -75,7 +75,10 @@ pub(crate) fn peer_id(key: &PublicKey) -> io::Result<PeerId> {
     Ok(SignalingKey::from(key).to_peer_id())
 }
 
+pub(crate) mod punch;
+
 #[cfg(test)]
+#[path = "tests/tests.rs"]
 mod tests;
 
 // Re-exported only for the cfg(test)-only startup resources regression suite

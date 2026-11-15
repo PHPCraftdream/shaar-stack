@@ -3,7 +3,8 @@
 //!
 //! The service key is the only required locator: without an explicit direct
 //! address hint the first dial resolves the key through the owned Mainline
-//! runtime. Native priority is fixed (direct, then relay negotiation, which
+//! runtime. Native priority is fixed (direct, then punch coordination, then
+//! relay negotiation, which
 //! exists only when the signaling settings pin a relay); the
 //! Yggdrasil fallback exists only in `Mode::Standby`. The client keeps
 //! independent per-endpoint admission pools — route switching must not
@@ -44,6 +45,7 @@ use tokio::task::JoinSet;
 use crate::config::{ClientConfig, Fallback};
 use crate::identity::Identity;
 use crate::network::observe;
+use crate::network::signaling::punch;
 use crate::network::{ForwardError, ForwardStats, Limits, SignaledEndpoint, YggEndpoint};
 use crate::path::{Mode, PathKind, StandbyError, StandbyOwner};
 use crate::startup::StartupError;
@@ -293,6 +295,30 @@ impl ClientRole {
         // start handle; later steps are infallible or seed the parts outcome.
         let service_key = PublicKey::from_bytes(self.config.server_key_bytes())
             .map_err(|_| StartupError::InvalidPolicy)?;
+        // Same derivation as the composition; `None` is the relay-optional
+        // composition (L0), not a failure.
+        let relay_addr = self
+            .config
+            .network()
+            .and_then(|network| network.signaling())
+            .and_then(|signaling| signaling.relay())
+            .and_then(|(peer_id, address)| RelayAddr::new(*peer_id, *address).ok());
+        // Punch channel (leaf L4): only the relay-less composition
+        // coordinates punches, and only over a retained Yggdrasil bridge.
+        // Opening is a bounded local registration; failure disables the
+        // punch phase and preserves today's behavior exactly. With relay
+        // fields present the channel does not exist at all (no behavior
+        // change).
+        let punch = if relay_addr.is_none() {
+            match resources.ygg_bridge() {
+                Some(bridge) => punch::PunchChannel::open(&bridge, *service_key.as_bytes())
+                    .await
+                    .ok(),
+                None => None,
+            }
+        } else {
+            None
+        };
         let ClientPhase::Starting(start) =
             std::mem::replace(&mut self.phase, ClientPhase::Done(Ok(())))
         else {
@@ -315,14 +341,6 @@ impl ClientRole {
         let payload = resources
             .take_ygg_payload()
             .map(|(ygg_endpoint, pump)| (Arc::new(ygg_endpoint), pump));
-        // Same derivation as the composition; `None` is the relay-optional
-        // composition (L0), not a failure.
-        let relay_addr = self
-            .config
-            .network()
-            .and_then(|network| network.signaling())
-            .and_then(|signaling| signaling.relay())
-            .and_then(|(peer_id, address)| RelayAddr::new(*peer_id, *address).ok());
         let mode = match self.config.fallback() {
             Fallback::Signal => Mode::Signal,
             Fallback::Standby => Mode::Standby,
@@ -354,6 +372,7 @@ impl ClientRole {
                 candidates,
                 relay,
                 resolve_note,
+                punch,
                 #[cfg(test)]
                 self.events.clone(),
             );

@@ -754,6 +754,7 @@ un-dispatched.
   exchange candidates over the Ygg bridge and complete an exact-APP exchange over Native with
   zero Ygg payload in signal mode. Units in ordinary CI; the namespace proof needs a
   privileged dispatch. Depends on L0 (no-relay path); independent of L3. Effort L.
+  - Status: implemented 2026-11-15 for ordinary CI — bounded candidate exchange over the Yggdrasil bridge control channel plus simultaneous QUIC probes, covered by wire codec, candidate builder, client state machine, server responder, and one in-process loopback role test proving the exchange and direct-path selection. The privileged double-cone-NAT namespace proof remains a later leaf. The recorded A5/A6 namespace verdicts are unchanged until a new dispatch re-runs them.
 - **L5 — harness**: DHT fixture `ip` votes plus observed-address reporting, the new cases and
   oracle flips (`flows/scenarios.py`, one new `flows/` module, `processes.py`,
   `runtime/phase.py`, `contract.py`, impact map). The fixture vote support is independent of

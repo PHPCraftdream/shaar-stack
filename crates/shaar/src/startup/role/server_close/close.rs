@@ -8,6 +8,26 @@ use crate::network::observe;
 use crate::network::{ForwardError, ServeReport, Session};
 use crate::path::PathKind;
 use crate::startup::StartupError;
+use crate::startup::role::server::ServerParts;
+
+impl Drop for ServerParts {
+    fn drop(&mut self) {
+        // Sync abort-only: no await is possible in `Drop`; the responder
+        // task (workers and in-flight bursts together) is cancelled without
+        // joining. Aborting drops every probe handle clone, and iroh's
+        // endpoint close does not depend on remaining handle clones anyway,
+        // so no probe handle can outlive the close.
+        if let Some(task) = self.punch_task.take() {
+            task.abort();
+        }
+        // Sync best-effort only: dropping `start` hands close to the owner task.
+        if self.joined {
+            return;
+        }
+        self.resources
+            .restore_live_owners(self.endpoint.take(), self.payload.take());
+    }
+}
 
 /// Emits the stable OBS-1 session line for one reaped session and answers
 /// whether the outcome is fatal for the serving role (a task failure is).
@@ -24,8 +44,17 @@ pub(super) fn reap_session(outcome: &(PathKind, Result<ServeReport, ForwardError
 /// Joined owned close: watch stop, session drain, reservation release while
 /// signaling is alive, owner restore, then the ordered composition shutdown.
 /// The first truthful error wins.
-pub(super) async fn close_parts(mut parts: super::server::ServerParts) -> Result<(), StartupError> {
+pub(super) async fn close_parts(mut parts: ServerParts) -> Result<(), StartupError> {
     let mut first_error = parts.outcome.take();
+    // Abort the punch responder (workers and in-flight bursts together) and
+    // join it with a bounded await (Finding 1c); a stuck task degrades to
+    // abort-only. Aborting drops every probe handle clone; iroh's endpoint
+    // close does not depend on remaining clones, so no probe handle outlives
+    // the composition close below (which restores and closes the endpoint).
+    if let Some(task) = parts.punch_task.take() {
+        task.abort();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), task).await;
+    }
     // Watch-driven stop, best-effort.
     if let Some((stop_tx, _)) = parts.stop.take() {
         let _ = stop_tx.send(true);
@@ -61,6 +90,8 @@ pub(super) async fn close_parts(mut parts: super::server::ServerParts) -> Result
         }
     }
     // Restore the OWNED owners into the retained slot for ordered close.
+    // The punch responder was aborted and joined above, so its probe handle
+    // clones are gone; iroh's close does not depend on remaining clones.
     parts
         .resources
         .restore_live_owners(parts.endpoint.take(), parts.payload.take());
@@ -86,7 +117,7 @@ pub(super) async fn close_parts(mut parts: super::server::ServerParts) -> Result
                     if let Some(events) = parts.events.as_ref()
                         && let Some(StartupError::Close { stage }) = first_error.as_ref()
                     {
-                        events.record(super::RoleEvent::ClosePending { stage });
+                        events.record(crate::startup::role::RoleEvent::ClosePending { stage });
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     continue;

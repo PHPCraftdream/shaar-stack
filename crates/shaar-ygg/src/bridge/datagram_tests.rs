@@ -592,3 +592,107 @@ async fn an_aborted_reader_is_replaced_by_one_owned_cleanup_task() {
     })
     .await;
 }
+
+// Registry-level tests for the independent control table; no transport required.
+#[cfg(test)]
+mod control_table {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use tokio::sync::{mpsc, oneshot};
+
+    use super::super::super::datagrams::{Register, Registry};
+    use super::super::{DATAGRAM_QUEUE_CAPACITY, DatagramError, MAX_DATAGRAM_PEERS};
+
+    type Reply = oneshot::Receiver<Result<(), DatagramError>>;
+    type Parts = (Register, Arc<AtomicBool>, mpsc::Receiver<Vec<u8>>, Reply);
+    type LiveRx = (Arc<AtomicBool>, mpsc::Receiver<Vec<u8>>);
+
+    fn request(peer: u8, control: bool) -> Parts {
+        let live = Arc::new(AtomicBool::new(true));
+        let (sender, receiver) = mpsc::channel(DATAGRAM_QUEUE_CAPACITY);
+        let (reply, response) = oneshot::channel();
+        let register = Register {
+            peer: [peer; 32],
+            live: Arc::clone(&live),
+            sender,
+            reply,
+            control,
+        };
+        (register, live, receiver, response)
+    }
+
+    fn admit(r: &mut Registry, peer: u8, control: bool) -> LiveRx {
+        let (entry, live, rx, mut ack) = request(peer, control);
+        r.register(entry, false);
+        assert_eq!(ack.try_recv(), Ok(Ok(())), "admission must succeed");
+        (live, rx)
+    }
+
+    fn rejected(r: &mut Registry, peer: u8, control: bool) -> DatagramError {
+        let (entry, _live, _rx, mut ack) = request(peer, control);
+        r.register(entry, false);
+        ack.try_recv().expect("ack").expect_err("admitted")
+    }
+
+    #[test]
+    fn control_and_payload_registrations_for_one_peer_coexist_independently() {
+        let mut registry = Registry::default();
+        let (_p, mut payload_rx) = admit(&mut registry, 7, false);
+        let (_c, mut control_rx) = admit(&mut registry, 7, true);
+        assert!(registry.deliver(&[7; 32], b"payload only"));
+        assert!(registry.deliver_control(&[7; 32], b"control only"));
+        assert_eq!(payload_rx.try_recv(), Ok(b"payload only".to_vec()));
+        assert_eq!(control_rx.try_recv(), Ok(b"control only".to_vec()));
+        assert!(payload_rx.try_recv().is_err());
+        assert!(control_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn control_duplicates_and_bounds_are_rejected_without_touching_the_payload_table() {
+        let mut registry = Registry::default();
+        admit(&mut registry, 1, true);
+        admit(&mut registry, 1, false);
+        let control_dup = rejected(&mut registry, 1, true);
+        let payload_dup = rejected(&mut registry, 1, false);
+        assert_eq!(control_dup, DatagramError::AlreadyRegistered);
+        assert_eq!(payload_dup, DatagramError::AlreadyRegistered);
+        // The control table fills to its own bound while the payload table stays free.
+        for peer in 2..=MAX_DATAGRAM_PEERS as u8 {
+            admit(&mut registry, peer, true);
+        }
+        let overflow = u8::try_from(MAX_DATAGRAM_PEERS + 1).expect("small peer");
+        assert_eq!(rejected(&mut registry, overflow, true), DatagramError::Busy);
+        admit(&mut registry, overflow, false);
+    }
+
+    #[test]
+    fn prune_frees_revoked_control_slots_and_close_revokes_both_tables() {
+        let mut registry = Registry::default();
+        let (control_live, mut control_rx) = admit(&mut registry, 3, true);
+        let (payload_live, _payload_rx) = admit(&mut registry, 4, false);
+        control_live.store(false, Ordering::Release);
+        registry.prune();
+        admit(&mut registry, 3, true);
+        assert!(registry.deliver_control(&[3; 32], b"fresh control"));
+        assert_eq!(control_rx.try_recv(), Ok(b"fresh control".to_vec()));
+        registry.close();
+        assert!(!control_live.load(Ordering::Acquire));
+        assert!(!payload_live.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_full_control_queue_drops_while_the_payload_queue_still_accepts() {
+        let mut registry = Registry::default();
+        let (_c, mut control_rx) = admit(&mut registry, 9, true);
+        let (_p, mut payload_rx) = admit(&mut registry, 9, false);
+        for _ in 0..DATAGRAM_QUEUE_CAPACITY {
+            assert!(registry.deliver_control(&[9; 32], b"fill control queue"));
+        }
+        assert!(!registry.deliver_control(&[9; 32], b"control overflow"));
+        assert!(registry.deliver(&[9; 32], b"payload still accepted"));
+        assert_eq!(payload_rx.try_recv(), Ok(b"payload ok".to_vec()));
+        control_rx.try_recv().expect("drained control slot");
+        assert!(registry.deliver_control(&[9; 32], b"control space recovered"));
+    }
+}

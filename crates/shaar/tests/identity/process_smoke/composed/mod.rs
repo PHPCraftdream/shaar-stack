@@ -16,7 +16,7 @@ mod nat;
 mod operator;
 mod outage;
 mod payload;
-#[path = "../../../../src/network/signaling/relay_fixture.rs"]
+#[path = "../../../../src/network/signaling/tests/relay_fixture.rs"]
 mod relay_fixture;
 #[cfg(target_os = "linux")]
 mod resources;

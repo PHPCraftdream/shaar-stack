@@ -111,19 +111,12 @@ pub(super) struct ServerParts {
     pub(super) reserve_not_before: Option<tokio::time::Instant>,
     /// The stored in-flight reserve operation, if started and not yet resolved.
     pub(super) reserve_op: Option<ReserveOperation>,
+    /// Leaf L4 punch responder task handle; joined with a bounded await on
+    /// close (abort + join) and abort-only on degraded drop. Present only for
+    /// relay-less compositions that retained a Yggdrasil bridge.
+    pub(super) punch_task: Option<tokio::task::JoinHandle<()>>,
     #[cfg(test)]
     pub(super) events: Option<RoleEventLog>,
-}
-
-impl Drop for ServerParts {
-    fn drop(&mut self) {
-        // Sync best-effort only: dropping `start` hands close to the owner task.
-        if self.joined {
-            return;
-        }
-        self.resources
-            .restore_live_owners(self.endpoint.take(), self.payload.take());
-    }
 }
 
 impl ServerParts {
@@ -150,6 +143,7 @@ impl ServerParts {
             reserve_attempts: 0,
             reserve_not_before: None,
             reserve_op: None,
+            punch_task: None,
             #[cfg(test)]
             events,
         }
@@ -478,6 +472,14 @@ impl ServerRole {
         };
         if parts.stop.is_none() {
             parts.stop = Some(tokio::sync::watch::channel(false));
+        }
+        // Relay-less compositions answer authenticated punch offers over the
+        // retained Yggdrasil bridge (leaf L4); the responder owns burst
+        // execution END TO END, off the accept loop and capped (Finding 1):
+        // the accept loop never runs a probe burst. With relay fields present
+        // no responder exists and behavior is unchanged.
+        if parts.punch_task.is_none() && parts.relay_addr.is_none() {
+            server_close::spawn_responder(parts, &self.allowlist);
         }
         let outcome = drive_loop(parts, self.limits, &self.config, shutdown).await;
         let parts = match std::mem::replace(&mut self.phase, ServerPhase::Done(Ok(()))) {
