@@ -30,6 +30,36 @@ pub enum Fallback {
     Standby,
 }
 
+/// Whether the Server publishes its NAT-observed public address in the DHT record.
+///
+/// The spelling `encrypted` is reserved for a later opt-in mode; the field
+/// shape already admits it, and validation refuses it until it exists.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PublishAddress {
+    /// Private-address-only records, byte-identical to a build without the setting.
+    #[default]
+    Off,
+    /// One extra record entry: the DHT-voted public IP with the local QUIC port.
+    /// The vote is untrusted and the address is readable by anyone who looks up the key.
+    Plain,
+}
+
+/// Validate the `publish_address` file value (absent means `off`).
+pub(crate) fn parse_publish_address(raw: Option<&str>) -> Result<PublishAddress, ConfigError> {
+    match raw {
+        None | Some("off") => Ok(PublishAddress::Off),
+        Some("plain") => Ok(PublishAddress::Plain),
+        Some("encrypted") => Err(ConfigError::validation(
+            "publish_address",
+            ValidationKind::NotYetAvailable,
+        )),
+        Some(_) => Err(ConfigError::validation(
+            "publish_address",
+            ValidationKind::InvalidEnum,
+        )),
+    }
+}
+
 /// Validate and convert a fallback selection after merging.
 ///
 /// `raw` is the unvalidated file value (if present), `over` the typed

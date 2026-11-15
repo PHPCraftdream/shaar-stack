@@ -8,6 +8,7 @@ mod policy;
 #[cfg_attr(not(test), expect(dead_code, reason = "P09 runtime wiring is pending"))]
 pub(crate) mod runtime;
 
+pub(crate) use address::compose_published;
 use address::validate_addresses;
 #[cfg(test)]
 use address::{SnapshotError, validate_snapshot, validate_transport_addresses};
