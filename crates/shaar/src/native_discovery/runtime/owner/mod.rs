@@ -172,7 +172,9 @@ impl RuntimeOwner {
         bind: SocketAddrV4,
         bootstrap: &[SocketAddrV4],
     ) -> std::io::Result<Self> {
-        Self::start_with_clock(identity, bind, bootstrap, Clock::system())
+        // Test builds keep the windowed reflexive schedule their fixtures pin;
+        // the fast start has its own fixtures (`start_controlled_fast`).
+        Self::start_with_clock(identity, bind, bootstrap, Clock::system(), !cfg!(test))
     }
 
     #[cfg(test)]
@@ -182,7 +184,17 @@ impl RuntimeOwner {
         bootstrap: &[SocketAddrV4],
         clock: TestClock,
     ) -> std::io::Result<Self> {
-        Self::start_with_clock(identity, bind, bootstrap, clock.clock())
+        Self::start_with_clock(identity, bind, bootstrap, clock.clock(), false)
+    }
+
+    #[cfg(test)]
+    pub(super) fn start_controlled_fast(
+        identity: Identity,
+        bind: SocketAddrV4,
+        bootstrap: &[SocketAddrV4],
+        clock: TestClock,
+    ) -> std::io::Result<Self> {
+        Self::start_with_clock(identity, bind, bootstrap, clock.clock(), true)
     }
 
     fn start_with_clock(
@@ -190,6 +202,7 @@ impl RuntimeOwner {
         bind: SocketAddrV4,
         bootstrap: &[SocketAddrV4],
         clock: Clock,
+        fast_reflexive: bool,
     ) -> std::io::Result<Self> {
         let dht = OwnedDht::new(bind, bootstrap)?;
         let handle = dht.handle();
@@ -210,6 +223,7 @@ impl RuntimeOwner {
             ReflexiveTally::new(),
             reflexive_tx,
             reflexive_stop_receiver,
+            fast_reflexive,
         ));
         let publisher = tokio::spawn(loop_state::publisher_loop(
             identity,

@@ -45,6 +45,15 @@ async fn start_owner(
     seed: u8,
     bootstraps: &[SocketAddr],
 ) -> (RuntimeOwner, tokio::sync::watch::Receiver<Option<IpAddr>>) {
+    start_owner_with(seed, bootstraps, false).await
+}
+
+/// `fast` selects the production fast start instead of the windowed schedule.
+async fn start_owner_with(
+    seed: u8,
+    bootstraps: &[SocketAddr],
+    fast: bool,
+) -> (RuntimeOwner, tokio::sync::watch::Receiver<Option<IpAddr>>) {
     let mut binds = Vec::with_capacity(bootstraps.len());
     for address in bootstraps {
         let SocketAddr::V4(bind) = *address else {
@@ -52,19 +61,22 @@ async fn start_owner(
         };
         binds.push(bind);
     }
-    let owner = RuntimeOwner::start_controlled(
-        Identity::from_seed([seed; 32]),
-        "127.0.0.1:0".parse().expect("loopback"),
-        &binds,
-        TestClock::new(WALL),
-    )
+    let identity = Identity::from_seed([seed; 32]);
+    let bind = "127.0.0.1:0".parse().expect("loopback");
+    let owner = if fast {
+        RuntimeOwner::start_controlled_fast(identity, bind, &binds, TestClock::new(WALL))
+    } else {
+        RuntimeOwner::start_controlled(identity, bind, &binds, TestClock::new(WALL))
+    }
     .expect("actual runtime owner");
     let watch = owner.public_address_watch();
     // Real-time settle: the spawned reflexive task must consume its immediate
     // first tick (a timer entry that fires on the next driver turn) and arm the
     // window timer before any test pauses the clock; otherwise the first
     // advance only fires that immediate tick and swallows window 1.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    if !fast {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     (owner, watch)
 }
 
@@ -314,4 +326,61 @@ async fn fixture_shutdown_cancels_inflight_lookup() {
         assert_eq!(gets.load(Ordering::Relaxed), 1);
     }
     assert!(!owner.has_pending_cleanup());
+}
+
+// Fast start (production schedule): three peers vote A, A, B; the lookups run at
+// once and every 5 s, so the majority is exposed after the second agreeing lookup
+// within seconds. The windowed schedule needs two 60 s windows.
+#[tokio::test]
+async fn fixture_fast_start_exposes_the_majority_within_seconds() {
+    let votes = [
+        Some("203.0.113.5".parse::<Ipv4Addr>().expect("vote A")),
+        Some("203.0.113.5".parse::<Ipv4Addr>().expect("vote A")),
+        Some("203.0.113.6".parse::<Ipv4Addr>().expect("vote B")),
+    ];
+    let target = own_target(0x5A);
+    let mut peers = Vec::new();
+    let mut counters = Vec::new();
+    for vote in votes {
+        let peer = LoopbackPeer::bind().await;
+        let gets = Arc::new(AtomicUsize::new(0));
+        let address = spawn_voter(peer, target, vote, Arc::clone(&gets)).await;
+        peers.push(address);
+        counters.push(gets);
+    }
+    let (mut owner, mut watch) = start_owner_with(0x5A, &peers, true).await;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while owner.public_address().is_none() {
+            watch.changed().await.expect("watch alive");
+        }
+    })
+    .await
+    .expect("the fast start exposes the vote within seconds, not minutes");
+    assert_eq!(
+        owner.public_address(),
+        Some("203.0.113.5".parse::<IpAddr>().expect("ip A"))
+    );
+    // Bounded: the fast phase ends at the first exposure (at most seven lookups).
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    for gets in &counters {
+        let seen = gets.load(Ordering::Relaxed);
+        assert!((2..=7).contains(&seen), "bounded fast lookups: {seen}");
+    }
+    owner.close().await.expect("bounded close");
+}
+
+// Fast start without any vote never exposes and stays bounded: one lookup at
+// start, then one per 5 s inside the 30 s fast window.
+#[tokio::test]
+async fn fixture_fast_start_without_votes_stays_none_and_is_bounded() {
+    let target = own_target(0x5B);
+    let peer = LoopbackPeer::bind().await;
+    let gets = Arc::new(AtomicUsize::new(0));
+    let address = spawn_voter(peer, target, None, Arc::clone(&gets)).await;
+    let (mut owner, _watch) = start_owner_with(0x5B, &[address], true).await;
+    tokio::time::sleep(Duration::from_secs(12)).await;
+    assert_eq!(owner.public_address(), None);
+    let seen = gets.load(Ordering::Relaxed);
+    assert!((1..=4).contains(&seen), "bounded fast lookups: {seen}");
+    owner.close().await.expect("bounded close");
 }

@@ -226,6 +226,52 @@ fn policy_clock(sample: ClockSample) -> PolicyClock {
 /// Hard bound on one reflexive self-lookup, matching the adapter's internal
 /// 10 s cap on `resolve_mutable` (`resolve_mutable` uses the same default).
 pub(super) const REFLEXIVE_LOOKUP_BOUND: Duration = Duration::from_secs(10);
+/// Fast start (production builds): the first lookups run at once and then every
+/// `FAST_START_INTERVAL` until a vote is exposed or `FAST_START_WINDOW` has
+/// passed, so the public address is known within seconds instead of two refresh
+/// windows. At most seven extra lookups once per owner lifetime; afterwards the
+/// regular `REFRESH` windows apply.
+pub(super) const FAST_START_INTERVAL: Duration = Duration::from_secs(5);
+pub(super) const FAST_START_WINDOW: Duration = Duration::from_secs(30);
+
+/// Result of one bounded self-lookup.
+enum Probe {
+    Stopped,
+    Skipped,
+    Observed(Option<IpAddr>),
+}
+
+/// One self-lookup plus the `info()` read, raced against `stop` and a single
+/// `REFLEXIVE_LOOKUP_BOUND`. Lookup or `info()` errors skip the probe.
+async fn reflexive_probe(
+    handle: &OwnedDhtHandle,
+    target: n0_mainline::Id,
+    stop: &mut oneshot::Receiver<()>,
+) -> Probe {
+    let bound = tokio::time::Instant::now() + REFLEXIVE_LOOKUP_BOUND;
+    let work = async {
+        let completion = handle.resolve_mutable(target).await.ok()?;
+        if !completion.network_completed() {
+            return None;
+        }
+        drop(completion);
+        let info = handle.info().await.ok()?;
+        Some(
+            info.public_address()
+                .map(|address| IpAddr::V4(*address.ip())),
+        )
+    };
+    let observed = tokio::select! {
+        biased;
+        _ = &mut *stop => return Probe::Stopped,
+        _ = tokio::time::sleep_until(bound) => None,
+        observed = work => observed,
+    };
+    match observed {
+        Some(observed) => Probe::Observed(observed),
+        None => Probe::Skipped,
+    }
+}
 
 /// Pure majority filter over a fixed 3-window observation ring.
 ///
@@ -278,8 +324,9 @@ impl ReflexiveTally {
 /// Advisory reflexive-address watcher. Never published anywhere (record,
 /// publisher and dial behavior are untouched): publication is leaf L3.
 ///
-/// Resource bounds: one GET query per `REFRESH` window (60 s), each lookup
-/// hard-bounded by `REFLEXIVE_LOOKUP_BOUND` (10 s), no queues — the watch
+/// Resource bounds: one GET query per `REFRESH` window (60 s) after an optional
+/// fast start (at most seven lookups within the first 30 s, only until a vote is
+/// exposed), each lookup hard-bounded by `REFLEXIVE_LOOKUP_BOUND` (10 s), no queues — the watch
 /// channel is a single bounded slot. `firewalled()` is deliberately never
 /// read: its confirm-by-ping branch is dead code in the pinned crate
 /// (compares the address with itself, core.rs:391-408), so only
@@ -311,8 +358,33 @@ pub(super) async fn reflexive_loop(
     mut tally: ReflexiveTally,
     sender: watch::Sender<Option<IpAddr>>,
     mut stop: oneshot::Receiver<()>,
+    fast_start: bool,
 ) {
     let mut sent: Option<IpAddr> = None;
+    if fast_start {
+        let deadline = tokio::time::Instant::now() + FAST_START_WINDOW;
+        loop {
+            match reflexive_probe(&handle, target, &mut stop).await {
+                Probe::Stopped => return,
+                Probe::Skipped => {}
+                Probe::Observed(observed) => {
+                    let value = tally.observe(observed);
+                    if value != sent {
+                        sender.send_replace(value);
+                        sent = value;
+                    }
+                }
+            }
+            if sent.is_some() || tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::select! {
+                biased;
+                _ = &mut stop => return,
+                _ = tokio::time::sleep(FAST_START_INTERVAL) => {}
+            }
+        }
+    }
     let mut window = tokio::time::interval(super::loop_state::REFRESH);
     window.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Consume the immediate first tick (publisher_loop.rs:44-46) so the first
@@ -323,25 +395,11 @@ pub(super) async fn reflexive_loop(
             biased;
             _ = &mut stop => return,
             _ = window.tick() => {
-                let bound = tokio::time::Instant::now() + REFLEXIVE_LOOKUP_BOUND;
-                let work = async {
-                    let completion = handle.resolve_mutable(target).await.ok()?;
-                    if !completion.network_completed() {
-                        return None;
-                    }
-                    drop(completion);
-                    let info = handle.info().await.ok()?;
-                    Some(info.public_address().map(|address| IpAddr::V4(*address.ip())))
-                };
-                let observed = tokio::select! {
-                    biased;
-                    _ = &mut stop => return,
-                    _ = tokio::time::sleep_until(bound) => None,
-                    observed = work => observed,
-                };
-                let Some(observed) = observed else {
+                let observed = match reflexive_probe(&handle, target, &mut stop).await {
+                    Probe::Stopped => return,
                     // Bounded out or skipped; no observation this window.
-                    continue;
+                    Probe::Skipped => continue,
+                    Probe::Observed(observed) => observed,
                 };
                 let value = tally.observe(observed);
                 if value != sent {
