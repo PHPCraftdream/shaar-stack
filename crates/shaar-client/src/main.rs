@@ -326,7 +326,7 @@ async fn run_auto() -> Result<(), Box<dyn Error>> {
 /// must take (a client cannot guess the server key or address).
 enum FirstRunState {
     Ready {
-        config: ClientConfig,
+        config: Box<ClientConfig>,
         identity: Identity,
         block: Vec<String>,
     },
@@ -416,7 +416,7 @@ async fn first_run_state(
         "add your key as one line to the server allowlist file, then restart the server".to_owned(),
     );
     Ok(FirstRunState::Ready {
-        config,
+        config: Box::new(config),
         identity: provisioned.identity,
         block,
     })
@@ -440,7 +440,7 @@ async fn run_first_run(
             config,
             identity,
             block,
-        }) => run_configured(config, identity, Some(block.as_slice())).await,
+        }) => run_configured(*config, identity, Some(block.as_slice())).await,
     }
 }
 

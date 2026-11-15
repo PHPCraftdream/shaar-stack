@@ -173,7 +173,7 @@ async fn first_run_ready_pins_server_and_announces_the_allowlist_key() {
         block[4],
         format!(
             "your public key for the server allowlist: public_key={}",
-            hex(identity.public_key_bytes())
+            hex(&identity.public_key_bytes())
         )
     );
     assert!(
@@ -269,21 +269,25 @@ async fn first_run_never_overwrites_a_pre_existing_config() {
 #[tokio::test]
 async fn first_run_rejects_an_invalid_server_key() {
     let dir = FixtureDir::new();
-    let error = first_run_state(
+    let Err(error) = first_run_state(
         &dir.0,
         Some("not-a-key".to_owned()),
         Some("127.0.0.1:9".to_owned()),
     )
     .await
-    .expect_err("invalid key");
+    else {
+        panic!("invalid key must fail");
+    };
     assert!(error.contains("field `server`"), "unexpected: {error}");
 }
 
 #[tokio::test]
 async fn first_run_rejects_a_digit_only_server_key() {
     let dir = FixtureDir::new();
-    let error = first_run_state(&dir.0, Some("1".repeat(64)), Some("127.0.0.1:9".to_owned()))
-        .await
-        .expect_err("digit-only key must fail Ed25519 validation");
+    let Err(error) =
+        first_run_state(&dir.0, Some("1".repeat(64)), Some("127.0.0.1:9".to_owned())).await
+    else {
+        panic!("digit-only key must fail Ed25519 validation");
+    };
     assert!(error.contains("field `server`"), "unexpected: {error}");
 }

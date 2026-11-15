@@ -273,9 +273,9 @@ async fn first_run_never_overwrites_a_pre_existing_config() {
 #[tokio::test]
 async fn first_run_rejects_an_invalid_positional_target() {
     let dir = FixtureDir::new();
-    let err = first_run_state(&dir.0, Some("not-an-address".to_owned()))
-        .await
-        .expect_err("invalid target");
+    let Err(err) = first_run_state(&dir.0, Some("not-an-address".to_owned())).await else {
+        panic!("invalid target must fail");
+    };
     assert!(err.contains("field `target`"), "unexpected: {err}");
 }
 
