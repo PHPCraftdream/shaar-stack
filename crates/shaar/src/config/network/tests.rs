@@ -97,8 +97,8 @@ fn assert_shared(network: &NetworkSettings) {
         SocketAddr::from(([0, 0, 0, 0], 0)),
         "default signaling bind"
     );
-    let (relay_peer_id, relay_address) = sig.relay().expect("fixture carries the relay pair");
-    assert_eq!(relay_peer_id, &relay_peer_id());
+    let (peer, relay_address) = sig.relay().expect("fixture carries the relay pair");
+    assert_eq!(peer, &relay_peer_id());
     assert_eq!(*relay_address, SocketAddr::from(([192, 0, 2, 20], 7000)));
     let y = network.ygg().expect("ygg always present");
     assert_eq!(

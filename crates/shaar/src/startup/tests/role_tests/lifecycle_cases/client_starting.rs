@@ -201,7 +201,10 @@ async fn client_role_starts_without_relay_fields() {
             let mut shutdown = std::pin::pin!(async move {
                 let _ = stop_rx.await;
             });
-            let outcome = role.start().await.and_then(|()| role.run(&mut shutdown).await);
+            let outcome = match role.start().await {
+                Ok(()) => role.run(&mut shutdown).await,
+                Err(error) => Err(error),
+            };
             let close = role.shutdown().await;
             outcome.and(close)
         });
