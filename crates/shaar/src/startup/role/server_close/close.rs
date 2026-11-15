@@ -31,7 +31,9 @@ impl Drop for ServerParts {
 
 /// Emits the stable OBS-1 session line for one reaped session and answers
 /// whether the outcome is fatal for the serving role (a task failure is).
-pub(super) fn reap_session(outcome: &(PathKind, Result<ServeReport, ForwardError>)) -> bool {
+pub(in crate::startup::role) fn reap_session(
+    outcome: &(PathKind, Result<ServeReport, ForwardError>),
+) -> bool {
     let (kind, result) = outcome;
     observe::emit(observe::session_line(
         observe::Product::Server,
@@ -44,7 +46,9 @@ pub(super) fn reap_session(outcome: &(PathKind, Result<ServeReport, ForwardError
 /// Joined owned close: watch stop, session drain, reservation release while
 /// signaling is alive, owner restore, then the ordered composition shutdown.
 /// The first truthful error wins.
-pub(super) async fn close_parts(mut parts: ServerParts) -> Result<(), StartupError> {
+pub(in crate::startup::role) async fn close_parts(
+    mut parts: ServerParts,
+) -> Result<(), StartupError> {
     let mut first_error = parts.outcome.take();
     // Abort the punch responder (workers and in-flight bursts together) and
     // join it with a bounded await (Finding 1c); a stuck task degrades to
@@ -136,7 +140,7 @@ pub(super) async fn close_parts(mut parts: ServerParts) -> Result<(), StartupErr
 
 /// Spawns one accepted session against the fixed loopback target; the gated
 /// `join_next` arm keeps the set within `limits.sessions`.
-pub(super) fn spawn_session(
+pub(in crate::startup::role) fn spawn_session(
     sessions: &mut JoinSet<(PathKind, Result<ServeReport, ForwardError>)>,
     kind: PathKind,
     mut session: Session,

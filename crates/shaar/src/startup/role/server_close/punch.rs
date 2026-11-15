@@ -60,7 +60,10 @@ fn candidate_provider(
 /// Spawns the punch responder when the composition is relay-less but
 /// retained a Yggdrasil bridge; otherwise a no-op (server behavior with
 /// relay fields present is byte-identical to before leaf L4).
-pub(super) fn spawn_responder(parts: &mut ServerParts, allowlist: &crate::network::Allowlist) {
+pub(in crate::startup::role) fn spawn_responder(
+    parts: &mut ServerParts,
+    allowlist: &crate::network::Allowlist,
+) {
     // No bridge: nothing to answer offers over.
     let Some(bridge) = parts.resources.ygg_bridge() else {
         return;
@@ -241,7 +244,7 @@ where
         tokio::select! {
             batch = batches.recv(), if running.len() < punch::BURST_CONCURRENCY_CAP => {
                 match batch {
-                    Some(batch) => running.push(burst(batch)),
+                    Some(batch) => running.push(Box::pin(burst(batch))),
                     None => break,
                 }
             }

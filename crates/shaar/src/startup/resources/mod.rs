@@ -445,7 +445,7 @@ impl SharedResources {
             .as_ref()?
             .owner
             .as_ref()
-            .map(RuntimeOwner::public_address)
+            .and_then(RuntimeOwner::public_address)
     }
 
     /// Transfers paired payload endpoint/pump. Caller closes them before the remaining bridge.

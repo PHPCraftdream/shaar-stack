@@ -231,7 +231,7 @@ fn native_ip(ip: IpAddr) -> bool {
 /// dedupe, capped at `MAX_CANDIDATES`; may be empty (wildcard or zero port).
 pub(crate) fn local_candidates(local: SocketAddr, reflexive: Option<IpAddr>) -> Vec<SocketAddr> {
     let mut candidates = Vec::with_capacity(MAX_CANDIDATES);
-    let mut push = |candidate: SocketAddr, candidates: &mut Vec<SocketAddr>| {
+    let push = |candidate: SocketAddr, candidates: &mut Vec<SocketAddr>| {
         let canonical = SocketAddr::new(candidate.ip().to_canonical(), candidate.port());
         if candidate_allowed(candidate) && !candidates.contains(&canonical) {
             candidates.push(canonical);
@@ -251,8 +251,8 @@ pub(crate) trait PunchLink {
         &self,
         message: &PunchMessage,
         budget: Duration,
-    ) -> impl Future<Output = Result<(), ()>> + '_;
-    fn recv_raw(&mut self) -> impl Future<Output = Option<Vec<u8>>> + '_;
+    ) -> impl Future<Output = Result<(), ()>> + Send;
+    fn recv_raw(&mut self) -> impl Future<Output = Option<Vec<u8>>> + Send;
 }
 
 /// Punch channel over the Yggdrasil bridge control datagrams.
