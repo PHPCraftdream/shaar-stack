@@ -296,6 +296,20 @@ def audit_lock_delta(before_bytes: bytes, after_bytes: bytes) -> dict[str, list[
         permitted_removed.add(n0_old)
     if multibase_switch:
         permitted_removed |= multibase_drop_keys | {multibase_old}
+    # Already-adopted prepared multibase (path package): the base45 edge and package leave.
+    base45_key = ("base45", "3.2.0", REGISTRY)
+    multibase_prune = (not multibase_switch and multibase_new in before and multibase_new in after
+                       and base45_key in before and base45_key not in after)
+    if multibase_prune:
+        if before[base45_key].get("checksum") != multibase_drops["base45"][1]:
+            raise ValueError("multibase base45 prune registry identity mismatch before removal")
+        prune_before, prune_after = before[multibase_new], after[multibase_new]
+        if (prune_before.get("dependencies", []) != ["base-x", "base45", "data-encoding", "data-encoding-macro"]
+                or prune_after.get("dependencies", []) != ["base-x", "data-encoding", "data-encoding-macro"]
+                or {k: v for k, v in prune_before.items() if k != "dependencies"}
+                != {k: v for k, v in prune_after.items() if k != "dependencies"}):
+            raise ValueError("multibase prune must drop exactly the base45 edge")
+        permitted_removed.add(base45_key)
     permitted_added = ALLOWED_ADDITIONS | set(REVIEWED_TRANSITIVES)
     if multibase_switch:
         permitted_added.add(multibase_new)
@@ -327,7 +341,7 @@ def audit_lock_delta(before_bytes: bytes, after_bytes: bytes) -> dict[str, list[
     for key in set(before) | set(after):
         old = before.get(key)
         new = after.get(key)
-        if key == shaar_key or key in {dns_old, dns_new}:
+        if key == shaar_key or key in {dns_old, dns_new} or (multibase_prune and key == multibase_new):
             continue
         if old is not None and new is not None and old != new:
             raise ValueError(f"unchanged lock identity changed fields: {key}")
@@ -369,6 +383,10 @@ def audit_lock_delta(before_bytes: bytes, after_bytes: bytes) -> dict[str, list[
                 if dependency.split()[0] in multibase_drops:
                     raise ValueError(f"retained lock package still references a removed multibase helper: {owner}")
         source_changes.append((multibase_old, multibase_new))
+    if multibase_prune:
+        for owner, package in after.items():
+            if any(dependency.split()[0] == "base45" for dependency in package.get("dependencies", [])):
+                raise ValueError(f"retained lock package still references the removed base45 package: {owner}")
     return {"added": sorted(added), "removed": sorted(removed), "source_changed": source_changes}
 
 
