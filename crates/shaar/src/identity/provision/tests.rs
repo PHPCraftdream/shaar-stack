@@ -103,8 +103,6 @@ fn digit_only_server_key_stays_a_ktav_string() {
     #[derive(serde::Deserialize)]
     struct Probe {
         server: Option<String>,
-        #[serde(default)]
-        key_file: Option<String>,
     }
     let dir = FixtureDir::new();
     let paths = ProvisionPaths {

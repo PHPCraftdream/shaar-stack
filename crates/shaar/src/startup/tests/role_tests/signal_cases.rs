@@ -480,7 +480,7 @@ async fn signal_mode_negotiates_but_ygg_never_carries_application_payload() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn composed_server_reaches_ready_without_relay_fields() {
     tokio::time::timeout(SIGNAL_BUDGET, async {
-        let mut service_peer = LoopbackPeer::bind().await;
+        let service_peer = LoopbackPeer::bind().await;
         let (transit, transit_port) = start_listener(CASE_R_TRANSIT).await;
         let transit_uri = format!("tcp://127.0.0.1:{transit_port}");
         let (echo, echo_address) = echo_target().await;
@@ -496,7 +496,7 @@ async fn composed_server_reaches_ready_without_relay_fields() {
             "signal",
         );
         let (server_log, _client_log) = role_logs();
-        let mut server_role = ServerRole::with_events(
+        let server_role = ServerRole::with_events(
             server_config,
             &server_identity,
             Allowlist::new(&[client_key]).expect("fixture allowlist"),

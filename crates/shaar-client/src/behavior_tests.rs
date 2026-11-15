@@ -1,5 +1,4 @@
 use super::*;
-use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::{
