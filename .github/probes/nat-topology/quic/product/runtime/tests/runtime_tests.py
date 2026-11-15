@@ -32,8 +32,9 @@ class ConfigTests(unittest.TestCase):
     def test_server_and_client_texts_follow_each_case_and_name_only_the_server_key(self):
         for case, spec in contract.CASES.items():
             with self.subTest(case=case):
-                server = configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, RELAY)
-                client = configs.client_text(case, KEY, "/w/keys/client.key", PORTS, RELAY)
+                peer = None if spec.get("norelay") else RELAY
+                server = configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, peer)
+                client = configs.client_text(case, KEY, "/w/keys/client.key", PORTS, peer)
                 self.assertIn(f"target: 127.0.0.1:{contract.TARGET_PORT}\n", server)
                 self.assertIn(f"fallback: {spec['mode']}\n", server)
                 self.assertIn(f"bind: {contract.ip_for(spec['server_ns'])}:0\n", server)
@@ -45,9 +46,35 @@ class ConfigTests(unittest.TestCase):
                 self.assertIn(f"bind: {contract.client_bind(spec)}:0\n", client)
                 for text in (server, client):
                     self.assertIn(f"203.0.113.10:{PORTS['dht']}\n", text)
-                    self.assertIn(f"relay: {RELAY}\nrelay_address: 203.0.113.10:{PORTS['relay']}\n", text)
+                    self.assertEqual("relay:" in text and "relay_address:" in text, not spec.get("norelay"), case)
+                    self.assertEqual(f"relay: {RELAY}\nrelay_address: 203.0.113.10:{PORTS['relay']}\n" in text,
+                                     not spec.get("norelay"), case)
+                    self.assertIn("signaling: {\n", text)
+                    self.assertIn(f"bind: {contract.client_bind(spec) if text is client else contract.ip_for(spec['server_ns'])}:0\n", text)
                     self.assertIn(f"tcp://203.0.113.10:{PORTS['transit']}\n", text)
                     self.assertTrue(text.endswith("}\n"))
+                self.assertEqual(server.count("publish_address: plain\n"), 1 if spec.get("publish") == "plain" else 0, case)
+                self.assertNotIn("publish_address", client)
+
+    def test_norelay_cases_bind_without_relay_and_mismatches_are_rejected(self):
+        for case in ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal"):
+            server = configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, None)
+            client = configs.client_text(case, KEY, "/w/keys/client.key", PORTS, None)
+            for text in (server, client):
+                self.assertNotIn("relay:", text)
+                self.assertNotIn("relay_address:", text)
+                self.assertIn("signaling: {\n", text)
+                self.assertIn("bind: ", text)
+        for other in ("native-signal", "dnat-cone-signal", "dnat-cone-relay-signal"):
+            self.assertNotIn("publish_address", configs.server_text(other, "/w/keys/server.key", "/w/allow.txt", PORTS, RELAY))
+        with self.assertRaises(ValueError):
+            configs.server_text("dnat-cone-norelay-signal", "/w/keys/server.key", "/w/allow.txt", PORTS, RELAY)
+        with self.assertRaises(ValueError):
+            configs.client_text("dnat-cone-norelay-signal", KEY, "/w/keys/client.key", PORTS, RELAY)
+        with self.assertRaises(ValueError):
+            configs.server_text("native-signal", "/w/keys/server.key", "/w/allow.txt", PORTS, None)
+        with self.assertRaises(ValueError):
+            configs.client_text("native-signal", KEY, "/w/keys/client.key", PORTS, None)
 
     def test_wildcard_client_bind_and_filler_namespace_follow_the_case_only(self):
         switch = configs.client_text("switch-standby", KEY, "/w/keys/client.key", PORTS, RELAY)
@@ -314,6 +341,26 @@ class CaseTests(unittest.TestCase):
         run.hard = time.monotonic() + 5
         self.assertLessEqual(run.limit(1000), run.hard)
         self.assertLess(run.limit(1), run.hard)
+
+    def collector(self, case):
+        run = object.__new__(runcase.Run)
+        run.spec, run.hard, run.ev = contract.CASES[case], time.monotonic() + 60, {"markers": {}}
+        run.client, run.sup = object(), mock.Mock()
+        run.sup.mark.side_effect = lambda child, needle, deadline: "line:" + needle.decode("ascii")
+        return run
+
+    def test_client_lines_are_read_after_the_flow_only_for_direct_cases(self):
+        run = self.collector("dnat-cone-norelay-signal")
+        run.collect_client_lines()
+        self.assertEqual(run.ev["markers"]["client_lines"], {
+            contract.PUNCH_DIRECT: "line:" + contract.PUNCH_DIRECT, contract.ROUTE_LINE: "line:" + contract.ROUTE_LINE})
+        calls = run.sup.mark.call_args_list
+        self.assertEqual([c.args[1] for c in calls], [contract.PUNCH_DIRECT.encode(), contract.ROUTE_LINE.encode()])
+        self.assertTrue(all(c.args[0] is run.client and c.args[2] <= run.hard for c in calls))
+        idle = self.collector("blocked-signal")
+        idle.collect_client_lines()
+        self.assertEqual(idle.ev["markers"], {})
+        idle.sup.mark.assert_not_called()
 
 
 class ControllerTests(unittest.TestCase):

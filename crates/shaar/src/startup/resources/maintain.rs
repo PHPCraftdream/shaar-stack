@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use iroh::{EndpointAddr, TransportAddr, Watcher};
 use iroh_base::EndpointId;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
 use crate::config::PublishAddress;
@@ -65,6 +65,8 @@ pub(crate) struct MaintenanceExit {
 
 pub(crate) struct Maintenance {
     pub(crate) commands: mpsc::Sender<MaintenanceCommand>,
+    /// DHT-voted public IP; the owner itself lives in the task below.
+    pub(crate) votes: watch::Receiver<Option<std::net::IpAddr>>,
     stop: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<MaintenanceExit>>,
     watcher_stopped: Option<oneshot::Receiver<()>>,
@@ -101,12 +103,10 @@ impl Maintenance {
         let (commands, receiver) = mpsc::channel(COMMANDS);
         let (stop, stopped) = oneshot::channel();
         let (watcher_stopped_tx, watcher_stopped) = oneshot::channel();
+        let votes = owner.public_address_watch();
         let task = tokio::spawn(async move {
-            // The wrapper owns the runtime: a fault anywhere in the loop
-            // unwinds only to the poll-boundary containment below, so the
-            // owner is always handed back for the joined close path instead
-            // of dying via abort-only Drop. The poll wrapper is the in-tree
-            // proven catch_unwind pattern (server production_join/capacity).
+            // A fault unwinds only to the poll-boundary containment below, so
+            // the owner is always handed back for the joined close.
             let mut owner = owner;
             let outcome = {
                 let mut loop_future =
@@ -133,6 +133,7 @@ impl Maintenance {
         });
         Self {
             commands,
+            votes,
             stop: Some(stop),
             task: Some(task),
             watcher_stopped: Some(watcher_stopped),
@@ -669,6 +670,7 @@ mod tests {
             });
             Self {
                 commands,
+                votes: watch::channel(None).1,
                 stop: Some(stop),
                 task: Some(task),
                 watcher_stopped: Some(watcher_stopped),

@@ -136,6 +136,14 @@ class Run:
         self.identity(child)
         return child
 
+    def collect_client_lines(self):
+        """Direct-path cases: the Client's punch trace and route line appear when the APP dials, so they are read after the flow."""
+        if not self.spec.get("direct"):
+            return
+        for needle in (contract.PUNCH_DIRECT, contract.ROUTE_LINE):
+            line = self.sup.mark(self.client, needle.encode("ascii"), self.limit(15))
+            self.ev["markers"].setdefault("client_lines", {})[needle] = line
+
     def calibrate_and_install(self, ports):
         deadline = self.limit(45)
         pairs = (("rtr_a", "host_a"), ("rtr_b", "host_b"))
@@ -277,7 +285,8 @@ class Run:
             contract.require(status.st_uid == self.uid and status.st_mode & 0o777 == 0o600, "provisioned key ownership/mode differs")
         ev["observations"]["key_files"] = "owned by the unprivileged helper identity, mode 0600"
         self.server_key, client_key = ready["server_key"], ready["client_key"]
-        self.wan, self.wan_ready = self.helper("wan", "wan", "wan", SHAAR_NAT_SERVICE_KEY=self.server_key)
+        self.wan, self.wan_ready = self.helper("wan", "wan", "wan", SHAAR_NAT_SERVICE_KEY=self.server_key,
+                                               **({"SHAAR_NAT_DHT_OBSERVED": "1"} if spec.get("dht_observed") else {}))
         wan_started = time.monotonic()
         ready = self.wan_ready
         self.ports = {"dht": ready["dht_port"], "relay": ready["relay_port"], "transit": ready["transit_port"]}
@@ -293,7 +302,7 @@ class Run:
         contract.require(self.await_event(self.target, "SHAAR_NAT_READY", self.limit(20))["port"] == contract.TARGET_PORT,
                          "fixed target port differs")
         self.identity(self.target)
-        self.relay = ready["relay_peer"]
+        self.relay = None if spec.get("norelay") else ready["relay_peer"]
         allow = self.owned_file("allowlist.txt", configs.allowlist_text(client_key))
         server_cfg = self.owned_file("server.ktav", configs.server_text(
             self.case, str(self.work / "keys/server.key"), allow, self.ports, self.relay))
@@ -316,7 +325,8 @@ class Run:
         hint = self.client_hint()
         client_cfg = self.owned_file("client.ktav", configs.client_text(
             self.case, self.server_key, str(self.work / "keys/client.key"), self.ports, self.relay, hint))
-        self.client = self.product("client", self.client_ns, client_cfg)
+        punch = (contract.PUNCH_DIRECT.encode("ascii"), contract.ROUTE_LINE.encode("ascii")) if spec.get("direct") else ()
+        self.client = self.product("client", self.client_ns, client_cfg, extra=punch)
         contract.require(("server_address=" + (hint or "none")) in ev["markers"]["client"],
                          "Client must be configured with the Server key only (plus the IPv6 hint of the IPv6 cases)")
         live = {"wan": self.wan, "target": self.target, "server": self.server, "client": self.client}
@@ -327,6 +337,7 @@ class Run:
         spec, ev = self.spec, self.ev
         self.bring_up(after_live)
         scenarios.FLOWS[spec.get("flow", "single")](self)
+        self.collect_client_lines()
         ev["active_seconds"] = time.monotonic() - self.active_start
         self.observe_nat()
         ev["client_exit"] = self.stop_all()

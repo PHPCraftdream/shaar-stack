@@ -11,7 +11,7 @@
 //! dials loopback record hints), but peer-claimed addresses are additionally
 //! gated at the probe decision: a server never fires QUIC probes at a
 //! candidate an authenticated peer merely CLAIMED when that candidate is its
-//! own loopback, link-local, documentation or otherwise special target (leaf
+//! own loopback, link-local or otherwise special target (leaf
 //! L4 review Finding 2 — see `peer_claimed_probe_allowed`).
 
 use std::{
@@ -197,10 +197,11 @@ pub(crate) fn candidate_allowed(address: SocketAddr) -> bool {
 
 /// Production denials for candidates a server probes from a peer-claimed
 /// Offer (leaf L4 review Finding 2): loopback, unspecified, multicast,
-/// broadcast, v4 link-local (169.254/16), v6 link-local (fe80::/10),
-/// documentation ranges (TEST-NET-1..3 via `is_documentation`, and
-/// 2001:db8::/32) and the synthetic fabric prefix. Private LAN ranges stay
-/// allowed: same-LAN punching is legitimate.
+/// broadcast, v4 link-local (169.254/16), v6 link-local (fe80::/10) and the
+/// synthetic fabric prefix. Private LAN ranges stay allowed: same-LAN
+/// punching is legitimate. Documentation ranges are allowed too: they are not
+/// routed on the public internet, so a probe to them reaches nothing, and the
+/// controlled-network matrix uses TEST-NET-3 as its WAN.
 pub(crate) fn peer_claimed_probe_denied(canonical: IpAddr) -> bool {
     canonical.is_loopback()
         || canonical.is_unspecified()
@@ -208,8 +209,6 @@ pub(crate) fn peer_claimed_probe_denied(canonical: IpAddr) -> bool {
         || canonical == IpAddr::V4(Ipv4Addr::BROADCAST)
         || matches!(&canonical, IpAddr::V4(v4) if v4.is_link_local())
         || matches!(&canonical, IpAddr::V6(v6) if (v6.segments()[0] & 0xffc0) == 0xfe80)
-        || matches!(&canonical, IpAddr::V4(v4) if v4.is_documentation())
-        || matches!(&canonical, IpAddr::V6(v6) if v6.segments()[..2] == [0x2001, 0x0db8])
         || !native_ip(canonical)
 }
 

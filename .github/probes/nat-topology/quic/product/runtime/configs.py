@@ -19,18 +19,20 @@ def owned_path(value):
     return value
 
 
-def network_text(bind_ip, ports, relay_peer):
-    """Shared network object: owned DHT, relay and Ygg transit on the WAN address only."""
+def network_text(bind_ip, ports, relay_peer=None):
+    """Shared network object: owned DHT, relay and Ygg transit on the WAN address only; relay_peer None omits the relay."""
     wan = contract.IPS["wan"]
     contract.require(bind_ip in contract.IPS.values() or bind_ip == WILDCARD, "bind address outside the owned plan")
     contract.require(type(ports) is dict and set(ports) >= {"dht", "relay", "transit"}
                      and all(type(ports[key]) is int and 1024 <= ports[key] <= 65535 for key in ("dht", "relay", "transit")),
                      "owned WAN fixture ports invalid")
-    contract.require(type(relay_peer) is str and re.fullmatch("[A-Za-z0-9]{1,100}", relay_peer) is not None,
-                     "relay identity malformed")
-    lines = ["network: {", "mainline: {", f"bind: {bind_ip}:0", "bootstrap: [", f"{wan}:{ports['dht']}", "]", "}",
-             "signaling: {", f"bind: {bind_ip}:0", f"relay: {relay_peer}", f"relay_address: {wan}:{ports['relay']}", "}",
-             "ygg: {", "peers: [", f"tcp://{wan}:{ports['transit']}", "]", "}", "}"]
+    contract.require(relay_peer is None or (type(relay_peer) is str
+                     and re.fullmatch("[A-Za-z0-9]{1,100}", relay_peer) is not None), "relay identity malformed")
+    signaling = ["signaling: {", f"bind: {bind_ip}:0"]
+    if relay_peer is not None:
+        signaling += [f"relay: {relay_peer}", f"relay_address: {wan}:{ports['relay']}"]
+    lines = ["network: {", "mainline: {", f"bind: {bind_ip}:0", "bootstrap: [", f"{wan}:{ports['dht']}", "]", "}"]
+    lines += signaling + ["}", "ygg: {", "peers: [", f"tcp://{wan}:{ports['transit']}", "]", "}", "}"]
     return "\n".join(lines) + "\n"
 
 
@@ -39,13 +41,24 @@ def mode_value(mode):
     return mode
 
 
+def relay_binding(case, relay_peer):
+    """Relay fields present in the config must match the case's expectation, in both directions."""
+    spec = contract.CASES[case]
+    norelay = bool(spec.get("norelay"))
+    contract.require((relay_peer is None) == norelay, "relay fields present/absent contradict the case")
+    return relay_peer
+
+
 def server_text(case, key_file, allowlist_file, ports, relay_peer, ns=None):
     """ns: namespace the Server runs in when it differs from the case's Server namespace (relay filler Servers)."""
     spec = contract.CASES[case]
     bind_ip = contract.ip_for(ns or spec["server_ns"])
-    head = [f"target: 127.0.0.1:{contract.TARGET_PORT}", f"allowlist_path:: {owned_path(allowlist_file)}",
-            f"key_file:: {owned_path(key_file)}", f"fallback: {mode_value(spec['mode'])}"]
-    return "\n".join(head) + "\n" + network_text(bind_ip, ports, relay_peer)
+    head = [f"target: 127.0.0.1:{contract.TARGET_PORT}"]
+    if spec.get("publish") == "plain":
+        head.append("publish_address: plain")
+    head += [f"allowlist_path:: {owned_path(allowlist_file)}",
+             f"key_file:: {owned_path(key_file)}", f"fallback: {mode_value(spec['mode'])}"]
+    return "\n".join(head) + "\n" + network_text(bind_ip, ports, relay_binding(case, relay_peer))
 
 
 def client_text(case, server_key, key_file, ports, relay_peer, hint=None):
@@ -57,7 +70,7 @@ def client_text(case, server_key, key_file, ports, relay_peer, hint=None):
     if hint is not None:
         contract.require(type(hint) is str and re.fullmatch(r"\[[0-9a-f:]{2,39}\]:[0-9]{1,5}", hint) is not None, "invalid IPv6 direct-address hint")
         head.append(f"server_address:: {hint}")
-    return "\n".join(head) + "\n" + network_text(contract.client_bind(spec), ports, relay_peer)
+    return "\n".join(head) + "\n" + network_text(contract.client_bind(spec), ports, relay_binding(case, relay_peer))
 
 
 def allowlist_text(client_key):

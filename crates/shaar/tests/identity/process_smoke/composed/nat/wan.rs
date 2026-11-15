@@ -10,7 +10,11 @@ use tokio::sync::{mpsc, watch};
 /// cancel-safe: NO — the supervisor owns this helper PID and classifies abnormal cleanup separately.
 pub(super) async fn run(nonce: &str) -> Result<(), String> {
     let expected = public_key(&std::env::var("SHAAR_NAT_SERVICE_KEY").map_err(|e| e.to_string())?)?;
-    let peer = mainline_fixture::LoopbackPeer::bind_namespace().await;
+    // The harness opts a case into BEP 42 `ip` votes through this owned variable; off by default.
+    let observed = std::env::var("SHAAR_NAT_DHT_OBSERVED").as_deref() == Ok("1");
+    let peer = mainline_fixture::LoopbackPeer::bind_namespace()
+        .await
+        .report_observed(observed);
     let dht_port = peer.address.port();
     let relay = timeout(IO_TIMEOUT, relay_fixture::RelayFixture::start_namespace())
         .await

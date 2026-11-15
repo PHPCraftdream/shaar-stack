@@ -85,10 +85,6 @@ fn production_filter_denies_special_ranges_and_allows_private_lan() {
         "255.255.255.255:1",
         "169.254.9.9:1",
         "[fe80::1]:1",
-        "203.0.113.10:1",
-        "198.51.100.9:1",
-        "192.0.2.9:1",
-        "[2001:db8::1]:1",
         "[fd15:70a:510b::1]:1",
     ];
     for raw in denied {
@@ -105,6 +101,11 @@ fn production_filter_denies_special_ranges_and_allows_private_lan() {
         "100.64.0.1:1",
         "8.8.8.8:53",
         "[2001:db7::1]:1",
+        // Documentation ranges: unrouted on the internet, the WAN of the namespace matrix.
+        "203.0.113.10:1",
+        "198.51.100.9:1",
+        "192.0.2.9:1",
+        "[2001:db8::1]:1",
     ];
     for raw in allowed {
         let address: SocketAddr = raw.parse().unwrap();

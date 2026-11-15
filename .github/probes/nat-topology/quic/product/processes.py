@@ -57,7 +57,7 @@ def namespace_command(config, namespace, executable, arguments, ip, setpriv, lan
 
 
 def child_environment(extra):
-    allowed = {"SHAAR_NAT_ROLE", "SHAAR_NAT_NONCE", "SHAAR_NAT_DIRECTORY", "SHAAR_NAT_SERVICE_KEY"}
+    allowed = {"SHAAR_NAT_ROLE", "SHAAR_NAT_NONCE", "SHAAR_NAT_DIRECTORY", "SHAAR_NAT_SERVICE_KEY", "SHAAR_NAT_DHT_OBSERVED"}
     if not isinstance(extra, dict) or not set(extra) <= allowed:
         raise ValueError("unreviewed child environment entry")
     if not all(type(value) is str and len(value) <= 4096 and "\0" not in value for value in extra.values()):

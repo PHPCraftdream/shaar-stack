@@ -23,13 +23,14 @@ on:
         type: boolean
         default: false
       controlled_network_group:
-        description: Case group of the privileged matrix (base, nat or faults); used only with controlled_network_matrix
+        description: Case group of the privileged matrix (base, nat, faults or punch); used only with controlled_network_matrix
         required: false
         type: choice
         options:
           - base
           - nat
           - faults
+          - punch
         default: base
       public_smoke:
         description: Bounded live smoke over public networks (needs a recorded approval and the contract digest below; the libp2p relay is optional and the products run relay-less over DHT and Yggdrasil without one)
