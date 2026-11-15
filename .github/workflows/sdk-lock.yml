@@ -272,7 +272,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Unit-test the smoke harness (pure; no network)
-        run: python -I -m unittest discover -s .github/probes/public-smoke -p "test_*.py"
+        run: python -I -m unittest discover -s .github/probes/public-smoke/tests -p "test_*.py"
       - name: Validate the contract, recorded approval and meter availability
         env:
           SOURCE_REVISION: ${{ inputs.source_revision }}
@@ -335,16 +335,16 @@ jobs:
           path: target/public-smoke/stage/
           retention-days: 1
           if-no-files-found: error
-      - name: Fix the shared window origin (now plus a 90 s runner setup margin)
+      - name: Fix the shared window origin (now plus a 600 s margin for runner queueing; idle waiting only)
         id: epoch
-        run: echo "t0=$(( $(date +%s) + 90 ))" >> "$GITHUB_OUTPUT"
+        run: echo "t0=$(( $(date +%s) + 600 ))" >> "$GITHUB_OUTPUT"
 
   public-smoke-server:
     needs: public-smoke-build
     if: ${{ inputs.public_smoke }}
     name: Public smoke Server (runner A; single run)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     steps:
       - name: Checkout the exact reviewed source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -359,7 +359,7 @@ jobs:
           name: public-smoke-binaries
           path: target/public-smoke/stage
       - name: Run the Server role under the enforced caps
-        timeout-minutes: 5
+        timeout-minutes: 15
         env:
           SOURCE_REVISION: ${{ inputs.source_revision }}
           CONTRACT_SHA256: ${{ inputs.public_smoke_contract_sha256 }}
@@ -387,7 +387,7 @@ jobs:
     if: ${{ inputs.public_smoke }}
     name: Public smoke Client (runner B; single run)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     steps:
       - name: Checkout the exact reviewed source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -402,7 +402,7 @@ jobs:
           name: public-smoke-binaries
           path: target/public-smoke/stage
       - name: Run the Client role under the enforced caps
-        timeout-minutes: 5
+        timeout-minutes: 15
         env:
           SOURCE_REVISION: ${{ inputs.source_revision }}
           CONTRACT_SHA256: ${{ inputs.public_smoke_contract_sha256 }}

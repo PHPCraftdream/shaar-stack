@@ -1949,6 +1949,37 @@ gh workflow run "SDK lockfile preparation" --repo <repo> --ref <branch> \
   -f public_smoke_contract_sha256=<that digest>
 ```
 
+Window origin: the two role jobs start independently, so the build fixes a shared origin
+`t0` (build end plus 600 s) and each role waits idle until its offset from it. Two
+dispatches on 2026-11-15 (runs 43760623868 and 43762751996, both on a2abd4a) failed with
+no public contact from the late role: GitHub started the role jobs 1 s to 6 min after
+the origin that then carried a 90 s margin. The margin and the role step and job timeouts
+(15 and 18 minutes) were widened for that idle wait only; the contact windows and every
+traffic, connection and time cap of the contract are unchanged.
+
+One-command entry (leaf PUNCH-SMOKE, decision of 2026-11-15): the same dispatch as a
+script that only drives the `gh` CLI. The compile and the run stay in CI; the script
+runs no product and contacts no public target itself.
+
+```text
+python -I .github/probes/public-smoke/launch.py plan    --repo <repo> --ref <branch>
+python -I .github/probes/public-smoke/launch.py run     --repo <repo> --ref <branch> --out <new dir>
+python -I .github/probes/public-smoke/launch.py collect --repo <repo> --run <id> --sha <SHA> --out <new dir>
+```
+
+`plan` dispatches nothing: it requires the ref to sit exactly on the SHA, a green
+ordinary CI run of that SHA and a contract at that SHA that is approved with one run
+per dispatch and zero retries, then prints the exact dispatch inputs (the contract
+digest is computed from the bytes at the SHA). `run` checks the same, refuses an
+unusable `--out` before spending the single run, dispatches exactly once, makes one
+lookup of the run, watches it with a 300 s interval and downloads only the two
+evidence artifacts into the new directory. `collect` does the watch and download for
+a run that was dispatched elsewhere. A clean pass exits 0; any other run or role
+result exits 1 with the evidence still collected; a refused check exits 2; a
+dispatched run whose id is not listed yet exits 3 (find the id with `gh run list`
+and use `collect`). The unit tests of the script run in the ordinary CI policy suite
+and in the dispatch's plan job; they use a fake `gh` and no network.
+
 Digest of the proposal as committed here (not runnable: approval and relay are
 `null`): see the delivery report; any edit of the contract changes it.
 

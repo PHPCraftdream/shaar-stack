@@ -9,7 +9,7 @@ import stat
 import tempfile
 import unittest
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]
 ROOT = HERE.parents[2]
 SPEC = importlib.util.spec_from_file_location("smoke_run_for_contract_tests", HERE / "run.py")
 RUN = importlib.util.module_from_spec(SPEC)
@@ -330,7 +330,7 @@ class WorkflowTests(unittest.TestCase):
             block = jobs[name]
             self.assertIn("runs-on: ubuntu-latest", block)
             minutes = int(re.search(r"timeout-minutes: (\d+)", block)[1])
-            self.assertLessEqual(minutes, 90 if name == "public-smoke-build" else 12, name)
+            self.assertLessEqual(minutes, 90 if name == "public-smoke-build" else 18, name)
             for forbidden in ("sudo", "apt-get", "secrets.", "continue-on-error", "retry", "ip netns"):
                 self.assertNotIn(forbidden, block, name)
         self.assertNotIn("secrets.", self.text)
@@ -338,6 +338,19 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("needs: public-smoke-build", jobs[name])
             self.assertIn("if: always()", jobs[name])
         self.assertIn("permissions:\n  contents: read", self.text)
+
+    def test_window_origin_margin_survives_runner_queueing_without_widening_contact(self):
+        # Runs 43760623868 and 43762751996: the role jobs started 1 s to 6 min after the origin.
+        margin = int(re.search(r"t0=\$\(\( \$\(date \+%s\) \+ (\d+) \)\)", self.text)[1])
+        self.assertGreaterEqual(margin, 600)
+        line = CONTRACT.load_contract()[0]["budgets"]["timeline"]
+        needed = margin + line["server_end_offset_s"] + line["shutdown_grace_s"]
+        for name in ("public-smoke-server", "public-smoke-client"):
+            block = self.jobs()[name]
+            step = int(re.search(r"enforced caps\n\s+timeout-minutes: (\d+)", block)[1])
+            job = int(re.search(r"timeout-minutes: (\d+)", block)[1])
+            self.assertGreaterEqual(step * 60, needed, name)
+            self.assertGreater(job, step, name)
 
     def test_build_is_normal_and_artifacts_carry_no_keys(self):
         build = self.jobs()["public-smoke-build"]
@@ -355,7 +368,8 @@ class WorkflowTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("smoke_policy", ROOT / ".github/ci/policy.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        for name in ("run.py", "contract.py", "contract.json", "budget.py", "test_budget.py"):
+        for name in ("run.py", "contract.py", "contract.json", "budget.py", "launch.py", "tests/test_budget.py",
+                     "tests/test_launch.py"):
             selected = module.select([".github/probes/public-smoke/" + name])
             self.assertEqual((selected["suites"], selected["targets"]), (["ci_policy"], []), name)
 
