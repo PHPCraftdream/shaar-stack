@@ -21,7 +21,8 @@
 //! - location case 2: identity 0x54, client identity 0x55, transit 0x56
 //! - denial case 5:   identity 0x57, allowed client 0x58, denied client
 //!   0x59, transit 0x5A
-//! - punch role test: service 0x72, client 0x73, transit 0x74
+//! - punch role test: service 0x21, client 0x22, transit 0x23
+//! - cancellation cases: 0x72, 0x73, 0x74 (see `lifecycle_cases/cancellation.rs`)
 //!
 //! The 5b suites own 0xB* and 0xE* ranges; no overlap.
 

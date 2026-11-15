@@ -27,6 +27,7 @@ Without `network` the binaries run direct-only and print that the configured `fa
 | `key_file` | no | `shaar.key` | Non-empty path of the raw 32-byte seed file. |
 | `allowlist_path` | no | `allowed.txt` | Non-empty path of the allowlist (see [operations.md](operations.md)): at most 256 entries, and at most 16 distinct keys when `network` is present. |
 | `fallback` | no | `standby` | `signal` or `standby`. See [operations.md](operations.md#path-modes). |
+| `publish_address` | no | `off` | `off` or `plain` (case sensitive); composed shape only. `off` publishes private addresses only, exactly as before. `plain` adds ONE entry to the DHT record: the public IP that the DHT nodes observed for this Server (a majority vote of BEP 42 observations) with the local QUIC port, so a Client behind a different NAT can try it directly. **`plain` makes the Server's public IP readable by anyone who looks up its key.** The vote is untrusted and is not authenticated: a wrong address costs a Client at most one bounded dial attempt, and addresses the record policy rejects (loopback, link-local, multicast, documentation, wildcard) are never added. The record keeps its limit of 4 addresses: when it is already full, the last local address yields its slot. With no observation yet, the record is unchanged; a changed observation updates the record through the normal refresh. The value `encrypted` is reserved for a later mode and is rejected. |
 | `network` | no | absent | Composed settings, see below. |
 
 ## Client fields
@@ -57,7 +58,7 @@ No default relay, bootstrap node or Yggdrasil peer is provided or contacted by t
 
 ## Validation order and error messages
 
-Validation runs before any socket is opened. Syntax and unknown-field errors come first, then fields in the order of the tables (server: `target`, `bind`, `key_file`, `allowlist_path`, then `network`; `fallback` is checked together with the merge). Messages never contain the rejected value, key material or unknown field names:
+Validation runs before any socket is opened. Syntax and unknown-field errors come first, then fields in the order of the tables (server: `target`, `bind`, `key_file`, `allowlist_path`, then `network`; `fallback` and `publish_address` are checked together with the merge). Messages never contain the rejected value, key material or unknown field names:
 
 | Message | Meaning |
 |---|---|
@@ -69,6 +70,8 @@ Validation runs before any socket is opened. Syntax and unknown-field errors com
 | ``invalid configuration value for field `server` (InvalidKey)`` | Not a valid hex/base32 Ed25519 public key; also an invalid relay PeerId (`network.signaling.relay`). |
 | ``invalid configuration value for field `fallback` (InvalidEnum)`` | Not exactly `signal` or `standby` (case sensitive). |
 | ``invalid configuration value for field `key_file` (EmptyPath)`` | Present but empty path (also `allowlist_path`). |
+| ``invalid configuration value for field `publish_address` (InvalidEnum)`` | Not exactly `off` or `plain` (case sensitive). |
+| ``invalid configuration value for field `publish_address` (NotYetAvailable)`` | `encrypted` is reserved for a later mode and not available yet. |
 | ``invalid configuration value for field `network.ygg.peers` (InvalidUri)`` | Unsupported scheme, missing host or port, port 0, malformed query. |
 | ``invalid configuration value for field `network.mainline.bootstrap` (TooFew)`` / `(TooMany)` | List is empty / has more than 4 entries (also `network.ygg.peers`). |
 | `configuration parse error (syntax, line N, offset M)` | ktav syntax error; location only. |

@@ -457,7 +457,8 @@ impl RuntimeOwner {
     }
 
     /// Synchronous snapshot of the advisory reflexive public IP (initially
-    /// `None`). Advisory only: never published (leaf L3 boundary).
+    /// `None`). Advisory only; published only when the Server opts in
+    /// (`publish_address: plain`).
     // Consumed by the L4 NAT hole-punch wiring (dialer phase and server responder).
     pub(crate) fn public_address(&self) -> Option<IpAddr> {
         *self.public_address.borrow()
@@ -465,8 +466,6 @@ impl RuntimeOwner {
 
     /// Watch clone of the reflexive public IP. `changed()` on tokio watch is
     /// cancel-safe.
-    // Read only by cfg(test) fixtures in production; kept available for tests.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn public_address_watch(&self) -> watch::Receiver<Option<IpAddr>> {
         self.public_address.clone()
     }
@@ -607,4 +606,18 @@ pub(super) fn to_mutable(packet: &SignedSnapshot) -> Result<MutableItem, Runtime
 pub(super) fn endpoint_key(identity: &Identity) -> std::io::Result<EndpointId> {
     EndpointId::from_bytes(&identity.public_key_bytes())
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid identity key"))
+}
+
+/// The latest voted public IP; `None` without the opt-in watch or a vote.
+pub(crate) fn current_vote(votes: &Option<watch::Receiver<Option<IpAddr>>>) -> Option<IpAddr> {
+    votes.as_ref().and_then(|receiver| *receiver.borrow())
+}
+
+/// Resolves when the vote changes (`true`) or its sender is gone (`false`).
+/// cancel-safe: yes — `watch::Receiver::changed` is.
+pub(crate) async fn vote_changed(votes: &mut Option<watch::Receiver<Option<IpAddr>>>) -> bool {
+    match votes.as_mut() {
+        Some(receiver) => receiver.changed().await.is_ok(),
+        None => std::future::pending().await,
+    }
 }

@@ -64,11 +64,12 @@ fn client_role_config_without_relay(
         .expect("fixture client role config parses")
 }
 
-// Fresh seeds per the fixtures.rs discipline comment: service 0x72, client
-// 0x73, transit 0x74.
-const PUNCH_SERVICE: u8 = 0x72;
-const PUNCH_CLIENT: u8 = 0x73;
-const PUNCH_TRANSIT: u8 = 0x74;
+// Seeds unused anywhere else in this binary (see the fixtures.rs discipline
+// comment): the key claim is process-wide and the cancellation cases own
+// 0x72..0x74.
+const PUNCH_SERVICE: u8 = 0x21;
+const PUNCH_CLIENT: u8 = 0x22;
+const PUNCH_TRANSIT: u8 = 0x23;
 /// Covers two full dial attempts (`max_attempts: 2`), each bounded by the
 /// 1.5 s punch exchange and the 2 s client probe window, plus startup.
 const PUNCH_BUDGET: Duration = Duration::from_secs(90);

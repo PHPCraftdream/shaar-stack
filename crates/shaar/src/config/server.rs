@@ -8,7 +8,8 @@ use serde::Deserialize;
 use super::error::{ConfigError, ValidationKind};
 use super::network::NetworkSettings;
 use super::raw::{
-    Fallback, merge, parse_fallback, parse_socket_addr, require_loopback, require_nonempty_path,
+    Fallback, PublishAddress, merge, parse_fallback, parse_publish_address, parse_socket_addr,
+    require_loopback, require_nonempty_path,
 };
 
 /// Default key file path used when the schema field is absent.
@@ -31,6 +32,9 @@ pub(crate) struct ServerFile {
     /// CLI override has had its chance to replace it (`parse_fallback`).
     #[serde(default)]
     fallback: Option<String>,
+    /// Unvalidated raw value of the opt-in public-address publication (`off|plain`).
+    #[serde(default)]
+    publish_address: Option<String>,
     #[serde(default)]
     network: Option<super::network::NetworkFile>,
 }
@@ -64,6 +68,7 @@ pub struct ServerConfig {
     key_file: PathBuf,
     allowlist_path: PathBuf,
     fallback: Fallback,
+    publish_address: PublishAddress,
     network: Option<NetworkSettings>,
 }
 
@@ -91,6 +96,11 @@ impl ServerConfig {
     /// Fallback transport selection.
     pub fn fallback(&self) -> Fallback {
         self.fallback
+    }
+
+    /// Whether the DHT record also carries the NAT-observed public address.
+    pub fn publish_address(&self) -> PublishAddress {
+        self.publish_address
     }
 
     /// Optional shared network settings; absence keeps the legacy
@@ -129,6 +139,7 @@ impl ServerConfig {
             over.allowlist_path.clone(),
         );
         let fallback = parse_fallback(file.fallback.as_deref(), over.fallback)?;
+        let publish_address = parse_publish_address(file.publish_address.as_deref())?;
 
         let target_text = target_raw
             .ok_or_else(|| ConfigError::validation("target", ValidationKind::MissingRequired))?;
@@ -165,7 +176,66 @@ impl ServerConfig {
             key_file,
             allowlist_path,
             fallback,
+            publish_address,
             network,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(extra: &str) -> Result<ServerConfig, ConfigError> {
+        let text = format!("target: 127.0.0.1:9\n{extra}");
+        ServerConfig::from_text(&text, &ServerOverrides::default())
+    }
+
+    #[test]
+    fn publish_address_defaults_to_off_and_accepts_both_modes() {
+        assert_eq!(parse("").unwrap().publish_address(), PublishAddress::Off);
+        assert_eq!(
+            parse("publish_address: off\n").unwrap().publish_address(),
+            PublishAddress::Off
+        );
+        assert_eq!(
+            parse("publish_address: plain\n").unwrap().publish_address(),
+            PublishAddress::Plain
+        );
+    }
+
+    #[test]
+    fn encrypted_is_reserved_and_refused_with_the_field_name() {
+        let error = parse("publish_address: encrypted\n").unwrap_err();
+        assert!(matches!(
+            error,
+            ConfigError::Validation {
+                field: "publish_address",
+                kind: ValidationKind::NotYetAvailable
+            }
+        ));
+        assert!(error.to_string().contains("publish_address"));
+    }
+
+    #[test]
+    fn unknown_values_and_bad_syntax_are_rejected_without_echoing_input() {
+        for value in ["Plain", "bogus"] {
+            let error = parse(&format!("publish_address: {value}\n")).unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    ConfigError::Validation {
+                        field: "publish_address",
+                        kind: ValidationKind::InvalidEnum
+                    }
+                ),
+                "{value:?}: {error}"
+            );
+            assert!(!error.to_string().contains("Plain"));
+        }
+        assert!(matches!(
+            parse("publish_address: [\n").unwrap_err(),
+            ConfigError::Parsing { .. }
+        ));
     }
 }

@@ -9,8 +9,10 @@ use iroh_base::EndpointId;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use crate::config::PublishAddress;
+use crate::native_discovery::compose_published;
 use crate::native_discovery::runtime::owner::{
-    PublicationHandle, ResolvedAddresses, RuntimeError, RuntimeOwner,
+    PublicationHandle, ResolvedAddresses, RuntimeError, RuntimeOwner, current_vote, vote_changed,
 };
 use crate::native_discovery::runtime::publisher::PublicationStatus;
 
@@ -94,6 +96,7 @@ impl Maintenance {
     pub(crate) fn spawn(
         owner: RuntimeOwner,
         watcher: impl Watcher<Value = EndpointAddr> + Send + 'static,
+        publish: PublishAddress,
     ) -> Self {
         let (commands, receiver) = mpsc::channel(COMMANDS);
         let (stop, stopped) = oneshot::channel();
@@ -107,7 +110,7 @@ impl Maintenance {
             let mut owner = owner;
             let outcome = {
                 let mut loop_future =
-                    std::pin::pin!(maintain(&mut owner, watcher, receiver, stopped));
+                    std::pin::pin!(maintain(&mut owner, watcher, publish, receiver, stopped));
                 std::future::poll_fn(|cx| {
                     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         loop_future.as_mut().poll(cx)
@@ -255,10 +258,14 @@ impl Maintenance {
 async fn maintain(
     owner: &mut RuntimeOwner,
     mut watcher: impl Watcher<Value = EndpointAddr> + Send + 'static,
+    publish_mode: PublishAddress,
     mut commands: mpsc::Receiver<MaintenanceCommand>,
     mut stop: oneshot::Receiver<()>,
 ) {
     let publisher: PublicationHandle = owner.publication_handle();
+    // Opt-in `plain` mode: the DHT-voted public IP joins the endpoint snapshot
+    // in the published list (`compose_published`); `off` never reads the vote.
+    let mut votes = (publish_mode == PublishAddress::Plain).then(|| owner.public_address_watch());
     // The exclusive owner access is a MOVED `&mut` lease: while a resolver
     // future is active the lease lives inside that future, the slot below is
     // empty, and a second reborrow cannot even be constructed. Completion,
@@ -266,7 +273,8 @@ async fn maintain(
     // on fault unwind only the reference drops — the owner object itself
     // stays in the spawning frame for the joined close.
     let mut owner_lease: Option<&mut RuntimeOwner> = Some(owner);
-    let mut latest = Some(snapshot(watcher.get()));
+    let mut base = snapshot(watcher.get());
+    let mut latest = Some(compose_published(&base, current_vote(&votes), publish_mode));
     let mut current: Option<Vec<TransportAddr>> = None;
     let mut publish: Option<PublishFuture> = None;
     let mut publish_admission: Option<oneshot::Receiver<()>> = None;
@@ -315,8 +323,24 @@ async fn maintain(
             biased;
             _ = &mut stop => Event::Stop,
             update = watcher.updated() => match update {
-                Ok(address) => Event::Snapshot(snapshot(address)),
+                Ok(address) => {
+                    base = snapshot(address);
+                    Event::Snapshot(compose_published(&base, current_vote(&votes), publish_mode))
+                }
                 Err(_) => Event::Stop,
+            },
+            alive = vote_changed(&mut votes), if votes.is_some() => {
+                if !alive {
+                    votes = None;
+                    Event::VoteIgnored
+                } else {
+                    let next = compose_published(&base, current_vote(&votes), publish_mode);
+                    if current.as_ref() == Some(&next) || latest.as_ref() == Some(&next) {
+                        Event::VoteIgnored
+                    } else {
+                        Event::Snapshot(next)
+                    }
+                }
             },
             result = publish_result(&mut publish), if publish.is_some() => Event::Published(result),
             _ = async { resolve_reply.as_mut().expect("guarded resolve reply").closed().await }, if resolve_reply.is_some() => Event::ResolveCanceled,
@@ -362,7 +386,8 @@ async fn maintain(
             }
             #[cfg(test)]
             Event::Command(Some(MaintenanceCommand::Submit(address, reply))) => {
-                latest = Some(snapshot(address));
+                base = snapshot(address);
+                latest = Some(compose_published(&base, current_vote(&votes), publish_mode));
                 publish = None;
                 publish_admission = None;
                 status_query = None;
@@ -414,6 +439,7 @@ async fn maintain(
                     }
                 }
             }
+            Event::VoteIgnored => {}
             Event::Retry => retry_at = None,
             Event::Published(result) => {
                 publish = None;
@@ -534,6 +560,8 @@ enum Event {
     Stop,
     Command(Option<MaintenanceCommand>),
     Snapshot(Vec<TransportAddr>),
+    /// A vote change that leaves the composed list as it is.
+    VoteIgnored,
     Retry,
     Published(Result<(), RuntimeError>),
     StatusQueried(Option<PublicationStatus>),

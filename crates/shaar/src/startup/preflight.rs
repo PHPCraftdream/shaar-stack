@@ -11,7 +11,7 @@
 use iroh_base::PublicKey;
 use libp2p_identity::PeerId;
 
-use crate::config::{ClientConfig, Fallback, NetworkSettings, ServerConfig};
+use crate::config::{ClientConfig, Fallback, NetworkSettings, PublishAddress, ServerConfig};
 use crate::identity::Identity;
 
 use super::StartupError;
@@ -28,6 +28,8 @@ pub(crate) struct ComposedStartupPlan<'a> {
     /// role config; decides whether the Yggdrasil payload endpoint is built
     /// (`Standby`) or the bridge stays control-only (`Signal`).
     mode: Fallback,
+    /// Opt-in publication of the NAT-observed public address (Server only).
+    publish: PublishAddress,
 }
 
 impl ComposedStartupPlan<'_> {
@@ -45,6 +47,11 @@ impl ComposedStartupPlan<'_> {
     pub(crate) fn fallback(&self) -> Fallback {
         self.mode
     }
+
+    /// Whether the published record also carries the observed public address.
+    pub(crate) fn publish_address(&self) -> PublishAddress {
+        self.publish
+    }
 }
 
 /// Preflight for the composed server role (no configured remote service key).
@@ -57,6 +64,7 @@ pub(crate) fn preflight_server<'a>(
         config.network(),
         &[],
         config.fallback(),
+        config.publish_address(),
         identity,
         app_peers,
     )
@@ -77,6 +85,7 @@ pub(crate) fn preflight_client<'a>(
         config.network(),
         &[service_key],
         config.fallback(),
+        PublishAddress::Off,
         identity,
         app_peers,
     )
@@ -86,6 +95,7 @@ fn preflight_shared<'a>(
     network: Option<&'a NetworkSettings>,
     service_keys: &[PublicKey],
     mode: Fallback,
+    publish: PublishAddress,
     identity: &Identity,
     app_peers: &'a [PublicKey],
 ) -> Result<ComposedStartupPlan<'a>, StartupError> {
@@ -142,6 +152,7 @@ fn preflight_shared<'a>(
         network,
         app_peers,
         mode,
+        publish,
     })
 }
 

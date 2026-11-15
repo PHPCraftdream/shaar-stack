@@ -7,6 +7,7 @@ use tokio::sync::watch;
 
 use super::super::Status;
 use super::*;
+use crate::config::PublishAddress;
 use crate::network::RelayFixture;
 use crate::startup::resources::maintain::Maintenance;
 
@@ -158,7 +159,7 @@ async fn faulted_maintenance_retains_owner_and_joined_close_releases_resources()
     .expect("native endpoint binds");
     let native_addr = endpoint.local_addr();
     let watcher = endpoint.native_addr_watcher();
-    let maintenance = Maintenance::spawn(owner, watcher);
+    let maintenance = Maintenance::spawn(owner, watcher, PublishAddress::Off);
     let commands = maintenance.commands.clone();
     let shared = shared_with(StartupResources {
         endpoint: Some(endpoint),

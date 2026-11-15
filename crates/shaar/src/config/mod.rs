@@ -26,7 +26,7 @@ pub use load::{
     load_server_with_endpoint_overrides,
 };
 pub use network::{MainlineNetwork, NetworkSettings, SignalingNetwork, YggNetwork};
-pub use raw::Fallback;
+pub use raw::{Fallback, PublishAddress};
 pub use server::{ServerConfig, ServerEndpointOverrides, ServerOverrides};
 
 /// Hard upper bound on configuration file size in bytes (1 MiB).

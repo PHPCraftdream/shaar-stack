@@ -10,7 +10,7 @@ use shaar_ygg::{YggBridge, YggError};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
-use crate::config::Fallback;
+use crate::config::{Fallback, PublishAddress};
 use crate::identity::Identity;
 use crate::native_discovery::runtime::owner::RuntimeOwner;
 use crate::network::{Allowlist, Limits, SignaledEndpoint, YggEndpoint};
@@ -34,6 +34,7 @@ struct StartupSettings {
     ygg_peers: Option<Vec<String>>,
     app_peers: Vec<PublicKey>,
     mode: Fallback,
+    publish: PublishAddress,
     /// When true, native/signaling and Ygg payload endpoints share ONE
     /// bounded admission pool instead of fresh per-endpoint pools.
     shared_admission: bool,
@@ -239,6 +240,7 @@ impl SharedResourcesStart {
             ygg_peers,
             app_peers,
             mode,
+            publish: plan.publish_address(),
             shared_admission,
         };
         let (status_tx, status_rx) = watch::channel(Status::Pending);
@@ -391,6 +393,7 @@ async fn run_startup(
         ygg_peers,
         app_peers,
         mode,
+        publish,
         shared_admission,
     } = settings;
     #[cfg(test)]
@@ -498,7 +501,7 @@ async fn run_startup(
             .map(SignaledEndpoint::native_addr_watcher)
             .expect("native endpoint stage installed")
     };
-    let maintenance = Maintenance::spawn(owner, watcher);
+    let maintenance = Maintenance::spawn(owner, watcher, publish);
     slot_lock(&shared.slot)
         .resources
         .as_mut()
