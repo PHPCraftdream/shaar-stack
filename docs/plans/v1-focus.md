@@ -1758,7 +1758,9 @@ TUN/root/routes, legal clearance and release permissions are not granted.
 Status: **one bounded live smoke executed (fork run 43629141158): the public Mainline
 bootstrap nodes and both Yggdrasil peers worked, while the pinned public libp2p
 bootstrap used as the signaling relay accepted TCP but gave no reservation, so the
-Server never became ready.** The user's 2026-11-04 and 2026-11-09 decisions authorize
+Server never became ready.** The second bounded live smoke (relay-less, fork run
+43671098240 on source 289bb1f, contract SHA-256 32671262002e...7134aa) passed: see
+"Second run" below. The user's 2026-11-04 and 2026-11-09 decisions authorize
 a smoke in principle, and the 2026-11-14 decision authorizes execution through this
 default-off contract. The contract is now relay-optional (`libp2p_relay: null`,
 approval recorded 2026-11-14); the next run is relay-less. A pass is a bounded
@@ -1821,6 +1823,26 @@ pinned later; it then needs an operator whose published terms permit the use, an
 the behavior is exactly as before (one reservation by the Server). The Client's
 owned silent loopback relay is used only when a relay is pinned; without one the
 Client config carries no relay fields at all.
+
+**Second run, relay-less (2026-11-15, fork run 43671098240, source 289bb1f0d02e, contract
+SHA-256 32671262002e0deed31915942c4863a4e8c099a9ceae27a64d4704b57a7134aa):** the
+plan, build, Server (runner A) and Client (runner B) jobs all passed, with the products
+started without any relay field. Observed by the harness: the Client, configured with the
+server key only (`server_address=none`), completed one exact application exchange (43 byte
+request, 43 byte reply, content match, first byte and total 0.87 s) through the Server's
+fixed target; the Server accepted one connection and the target saw the request; each
+role held two Yggdrasil connections to the contract's public peers and no connection to any
+unlisted address or relay. Metered per job against the caps: NIC 201,674 B (Server) and
+70,820 B (Client) of 5 MiB, Yggdrasil TCP 25,741 B and 18,085 B of 3 MiB, DHT UDP 175,933 B
+and 52,735 B of 1.5 MiB, zero violations. Both products exited with code 0 and the Server
+stayed alive until the stop. **What this does not prove:** the route is Yggdrasil standby
+inferred by exclusion (Native is blocked by construction on the cloud NAT runner, no relay
+is configured) and was not directly observed; the harness cannot observe whether the Client
+resolved the DHT record (the products log nothing about it; it is inferred only from the
+exchange succeeding by key alone); no direct path, no hole punching and no NAT traversal were
+exercised; one run on two GitHub-hosted runners is not acceptance of the end-to-end claim,
+and real devices were not involved. The evidence artifacts are `public-smoke-server-evidence`
+and `public-smoke-client-evidence` of that run.
 
 ### How Native is blocked without root
 
