@@ -44,7 +44,8 @@
       "server_launch_deadline_s": 10,
       "client_start_offset_s": 20,
       "client_ready_wait_s": 25,
-      "client_exchange_s": 50,
+      "client_exchange_s": 20,
+      "client_punch_observe_s": 30,
       "shutdown_grace_s": 15,
       "server_end_offset_s": 105
     },

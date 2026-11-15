@@ -183,7 +183,8 @@ class ContractTests(unittest.TestCase):
     def test_timeline_is_consistent(self):
         full, _ = runnable()
         for key, value in (("server_launch_deadline_s", 20), ("server_end_offset_s", 99), ("server_end_offset_s", 106),
-                           ("client_exchange_s", 80), ("client_exchange_s", 301), ("shutdown_grace_s", 16)):
+                           ("client_exchange_s", 80), ("client_exchange_s", 301), ("shutdown_grace_s", 16),
+                           ("client_punch_observe_s", 40), ("client_punch_observe_s", 0)):
             changed = copy.deepcopy(full)
             changed["budgets"]["timeline"][key] = value
             with self.subTest(key=key, value=value), self.assertRaises(CONTRACT.ContractError):
@@ -421,20 +422,62 @@ class ObservabilityTests(unittest.TestCase):
         self.assertIsNone(session)
         self.assertEqual(CONTRACT.scan_product_lines("", "client"), (None, None))
 
-    def test_route_violations_carry_the_observed_value(self):
-        route = {"role": "client", "path": "native"}
+    def test_route_violations_allow_standby_and_a_punched_native_path(self):
+        for path in ("ygg-standby", "native"):
+            self.assertEqual(CONTRACT.route_violations({"role": "client", "path": path},
+                                                       {"role": "client", "path": path}), [], path)
+        route = {"role": "client", "path": "ygg-signal"}
         found = CONTRACT.route_violations(route, None)
         self.assertEqual(len(found), 1)
-        self.assertIn("native", found[0])
-        self.assertIn("ygg-standby", found[0])
+        self.assertIn("ygg-signal", found[0])
+        self.assertIn("ygg-standby or native", found[0])
         session = {"role": "client", "path": "ygg-signal", "result": "ok", "error": None,
                    "bytes_in": 1, "bytes_out": 1}
         found = CONTRACT.route_violations(None, session)
         self.assertEqual(len(found), 1)
         self.assertIn("ygg-signal", found[0])
-        self.assertEqual(CONTRACT.route_violations({"role": "client", "path": "ygg-standby"},
-                                                   {"role": "client", "path": "ygg-standby"}), [])
         self.assertEqual(CONTRACT.route_violations(None, None), [])
+
+    def test_route_paths_keep_the_first_seen_order_per_role(self):
+        text = "\n".join([
+            "shaar-client: route path=ygg-standby candidates=record:1,hint:0 resolve=found elapsed_ms=10",
+            "shaar-server: route path=native",
+            "shaar-client: route path=ygg-standby candidates=record:1,hint:0 resolve=found elapsed_ms=11",
+            "shaar-client: route path=native candidates=record:1,hint:0 resolve=found elapsed_ms=12",
+            "noise"])
+        self.assertEqual(CONTRACT.route_paths(text, "client"), ["ygg-standby", "native"])
+        self.assertEqual(CONTRACT.route_paths(text, "server"), ["native"])
+        self.assertEqual(CONTRACT.route_paths("", "client"), [])
+        self.assertEqual(CONTRACT.path_violations(["ygg-standby", "ygg-signal", "native"]),
+                         ["observed route path ygg-signal is outside the allowed ygg-standby or native"])
+
+    def test_punch_lines_are_counted_without_addresses(self):
+        text = "\n".join([
+            "shaar: client punch candidates=0 outcome=fallback elapsed_ms=1500",
+            "shaar: client punch candidates=1 outcome=fallback elapsed_ms=3",
+            "shaar: client punch candidates=2 outcome=direct elapsed_ms=7",
+            "shaar: server punch candidates=1 outcome=fallback elapsed_ms=501",
+            "shaar: client punch candidates=1 outcome=maybe elapsed_ms=1",
+            "shaar: client punch candidates=1 outcome=direct elapsed_ms=7 10.0.0.1:5",
+            "shaar: rejected/failed session"])
+        self.assertEqual(CONTRACT.scan_punch(text, "client"), {"attempts": 3, "direct": 1, "max_candidates": 2})
+        self.assertEqual(CONTRACT.scan_punch(text, "server"), {"attempts": 1, "direct": 0, "max_candidates": 1})
+        self.assertEqual(CONTRACT.scan_punch("", "client"), {"attempts": 0, "direct": 0, "max_candidates": 0})
+
+    def test_direct_claim_is_written_from_observed_lines_only(self):
+        punch = {"attempts": 4, "direct": 0, "max_candidates": 1}
+        self.assertIn("direct Native path was established",
+                      CONTRACT.direct_claim(["ygg-standby", "native"], punch))
+        found = CONTRACT.direct_claim(["ygg-standby"], punch)
+        self.assertIn("no direct path", found)
+        self.assertIn("4 punch attempts", found)
+        self.assertTrue(CONTRACT.direct_claim([], {"attempts": 0, "direct": 0, "max_candidates": 0})
+                        .startswith("not observed"))
+
+    def test_linger_is_over_only_after_the_event_and_the_wait(self):
+        self.assertFalse(CONTRACT.linger_over(None, 1000, 35))
+        self.assertFalse(CONTRACT.linger_over(100, 134, 35))
+        self.assertTrue(CONTRACT.linger_over(100, 135, 35))
 
     def test_dht_claim_mapping(self):
         found = CONTRACT.dht_claim({"resolve": "found", "record": 6})
