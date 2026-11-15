@@ -25,6 +25,7 @@ use iroh_base::PublicKey;
 use tokio::time::{Instant, timeout_at};
 
 use crate::network::{NetworkError, Session};
+use shaar_ygg::DatagramError;
 
 /// Maximum candidates carried per punch message and probe burst.
 pub(crate) const MAX_CANDIDATES: usize = 4;
@@ -254,13 +255,22 @@ pub(crate) fn local_candidates(local: SocketAddr, reflexive: Option<IpAddr>) -> 
     candidates
 }
 
+/// Why one punch datagram was not sent. `Refused` is transient (request
+/// queue or carrier budget full, no route yet on a cold Yggdrasil path): the
+/// sender retries inside its window. `Closed` is permanent for this link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SendError {
+    Refused,
+    Closed,
+}
+
 /// Bidirectional punch transport: typed sends and raw receives with budgets.
 pub(crate) trait PunchLink {
     fn send(
         &self,
         message: &PunchMessage,
         budget: Duration,
-    ) -> impl Future<Output = Result<(), ()>> + Send;
+    ) -> impl Future<Output = Result<(), SendError>> + Send;
     /// Receives one raw datagram; `None` when the link is closed. Must be
     /// cancel-safe: callers bound it with timeouts and call it again.
     fn recv_raw(&mut self) -> impl Future<Output = Option<Vec<u8>>> + Send;
@@ -287,9 +297,17 @@ impl PunchChannel {
 }
 
 impl PunchLink for PunchChannel {
-    async fn send(&self, message: &PunchMessage, budget: Duration) -> Result<(), ()> {
-        let bytes = encode(message).ok_or(())?;
-        self.sender.send(&bytes, budget).await.map_err(|_| ())
+    async fn send(&self, message: &PunchMessage, budget: Duration) -> Result<(), SendError> {
+        let bytes = encode(message).ok_or(SendError::Closed)?;
+        self.sender
+            .send(&bytes, budget)
+            .await
+            .map_err(|error| match error {
+                DatagramError::Busy | DatagramError::TimedOut | DatagramError::Transport(_) => {
+                    SendError::Refused
+                }
+                _ => SendError::Closed,
+            })
     }
 
     async fn recv_raw(&mut self) -> Option<Vec<u8>> {
@@ -343,7 +361,9 @@ where
     let answer = loop {
         if Instant::now() >= resend_at {
             let sent = timeout_at(exchange_end, channel.send(&offer, EXCHANGE_BUDGET)).await;
-            if sent.is_err() || matches!(sent, Ok(Err(()))) {
+            // A refused copy is lost like any other: the next one follows after
+            // `OFFER_RESEND` while the window lasts; only a closed link ends it.
+            if sent.is_err() || matches!(sent, Ok(Err(SendError::Closed))) {
                 trace_attempt(role, offer.candidates.len(), false, started);
                 return None;
             }

@@ -311,12 +311,12 @@ struct FakeLink {
 }
 
 impl PunchLink for FakeLink {
-    async fn send(&self, message: &PunchMessage, budget: Duration) -> Result<(), ()> {
-        let bytes = encode(message).ok_or(())?;
+    async fn send(&self, message: &PunchMessage, budget: Duration) -> Result<(), SendError> {
+        let bytes = encode(message).ok_or(SendError::Closed)?;
         tokio::time::timeout(budget, self.tx.send(bytes))
             .await
-            .map_err(|_| ())?
-            .map_err(|_| ())
+            .map_err(|_| SendError::Refused)?
+            .map_err(|_| SendError::Closed)
     }
 
     async fn recv_raw(&mut self) -> Option<Vec<u8>> {

@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use super::{
-    EXCHANGE_BUDGET, Kind, NetworkError, PROBE_WINDOW, PunchLink, PunchMessage, Session,
+    EXCHANGE_BUDGET, Kind, NetworkError, PROBE_WINDOW, PunchLink, PunchMessage, SendError, Session,
     client_attempt, decode, encode, peer_claimed_probe_allowed, peer_claimed_probe_denied,
 };
 
@@ -126,9 +126,9 @@ struct FakeLink {
 }
 
 impl PunchLink for FakeLink {
-    async fn send(&self, message: &PunchMessage, _budget: Duration) -> Result<(), ()> {
-        let bytes = encode(message).ok_or(())?;
-        self.tx.send(bytes).await.map_err(|_| ())
+    async fn send(&self, message: &PunchMessage, _budget: Duration) -> Result<(), SendError> {
+        let bytes = encode(message).ok_or(SendError::Closed)?;
+        self.tx.send(bytes).await.map_err(|_| SendError::Closed)
     }
 
     async fn recv_raw(&mut self) -> Option<Vec<u8>> {
