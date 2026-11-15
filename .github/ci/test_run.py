@@ -35,6 +35,32 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(seen, [["cargo", "clippy", "--locked", "--manifest-path",
                                  "crates/shaar-ygg-core/Cargo.toml", "--lib", "--", "-D", "warnings"]])
 
+    def test_member_lint_covers_all_targets_once_per_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            seen = []
+            def record(arguments, log):
+                seen.append(arguments)
+                return "ok\n", 0
+            with patch.object(RUN, "ROOT", Path(directory)), patch.object(RUN, "capture", side_effect=record):
+                RUN.lint([RUN.POLICY.target("shaar", ("network::",)), RUN.POLICY.target("shaar", ("startup::",))])
+        self.assertEqual(seen, [["cargo", "clippy", "--locked", "-p", "shaar", "--all-targets",
+                                 "--", "-D", "warnings"]])
+
+    def test_a_broken_later_target_fails_before_any_case_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = []
+            def build(arguments, log, stderr=None):
+                calls.append(arguments)
+                return ("", 101) if len(calls) == 2 else ("built", 0)
+            first = RUN.POLICY.target("shaar-p2p")
+            with patch.object(RUN, "ROOT", root), patch.object(RUN, "capture", side_effect=build), \
+                 patch.object(RUN, "executable", return_value=root / "target/binary"):
+                with self.assertRaisesRegex(ValueError, "compilation failed: shaar-ygg lib shaar_ygg: 101"):
+                    RUN.tests([first, RUN.POLICY.target("shaar-ygg")])
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all("--no-run" in arguments for arguments in calls))
+
     def test_failed_lint_retains_an_artifact_without_running_test_cases(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
