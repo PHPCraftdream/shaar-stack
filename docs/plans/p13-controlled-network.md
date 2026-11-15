@@ -385,7 +385,12 @@ is **not dispatched**; one nat-group dispatch is needed to verify it.
 
 ## Reflexive address source and hole punching without a helper server (design)
 
-Status: **design, not implemented** (rewritten 2026-11-14). It answers the A5 finding
+Status: **partly implemented** (design rewritten 2026-11-14; status updated 2026-11-15).
+Leaves L1, L0, L2 and the L5 fixture part are merged; L4 is in progress; L3, the L5 cases and
+L6 are not started; no namespace dispatch has yet run against the new behavior, so row A5
+stays a negative finding until L6 produces receipts. A second rendezvous channel of R5 (the
+libp2p relay carrier when a relay is configured) is tracked as leaf L4b, after L4. The
+design text below is kept as written. It answers the A5 finding
 (scenarios.md §10.2, row A5): with a port-preserving cone NAT on each router and Yggdrasil
 denied, neither product direction punches; the signed record lists only the Server's private
 address, the Client spends its whole attempt budget on that silent candidate, and relay-first
@@ -711,8 +716,12 @@ un-dispatched amendment still needs its own dispatch).
 ### 5. Leaves, effort, parallelism
 
 Each leaf has authored tests and ordinary CI; no local build/test per project rules.
-Privileged = needs its own namespace dispatch grant (the six-dispatch remaining-row budget is
-fully used; the punch-control amendment is still un-dispatched).
+Privileged = needs a namespace dispatch grant. The six-dispatch remaining-row budget is fully
+used; the owner authorized up to six further dispatches for this toolkit on 2026-11-14 (see
+the north-star decision log). They are spent in one L6 pass after L4, L3, L4b and L5 are
+merged: the `nat` group for the new and flipped cases, `base` and `faults` as a regression
+of the changed dial sequence, three in reserve. The punch-control amendment is still
+un-dispatched.
 
 - **L1 (first) — dial ordering** (R1). Files: `crates/shaar/src/startup/role/dialers.rs` and
   its tests. Acceptance: with a record whose first candidate is silent and a second dialable,
@@ -767,10 +776,11 @@ confirm-by-ping branch is dead (`core.rs:391-408`), tie breaking is nondetermini
 `firewalled()` must not be trusted; a wrong-but-consistent set of respondents can shift the
 voted address, which the design bounds but does not eliminate.
 
-Owner decisions still open (scope decisions are the owner's): (1) the default of R4 —
-publish the reflexive guess in the signed record vs exchange-only, accepting the public-IP
-disclosure trade-off; (2) a new privileged dispatch grant for the flipped oracles and the
-punch cases, sequenced with the still-un-dispatched punch-control amendment; (3) whether the
+Owner decisions taken: (1) R4 is a Server setting, not unconditional behavior, with an
+optional encrypted mode for holders of the decryption keys (2026-11-15); the engineer's
+default is off, and the encrypted mode starts only after the owner approves its threat
+model; (2) six further privileged dispatches are authorized for this toolkit (2026-11-14).
+Owner decisions still open (scope decisions are the owner's): (3) whether the
 periodic self-lookup (L2) and the punch probe bursts fit the efficiency budget (bounded: one
 lookup per refresh window, ≤4 candidates per attempt); (4) the exact ktav field shape for the
 R4 flag, reviewed together with the L0 schema change that makes the signaling relay pair

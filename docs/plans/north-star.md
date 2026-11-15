@@ -17,7 +17,8 @@ anonymization overhead.
 1. The server publishes a signed address record under its key in the Mainline DHT.
 2. The client is configured with the server key only.
 3. The client resolves the record and tries direct QUIC to the published addresses.
-4. If direct paths fail, the client negotiates through libp2p (signaling only) and
+4. If direct paths fail, the client negotiates through libp2p or Yggdrasil
+   signaling (signaling only, no helper server: decision of 2026-11-14) and
    hole-punches; direct QUIC has data priority.
 5. If UDP/QUIC is blocked, the client uses the Yggdrasil path derived from the same
    key. Yggdrasil carries negotiation in `signal` mode and payload fallback in
@@ -110,7 +111,7 @@ An in-house Yggdrasil implementation is not permitted.
 
 | Date | Decision | User words |
 |---|---|---|
-| 2026-11-15 | The NAT punch must actually trigger and work correctly in the relay-less composed startup (north-star step 4). Acceptance: coordinated punch over the Yggdrasil signaling bridge proven in the namespace matrix, and an observed direct path in the live smoke within the existing live-smoke contract and approvals; a fallback to Yggdrasil standby stays within the 10 s failover budget. | "И что там с пркоолом NAT? нужнно чтобы он тоже срабатывал и работал корректно" |
+| 2026-11-15 | The NAT punch must actually trigger and work correctly in the relay-less composed startup (north-star step 4). Acceptance: the coordinated punch is proven in the controlled namespace matrix (double port-preserving cone NAT, no relay, exact application exchange over direct QUIC); a fallback to Yggdrasil standby stays within the 10 s failover budget. The live smoke additionally attempts a direct path within its contract and records the observed route either way: a cloud NAT that cannot be punched is recorded as that observation, neither as a pass nor as a v1 failure. | "И что там с пркоолом NAT? нужнно чтобы он тоже срабатывал и работал корректно" |
 | 2026-11-15 | Publishing the NAT-observed public (reflexive) address in the DHT record is a Server configuration setting (ktav), not an unconditional behavior. The engineer sets the default to off (private-address-only records) and reports it; changing the default is the owner's call. | "Пусть это будет в настройках." |
 | 2026-11-15 | Optional encryption of the published address, so that only holders of the decryption keys learn the real IP address. This lifts the v1 non-goal "DHT record encryption" for this one field, as an opt-in. The threat model and the key scheme are not yet agreed: the candidate (X25519 envelopes to the allowlisted client keys) is a proposal, and no cryptographic code starts before the owner approves the threat model. | "И наверно нужно опционально шифровать адрес, чтобы те, кто имеет креды (ключи к расшифровке) могли узнать реальный ip адрес" |
 | 2026-11-15 | A scripted one-command entry point for "build and run the hole-punch smoke". It dispatches the CI build and the smoke workflow and collects the evidence; the compile and the test run stay in CI under the standing local-execution ban unless the owner explicitly asks for a local run, and every live-network bound of the existing smoke contract stays in force. | "И нужен скрипт запуска компиляции со смок тестом прокола." |
