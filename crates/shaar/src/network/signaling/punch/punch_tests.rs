@@ -27,7 +27,7 @@ fn public(identity: &crate::identity::Identity) -> PublicKey {
 
 /// One real handshaken loopback session; the server endpoint is closed, the
 /// session is dropped by the caller's seam when the attempt consumes it.
-async fn direct_session() -> Session {
+pub(super) async fn direct_session() -> Session {
     let a = crate::identity::Identity::generate();
     let b = crate::identity::Identity::generate();
     let mut server = crate::network::SignaledEndpoint::bind(

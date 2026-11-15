@@ -460,18 +460,36 @@ class ObservabilityTests(unittest.TestCase):
             "shaar: client punch candidates=1 outcome=maybe elapsed_ms=1",
             "shaar: client punch candidates=1 outcome=direct elapsed_ms=7 10.0.0.1:5",
             "shaar: rejected/failed session"])
-        self.assertEqual(CONTRACT.scan_punch(text, "client"), {"attempts": 3, "direct": 1, "max_candidates": 2})
-        self.assertEqual(CONTRACT.scan_punch(text, "server"), {"attempts": 1, "direct": 0, "max_candidates": 1})
-        self.assertEqual(CONTRACT.scan_punch("", "client"), {"attempts": 0, "direct": 0, "max_candidates": 0})
+        self.assertEqual(CONTRACT.scan_punch(text, "client"),
+                         {"attempts": 3, "direct": 1, "max_candidates": 2, "reasons": {}})
+        self.assertEqual(CONTRACT.scan_punch(text, "server"),
+                         {"attempts": 1, "direct": 0, "max_candidates": 1, "reasons": {}})
+        self.assertEqual(CONTRACT.scan_punch("", "client"),
+                         {"attempts": 0, "direct": 0, "max_candidates": 0, "reasons": {}})
+
+    def test_punch_end_reasons_are_counted_when_the_binary_reports_them(self):
+        text = "\n".join([
+            "shaar: client punch candidates=0 outcome=fallback reason=deadline elapsed_ms=0",
+            "shaar: client punch candidates=0 outcome=fallback reason=deadline elapsed_ms=0",
+            "shaar: client punch candidates=1 outcome=fallback reason=no-answer elapsed_ms=1500",
+            "shaar: client punch candidates=1 outcome=direct reason=direct elapsed_ms=7",
+            "shaar: client punch candidates=1 outcome=fallback reason=bogus elapsed_ms=1"])
+        found = CONTRACT.scan_punch(text, "client")
+        self.assertEqual(found["attempts"], 4)
+        self.assertEqual(found["reasons"], {"deadline": 2, "no-answer": 1, "direct": 1})
+        claim = CONTRACT.direct_claim(["ygg-standby"], {"attempts": 3, "direct": 0, "max_candidates": 1,
+                                                        "reasons": {"deadline": 2, "closed": 1}})
+        self.assertIn("end reasons: closed=1, deadline=2", claim)
 
     def test_direct_claim_is_written_from_observed_lines_only(self):
-        punch = {"attempts": 4, "direct": 0, "max_candidates": 1}
+        punch = {"attempts": 4, "direct": 0, "max_candidates": 1, "reasons": {}}
         self.assertIn("direct Native path was established",
                       CONTRACT.direct_claim(["ygg-standby", "native"], punch))
         found = CONTRACT.direct_claim(["ygg-standby"], punch)
         self.assertIn("no direct path", found)
         self.assertIn("4 punch attempts", found)
-        self.assertTrue(CONTRACT.direct_claim([], {"attempts": 0, "direct": 0, "max_candidates": 0})
+        self.assertIn("not reported by this binary", found)
+        self.assertTrue(CONTRACT.direct_claim([], {"attempts": 0, "direct": 0, "max_candidates": 0, "reasons": {}})
                         .startswith("not observed"))
 
     def test_linger_is_over_only_after_the_event_and_the_wait(self):

@@ -287,9 +287,11 @@ SESSION_LINE = re.compile(
 # standby path, and a direct Native path is an observed punch success; both are valid outcomes. The
 # signal path never carries payload in standby mode, so it is the only violation.
 ALLOWED_ROUTES = ("ygg-standby", "native")
-# Counts only: the products print no addresses on this line.
+# Counts only: the products print no addresses on this line. The reason token is optional so that an older
+# binary's line still parses.
 PUNCH_LINE = re.compile(
-    r"^shaar: (client|server) punch candidates=([0-9]{1,3}) outcome=(direct|fallback) elapsed_ms=([0-9]{1,10})$")
+    r"^shaar: (client|server) punch candidates=([0-9]{1,3}) outcome=(direct|fallback)"
+    r"(?: reason=(direct|deadline|no-answer|closed|probe))? elapsed_ms=([0-9]{1,10})$")
 
 # Exact legacy wording of the dht_record_resolved claim (fallback when unobserved).
 NOT_OBSERVED = ("not observable: the products log nothing about resolution; "
@@ -341,14 +343,16 @@ def route_paths(text, role):
 
 
 def scan_punch(text, role):
-    """Punch attempt counts for this role: attempts, direct outcomes and the most candidates offered."""
-    found = {"attempts": 0, "direct": 0, "max_candidates": 0}
+    """Punch attempt counts for this role: attempts, direct outcomes, the most candidates offered and the end reasons."""
+    found = {"attempts": 0, "direct": 0, "max_candidates": 0, "reasons": {}}
     for line in text.splitlines():
         match = PUNCH_LINE.fullmatch(line.strip())
         if match and match[1] == role:
             found["attempts"] += 1
             found["direct"] += 1 if match[3] == "direct" else 0
             found["max_candidates"] = max(found["max_candidates"], int(match[2]))
+            if match[4] is not None:
+                found["reasons"][match[4]] = found["reasons"].get(match[4], 0) + 1
     return found
 
 
@@ -372,8 +376,10 @@ def direct_claim(paths, punch):
         return "observed: a direct Native path was established (route line path=native)"
     if punch["attempts"] == 0:
         return "not observed: the product stderr carries no punch attempt line"
+    reasons = ", ".join(f"{name}={count}" for name, count in sorted(punch["reasons"].items()))
     return (f"observed: no direct path; {punch['attempts']} punch attempts (at most {punch['max_candidates']} "
-            "candidates offered), every observed route stayed on Yggdrasil standby")
+            f"candidates offered; end reasons: {reasons or 'not reported by this binary'}), "
+            "every observed route stayed on Yggdrasil standby")
 
 
 def linger_over(done_at, now, seconds):
