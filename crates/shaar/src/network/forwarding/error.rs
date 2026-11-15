@@ -6,6 +6,9 @@ pub enum ForwardError {
     Capacity,
     AccessDenied,
     PathUnavailable,
+    /// The peer's application-level close of the whole session — a clean end,
+    /// never a path failure.
+    PeerClosed,
     TargetUnavailable,
     Protocol,
     Deadline,
@@ -40,15 +43,25 @@ impl ForwardError {
         Self::Io(error)
     }
 
-    fn connection(reason: &iroh::endpoint::ConnectionError) -> Self {
+    /// Classifies a QUIC-level connection close. Only an access-denied close is
+    /// an access failure; any other application close is a clean peer end; the
+    /// rest (locally closed, transport errors, timeouts) are path failures.
+    pub(super) fn from_connection_error(reason: iroh::endpoint::ConnectionError) -> Self {
         use iroh::endpoint::{ConnectionError, VarInt};
-        if matches!(reason, ConnectionError::ApplicationClosed(reason)
-            if reason.error_code == VarInt::from_u32(crate::network::session::ACCESS_DENIED))
-        {
-            Self::AccessDenied
-        } else {
-            Self::PathUnavailable
+        match reason {
+            ConnectionError::ApplicationClosed(reason)
+                if reason.error_code
+                    == VarInt::from_u32(crate::network::session::ACCESS_DENIED) =>
+            {
+                Self::AccessDenied
+            }
+            ConnectionError::ApplicationClosed(_) => Self::PeerClosed,
+            _ => Self::PathUnavailable,
         }
+    }
+
+    fn connection(reason: &iroh::endpoint::ConnectionError) -> Self {
+        Self::from_connection_error(reason.clone())
     }
 }
 
@@ -59,6 +72,7 @@ impl fmt::Display for ForwardError {
             Self::InvalidTarget => f.write_str("target must be a nonzero loopback TCP address"),
             Self::AccessDenied => f.write_str("peer access denied"),
             Self::PathUnavailable => f.write_str("QUIC connection is unavailable"),
+            Self::PeerClosed => f.write_str("peer closed the session"),
             Self::TargetUnavailable => f.write_str("target TCP connection failed"),
             Self::Protocol => f.write_str("invalid forwarding request or status"),
             Self::Deadline => f.write_str("forwarding setup deadline exceeded"),

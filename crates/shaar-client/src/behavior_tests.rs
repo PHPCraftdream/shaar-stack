@@ -52,10 +52,19 @@ async fn shutdown_releases_listener_port() {
 async fn worker_failures_are_reported_and_cancelled_workers_are_joined() {
     assert!(worker_failure(Ok(Err(ForwardError::TaskFailure)), false).is_some());
     assert!(worker_failure(Ok(Err(ForwardError::PathUnavailable)), false).is_none());
-    assert!(worker_failure(Ok(Ok(())), false).is_none());
+    assert!(
+        worker_failure(
+            Ok(Ok(ForwardStats {
+                to_peer: 0,
+                from_peer: 0,
+            })),
+            false
+        )
+        .is_none()
+    );
 
     let mut workers = JoinSet::new();
-    workers.spawn(async { std::future::pending::<Result<(), ForwardError>>().await });
+    workers.spawn(async { std::future::pending::<Result<ForwardStats, ForwardError>>().await });
     assert!(abort_workers(&mut workers).await.is_none());
     assert!(workers.is_empty());
 
@@ -83,7 +92,7 @@ async fn coordinator_reports_worker_failure_after_joining_other_workers() {
         let mut workers = JoinSet::new();
         workers.spawn(async move {
             let _held = held_tx;
-            std::future::pending::<Result<(), ForwardError>>().await
+            std::future::pending::<Result<ForwardStats, ForwardError>>().await
         });
         workers.spawn(async { Err(ForwardError::TaskFailure) });
         let result = coordinate_with_workers(
@@ -226,10 +235,10 @@ async fn coordinator_forwards_and_reconnects_after_session_loss() {
             let _ = first_finished.send(());
             let mut second = server.accept().await.unwrap();
             let result = second.serve(target_address, std::future::pending()).await;
-            assert!(matches!(
-                result,
-                Err(shaar::network::ForwardError::PathUnavailable)
-            ));
+            assert!(
+                result.is_ok(),
+                "the coordinator's clean session close is not a path error"
+            );
             drop(second);
             server
         });

@@ -39,11 +39,11 @@ use tokio::task::JoinSet;
 
 use crate::config::ServerConfig;
 use crate::identity::Identity;
+use crate::network::observe;
 use crate::network::signaling::RelayOperations;
 use crate::network::{
     Allowlist, ForwardError, Limits, NetworkError, ServeReport, SignaledEndpoint, YggEndpoint,
 };
-#[cfg(test)]
 use crate::path::PathKind;
 use crate::startup::StartupError;
 use crate::startup::preflight::preflight_server;
@@ -94,7 +94,7 @@ pub(super) struct ServerParts {
         tokio::sync::watch::Sender<bool>,
         tokio::sync::watch::Receiver<bool>,
     )>,
-    pub(super) sessions: JoinSet<Result<ServeReport, ForwardError>>,
+    pub(super) sessions: JoinSet<(PathKind, Result<ServeReport, ForwardError>)>,
     /// Set once `YggPump::run` returned its cached outcome; disables the pump.
     pub(super) pump_finished: bool,
     /// Set after a Yggdrasil accept `Closed` or pump error; disables that arm.
@@ -551,15 +551,15 @@ async fn drive_loop(
     emit_payload_acquired(parts.events.as_ref(), parts.payload.is_some());
     loop {
         // Reap finished sessions without blocking on the accept arms.
-        while let Some(result) = parts.sessions.try_join_next() {
-            match result {
-                Ok(Ok(_)) | Ok(Err(ForwardError::PathUnavailable)) => {}
-                Ok(Err(ForwardError::TaskFailure)) => {
-                    parts.outcome = Some(StartupError::Close {
-                        stage: "session-serve",
-                    });
+        while let Some(joined) = parts.sessions.try_join_next() {
+            match joined {
+                Ok(outcome) => {
+                    if server_close::reap_session(&outcome) {
+                        parts.outcome = Some(StartupError::Close {
+                            stage: "session-serve",
+                        });
+                    }
                 }
-                Ok(Err(error)) => eprintln!("shaar: session ended: {error}"),
                 Err(_) => {
                     parts.outcome = Some(StartupError::Close {
                         stage: "session-serve",
@@ -581,14 +581,16 @@ async fn drive_loop(
             // Bounded gate: sessions are reaped before admitting more.
             result = parts.sessions.join_next(), if parts.sessions.len() >= limits.sessions => {
                 match result {
-                    Some(Ok(Ok(_))) | Some(Ok(Err(ForwardError::PathUnavailable))) => {}
-                    Some(Ok(Err(ForwardError::TaskFailure))) | Some(Err(_)) => {
-                        parts.outcome = Some(StartupError::Close {
-                            stage: "session-serve",
-                        });
+                    Some(Ok(outcome)) => {
+                        if server_close::reap_session(&outcome) {
+                            parts.outcome = Some(StartupError::Close { stage: "session-serve" });
+                            break;
+                        }
+                    }
+                    Some(Err(_)) => {
+                        parts.outcome = Some(StartupError::Close { stage: "session-serve" });
                         break;
                     }
-                    Some(Ok(Err(error))) => eprintln!("shaar: session ended: {error}"),
                     None => {}
                 }
             }
@@ -598,6 +600,7 @@ async fn drive_loop(
                 .expect("server holds the native endpoint while live")
                 .accept() => match accepted {
                 Ok(session) => {
+                    observe::emit(observe::server_route(observe::RoutePath::Native));
                     #[cfg(test)]
                     if let Some(events) = &parts.events {
                         events.capture_native(&session);
@@ -606,6 +609,7 @@ async fn drive_loop(
                     emit(parts.events.as_ref(), RoleEvent::SessionAdmitted(PathKind::Native));
                     server_close::spawn_session(
                         &mut parts.sessions,
+                        PathKind::Native,
                         session,
                         config,
                         &parts.stop.as_ref().expect("server holds the stop watch").1,
@@ -642,10 +646,12 @@ async fn drive_loop(
                     .await
             }, if ygg_endpoint.is_some() && !parts.ygg_down => match accepted {
                 Ok(session) => {
+                    observe::emit(observe::server_route(observe::RoutePath::YggStandby));
                     #[cfg(test)]
                     emit(parts.events.as_ref(), RoleEvent::SessionAdmitted(PathKind::Yggdrasil));
                     server_close::spawn_session(
                         &mut parts.sessions,
+                        PathKind::Yggdrasil,
                         session,
                         config,
                         &parts.stop.as_ref().expect("server holds the stop watch").1,

@@ -43,6 +43,7 @@ use tokio::task::JoinSet;
 
 use crate::config::{ClientConfig, Fallback};
 use crate::identity::Identity;
+use crate::network::observe;
 use crate::network::{ForwardError, ForwardStats, Limits, SignaledEndpoint, YggEndpoint};
 use crate::path::{Mode, PathKind, StandbyError, StandbyOwner};
 use crate::startup::StartupError;
@@ -78,7 +79,7 @@ struct ClientParts {
     payload: Option<(Arc<YggEndpoint>, YggPump)>,
     listener: Option<TcpListener>,
     lease: Option<(PathKind, Arc<dyn RouteLink>)>,
-    workers: JoinSet<Result<ForwardStats, ForwardError>>,
+    workers: JoinSet<(PathKind, Result<ForwardStats, ForwardError>)>,
     /// Cached pump outcome: polling a finished pump would spin, so this
     /// disables the pump arm after its first completion.
     pump_finished: bool,
@@ -339,12 +340,20 @@ impl ClientRole {
             let relay =
                 relay_addr.and_then(|relay_addr| ops.as_ref().map(|ops| (relay_addr, ops.clone())));
             let ygg_arc = payload.as_ref().map(|(ygg, _)| Arc::clone(ygg));
+            // OBS-1: one shared resolve observation — the native dialer writes
+            // it after each decision; the standby fallback reads it for its
+            // route line.
+            let (resolve_note, fallback_note): (
+                tokio::sync::watch::Sender<Option<observe::ResolveObservation>>,
+                _,
+            ) = tokio::sync::watch::channel(None);
             let native_dialer = NativeDialer::new(
                 Arc::clone(&arc),
                 service_key,
                 resources.clone(),
                 candidates,
                 relay,
+                resolve_note,
                 #[cfg(test)]
                 self.events.clone(),
             );
@@ -353,7 +362,7 @@ impl ClientRole {
                 Some(ygg) => {
                     let owner = StandbyOwner::new(
                         native_dialer,
-                        YggDialer::new(ygg, service_key),
+                        YggDialer::new(ygg, service_key, fallback_note),
                         mode,
                         policy,
                     );
@@ -496,23 +505,29 @@ impl ClientRole {
 /// Never closes a live endpoint itself.
 async fn close_parts(mut parts: ClientParts) -> Result<(), StartupError> {
     let mut first_error = parts.outcome.take();
-    // Abort+join workers; the first fatal error is kept, others logged; cancelled joins are self-induced shutdown.
+    // Abort+join workers; every worker emits its line, the first fatal error
+    // is kept; cancelled joins are self-induced shutdown.
     parts.workers.abort_all();
-    while let Some(result) = parts.workers.join_next().await {
-        match result {
-            Ok(Ok(_)) | Ok(Err(ForwardError::PathUnavailable)) => {}
+    while let Some(joined) = parts.workers.join_next().await {
+        match joined {
+            Ok((kind, outcome)) => {
+                observe::emit(observe::session_line(
+                    observe::Product::Client,
+                    observe::RoutePath::from_kind(kind),
+                    observe::SessionOutcome::of_worker(&outcome),
+                ));
+                if matches!(outcome, Err(ForwardError::TaskFailure)) {
+                    first_error.get_or_insert(StartupError::Close {
+                        stage: "forward-drain",
+                    });
+                }
+            }
             Err(join_error) if !join_error.is_cancelled() => {
                 first_error.get_or_insert(StartupError::Close {
                     stage: "forward-drain",
                 });
             }
             Err(_) => {}
-            Ok(Err(ForwardError::TaskFailure)) => {
-                first_error.get_or_insert(StartupError::Close {
-                    stage: "forward-drain",
-                });
-            }
-            Ok(Err(error)) => eprintln!("shaar: forward worker ended: {error}"),
         }
     }
     // Joins both dialer sides; `drop(owner)` releases the dialers and their Arc clones before the exclusive unwraps.

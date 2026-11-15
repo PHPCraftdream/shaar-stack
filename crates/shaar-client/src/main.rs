@@ -13,7 +13,9 @@ use shaar::{
         Identity,
         provision::{Role, default_data_dir, first_run_summary_lines, provision},
     },
-    network::{Allowlist, Endpoint, ForwardError, Limits, NetworkError, Session},
+    network::{
+        Allowlist, Endpoint, ForwardError, ForwardStats, Limits, NetworkError, Session, observe,
+    },
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -136,27 +138,36 @@ async fn admission_live(session: &Session) -> bool {
     }
 }
 
-async fn handle_stream(session: Arc<Session>, stream: TcpStream) -> Result<(), ForwardError> {
-    session.forward(stream).await.map(|_| ())
+async fn handle_stream(
+    session: Arc<Session>,
+    stream: TcpStream,
+) -> Result<ForwardStats, ForwardError> {
+    session.forward(stream).await
 }
 
 fn worker_failure(
-    result: Result<Result<(), ForwardError>, tokio::task::JoinError>,
+    result: Result<Result<ForwardStats, ForwardError>, tokio::task::JoinError>,
     cancelling: bool,
 ) -> Option<Box<dyn Error + Send + Sync>> {
     match result {
-        Ok(Err(ForwardError::TaskFailure)) => Some(Box::new(ForwardError::TaskFailure)),
-        Err(error) if !cancelling || !error.is_cancelled() => Some(Box::new(error)),
-        Ok(Err(error)) => {
-            eprintln!("shaar-client: stream ended: {error}");
-            None
+        Ok(outcome) => {
+            observe::emit(observe::session_line(
+                observe::Product::Client,
+                observe::RoutePath::Native,
+                observe::SessionOutcome::of_worker(&outcome),
+            ));
+            match outcome {
+                Err(ForwardError::TaskFailure) => Some(Box::new(ForwardError::TaskFailure)),
+                _ => None,
+            }
         }
-        _ => None,
+        Err(error) if !cancelling || !error.is_cancelled() => Some(Box::new(error)),
+        Err(_) => None,
     }
 }
 
 async fn abort_workers(
-    workers: &mut JoinSet<Result<(), ForwardError>>,
+    workers: &mut JoinSet<Result<ForwardStats, ForwardError>>,
 ) -> Option<Box<dyn Error + Send + Sync>> {
     workers.abort_all();
     let mut failure = None;
@@ -505,7 +516,7 @@ async fn coordinate_with_workers<F: std::future::Future<Output = Result<(), std:
     key_hex: String,
     address: SocketAddr,
     shutdown: F,
-    mut workers: JoinSet<Result<(), ForwardError>>,
+    mut workers: JoinSet<Result<ForwardStats, ForwardError>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut session: Option<Arc<Session>> = None;
     let mut stopping = Box::pin(shutdown);
@@ -536,6 +547,7 @@ async fn coordinate_with_workers<F: std::future::Future<Output = Result<(), std:
                     }
                 }
                 if session.is_none() {
+                    let route_started = std::time::Instant::now();
                     let connected = tokio::select! {
                         signal = &mut stopping => {
                             if let Err(error) = signal { failure = Some(Box::new(error)); }
@@ -547,6 +559,11 @@ async fn coordinate_with_workers<F: std::future::Future<Output = Result<(), std:
                         }
                     };
                     let Some(connected) = connected else { continue; };
+                    observe::emit(observe::client_route(
+                        observe::RoutePath::Native,
+                        observe::ResolveObservation::cached(0, 1),
+                        observe::elapsed_ms(route_started),
+                    ));
                     session = Some(Arc::new(connected));
                 }
                 workers.spawn(handle_stream(session.as_ref().expect("session established").clone(), stream));

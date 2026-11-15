@@ -42,15 +42,20 @@ pub(super) async fn run_parts(
     let mut accept_backoff = AcceptBackoff::default();
     loop {
         // Reap finished forward workers without blocking on the other arms.
-        while let Some(result) = parts.workers.try_join_next() {
-            match result {
-                Ok(Ok(_)) | Ok(Err(ForwardError::PathUnavailable)) => {}
-                Ok(Err(ForwardError::TaskFailure)) => {
-                    parts.outcome = Some(StartupError::Close {
-                        stage: "forward-serve",
-                    });
+        while let Some(joined) = parts.workers.try_join_next() {
+            match joined {
+                Ok((kind, outcome)) => {
+                    observe::emit(observe::session_line(
+                        observe::Product::Client,
+                        observe::RoutePath::from_kind(kind),
+                        observe::SessionOutcome::of_worker(&outcome),
+                    ));
+                    if matches!(outcome, Err(ForwardError::TaskFailure)) {
+                        parts.outcome = Some(StartupError::Close {
+                            stage: "forward-serve",
+                        });
+                    }
                 }
-                Ok(Err(error)) => eprintln!("shaar: forward worker ended: {error}"),
                 Err(_) => {
                     parts.outcome = Some(StartupError::Close {
                         stage: "forward-serve",
@@ -120,11 +125,15 @@ pub(super) async fn run_parts(
                 match accepted {
                     Ok((stream, _)) => {
                         accept_backoff.succeeded();
-                        if let Some((_kind, link)) = parts.lease.as_ref() {
+                        if let Some((kind, link)) = parts.lease.as_ref() {
                             let link = Arc::clone(link);
-                            parts.workers.spawn(async move { link.forward(stream).await });
+                            let kind = *kind;
+                            parts.workers.spawn(async move {
+                                let result = link.forward(stream).await;
+                                (kind, result)
+                            });
                             #[cfg(test)]
-                            emit(parts.events.as_ref(), RoleEvent::ForwardStarted(*_kind));
+                            emit(parts.events.as_ref(), RoleEvent::ForwardStarted(kind));
                         }
                     }
                     // Local accept hiccups never kill the client; the retry is
@@ -141,15 +150,27 @@ pub(super) async fn run_parts(
             }
             result = parts.workers.join_next(), if !parts.workers.is_empty() => {
                 match result {
-                    Some(Ok(Ok(_))) | Some(Ok(Err(ForwardError::PathUnavailable))) => {}
-                    Some(Ok(Err(ForwardError::TaskFailure))) | Some(Err(_)) => {
+                    Some(Ok((kind, outcome))) => {
+                        observe::emit(observe::session_line(
+                            observe::Product::Client,
+                            observe::RoutePath::from_kind(kind),
+                            observe::SessionOutcome::of_worker(&outcome),
+                        ));
+                        if matches!(outcome, Err(ForwardError::TaskFailure)) {
+                            let error = StartupError::Close {
+                                stage: "forward-serve",
+                            };
+                            parts.outcome = Some(error.clone());
+                            return Err(error);
+                        }
+                    }
+                    Some(Err(_)) => {
                         let error = StartupError::Close {
                             stage: "forward-serve",
                         };
                         parts.outcome = Some(error.clone());
                         return Err(error);
                     }
-                    Some(Ok(Err(error))) => eprintln!("shaar: forward worker ended: {error}"),
                     None => {}
                 }
             }

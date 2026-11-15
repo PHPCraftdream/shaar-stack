@@ -404,3 +404,35 @@ async fn completed_real_get_cannot_commit_after_the_original_handoff_deadline() 
         .await
         .expect("actual joins after rejected handoff");
 }
+
+/// OBS-1: a successful resolve through the real loopback fixture yields the
+/// stable route-line observation `found` with the actual address count.
+#[tokio::test]
+async fn the_route_line_observation_reports_found_from_a_real_resolve() {
+    let (mut peer, mut owner, _) = setup().await;
+    let item = record(0x76, WALL);
+    let resolved = resolve(&mut owner, &mut peer, &item)
+        .await
+        .expect("real GET winner");
+    // The dialer classifies the EXISTING resolver result: one signed address.
+    let observation =
+        crate::network::observe::ResolveObservation::from_answer(Some(resolved.addresses().len()));
+    assert_eq!(
+        observation.outcome,
+        crate::network::observe::ResolveOutcome::Found
+    );
+    assert_eq!(observation.record, 1);
+    assert_eq!(
+        crate::network::observe::client_route(
+            crate::network::observe::RoutePath::Native,
+            observation,
+            7
+        ),
+        "shaar-client: route path=native candidates=record:1,hint:0 resolve=found elapsed_ms=7"
+    );
+    drop(resolved);
+    owner
+        .close()
+        .await
+        .expect("actual publisher and socket joins");
+}

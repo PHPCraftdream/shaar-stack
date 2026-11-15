@@ -14,7 +14,7 @@ use shaar::{
         Identity,
         provision::{Role, first_run_summary_lines, provision},
     },
-    network::{Allowlist, Endpoint, ForwardError, Limits, ServeReport},
+    network::{Allowlist, Endpoint, ForwardError, Limits, ServeReport, observe},
 };
 use tokio::{sync::watch, task::JoinSet};
 
@@ -417,12 +417,23 @@ where
     let outcome = 'run: loop {
         while let Some(result) = sessions.try_join_next() {
             match result {
-                Ok(Ok(_)) => {}
-                Ok(Err(ForwardError::PathUnavailable)) => {}
-                Ok(Err(ForwardError::TaskFailure)) => {
-                    break 'run Err("session forwarding task failed".into());
+                Ok(Ok(report)) => {
+                    observe::emit(observe::session_line(
+                        observe::Product::Server,
+                        observe::RoutePath::Native,
+                        observe::SessionOutcome::of_report(&report),
+                    ));
                 }
-                Ok(Err(error)) => eprintln!("shaar-server: session ended: {error}"),
+                Ok(Err(error)) => {
+                    observe::emit(observe::session_line(
+                        observe::Product::Server,
+                        observe::RoutePath::Native,
+                        observe::SessionOutcome::of_error(&error),
+                    ));
+                    if matches!(error, ForwardError::TaskFailure) {
+                        break 'run Err("session forwarding task failed".into());
+                    }
+                }
                 Err(error) => break 'run Err(format!("session task failed: {error}")),
             }
         }
@@ -434,10 +445,23 @@ where
             },
             result = sessions.join_next(), if sessions.len() >= session_limit => {
                 match result {
-                    Some(Ok(Ok(_))) => {},
-                    Some(Ok(Err(ForwardError::PathUnavailable))) => {},
-                    Some(Ok(Err(ForwardError::TaskFailure))) => break 'run Err("session forwarding task failed".into()),
-                    Some(Ok(Err(error))) => eprintln!("shaar-server: session ended: {error}"),
+                    Some(Ok(Ok(report))) => {
+                        observe::emit(observe::session_line(
+                            observe::Product::Server,
+                            observe::RoutePath::Native,
+                            observe::SessionOutcome::of_report(&report),
+                        ));
+                    }
+                    Some(Ok(Err(error))) => {
+                        observe::emit(observe::session_line(
+                            observe::Product::Server,
+                            observe::RoutePath::Native,
+                            observe::SessionOutcome::of_error(&error),
+                        ));
+                        if matches!(error, ForwardError::TaskFailure) {
+                            break 'run Err("session forwarding task failed".into());
+                        }
+                    }
                     Some(Err(error)) => break 'run Err(format!("session task failed: {error}")),
                     None => {},
                 }
@@ -445,6 +469,7 @@ where
             accepted = endpoint.next_session(), if sessions.len() < session_limit => {
                 match accepted {
                     Ok(mut session) => {
+                        observe::emit(observe::server_route(observe::RoutePath::Native));
                         let mut stop = stop_receiver.clone();
                         let after_serve = after_serve.clone();
                         sessions.spawn(async move {
@@ -483,8 +508,20 @@ async fn drain_sessions(
             Ok(Err(ForwardError::TaskFailure)) => {
                 drain_error.get_or_insert_with(|| "session forwarding task failed".to_owned());
             }
-            Ok(Err(ForwardError::PathUnavailable)) | Ok(Ok(_)) => {}
-            Ok(Err(error)) => eprintln!("shaar-server: session ended: {error}"),
+            Ok(Ok(report)) => {
+                observe::emit(observe::session_line(
+                    observe::Product::Server,
+                    observe::RoutePath::Native,
+                    observe::SessionOutcome::of_report(&report),
+                ));
+            }
+            Ok(Err(error)) => {
+                observe::emit(observe::session_line(
+                    observe::Product::Server,
+                    observe::RoutePath::Native,
+                    observe::SessionOutcome::of_error(&error),
+                ));
+            }
         }
     }
     drain_error

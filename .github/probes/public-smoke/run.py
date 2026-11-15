@@ -287,6 +287,16 @@ def write_evidence(directory, evidence, secrets):
     return body
 
 
+def product_stderr_text(workdir):
+    """Tail of the product stderr as text, hard-bounded to the last 64 KiB of bytes."""
+    data = (workdir / "product.stderr.log").read_bytes()[-64 * 1024:]
+    return data.decode("utf-8", "replace")
+
+
+def observed_lines(workdir, role):
+    return CONTRACT.scan_product_lines(product_stderr_text(workdir), role)
+
+
 def common_setup(args, role, env=os.environ):
     contract, digest = CONTRACT.load_contract()
     dispatch = CONTRACT.validate_dispatch(env, digest)
@@ -415,6 +425,12 @@ def run_server(args, clock=time.time):
                             "server_alive_until_stop": alive}
     if not alive:
         evidence["failures"].append("server exited before the end of its window")
+    route, session = observed_lines(workdir, "server")
+    evidence["observed"]["route"] = None if route is None else {"path": route["path"]}
+    evidence["observed"]["session"] = None if session is None else session
+    if route is None:
+        evidence["observed"]["route_fallback"] = "not observed: no structured route line in the product stderr (older binary)"
+    evidence["failures"].extend(CONTRACT.route_violations(route, session))
     evidence["failures"].extend(server_failures(relay is not None, totals, evidence["target"]))
     return finish("server", setup, evidence, product, meter, code, secrets)
 
@@ -460,11 +476,20 @@ def run_client(args, clock=time.time, sleep=time.sleep):
             silent.close()
     evidence["app"] = result
     evidence["failures"].extend(client_failures(result, evidence["failures"]))
+    route, session = observed_lines(workdir, "client")
+    evidence["observed"] = {"route": None if route is None else
+                            {"path": route["path"], "resolve": route["resolve"], "record": route["record"]},
+                            "session": None if session is None else session}
+    if route is None:
+        evidence["observed"]["route_fallback"] = "not observed: no structured route line in the product stderr (older binary)"
+    evidence["failures"].extend(CONTRACT.route_violations(route, session))
     evidence["claims"] = {
-        "dht_record_resolved": "not observable: the products log nothing about resolution; inferred only from the exchange succeeding by key alone",
-        "route": ("Yggdrasil standby inferred by exclusion (no Native path by construction, no relay configured); not directly observed"
-                  if not relay_configured else
-                  "Yggdrasil standby inferred by exclusion (no Native path by construction, no relay negotiation); not directly observed"),
+        "dht_record_resolved": CONTRACT.dht_claim(route),
+        "route": (f"observed: the client route line reports path={route['path']} resolve={route['resolve']}"
+                  if route is not None else
+                  ("Yggdrasil standby inferred by exclusion (no Native path by construction, no relay configured); not directly observed"
+                   if not relay_configured else
+                   "Yggdrasil standby inferred by exclusion (no Native path by construction, no relay negotiation); not directly observed")),
         "app_payload_bytes": 0 if result is None else result["request_bytes"] + result["reply_bytes"]}
     return finish("client", setup, evidence, product, meter, code, secrets)
 

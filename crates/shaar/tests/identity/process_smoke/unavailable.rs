@@ -93,7 +93,7 @@ pub(super) async fn unavailable_scenario(
     timeout(IO_TIMEOUT, async {
         for _ in 0..8 {
             if ready_line(&mut stderr).await?.trim()
-                == "shaar-client: stream ended: target TCP connection failed"
+                == "shaar-client: session path=native result=error error=target-unavailable bytes_in=0 bytes_out=0"
             {
                 return Ok::<(), String>(());
             }

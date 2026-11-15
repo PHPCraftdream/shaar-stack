@@ -4,8 +4,22 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 use crate::config::ServerConfig;
+use crate::network::observe;
 use crate::network::{ForwardError, ServeReport, Session};
+use crate::path::PathKind;
 use crate::startup::StartupError;
+
+/// Emits the stable OBS-1 session line for one reaped session and answers
+/// whether the outcome is fatal for the serving role (a task failure is).
+pub(super) fn reap_session(outcome: &(PathKind, Result<ServeReport, ForwardError>)) -> bool {
+    let (kind, result) = outcome;
+    observe::emit(observe::session_line(
+        observe::Product::Server,
+        observe::RoutePath::from_kind(*kind),
+        observe::SessionOutcome::of_session(result),
+    ));
+    matches!(result, Err(ForwardError::TaskFailure))
+}
 
 /// Joined owned close: watch stop, session drain, reservation release while
 /// signaling is alive, owner restore, then the ordered composition shutdown.
@@ -16,16 +30,21 @@ pub(super) async fn close_parts(mut parts: super::server::ServerParts) -> Result
     if let Some((stop_tx, _)) = parts.stop.take() {
         let _ = stop_tx.send(true);
     }
-    // Joined drain: first fatal error wins, outcomes logged.
-    while let Some(result) = parts.sessions.join_next().await {
-        match result {
-            Err(_) | Ok(Err(ForwardError::TaskFailure)) => {
+    // Joined drain: first fatal error wins; every session emits its line.
+    while let Some(joined) = parts.sessions.join_next().await {
+        match joined {
+            Ok(outcome) => {
+                if reap_session(&outcome) {
+                    first_error.get_or_insert(StartupError::Close {
+                        stage: "session-drain",
+                    });
+                }
+            }
+            Err(_) => {
                 first_error.get_or_insert(StartupError::Close {
                     stage: "session-drain",
                 });
             }
-            Ok(Err(error)) => eprintln!("shaar: session ended: {error}"),
-            Ok(Ok(_)) => {}
         }
     }
     // Release the reservation while signaling is still alive.
@@ -87,7 +106,8 @@ pub(super) async fn close_parts(mut parts: super::server::ServerParts) -> Result
 /// Spawns one accepted session against the fixed loopback target; the gated
 /// `join_next` arm keeps the set within `limits.sessions`.
 pub(super) fn spawn_session(
-    sessions: &mut JoinSet<Result<ServeReport, ForwardError>>,
+    sessions: &mut JoinSet<(PathKind, Result<ServeReport, ForwardError>)>,
+    kind: PathKind,
     mut session: Session,
     config: &ServerConfig,
     stop_rx: &watch::Receiver<bool>,
@@ -96,13 +116,14 @@ pub(super) fn spawn_session(
     let mut stop = stop_rx.clone();
     sessions.spawn(async move {
         // `serve` enforces the fixed loopback target and pre-admitted peer.
-        session
+        let result = session
             .serve(target, async move {
                 if *stop.borrow() {
                     return;
                 }
                 let _ = stop.changed().await;
             })
-            .await
+            .await;
+        (kind, result)
     });
 }
