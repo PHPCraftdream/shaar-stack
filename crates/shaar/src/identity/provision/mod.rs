@@ -163,10 +163,10 @@ pub fn resolve_data_dir(
     }
     #[cfg(not(windows))]
     {
-        if let Some(xdg) = non_empty("XDG_DATA_HOME") {
-            if xdg.is_absolute() {
-                return Ok(xdg.join("shaar"));
-            }
+        if let Some(xdg) = non_empty("XDG_DATA_HOME")
+            && xdg.is_absolute()
+        {
+            return Ok(xdg.join("shaar"));
         }
         non_empty("HOME")
             .map(|home| home.join(".local/share/shaar"))
@@ -418,10 +418,10 @@ pub fn first_run_summary_lines(
         word(report.key),
         report.paths.key.to_string_lossy()
     ));
-    if role == Role::Server {
-        if let (Some(state), Some(path)) = (report.allowlist, report.paths.allowlist.as_deref()) {
-            lines.push(format!("{}: {}", word(state), path.to_string_lossy()));
-        }
+    if role == Role::Server
+        && let (Some(state), Some(path)) = (report.allowlist, report.paths.allowlist.as_deref())
+    {
+        lines.push(format!("{}: {}", word(state), path.to_string_lossy()));
     }
     lines.push(format!("public_key={hex}"));
     lines
