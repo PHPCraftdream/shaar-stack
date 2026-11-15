@@ -285,7 +285,7 @@ def _removals(name: str, data: bytes) -> list[int]:
             raise ValueError("multibase tests/lib.rs emoji case count mismatch")
         drop = hits
         hits45 = [i for i, line in enumerate(lines)
-                  if line.startswith(b'        (Base45, "') and line.endswith(b'",\n')]
+                  if line.startswith(b'        (Base45, "') and line.endswith(b'"),\n')]
         if len(hits45) != 4:
             raise ValueError("multibase tests/lib.rs base45 case count mismatch")
         drop.extend(hits45)
