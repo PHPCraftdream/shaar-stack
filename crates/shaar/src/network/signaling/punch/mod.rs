@@ -321,15 +321,41 @@ pub(crate) struct OfferBatch {
     pub candidates: Vec<SocketAddr>,
 }
 
+/// Why one punch attempt ended: the `reason` token of the trace line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EndReason {
+    /// A probe completed a session.
+    Direct,
+    /// No time was left: the attempt deadline had passed or cut the exchange window.
+    Deadline,
+    /// No matching Answer arrived inside the exchange window.
+    NoAnswer,
+    /// The control link is closed (permanent send failure or closed receive end).
+    Closed,
+    /// An Answer arrived but no probe completed (none passed the gate, or all failed).
+    Probe,
+}
+
+impl EndReason {
+    pub(crate) const fn token(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::Deadline => "deadline",
+            Self::NoAnswer => "no-answer",
+            Self::Closed => "closed",
+            Self::Probe => "probe",
+        }
+    }
+}
+
 /// Client-side punch state machine for one attempt.
 ///
 /// Sends the Offer, waits for a matching Answer, then probes the answered
 /// candidates that pass the peer-claimed gate; the first completed session
 /// wins. The gate is the uniform production rule on both sides (Finding 2):
 /// the client applies it exactly where the server does on answered peers.
-/// Every exit path
-/// traces exactly once via `trace_attempt`; the success path traces
-/// `direct = true` and returns the session, everything else returns `None`.
+/// Every exit path traces exactly once with its [`EndReason`]; the success
+/// path returns the session, everything else returns `None`.
 pub(crate) async fn client_attempt<L, C, Fut>(
     channel: &mut L,
     connect: C,
@@ -344,9 +370,28 @@ where
     Fut: Future<Output = Result<Session, NetworkError>>,
 {
     let started = Instant::now();
+    let offered = candidates.len();
+    let (session, reason) = client_exchange(channel, connect, candidates, epoch, deadline).await;
+    trace_attempt(role, offered, reason, started);
+    session
+}
+
+/// The attempt itself; returns the session (if any) and why the attempt ended.
+async fn client_exchange<L, C, Fut>(
+    channel: &mut L,
+    connect: C,
+    candidates: Vec<SocketAddr>,
+    epoch: u32,
+    deadline: Instant,
+) -> (Option<Session>, EndReason)
+where
+    L: PunchLink,
+    C: Fn(SocketAddr) -> Fut,
+    Fut: Future<Output = Result<Session, NetworkError>>,
+{
+    let started = Instant::now();
     if started >= deadline {
-        trace_attempt(role, candidates.len(), false, started);
-        return None;
+        return (None, EndReason::Deadline);
     }
     let offer = PunchMessage {
         kind: Kind::Offer,
@@ -354,6 +399,12 @@ where
         candidates,
     };
     let exchange_end = deadline.min(started + EXCHANGE_BUDGET);
+    // Why the window ends without an Answer: the attempt deadline cut it short, or the full budget ran out.
+    let window_end = if deadline <= started + EXCHANGE_BUDGET {
+        EndReason::Deadline
+    } else {
+        EndReason::NoAnswer
+    };
     // The Offer is repeated every `OFFER_RESEND` until the matching Answer or
     // the end of the window; the responder answers every copy and starts at
     // most one probe burst per epoch, so copies are idempotent.
@@ -363,23 +414,19 @@ where
             let sent = timeout_at(exchange_end, channel.send(&offer, EXCHANGE_BUDGET)).await;
             // A refused copy is lost like any other: the next one follows after
             // `OFFER_RESEND` while the window lasts; only a closed link ends it.
-            if sent.is_err() || matches!(sent, Ok(Err(SendError::Closed))) {
-                trace_attempt(role, offer.candidates.len(), false, started);
-                return None;
+            if sent.is_err() {
+                return (None, window_end);
+            }
+            if matches!(sent, Ok(Err(SendError::Closed))) {
+                return (None, EndReason::Closed);
             }
             resend_at = Instant::now() + OFFER_RESEND;
         }
         match timeout_at(resend_at.min(exchange_end), channel.recv_raw()).await {
-            Err(_) if Instant::now() >= exchange_end => {
-                trace_attempt(role, offer.candidates.len(), false, started);
-                return None;
-            }
+            Err(_) if Instant::now() >= exchange_end => return (None, window_end),
             // Resend interval elapsed inside the window: send the next copy.
             Err(_) => continue,
-            Ok(None) => {
-                trace_attempt(role, offer.candidates.len(), false, started);
-                return None;
-            }
+            Ok(None) => return (None, EndReason::Closed),
             Ok(Some(raw)) => match decode(&raw) {
                 Some(PunchMessage {
                     kind: Kind::Answer,
@@ -407,16 +454,12 @@ where
         .collect::<Vec<_>>();
     while !probes.is_empty() {
         match timeout_at(burst_end, futures::future::select_all(probes)).await {
-            Ok((Ok(session), _index, _rest)) => {
-                trace_attempt(role, offer.candidates.len(), true, started);
-                return Some(session);
-            }
+            Ok((Ok(session), _index, _rest)) => return (Some(session), EndReason::Direct),
             Ok((Err(_), _index, rest)) => probes = rest,
             Err(_) => break,
         }
     }
-    trace_attempt(role, offer.candidates.len(), false, started);
-    None
+    (None, EndReason::Probe)
 }
 
 /// Server-side bounded probe burst over PEER-CLAIMED candidates (Finding 2),
@@ -449,16 +492,37 @@ pub(crate) async fn probe_burst_sequential(
             break;
         }
     }
-    trace_attempt(role, candidates.len(), completed, started);
+    let reason = if completed {
+        EndReason::Direct
+    } else {
+        EndReason::Probe
+    };
+    trace_attempt(role, candidates.len(), reason, started);
     completed
 }
 
-/// One-line attempt trace on stderr: counts and timing only, no addresses.
-pub(crate) fn trace_attempt(role: &'static str, candidates: usize, direct: bool, started: Instant) {
+/// The attempt trace line: counts, a reason and timing only, no addresses.
+pub(crate) fn trace_line(
+    role: &str,
+    candidates: usize,
+    reason: EndReason,
+    elapsed_ms: u128,
+) -> String {
+    format!(
+        "shaar: {role} punch candidates={candidates} outcome={} reason={} elapsed_ms={elapsed_ms}",
+        if reason == EndReason::Direct {
+            "direct"
+        } else {
+            "fallback"
+        },
+        reason.token()
+    )
+}
+
+fn trace_attempt(role: &'static str, candidates: usize, reason: EndReason, started: Instant) {
     eprintln!(
-        "shaar: {role} punch candidates={candidates} outcome={} elapsed_ms={}",
-        if direct { "direct" } else { "fallback" },
-        started.elapsed().as_millis()
+        "{}",
+        trace_line(role, candidates, reason, started.elapsed().as_millis())
     );
 }
 
@@ -470,3 +534,6 @@ mod punch_rules_tests;
 
 #[cfg(test)]
 mod punch_resend_tests;
+
+#[cfg(test)]
+mod punch_reason_tests;
