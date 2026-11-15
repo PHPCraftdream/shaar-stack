@@ -1862,11 +1862,14 @@ products exited with code 0. Metered per job: NIC 316,420 B (Client) and 351,922
 5 MiB, DHT UDP 282,512 B and 317,044 B of 1.5 MiB, zero violations. **Direct-path observation: none,
 and no punch exchange took place.** The Client printed six punch attempts, every one with
 `candidates=0` (it knew no public address of its own), four of them lasting 0 ms; the Server
-printed no punch line (an Offer without candidates starts no probe burst). Reading of the code,
-not an observation: the 3 s attempt deadline is spent by the DHT lookup (`resolve_candidates`)
-before the punch phase starts, so a slow lookup leaves the punch no time, and the first seconds
-precede the first reflexive vote. These are product findings (task NAT-L4e) and say nothing about
-the cloud NAT: no cloud-NAT punch has been tried yet. What this does not prove: any direct path,
+printed no punch line (an Offer without candidates starts no probe burst). The cause of the 0 ms
+attempts is **not established**: the trace carries no end reason. Hypotheses from the code, none
+observed: the 3 s attempt deadline was already spent by the DHT lookup before the punch phase began
+(`started >= deadline`), or the control datagram path refused or closed the send. The first
+reflexive vote also arrives seconds after start, so early attempts offered no candidate. The next
+step is an end-reason token on the punch trace (task NAT-L4e), so that the next live run can tell
+these apart. None of this says anything about the cloud NAT: no cloud-NAT punch has been tried
+yet. What this does not prove: any direct path,
 any hole punching or NAT traversal on a public network, or acceptance of the end-to-end claim.
 
 ### Native is not blocked (third run onward): the direct attempt
