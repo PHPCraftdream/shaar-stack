@@ -17,7 +17,8 @@ const MAX_ADDRESSES: usize = 4;
 /// untouched. The vote is untrusted input: a wrong address is not
 /// authenticated and costs a client at most one bounded dial slice, and an
 /// address the record policy would reject is never added, so a hostile vote
-/// cannot invalidate the whole record.
+/// cannot invalidate the whole record. Documentation ranges are publishable:
+/// they are unrouted on the internet and the WAN of the namespace matrix.
 pub(crate) fn compose_published(
     base: &[TransportAddr],
     vote: Option<IpAddr>,
@@ -59,8 +60,8 @@ fn usable_vote(candidate: SocketAddr) -> bool {
         || ip.is_loopback()
         || ip.is_multicast()
         || match ip {
-            IpAddr::V4(v4) => v4.is_link_local() || v4.is_broadcast() || v4.is_documentation(),
-            IpAddr::V6(v6) => is_v6_link_local(&v6) || v6.segments()[..2] == [0x2001, 0x0db8],
+            IpAddr::V4(v4) => v4.is_link_local() || v4.is_broadcast(),
+            IpAddr::V6(v6) => is_v6_link_local(&v6),
         };
     !special && valid_native(candidate) && portable_v6(candidate)
 }
@@ -238,6 +239,19 @@ mod publish_tests {
         assert_eq!(second.len(), first.len());
     }
 
+    /// The namespace matrix WAN is TEST-NET-3; its votes must reach the record.
+    #[test]
+    fn documentation_range_votes_are_published() {
+        for documentation in ["203.0.113.1", "198.51.100.7", "192.0.2.5", "2001:db8::7"] {
+            let composed = compose_published(&local(), vote(documentation), PublishAddress::Plain);
+            assert_eq!(composed.len(), local().len() + 1, "{documentation}");
+            assert!(
+                validate_transport_addresses(&composed).is_ok(),
+                "{documentation}"
+            );
+        }
+    }
+
     #[test]
     fn hostile_votes_never_enter_the_record() {
         for hostile in [
@@ -246,11 +260,9 @@ mod publish_tests {
             "224.0.0.1",
             "255.255.255.255",
             "169.254.1.1",
-            "203.0.113.9",
             "::",
             "::1",
             "fe80::1",
-            "2001:db8::1",
             "fd15:70a:510b::1",
         ] {
             assert_eq!(
