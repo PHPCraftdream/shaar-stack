@@ -5,7 +5,7 @@
 //! are probe targets only for such allowlisted peers; datagrams never carry
 //! application payload. Candidate validity mirrors the dial policy
 //! (`crate::network::admission::policy::dial_address`), including denial of
-//! the synthetic fabric prefix `fd15:070a:051b::/48`; the mirror exists
+//! the synthetic fabric prefix `fd15:070a:510b::/48`; the mirror exists
 //! because `policy` is private to the admission module. The codec ACCEPTS
 //! loopback candidates for dial parity with the dialer (a Client legitimately
 //! dials loopback record hints), but peer-claimed addresses are additionally
@@ -65,9 +65,15 @@ pub(crate) struct PunchMessage {
 /// Wire magic: `"pnc1"` + version byte 1.
 const MAGIC: [u8; 5] = [b'p', b'n', b'c', b'1', 1];
 
-/// Serializes a punch message; `None` when it exceeds `MAX_MESSAGE_BYTES`.
+/// Serializes a punch message; `None` when it exceeds `MAX_MESSAGE_BYTES`, carries
+/// too many candidates, or carries a candidate the codec policy denies.
 pub(crate) fn encode(message: &PunchMessage) -> Option<Vec<u8>> {
-    if message.candidates.len() > MAX_CANDIDATES {
+    if message.candidates.len() > MAX_CANDIDATES
+        || message
+            .candidates
+            .iter()
+            .any(|candidate| !candidate_allowed(*candidate))
+    {
         return None;
     }
     let mut bytes = Vec::with_capacity(MAGIC.len() + 6 + 18 * MAX_CANDIDATES);
@@ -174,7 +180,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Option<PunchMessage> {
 /// Mirror of `crate::network::admission::policy::dial_address` (that function
 /// is private to the admission module, so the predicate is duplicated here;
 /// keep both in sync). Denies port 0, unspecified/multicast/broadcast and the
-/// synthetic fabric prefix `fd15:070a:051b::/48`; allows loopback and
+/// synthetic fabric prefix `fd15:070a:510b::/48`; allows loopback and
 /// documentation ranges (dial parity with the dialer).
 pub(crate) fn candidate_allowed(address: SocketAddr) -> bool {
     let ip = address.ip().to_canonical();

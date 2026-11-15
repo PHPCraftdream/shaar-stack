@@ -294,7 +294,7 @@ fn candidate_allowed_mirrors_dial_predicate() {
     assert!(!candidate_allowed(v4([224, 0, 0, 1], 1)));
     assert!(!candidate_allowed(v4([255, 255, 255, 255], 1)));
     assert!(!candidate_allowed(SocketAddr::new(
-        IpAddr::V6("fd15:70a:51b::1".parse().unwrap()),
+        IpAddr::V6("fd15:70a:510b::1".parse().unwrap()),
         1
     )));
 }
@@ -371,7 +371,7 @@ async fn both_sides_probe_within_the_bound() {
     let (mut client_link, peer_link) = link_pair();
     let epoch = 5;
     let client_candidates = vec![v4([10, 0, 0, 1], 7777)];
-    let answer_candidates = vec![v4([203, 0, 113, 10], 1)];
+    let answer_candidates = vec![v4([10, 0, 0, 2], 1)];
     let events = Arc::new(Mutex::new(Vec::<(&'static str, u128)>::new()));
     let started = Instant::now();
 
@@ -440,8 +440,8 @@ async fn both_sides_probe_within_the_bound() {
 #[tokio::test(start_paused = true)]
 async fn burst_stops_on_first_success() {
     let (mut client_link, peer_link) = link_pair();
-    let first = v4([203, 0, 113, 10], 1);
-    let second = v4([203, 0, 113, 11], 1);
+    let first = v4([10, 0, 0, 2], 1);
+    let second = v4([10, 0, 0, 3], 1);
     let server = tokio::spawn(async move {
         let mut peer_link = peer_link;
         let raw = peer_link.recv_raw().await.expect("offer received");
@@ -509,7 +509,7 @@ async fn burst_window_bounds_hanging_probes() {
                 &PunchMessage {
                     kind: Kind::Answer,
                     epoch: offer.epoch,
-                    candidates: vec![v4([203, 0, 113, 10], 1)],
+                    candidates: vec![v4([10, 0, 0, 2], 1)],
                 },
                 EXCHANGE_BUDGET,
             )
@@ -564,7 +564,7 @@ async fn malformed_datagram_is_discarded_and_attempt_succeeds() {
                 &PunchMessage {
                     kind: Kind::Answer,
                     epoch: offer.epoch,
-                    candidates: vec![v4([203, 0, 113, 10], 1)],
+                    candidates: vec![v4([10, 0, 0, 2], 1)],
                 },
                 EXCHANGE_BUDGET,
             )

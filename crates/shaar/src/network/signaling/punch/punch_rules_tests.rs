@@ -89,7 +89,7 @@ fn production_filter_denies_special_ranges_and_allows_private_lan() {
         "198.51.100.9:1",
         "192.0.2.9:1",
         "[2001:db8::1]:1",
-        "[fd15:70a:51b::1]:1",
+        "[fd15:70a:510b::1]:1",
     ];
     for raw in denied {
         let address: SocketAddr = raw.parse().unwrap();
@@ -212,7 +212,7 @@ async fn client_probes_skip_link_local_but_keep_loopback_and_private_lan_under_t
     sorted.sort();
     assert_eq!(
         sorted,
-        vec![loopback, private],
+        vec![private, loopback],
         "exactly the gated-in candidates were probed (eagerly), link-local never"
     );
     assert!(result.is_some(), "loopback connect completed the burst");
