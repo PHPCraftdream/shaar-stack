@@ -481,6 +481,27 @@ class ObservabilityTests(unittest.TestCase):
                                                         "reasons": {"deadline": 2, "closed": 1}})
         self.assertIn("end reasons: closed=1, deadline=2", claim)
 
+    def test_reflexive_windows_and_server_offers_are_counted_without_addresses(self):
+        text = "\n".join([
+            "shaar: reflexive window outcome=skipped elapsed_ms=10001",
+            "shaar: reflexive window outcome=empty elapsed_ms=16000",
+            "shaar: reflexive window outcome=observed elapsed_ms=21000",
+            "shaar: reflexive window outcome=observed elapsed_ms=26000",
+            "shaar: reflexive window outcome=exposed elapsed_ms=26001",
+            "shaar: reflexive window outcome=exposed elapsed_ms=90000",
+            "shaar: reflexive window outcome=bogus elapsed_ms=1",
+            "shaar: reflexive window outcome=observed elapsed_ms=1 203.0.113.9",
+            "shaar: server punch offer candidates=0 answer=none",
+            "shaar: server punch offer candidates=1 answer=sent",
+            "shaar: server punch offer candidates=2 answer=refused",
+            "shaar: server punch offer candidates=1 answer=maybe"])
+        self.assertEqual(CONTRACT.scan_reflexive(text),
+                         {"windows": {"skipped": 1, "empty": 1, "observed": 2}, "exposed_ms": 26001})
+        self.assertEqual(CONTRACT.scan_reflexive(""), {"windows": {}, "exposed_ms": None})
+        self.assertEqual(CONTRACT.scan_offers(text),
+                         {"received": 3, "with_candidates": 2, "answers": {"none": 1, "sent": 1, "refused": 1}})
+        self.assertEqual(CONTRACT.scan_offers(""), {"received": 0, "with_candidates": 0, "answers": {}})
+
     def test_direct_claim_is_written_from_observed_lines_only(self):
         punch = {"attempts": 4, "direct": 0, "max_candidates": 1, "reasons": {}}
         self.assertIn("direct Native path was established",

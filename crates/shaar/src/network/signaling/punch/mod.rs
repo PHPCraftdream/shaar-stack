@@ -519,6 +519,16 @@ pub(crate) fn trace_line(
     )
 }
 
+/// The Server's trace of one received Offer: how many candidates it offered and
+/// what became of the Answer (`sent`, `none` for an empty provider, `refused`).
+pub(crate) fn offer_line(offered: usize, answer: &str) -> String {
+    format!("shaar: server punch offer candidates={offered} answer={answer}")
+}
+
+pub(crate) fn trace_offer(offered: usize, answer: &str) {
+    eprintln!("{}", offer_line(offered, answer));
+}
+
 fn trace_attempt(role: &'static str, candidates: usize, reason: EndReason, started: Instant) {
     eprintln!(
         "{}",
