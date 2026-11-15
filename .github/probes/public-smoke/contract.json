@@ -1,7 +1,11 @@
 {
   "schema": 1,
   "scope": "public-smoke-v1",
-  "approval": null,
+  "approval": {
+    "date": "2026-11-14",
+    "quote": "Пробуй всё, что нужно, друг",
+    "decision_log": "docs/plans/north-star.md"
+  },
   "targets": {
     "mainline_bootstrap": [
       {

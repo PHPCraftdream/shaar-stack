@@ -88,6 +88,11 @@ class ContractTests(unittest.TestCase):
                          ["tcp://ygg-pa.incognet.io:8883", "tcp://mo.us.ygg.triplebit.org:9000"])
         self.assertEqual(contract["budgets"]["retries"], 0)
         self.assertEqual(contract["budgets"]["runs_per_dispatch"], 1)
+        self.assertIsNone(targets["libp2p_relay"])
+        self.assertEqual(contract["approval"],
+                         {"date": "2026-11-14", "quote": "Пробуй всё, что нужно, друг",
+                          "decision_log": "docs/plans/north-star.md"})
+        self.assertEqual(CONTRACT.blockers(contract), [])
 
     def test_unapproved_contract_cannot_run(self):
         contract, _ = CONTRACT.load_contract()
@@ -107,7 +112,14 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(len(CONTRACT.blockers(CONTRACT.validate_contract(changed))), 1)
         changed = copy.deepcopy(full)
         changed["targets"]["libp2p_relay"] = None
-        self.assertEqual(len(CONTRACT.blockers(CONTRACT.validate_contract(changed))), 1)
+        self.assertEqual(CONTRACT.blockers(CONTRACT.validate_contract(changed)), [])
+
+    def test_relay_less_contract_is_valid_and_ready(self):
+        contract, _ = CONTRACT.load_contract()
+        self.assertIsNone(contract["targets"]["libp2p_relay"])
+        CONTRACT.validate_contract(contract)
+        self.assertEqual(CONTRACT.blockers(contract), [])
+        CONTRACT.require_runnable(contract)
 
     def test_ceilings_cannot_be_widened(self):
         full, _ = runnable()
@@ -242,6 +254,27 @@ class RenderTests(unittest.TestCase):
             "            203.0.113.6:6881\n        ]\n    }\n    signaling: {\n        relay: " + RELAY["peer_id"] +
             "\n        relay_address: 8.8.4.4:4001\n    }\n    ygg: {\n        peers: [\n"
             "            tcp://a.example.org:1\n            tcp://b.example.org:2\n        ]\n    }\n}\n"))
+
+    def test_relay_less_network_render_has_no_relay_fields(self):
+        text = CONTRACT.render_network(["203.0.113.5:25401"], peers=["tcp://a.example.org:1"])
+        self.assertEqual(text, (
+            "network: {\n    mainline: {\n        bootstrap: [\n            203.0.113.5:25401\n"
+            "        ]\n    }\n    signaling: {}\n    ygg: {\n        peers: [\n"
+            "            tcp://a.example.org:1\n        ]\n    }\n}\n"))
+        self.assertNotIn("relay", text)
+        server = CONTRACT.render_server("127.0.0.1:9", text)
+        client = CONTRACT.render_client("ab" * 32, "127.0.0.1:2222", text)
+        self.assertNotIn("relay", server)
+        self.assertNotIn("relay", client)
+        self.assertIn("    signaling: {}\n", server)
+        self.assertIn("    signaling: {}\n", client)
+
+    def test_relay_render_arguments_are_given_together(self):
+        peers = ["tcp://a.example.org:1"]
+        with self.assertRaises(CONTRACT.ContractError):
+            CONTRACT.render_network(["203.0.113.5:25401"], RELAY["peer_id"], None, peers)
+        with self.assertRaises(CONTRACT.ContractError):
+            CONTRACT.render_network(["203.0.113.5:25401"], None, RELAY["address"], peers)
 
     def test_role_configs(self):
         network = "network: {\n}\n"

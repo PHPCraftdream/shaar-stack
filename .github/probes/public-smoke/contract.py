@@ -175,8 +175,6 @@ def blockers(contract):
     found = []
     if contract["approval"] is None:
         found.append("no recorded user approval of these exact targets and budgets")
-    if contract["targets"]["libp2p_relay"] is None:
-        found.append("no libp2p relay target: the composed Server cannot start without a reservation")
     return found
 
 
@@ -230,12 +228,22 @@ def split_peer(uri):
     return match[1], int(match[3])
 
 
-def render_network(bootstrap_ips, relay_peer, relay_address, peers):
-    """`network` object text: bootstrap_ips are 'ip:port' strings, peers are tcp:// URIs."""
+def render_network(bootstrap_ips, relay_peer=None, relay_address=None, peers=()):
+    """`network` object text: bootstrap_ips are 'ip:port' strings, peers are tcp:// URIs.
+
+    Without a relay pair the signaling section carries no relay fields: the composed
+    products start without a reservation (leaf L0).
+    """
+    if (relay_peer is None) != (relay_address is None):
+        raise ContractError("render_network: the relay peer and address must be given together")
     lines = ["network: {", "    mainline: {", "        bootstrap: ["]
     lines += ["            " + item for item in bootstrap_ips]
-    lines += ["        ]", "    }", "    signaling: {", "        relay: " + relay_peer,
-              "        relay_address: " + relay_address, "    }", "    ygg: {", "        peers: ["]
+    lines += ["        ]", "    }", "    signaling: {"]
+    if relay_peer is not None:
+        lines += ["        relay: " + relay_peer, "        relay_address: " + relay_address]
+    else:
+        lines[-1] = "    signaling: {}"
+    lines += ["    }", "    ygg: {", "        peers: ["]
     lines += ["            " + item for item in peers]
     lines += ["        ]", "    }", "}"]
     return "\n".join(lines) + "\n"

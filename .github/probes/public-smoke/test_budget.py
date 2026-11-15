@@ -117,6 +117,15 @@ class MeterTests(unittest.TestCase):
         self.assertEqual(m.observe(10, {1: entry("93.184.216.34", 443, 1)}, 0.5), ["unexpected_tcp_peer"])
         self.assertEqual(m.totals()["unexpected_connections"], 1)
 
+    def test_empty_relay_allowed_set_never_needs_a_relay_target(self):
+        m = BUDGET.Meter(dict(LIMITS), {"ygg": {YGG}, "relay": set()}, 0)
+        self.assertEqual(m.observe(100, {1: entry("203.0.113.9", 8883, 200)}, 1.0), [])
+        totals = m.totals()
+        self.assertEqual((totals["relay_connections"], totals["relay_tcp_bytes"]), (0, 0))
+        self.assertEqual(totals["ygg_connections"], 1)
+        self.assertEqual(m.classify(ipaddress.ip_address("93.184.216.34")), "unexpected")
+        self.assertEqual(m.observe(200, {2: entry("93.184.216.34", 443, 5)}, 2.0), ["unexpected_tcp_peer"])
+
     def test_ipv4_mapped_addresses_classify_as_their_ipv4(self):
         m = meter()
         self.assertEqual(m.classify(ipaddress.ip_address("::ffff:203.0.113.9")), "ygg")
@@ -183,6 +192,44 @@ class NetworkHelperTests(unittest.TestCase):
                 RUN.resolve_targets(contract, resolver(private))
         with self.assertRaises(RUN.Abort):
             RUN.resolve_targets(contract, lambda *args: [])
+
+    def test_resolution_without_a_relay_target_needs_no_relay_address(self):
+        contract, _ = CONTRACT.load_contract()
+        self.assertIsNone(contract["targets"]["libp2p_relay"])
+
+        def resolver(ip):
+            return lambda host, port, family, kind: [(family, kind, 6, "", (ip, port))]
+
+        result = RUN.resolve_targets(contract, resolver("8.8.8.8"))
+        self.assertEqual(result["relay_allowed"], set())
+        self.assertEqual(result["ygg_allowed"], {ipaddress.ip_address("8.8.8.8")})
+
+
+class VerdictRuleTests(unittest.TestCase):
+    def test_server_rules_do_not_demand_a_relay_connection_without_one(self):
+        target = {"accepts": 1, "request_ok": True, "errors": []}
+        totals = {"ygg_connections": 1, "relay_connections": 0}
+        self.assertEqual(RUN.server_failures(False, totals, target), [])
+        self.assertEqual(RUN.server_failures(True, totals, target), ["no relay connection observed"])
+        self.assertEqual(RUN.server_failures(False, dict(totals, ygg_connections=0), target),
+                         ["no Yggdrasil peer connection observed"])
+        bad = dict(target, accepts=0)
+        self.assertEqual(RUN.server_failures(False, totals, bad),
+                         ["the target did not see exactly one valid authorized exchange"])
+
+    def test_client_rules_fail_on_missing_or_wrong_exchange(self):
+        self.assertEqual(RUN.client_failures(None, []), ["no APP reply"])
+        self.assertEqual(RUN.client_failures(None, ["client not ready: x"]), [])
+        self.assertEqual(RUN.client_failures({"match": False}, []), ["APP reply did not match"])
+        self.assertEqual(RUN.client_failures({"match": True}, []), [])
+
+    def test_silent_relay_listener_exists_only_with_a_relay(self):
+        silent, address = RUN.silent_relay(False)
+        self.assertIsNone(silent)
+        self.assertIsNone(address)
+        silent, address = RUN.silent_relay(True)
+        self.addCleanup(silent.close)
+        self.assertRegex(address, r"^127\.0\.0\.1:[0-9]+$")
 
 
 class FixtureTests(unittest.TestCase):
@@ -381,6 +428,23 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(RUN.main(["client", "--manifest", "m", "--bin", "b", "--workdir", "w", "--t0", "x1"]), 2)
         with mock.patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push"}, clear=True):
             self.assertEqual(RUN.main(["validate"]), 2)
+
+    def test_base_evidence_states_the_relay_expectation(self):
+        contract, _ = CONTRACT.load_contract()
+
+        def setup(relay):
+            changed = copy.deepcopy(contract)
+            changed["targets"]["libp2p_relay"] = relay
+            return {"contract": changed, "digest": "d" * 64,
+                    "dispatch": {"revision": "a" * 40, "run_id": "7"},
+                    "binary_digest": "b" * 64, "pubs": {"server": "ab" * 32, "client": "cd" * 32},
+                    "resolved": {"bootstrap": [], "ygg": []}, "addresses": []}
+
+        without = RUN.base_evidence("server", setup(None))
+        self.assertIsNone(without["resolved"]["relay"])
+        self.assertIn("no relay", without["relay_expectation"])
+        with_relay = RUN.base_evidence("client", setup({"address": "8.8.4.4:4001"}))
+        self.assertEqual(with_relay["resolved"]["relay"], "8.8.4.4:4001")
 
 
 if __name__ == "__main__":
