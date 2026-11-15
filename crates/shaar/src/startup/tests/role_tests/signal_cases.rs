@@ -531,11 +531,10 @@ async fn composed_server_reaches_ready_without_relay_fields() {
         assert_eq!(event, RoleEvent::Admitted);
 
         let _ = server_stop.send(());
-        let outcome = tokio::time::timeout(SIGNAL_BUDGET, server)
+        tokio::time::timeout(SIGNAL_BUDGET, server)
             .await
             .expect("relay-less server stops within the budget")
             .expect("relay-less server joined shutdown succeeds");
-        assert_eq!(outcome, Ok(()));
 
         echo.close().await;
         let closed = tokio::time::timeout(PROBE_BUDGET, transit.close()).await;

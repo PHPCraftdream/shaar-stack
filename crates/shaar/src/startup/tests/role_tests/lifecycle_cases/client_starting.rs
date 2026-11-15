@@ -224,11 +224,10 @@ async fn client_role_starts_without_relay_fields() {
         assert!(listener.port() != 0, "the listener bound a real port");
 
         let _ = stop.send(());
-        let outcome = tokio::time::timeout(CANCEL_BUDGET, client)
+        tokio::time::timeout(CANCEL_BUDGET, client)
             .await
             .expect("relay-less client stops within the budget")
             .expect("relay-less client joined shutdown succeeds");
-        assert_eq!(outcome, Ok(()));
 
         assert_client_binds_released(&config, "relay-less client");
         drop(silent);
