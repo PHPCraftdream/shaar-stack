@@ -370,6 +370,12 @@ impl Dialer for NativeDialer {
                 if let Some(events) = &self.events {
                     events.capture_native(&session);
                 }
+                // A punched session is a Native route like any direct one.
+                emit(client_route(
+                    RoutePath::Native,
+                    observation,
+                    elapsed_ms(started),
+                ));
                 return Ok(session);
             }
         }

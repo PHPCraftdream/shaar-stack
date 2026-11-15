@@ -149,11 +149,16 @@ async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero()
 
         // Fake-NAT seam, armed after start and before run: the responder's
         // per-call provider returns exactly this mapped endpoint, so the
-        // Answer carries the server's externally visible address.
+        // Answer carries the server's externally visible address. The composed
+        // endpoint reports its bind (a wildcard is never a valid candidate), so
+        // the mapped endpoint is loopback plus the real bound port.
         let server_native = server_role
             .native_addr()
-            .expect("started server reports its native mapped address");
-        set_punch_candidates_for_tests(vec![server_native]);
+            .expect("started server reports its native bound address");
+        set_punch_candidates_for_tests(vec![SocketAddr::from((
+            Ipv4Addr::LOCALHOST,
+            server_native.port(),
+        ))]);
 
         let mut client_role = ClientRole::with_events(
             client_config,
