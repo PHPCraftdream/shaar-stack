@@ -43,6 +43,7 @@ async fn start_until_shutdown<T>(
     }
 }
 
+#[derive(Debug)]
 enum Invocation {
     Config(PathBuf),
     FirstRun { target: Option<String> },
@@ -104,14 +105,13 @@ async fn run_from_config(config_path: PathBuf) -> Result<(), String> {
 
 enum FirstRunState {
     Ready {
-        config: shaar::config::ServerConfig,
-        identity: Identity,
+        config: Box<shaar::config::ServerConfig>,
+        identity: Box<Identity>,
         keys: Vec<PublicKey>,
         block: Vec<String>,
     },
     MissingTarget {
         block: Vec<String>,
-        config_path: PathBuf,
         error: String,
     },
 }
@@ -139,7 +139,6 @@ async fn first_run_state(base: &Path, target: Option<String>) -> Result<FirstRun
             ));
             return Ok(FirstRunState::MissingTarget {
                 block,
-                config_path: report.paths.config.clone(),
                 error: ConfigError::Validation {
                     field: "target",
                     kind: ValidationKind::MissingRequired,
@@ -170,8 +169,8 @@ async fn first_run_state(base: &Path, target: Option<String>) -> Result<FirstRun
     });
     block.push(format!("forward target: {}", config.target()));
     Ok(FirstRunState::Ready {
-        config,
-        identity,
+        config: Box::new(config),
+        identity: Box::new(identity),
         keys,
         block,
     })
@@ -181,7 +180,7 @@ async fn run_first_run(target: Option<String>) -> Result<(), String> {
     let base =
         shaar::identity::default_data_dir().map_err(|error| format!("first run: {error}"))?;
     match first_run_state(&base, target).await? {
-        FirstRunState::MissingTarget { block, error, .. } => {
+        FirstRunState::MissingTarget { block, error } => {
             for line in &block {
                 println!("{line}");
             }
@@ -192,7 +191,7 @@ async fn run_first_run(target: Option<String>) -> Result<(), String> {
             identity,
             keys,
             block,
-        } => run_configured(config, identity, keys, Some(&block)).await,
+        } => run_configured(*config, *identity, keys, Some(&block)).await,
     }
 }
 

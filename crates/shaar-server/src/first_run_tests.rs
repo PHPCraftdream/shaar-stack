@@ -218,12 +218,7 @@ async fn first_run_without_target_reports_missing_target() {
     let state = first_run_state(&dir.0, None)
         .await
         .expect("provisioning itself succeeds");
-    let FirstRunState::MissingTarget {
-        block,
-        config_path,
-        error,
-    } = state
-    else {
+    let FirstRunState::MissingTarget { block, error } = state else {
         panic!("expected MissingTarget");
     };
     assert_eq!(block.len(), 7, "summary(5) + two next-step lines");
@@ -233,7 +228,7 @@ async fn first_run_without_target_reports_missing_target() {
         block[6],
         format!(
             "next step: run shaar-server <target:port> or set target: in {}",
-            config_path.display()
+            dir.server_dir().join("server.ktav").display()
         )
     );
     assert_eq!(
