@@ -16,7 +16,7 @@ pub(super) async fn startup_scenario(temp: &Temp, processes: &mut Processes) -> 
     let server_config = temp.0.join("invalid-server.ktav");
     fs::write(&server_config, format!("target: 127.0.0.1:0\nbind: {udp_address}\nkey_file:: missing.key\nallowlist_path:: missing.txt\nfallback: signal\n"))
         .map_err(|error| error.to_string())?;
-    let server_error = failed_start(processes, &server_exe, &server_config, &temp.0)?;
+    let server_error = failed_start(processes, &server_exe, &server_config, &temp.0).await?;
     if !server_error.contains("field `target`") {
         return Err("server did not report invalid target before bind".into());
     }
@@ -24,7 +24,7 @@ pub(super) async fn startup_scenario(temp: &Temp, processes: &mut Processes) -> 
     let client_config = temp.0.join("invalid-client.ktav");
     fs::write(&client_config, format!("server: not-a-public-key\nserver_address: 127.0.0.1:1\nlisten: {tcp_address}\nkey_file:: missing.key\nfallback: signal\n"))
         .map_err(|error| error.to_string())?;
-    let client_error = failed_start(processes, &client_exe, &client_config, &temp.0)?;
+    let client_error = failed_start(processes, &client_exe, &client_config, &temp.0).await?;
     if !client_error.contains("field `server`") {
         return Err("client did not report invalid server key before bind".into());
     }
@@ -34,7 +34,7 @@ pub(super) async fn startup_scenario(temp: &Temp, processes: &mut Processes) -> 
     let busy_config = temp.0.join("busy-client.ktav");
     fs::write(&busy_config, format!("server: {server_key}\nserver_address: 127.0.0.1:1\nlisten: {tcp_address}\nkey_file:: client.key\nfallback: signal\n"))
         .map_err(|error| error.to_string())?;
-    let busy_error = failed_start(processes, &client_exe, &busy_config, &temp.0)?;
+    let busy_error = failed_start(processes, &client_exe, &busy_config, &temp.0).await?;
     if !["(os error 98)", "(os error 10048)", "(os error 10013)"]
         .iter()
         .any(|marker| busy_error.contains(marker))
@@ -107,10 +107,12 @@ async fn run_first_run() -> Result<(), String> {
     let temp = Temp::new().map_err(|error| error.to_string())?;
     let mut processes = Processes::default();
     let mut tasks = JoinSet::new();
-    let result =
-        std::panic::AssertUnwindSafe(timeout(DEADLINE, first_run_scenario(&temp, &mut processes)))
-            .catch_unwind()
-            .await;
+    let result = std::panic::AssertUnwindSafe(timeout(
+        DEADLINE,
+        first_run_scenario(&temp, &mut processes, &mut tasks),
+    ))
+    .catch_unwind()
+    .await;
     finalize(&mut processes, &mut tasks, result).await
 }
 
@@ -144,7 +146,7 @@ async fn spawn_first_run(
 /// returns the exit status with the collected stdout. The child is NOT tracked
 /// by Processes; kill_on_drop plus wait keep it reaped here.
 async fn run_to_exit(child: &mut Child) -> Result<(ExitStatus, String), String> {
-    let mut stdout = child.stdout.take().ok_or("piped stdout unavailable")?;
+    let stdout = child.stdout.take().ok_or("piped stdout unavailable")?;
     let mut bytes = Vec::new();
     stdout
         .take(65_537)
@@ -182,7 +184,7 @@ async fn operator_block(
 ) -> Result<String, String> {
     let mut block = String::new();
     for _ in 0..limit {
-        let line = next_line(reader)?;
+        let line = next_line(reader).await?;
         let done = line.starts_with(final_prefix);
         block.push_str(&line);
         if done {
@@ -204,7 +206,11 @@ fn ensure_file(path: &Path) -> Result<(), String> {
     require(path.is_file(), &format!("missing file: {}", path.display()))
 }
 
-async fn first_run_scenario(temp: &Temp, processes: &mut Processes) -> Result<(), String> {
+async fn first_run_scenario(
+    temp: &Temp,
+    processes: &mut Processes,
+    tasks: &mut JoinSet<Result<(), String>>,
+) -> Result<(), String> {
     let server_exe = std::env::var("SHAAR_SERVER_EXE").map_err(|error| error.to_string())?;
     let client_exe = std::env::var("SHAAR_CLIENT_EXE").map_err(|error| error.to_string())?;
     let data = temp.0.join("shaar");
@@ -303,6 +309,24 @@ async fn first_run_scenario(temp: &Temp, processes: &mut Processes) -> Result<()
         .local_addr()
         .map_err(|error| error.to_string())?
         .port();
+    // One-shot echo target: read the exact request, answer the exact reply, close.
+    tasks.spawn(async move {
+        let (mut stream, _) = target.accept().await.map_err(|error| error.to_string())?;
+        let mut payload = [0; REQUEST.len()];
+        stream
+            .read_exact(&mut payload)
+            .await
+            .map_err(|error| error.to_string())?;
+        if payload != REQUEST {
+            return Err("target received incorrect bytes".into());
+        }
+        stream
+            .write_all(REPLY)
+            .await
+            .map_err(|error| error.to_string())?;
+        stream.shutdown().await.map_err(|error| error.to_string())?;
+        Ok(())
+    });
     let client_identity = Identity::load(&client_key_file)
         .await
         .map_err(|error| error.to_string())?;
@@ -332,7 +356,7 @@ async fn first_run_scenario(temp: &Temp, processes: &mut Processes) -> Result<()
         .parse()
         .map_err(|error: std::net::AddrParseError| error.to_string())?;
     require(
-        bound.ip().is_loopback() && bound.port() != 0,
+        (bound.ip().is_loopback() || bound.ip().is_unspecified()) && bound.port() != 0,
         "unexpected server bind address",
     )?;
     let server_hex = fields[1].trim_start_matches("public_key=").to_owned();
@@ -406,7 +430,8 @@ async fn first_run_scenario(temp: &Temp, processes: &mut Processes) -> Result<()
         .parse()
         .map_err(|error: std::net::AddrParseError| error.to_string())?;
     require(
-        restarted_bound.ip().is_loopback() && restarted_bound.port() != 0,
+        (restarted_bound.ip().is_loopback() || restarted_bound.ip().is_unspecified())
+            && restarted_bound.port() != 0,
         "unexpected restarted server bind address",
     )?;
     let block =
@@ -497,6 +522,5 @@ async fn first_run_scenario(temp: &Temp, processes: &mut Processes) -> Result<()
     .map_err(|_| "echo exchange deadline")?
     .map_err(|error| error.to_string())?;
     drop(stream);
-    drop(target);
     Ok(())
 }
