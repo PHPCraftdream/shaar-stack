@@ -377,6 +377,30 @@ fn from_connection_error_classifies_application_and_transport_closes() {
     ));
 }
 
+/// Byte sums are taken from fully completed streams only; failed streams add
+/// nothing. Deterministic counterpart of the clean-close acceptance test.
+#[test]
+fn serve_report_sums_bytes_over_completed_streams_only() {
+    let mut report = ServeReport::default();
+    report
+        .record(Ok(Ok(ForwardStats {
+            to_peer: 3,
+            from_peer: 5,
+        })))
+        .unwrap();
+    report.record(Ok(Err(ForwardError::Protocol))).unwrap();
+    assert_eq!(
+        report,
+        ServeReport {
+            completed: 1,
+            failed: 1,
+            cancelled: 0,
+            bytes_in: 5,
+            bytes_out: 3,
+        }
+    );
+}
+
 /// THE acceptance test: the peer's clean application close (Session::drop,
 /// code 0) ends serve() as Ok with the completed stream's byte sums. Fails on
 /// the old code, where serve() returned Err(PathUnavailable).
@@ -420,15 +444,18 @@ async fn a_clean_peer_close_ends_the_served_session_ok_with_completed_stream_byt
             target_io,
         );
         let report = report.expect("a clean peer close ends the served session ok");
+        // The peer's close can overtake the server worker's final bookkeeping:
+        // the single stream is then cancelled instead of completed. It is never
+        // failed, and byte sums come from completed streams only.
+        assert_eq!(report.failed, 0);
+        assert_eq!(report.completed + report.cancelled, 1);
         assert_eq!(
-            report,
-            ServeReport {
-                completed: 1,
-                failed: 0,
-                cancelled: 0,
-                bytes_in: u64::try_from(PAYLOAD).unwrap(),
-                bytes_out: u64::try_from(REPLY).unwrap(),
-            }
+            report.bytes_in,
+            report.completed * u64::try_from(PAYLOAD).unwrap()
+        );
+        assert_eq!(
+            report.bytes_out,
+            report.completed * u64::try_from(REPLY).unwrap()
         );
         tokio::join!(server.close(), client.close());
     })

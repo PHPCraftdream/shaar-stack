@@ -64,7 +64,7 @@ async fn worker_failures_are_reported_and_cancelled_workers_are_joined() {
     );
 
     let mut workers = JoinSet::new();
-    workers.spawn(async { std::future::pending::<Result<(), ForwardError>>().await });
+    workers.spawn(async { std::future::pending::<Result<ForwardStats, ForwardError>>().await });
     assert!(abort_workers(&mut workers).await.is_none());
     assert!(workers.is_empty());
 
@@ -92,7 +92,7 @@ async fn coordinator_reports_worker_failure_after_joining_other_workers() {
         let mut workers = JoinSet::new();
         workers.spawn(async move {
             let _held = held_tx;
-            std::future::pending::<Result<(), ForwardError>>().await
+            std::future::pending::<Result<ForwardStats, ForwardError>>().await
         });
         workers.spawn(async { Err(ForwardError::TaskFailure) });
         let result = coordinate_with_workers(
