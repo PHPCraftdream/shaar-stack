@@ -77,7 +77,7 @@ All runs below are GitHub Actions runs on the owner's CI; "executed" means the t
 
 ## Not performed (explicitly open)
 
-- Public-network interoperability and smoke (public DHT, public relay, public Yggdrasil peers): needs the owner's approval of exact targets and budgets.
+- Public-network interoperability beyond one bounded smoke: the smoke is authorized through its default-off contract (2026-11-14). One relay-less run passed over Yggdrasil standby (run 43671098240); a run with a public libp2p relay failed at the relay reservation (run 43629141158). Neither observed a direct path or a hole punch, and neither is an acceptance of the end-to-end claim.
 - Real home, mobile or LAN device tests; a product mechanism that learns public (reflexive) addresses, without which double-NAT hole punching does not happen (§10 A5).
 - Long-duration, public-network and many-peer resource behaviour; P16 first-version readiness; notices and license corpus completion.
 - Building outside the CI recipes, running under a service manager (SIGTERM is handled but no unit file or manager was exercised), packaging and releases.

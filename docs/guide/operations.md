@@ -68,7 +68,7 @@ The allowlist is read once at startup. Append each client's public key as one li
 
 ### What the first run does not do today
 
-The generated configs are direct-only (no `network` object), and that is deliberate: the composed shape requires a libp2p relay reservation and cannot start without one, and public relays proved unreliable. **No default relay, bootstrap or Yggdrasil peers are invented** — none exist and none will be added. A `relay-optional startup` leaf (owned by the NAT task) is planned to make the composed shape work without a relay. Until it lands, the first run **cannot publish a DHT record**, the server **cannot be found by key alone**, and the client **cannot hole-punch**: the client needs the server's numeric address, UDP must flow between them, and `fallback` stays inactive.
+The generated configs are direct-only (no `network` object), and that is deliberate: **no default relay, bootstrap or Yggdrasil peers are invented** — none exist and none will be added. A first run therefore **does not publish a DHT record** and the client still needs the server's numeric address; `fallback` stays inactive. To find the server by key alone, write a `network` object yourself (Mainline bootstrap node(s) and Yggdrasil peers; the libp2p relay pair is optional since leaf L0 and is not needed for the DHT and Yggdrasil paths, see [configuration.md](configuration.md)). Hole punching is **not** part of this build: a composed client dials the published candidates directly and falls back to Yggdrasil, and no direct path through a NAT between two private networks has been observed on a public network.
 
 ## Startup
 
@@ -85,7 +85,7 @@ The server prints a notice that the configured fallback is not active, then one 
 
 ### Composed shape (`network` object)
 
-Needs a Mainline bootstrap node, a libp2p relay and Yggdrasil peers that you provide ([configuration.md](configuration.md)). The server prints `shaar-server: composed startup: public_key=<hex> fallback=<mode>` on stderr, then (once started) the stdout line `bound=<ip:port> public_key=<hex>`; `bound=0.0.0.0:PORT` is the native UDP port on all IPv4 interfaces. It publishes its signed record under that key and clients find it from the key alone. The client prints `shaar-client: composed startup: public_key=<own hex> server=<pinned server hex> fallback=<mode> server_address=<hint|none>` on stderr, then the stdout line `listening=<ip:port>` once its local listener is bound. `public_key` is always the process's own key; the pinned server key is labelled `server`. **Verified** with real processes against owned fixtures (DHT bootstrap, relay, Yggdrasil transit) in CI; **Unverified** against the public Mainline DHT, public relays or public Yggdrasil peers.
+Needs a Mainline bootstrap node and Yggdrasil peers that you provide; a libp2p relay is optional ([configuration.md](configuration.md)). With no relay fields the Server skips the relay reservation and the Client dials the direct candidates, then the Yggdrasil path. The server prints `shaar-server: composed startup: public_key=<hex> fallback=<mode>` on stderr, then (once started) the stdout line `bound=<ip:port> public_key=<hex>`; `bound=0.0.0.0:PORT` is the native UDP port on all IPv4 interfaces. It publishes its signed record under that key and clients find it from the key alone. The client prints `shaar-client: composed startup: public_key=<own hex> server=<pinned server hex> fallback=<mode> server_address=<hint|none>` on stderr, then the stdout line `listening=<ip:port>` once its local listener is bound. `public_key` is always the process's own key; the pinned server key is labelled `server`. **Verified** with real processes against owned fixtures (DHT bootstrap, relay, Yggdrasil transit) in CI, including the relay-less shape. **Observed once** on the public network without a relay: a single bounded smoke (fork run 43671098240, two separate GitHub-hosted runners, public Mainline bootstrap nodes and public Yggdrasil peers, key-only Client) completed one exact request/reply over the Yggdrasil standby path in under one second; the route was inferred at that time, not observed, and no direct path was attempted. This is an observation, not an acceptance of the end-to-end claim. A public libp2p relay was tried once and gave no reservation. Everything else on public networks stays **Unverified**.
 
 ## Shutdown
 
@@ -112,7 +112,7 @@ Policy defaults (**Source**; not configurable from the files; the SDK exposes th
 
 ## Session observability lines (stable grammar)
 
-This section is **Source** (written in this leaf; CI execution pending).
+This section is **Verified** by unit tests and real-process cases in CI (fork CI 43694473684, process feedback 43695774162, upstream CI 43696633747 at `aac9ddf`). A live public smoke with these lines has not run yet; until it does, the smoke harness falls back to inferring the route.
 
 Both binaries print operator-facing lines on **stderr** with a fixed grammar (`crates/shaar/src/network/forwarding/observe.rs`). Lines carry only counts and typed tokens — never key material, addresses, or third-party data.
 

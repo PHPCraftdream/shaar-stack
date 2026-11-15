@@ -20,7 +20,7 @@ Labels: **Verified** = exercised by tests that ran in GitHub CI; **Source** = re
 | Client needs | server key **and** a numeric `server_address` | server key only |
 | Finds the server by | the address you give | the Mainline DHT |
 | Fallback | none (`fallback` is accepted but not active) | `signal` or `standby` |
-| You must supply | a reachable address | DHT bootstrap node(s), a libp2p relay, Yggdrasil peers |
+| You must supply | a reachable address | DHT bootstrap node(s) and Yggdrasil peers; a libp2p relay is optional |
 | Evidence | real processes on loopback in CI | real processes against owned fixtures in CI, controlled NAT and blockade matrix |
 
 The direct-only shape is the simplest path and is described first.
