@@ -141,14 +141,20 @@ def tests(targets):
     directory = ROOT / "target/ci-selected"
     directory.mkdir(parents=True, exist_ok=True)
     receipt = []
+    # Every selected target compiles before any case runs: a broken last target
+    # fails the run in minutes instead of after the earlier targets' cases.
+    built = []
     for index, spec in enumerate(targets):
         prefix = directory / str(index)
         arguments = ["cargo", "test", "--locked", *package_arguments(spec), *cargo_target(spec)]
         messages, status = capture(arguments + ["--no-run", "--message-format=json"],
                                    prefix.with_suffix(".build.jsonl"), stderr=prefix.with_suffix(".build.stderr"))
         if status:
-            raise ValueError("selected target compilation failed: " + str(status))
-        binary = executable(messages, spec)
+            raise ValueError("selected target compilation failed: " + spec["package"] + " "
+                             + spec["kind"] + " " + spec["name"] + ": " + str(status))
+        built.append((index, spec, arguments, executable(messages, spec)))
+    for index, spec, arguments, binary in built:
+        prefix = directory / str(index)
         listing, status = capture([str(binary), "--list", "--format=terse"], prefix.with_suffix(".list.log"))
         if status:
             raise ValueError("test binary listing failed")
@@ -220,11 +226,23 @@ fn unselected_failure() { panic!("UNSELECTED_CASE_RAN"); }
         ROOT = original
 
 
+def lint_arguments(spec):
+    # Workspace members lint every target, so test code meets the same gate as
+    # the all-target clippy of process feedback; nested manifests keep the target.
+    if NESTED.get(spec["package"]):
+        return [*package_arguments(spec), *cargo_target(spec)]
+    return [*package_arguments(spec), "--all-targets"]
+
+
 def lint(targets):
     directory = ROOT / "target/ci-selected"
     directory.mkdir(parents=True, exist_ok=True)
-    for index, spec in enumerate(targets):
-        arguments = ["cargo", "clippy", "--locked", *package_arguments(spec), *cargo_target(spec), "--", "-D", "warnings"]
+    unique = []
+    for spec in targets:
+        if lint_arguments(spec) not in unique:
+            unique.append(lint_arguments(spec))
+    for index, selected in enumerate(unique):
+        arguments = ["cargo", "clippy", "--locked", *selected, "--", "-D", "warnings"]
         _, status = capture(arguments, directory / f"{index}.lint.log")
         if status:
             raise ValueError("selected target lint failed: " + str(status))
