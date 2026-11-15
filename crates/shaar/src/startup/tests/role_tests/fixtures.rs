@@ -246,6 +246,29 @@ pub(super) fn server_role_config(
         .expect("fixture server role config parses")
 }
 
+/// Server role config text WITHOUT signaling relay fields (L0): the
+/// signaling section keeps only its bind; everything else mirrors
+/// [`server_role_config`].
+pub(super) fn server_role_config_without_relay(
+    target: SocketAddr,
+    bootstrap: SocketAddrV4,
+    transit_uri: &str,
+    fallback: &str,
+) -> ServerConfig {
+    let mainline_bind = SocketAddrV4::new(Ipv4Addr::LOCALHOST, reserve_udp_port());
+    let signaling_bind: SocketAddr = format!("127.0.0.1:{}", reserve_tcp_port())
+        .parse()
+        .expect("reserved signaling bind");
+    let text = format!(
+        "target: {target}\nfallback: {fallback}\nnetwork: {{\n    mainline: {{\n        \
+         bind: {mainline_bind}\n        bootstrap: [\n            {bootstrap}\n        ]\n    \
+         }}\n    signaling: {{\n        bind: {signaling_bind}\n    }}\n    ygg: {{\n        \
+         peers: [\n            {transit_uri}\n        ]\n    }}\n}}\n",
+    );
+    ServerConfig::from_text(&text, &ServerOverrides::default())
+        .expect("fixture server role config parses")
+}
+
 /// Client role config text (ktav). `listen` is a loopback ephemeral port;
 /// the legacy `server_address` locator is emitted ONLY when the caller
 /// passes `direct_hint` — the key-only cases must not carry it. Parsed via

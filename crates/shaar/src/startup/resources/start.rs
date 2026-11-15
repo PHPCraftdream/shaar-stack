@@ -223,7 +223,9 @@ impl SharedResourcesStart {
         let signaling = network.signaling();
         let signaling_bind = signaling.map(|settings| settings.bind());
         let configured_relay = signaling.and_then(|settings| {
-            RelayAddr::new(*settings.relay_peer_id(), settings.relay_address()).ok()
+            settings
+                .relay()
+                .and_then(|(peer_id, address)| RelayAddr::new(*peer_id, *address).ok())
         });
         let mainline = network
             .mainline()
@@ -243,7 +245,7 @@ impl SharedResourcesStart {
         let (completion_tx, _) = watch::channel(None);
         let (owner_commands, mut owner_requests) = mpsc::channel(1);
         let shared = Arc::new(SharedState {
-            configured_relay: configured_relay.expect("preflight validated relay settings"),
+            configured_relay,
             slot: std::sync::Mutex::new(super::CompositionSlot {
                 resources: None,
                 closing: None,

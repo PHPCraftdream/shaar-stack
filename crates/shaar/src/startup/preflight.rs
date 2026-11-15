@@ -99,19 +99,24 @@ fn preflight_shared<'a>(
         });
     }
     let signaling = network.signaling().ok_or(StartupError::NetworkRequired)?;
-    let relay_peer_id = *signaling.relay_peer_id();
     let local_peer_id = PeerId::from_bytes(&identity.peer_id_bytes())
         .expect("local identity multihash is a valid PeerId");
-    // A node cannot pin itself as its own relay, and it cannot pin itself
-    // as its own service either.
-    if relay_peer_id == local_peer_id {
+    // Relay-optional startup (L0): the relay conflicts are checked only when
+    // a relay is pinned; a relay-less composition pins no infrastructure.
+    let relay_peer_id = signaling.relay().map(|(peer_id, _)| *peer_id);
+    if let Some(relay_peer_id) = relay_peer_id
+        && relay_peer_id == local_peer_id
+    {
         return Err(StartupError::IdentityConflict { role: "relay" });
     }
     for key in service_keys {
-        if peer_id_of(key) == relay_peer_id {
+        let peer = peer_id_of(key);
+        if let Some(relay_peer_id) = relay_peer_id
+            && peer == relay_peer_id
+        {
             return Err(StartupError::IdentityConflict { role: "relay" });
         }
-        if peer_id_of(key) == local_peer_id {
+        if peer == local_peer_id {
             return Err(StartupError::IdentityConflict { role: "service" });
         }
     }
@@ -120,7 +125,14 @@ fn preflight_shared<'a>(
     // legitimate application peer.
     for key in app_peers {
         let peer = peer_id_of(key);
-        if peer == local_peer_id || peer == relay_peer_id {
+        if peer == local_peer_id {
+            return Err(StartupError::IdentityConflict {
+                role: "application",
+            });
+        }
+        if let Some(relay_peer_id) = relay_peer_id
+            && peer == relay_peer_id
+        {
             return Err(StartupError::IdentityConflict {
                 role: "application",
             });

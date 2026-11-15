@@ -2,7 +2,8 @@
 //!
 //! Native priority is fixed: direct candidates first — public/reflexive-scope
 //! candidates ahead of private/local-scope ones, every private/local connect
-//! bounded by a fixed slice (R1) — then key-directed relay negotiation, and
+//! bounded by a fixed slice (R1) — then key-directed relay negotiation, which
+//! exists only when the signaling settings pin a relay (L0), and
 //! Yggdrasil only ever on the standby owner's fallback side. All dials are
 //! bounded by the caller-supplied attempt deadline; a link completed after
 //! the deadline is abandoned, never returned.
@@ -50,6 +51,7 @@ fn fatal_peer_error(error: &NetworkError) -> bool {
 }
 
 /// Direct-then-relay native dialer over the transferred signaling endpoint.
+/// The relay phase exists only when a relay is configured (L0).
 /// The client role keeps the endpoint behind an [`Arc`] because dialing only
 /// uses `&self` methods; the role never accepts native sessions, so no
 /// exclusive access is required and no interior mutability is introduced.
@@ -59,14 +61,10 @@ pub(crate) struct NativeDialer {
     resources: SharedResources,
     candidates: Vec<SocketAddr>,
     refresh_after_loss: bool,
-    /// Retained relay-operations handle of the live-transferred endpoint; the
-    /// reserved lease is owned here and released in [`Dialer::close`].
-    ops: RelayOperations,
-    /// Validated configured relay address, taken from the signaling settings
-    /// at construction; the reserved lease carrying it is owned here and
-    /// released in [`Dialer::close`]. (`RelayLease::relay` consumes the lease,
-    /// so the address is carried separately.)
-    relay_addr: RelayAddr,
+    /// Configured relay pair (pinned address, retained ops handle); present
+    /// only when the signaling settings carry `relay`/`relay_address` (L0).
+    /// The reserved lease is owned here and released in [`Dialer::close`].
+    relay: Option<(RelayAddr, RelayOperations)>,
     lease: Option<RelayLease>,
     #[cfg(test)]
     events: Option<super::RoleEventLog>,
@@ -78,8 +76,7 @@ impl NativeDialer {
         peer: PublicKey,
         resources: SharedResources,
         candidates: Vec<SocketAddr>,
-        relay_addr: RelayAddr,
-        ops: RelayOperations,
+        relay: Option<(RelayAddr, RelayOperations)>,
         #[cfg(test)] events: Option<super::RoleEventLog>,
     ) -> Self {
         Self {
@@ -88,8 +85,7 @@ impl NativeDialer {
             resources,
             candidates,
             refresh_after_loss: false,
-            relay_addr,
-            ops,
+            relay,
             lease: None,
             #[cfg(test)]
             events,
@@ -127,21 +123,22 @@ impl NativeDialer {
         Ok(())
     }
 
-    /// Reserves the configured relay exactly once per dialer lifetime over
-    /// the retained relay-operations handle; the lease is owned here and
-    /// released in [`Dialer::close`]. The address itself comes from the
-    /// validated signaling settings at construction, never from the lease
+    /// Resolves the negotiation target and reserves the configured relay
+    /// exactly once per dialer lifetime over the retained ops handle. With
+    /// no configured relay there is no negotiation target (L0). The lease is
+    /// owned here and released in [`Dialer::close`]; the address itself comes
+    /// from the validated signaling settings, never from the lease
     /// (`RelayLease::relay` consumes the lease).
-    async fn ensure_relay(&mut self) -> Result<(), DialError> {
+    async fn ensure_relay(&mut self, relay_addr: RelayAddr) -> Result<(), DialError> {
         if self.lease.is_some() {
             return Ok(());
         }
-        self.lease = Some(
-            self.ops
-                .reserve(self.relay_addr)
-                .await
-                .map_err(|_| DialError)?,
-        );
+        let Some((_, ops)) = self.relay.as_ref() else {
+            return Err(DialError);
+        };
+        let ops = ops.clone();
+        let lease = ops.reserve(relay_addr).await.map_err(|_| DialError)?;
+        self.lease = Some(lease);
         Ok(())
     }
 }
@@ -187,6 +184,14 @@ fn public_first_order(candidates: &mut [SocketAddr]) {
     // `sort_by_key` is stable and `false` (public) sorts before `true` (local); the
     // list is bounded by MAX_CANDIDATES, so this is a handful of comparisons.
     candidates.sort_by_key(|candidate| candidate_is_local(*candidate));
+}
+
+/// L0 seam: the relay negotiation target of one attempt. `None` — no relay
+/// is configured, so the negotiation phase does not exist for this dialer
+/// and the attempt ends typed instead of dialing unconfigured
+/// infrastructure or hanging.
+fn negotiation_target(relay: &Option<(RelayAddr, RelayOperations)>) -> Option<RelayAddr> {
+    relay.as_ref().map(|(relay_addr, _)| *relay_addr)
 }
 
 /// The direct-candidate phase of one attempt (R1). Candidates are ordered
@@ -246,8 +251,8 @@ impl Dialer for NativeDialer {
     /// One attempt: direct candidates first — public/reflexive-scope
     /// candidates ahead of private/local-scope ones, every private/local
     /// connect bounded by a fixed slice and a timed-out candidate dropped
-    /// from the list (R1) — then relay negotiation only when all direct
-    /// candidates failed and time remains. A failed cold Mainline lookup does
+    /// from the list (R1) — then relay negotiation only when a relay is
+    /// configured, all direct candidates failed and time remains. A failed cold Mainline lookup does
     /// NOT end the attempt: the pinned relay is addressed by key alone, so
     /// the dial still reaches relay negotiation. Native priority is
     /// unchanged (direct candidates first, relay negotiation second).
@@ -282,14 +287,18 @@ impl Dialer for NativeDialer {
             }
             return Ok(session);
         }
-        // Relay negotiation only when time remains: exhausting the list
-        // exactly at the deadline still ends the attempt inside the unchanged
-        // budget.
+        // Relay negotiation only when a relay is configured and time remains:
+        // exhausting the list exactly at the deadline still ends the attempt
+        // inside the unchanged budget. With no configured relay the phase
+        // does not exist (L0): the attempt ends typed here — no relay dial
+        // is attempted and nothing hangs.
         if Instant::now() >= deadline {
             return Err(DialError);
         }
-        self.ensure_relay().await?;
-        let relay = self.relay_addr;
+        let Some(relay) = negotiation_target(&self.relay) else {
+            return Err(DialError);
+        };
+        self.ensure_relay(relay).await?;
         match timeout_at(deadline, self.endpoint.connect_via(self.peer, relay)).await {
             Ok(Ok(session)) => {
                 // A Custom negotiation connection is not yet a Native payload route.
@@ -324,8 +333,10 @@ impl Dialer for NativeDialer {
     /// error is invented here.
     /// cancel-safe: yes — an interrupted close is resumable by another call.
     async fn close(&mut self) -> Result<(), DialError> {
-        if self.lease.take().is_some() {
-            let _ = self.ops.release(self.relay_addr).await;
+        if self.lease.take().is_some()
+            && let Some((relay_addr, ops)) = self.relay.as_ref()
+        {
+            let _ = ops.release(*relay_addr).await;
         }
         Ok(())
     }

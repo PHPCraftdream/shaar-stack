@@ -16,8 +16,9 @@ use crate::path::PathKind;
 use crate::startup::role::{ClientRole, RoleEvent, ServerRole};
 
 use super::fixtures::{
-    bootstrap_v4, client_role_config, echo_target, forward_and_echo, identity, probe_claim_free,
-    pub_key_hex, role_logs, server_role_config, start_listener, tuned_policy,
+    bootstrap_v4, client_role_config, echo_target, forward_and_echo, identity, pin_role,
+    probe_claim_free, pub_key_hex, role_logs, server_role_config, server_role_config_without_relay,
+    start_listener, tuned_policy,
 };
 
 // Unique seeds (see the fixtures.rs discipline comment): server 0x5E, client
@@ -27,6 +28,13 @@ const CASE_S_CLIENT: u8 = 0x5F;
 const CASE_S_TRANSIT: u8 = 0x60;
 const SIGNAL_BUDGET: Duration = Duration::from_secs(60);
 const PROBE_BUDGET: Duration = Duration::from_secs(10);
+
+// L0 relay-less server readiness case: service 0x69, allowlist-only key
+// 0x6F (no transport starts with it), transit 0x71. Fresh bytes per the
+// fixtures.rs discipline.
+const CASE_R_SERVICE: u8 = 0x69;
+const CASE_R_CLIENT: u8 = 0x6F;
+const CASE_R_TRANSIT: u8 = 0x71;
 
 fn key32(identity: &Identity) -> [u8; 32] {
     identity.public_key_bytes()
@@ -462,4 +470,82 @@ async fn signal_mode_negotiates_but_ygg_never_carries_application_payload() {
     })
     .await
     .expect("signal case completes within its budget");
+}
+
+/// L0: the composed server role reaches ready with NO signaling relay
+/// fields at all — the reservation phase does not exist (a regression
+/// would retry reservations against a nonexistent relay and fail with the
+/// typed `RelayReserve` error instead of admitting), both sockets bind and
+/// the joined shutdown is clean.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn composed_server_reaches_ready_without_relay_fields() {
+    tokio::time::timeout(SIGNAL_BUDGET, async {
+        let mut service_peer = LoopbackPeer::bind().await;
+        let (transit, transit_port) = start_listener(CASE_R_TRANSIT).await;
+        let transit_uri = format!("tcp://127.0.0.1:{transit_port}");
+        let (echo, echo_address) = echo_target().await;
+
+        let server_identity = identity(CASE_R_SERVICE);
+        let client_key = PublicKey::from_bytes(&identity(CASE_R_CLIENT).public_key_bytes())
+            .expect("fixture allowlist key");
+        // No relay fixture and no relay fields in the config at all.
+        let server_config = server_role_config_without_relay(
+            echo_address,
+            bootstrap_v4(&service_peer),
+            &transit_uri,
+            "signal",
+        );
+        let (server_log, _client_log) = role_logs();
+        let mut server_role = ServerRole::with_events(
+            server_config,
+            &server_identity,
+            Allowlist::new(&[client_key]).expect("fixture allowlist"),
+            Limits::new(4).expect("fixture limits"),
+            tuned_policy(),
+            server_log.clone(),
+        )
+        .expect("server role builds");
+        let (server_stop, server_stop_rx) = oneshot::channel();
+        let mut server = pin_role(async move {
+            let mut role = server_role;
+            let mut shutdown = std::pin::pin!(async move {
+                let _ = server_stop_rx.await;
+            });
+            let outcome = role
+                .start()
+                .await
+                .and_then(|()| role.run(&mut shutdown).await);
+            let close = role.shutdown().await;
+            outcome.and(close)
+        });
+
+        let admitted = |event: &RoleEvent| matches!(event, RoleEvent::Admitted);
+        let event = tokio::time::timeout(SIGNAL_BUDGET, async {
+            tokio::select! {
+                result = &mut server => panic!("server role ended before ready: {result:?}"),
+                event = server_log.wait(&admitted) => event,
+            }
+        })
+        .await
+        .expect("the relay-less server composition reaches ready");
+        assert_eq!(event, RoleEvent::Admitted);
+
+        let _ = server_stop.send(());
+        let outcome = tokio::time::timeout(SIGNAL_BUDGET, server)
+            .await
+            .expect("relay-less server stops within the budget")
+            .expect("relay-less server joined shutdown succeeds");
+        assert_eq!(outcome, Ok(()));
+
+        echo.close().await;
+        let closed = tokio::time::timeout(PROBE_BUDGET, transit.close()).await;
+        assert!(
+            closed.is_ok() && closed.expect("checked").is_ok(),
+            "transit close"
+        );
+        probe_claim_free(CASE_R_SERVICE, "relay-less service claim released").await;
+        probe_claim_free(CASE_R_TRANSIT, "relay-less transit claim released").await;
+    })
+    .await
+    .expect("the relay-less readiness case completes within the signal budget");
 }

@@ -3,7 +3,8 @@
 //!
 //! The service key is the only required locator: without an explicit direct
 //! address hint the first dial resolves the key through the owned Mainline
-//! runtime. Native priority is fixed (direct, then relay negotiation); the
+//! runtime. Native priority is fixed (direct, then relay negotiation, which
+//! exists only when the signaling settings pin a relay); the
 //! Yggdrasil fallback exists only in `Mode::Standby`. The client keeps
 //! independent per-endpoint admission pools — route switching must not
 //! contend with a held relay lease (shared admission is the server contract).
@@ -313,17 +314,14 @@ impl ClientRole {
         let payload = resources
             .take_ygg_payload()
             .map(|(ygg_endpoint, pump)| (Arc::new(ygg_endpoint), pump));
-        // Same derivation as the composition; unreachable `None` after preflight is a truthful failure, never a fallback.
+        // Same derivation as the composition; `None` is the relay-optional
+        // composition (L0), not a failure.
         let relay_addr = self
             .config
             .network()
             .and_then(|network| network.signaling())
-            .and_then(|signaling| {
-                RelayAddr::new(*signaling.relay_peer_id(), signaling.relay_address()).ok()
-            });
-        if relay_addr.is_none() {
-            seed.get_or_insert(StartupError::NetworkRequired);
-        }
+            .and_then(|signaling| signaling.relay())
+            .and_then(|(peer_id, address)| RelayAddr::new(*peer_id, *address).ok());
         let mode = match self.config.fallback() {
             Fallback::Signal => Mode::Signal,
             Fallback::Standby => Mode::Standby,
@@ -335,39 +333,41 @@ impl ClientRole {
         let mut native_arc: Option<Arc<SignaledEndpoint>> = None;
         if let Some(endpoint) = native {
             let arc = Arc::new(endpoint);
-            if let (Some(relay_addr), Some(ops)) = (relay_addr, ops) {
-                let ygg_arc = payload.as_ref().map(|(ygg, _)| Arc::clone(ygg));
-                let native_dialer = NativeDialer::new(
-                    Arc::clone(&arc),
-                    service_key,
-                    resources.clone(),
-                    candidates,
-                    relay_addr,
-                    ops,
+            // Relay-optional dialer (L0): the negotiation pair exists only
+            // when the signaling settings pin a relay; the live transfer
+            // always yields the ops handle together with the endpoint.
+            let relay =
+                relay_addr.and_then(|relay_addr| ops.as_ref().map(|ops| (relay_addr, ops.clone())));
+            let ygg_arc = payload.as_ref().map(|(ygg, _)| Arc::clone(ygg));
+            let native_dialer = NativeDialer::new(
+                Arc::clone(&arc),
+                service_key,
+                resources.clone(),
+                candidates,
+                relay,
+                #[cfg(test)]
+                self.events.clone(),
+            );
+            let built = match ygg_arc {
+                // Never dialed when absent: the standby gate blocks the fallback in `Mode::Signal`.
+                Some(ygg) => {
+                    let owner = StandbyOwner::new(
+                        native_dialer,
+                        YggDialer::new(ygg, service_key),
+                        mode,
+                        policy,
+                    );
                     #[cfg(test)]
-                    self.events.clone(),
-                );
-                let built = match ygg_arc {
-                    // Never dialed when absent: the standby gate blocks the fallback in `Mode::Signal`.
-                    Some(ygg) => {
-                        let owner = StandbyOwner::new(
-                            native_dialer,
-                            YggDialer::new(ygg, service_key),
-                            mode,
-                            policy,
-                        );
-                        #[cfg(test)]
-                        let owner = super::observe_owner(owner, self.events.clone());
-                        owner.map(super::boxed_owner)
-                    }
-                    None => StandbyOwner::new(native_dialer, MissingYggDialer, mode, policy)
-                        .map(super::boxed_owner),
-                };
-                match built {
-                    Ok(built) => owner = Some(built),
-                    Err(_) => {
-                        seed.get_or_insert(StartupError::InvalidPolicy);
-                    }
+                    let owner = super::observe_owner(owner, self.events.clone());
+                    owner.map(super::boxed_owner)
+                }
+                None => StandbyOwner::new(native_dialer, MissingYggDialer, mode, policy)
+                    .map(super::boxed_owner),
+            };
+            match built {
+                Ok(built) => owner = Some(built),
+                Err(_) => {
+                    seed.get_or_insert(StartupError::InvalidPolicy);
                 }
             }
             native_arc = Some(arc);

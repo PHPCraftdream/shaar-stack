@@ -106,13 +106,11 @@ pub(crate) fn readiness_view(
     shared: &SharedState,
     resources: Option<&StartupResources>,
 ) -> (bool, bool, Option<SocketAddr>, bool, YggPhase) {
-    let relay_reserved = resources
-        .and_then(|resources| resources.endpoint.as_ref())
-        .is_some_and(|endpoint| {
-            endpoint
-                .relay_operations()
-                .has_reservation(shared.configured_relay)
-        });
+    let relay_reserved = shared.configured_relay.is_some_and(|relay| {
+        resources
+            .and_then(|resources| resources.endpoint.as_ref())
+            .is_some_and(|endpoint| endpoint.relay_operations().has_reservation(relay))
+    });
     (
         resources.is_some_and(|resources| resources.endpoint.is_some()),
         resources.is_some_and(|resources| resources.native_transferred),
@@ -159,7 +157,10 @@ impl YggResources {
 }
 
 pub(crate) struct SharedState {
-    pub(crate) configured_relay: shaar_p2p::RelayAddr,
+    /// The configured relay pair, when the signaling settings pin one;
+    /// `None` is the relay-optional composition (L0) with no reservation
+    /// phase.
+    pub(crate) configured_relay: Option<shaar_p2p::RelayAddr>,
     pub(crate) slot: Mutex<CompositionSlot>,
     status_tx: watch::Sender<Status>,
     pub(crate) status_rx: watch::Receiver<Status>,
@@ -442,15 +443,19 @@ impl SharedResources {
     pub(crate) async fn reserve_configured_relay(
         &self,
     ) -> Result<shaar_p2p::RelayLease, NetworkError> {
-        let (operation, relay) = {
+        let relay = self.shared.configured_relay.ok_or_else(|| {
+            NetworkError::SignalingOperation(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "no signaling relay is configured",
+            ))
+        })?;
+        let operation = {
             let slot = slot_lock(&self.shared.slot);
-            let operation = slot
-                .resources
+            slot.resources
                 .as_ref()
                 .and_then(|resources| resources.endpoint.as_ref())
                 .map(SignaledEndpoint::relay_operations)
-                .ok_or(NetworkError::Closed)?;
-            (operation, self.shared.configured_relay)
+                .ok_or(NetworkError::Closed)?
         };
         operation.reserve(relay).await
     }
@@ -482,15 +487,19 @@ impl SharedResources {
         )
     )]
     pub(crate) async fn release_configured_relay(&self) -> Result<(), NetworkError> {
-        let (operation, relay) = {
+        let relay = self.shared.configured_relay.ok_or_else(|| {
+            NetworkError::SignalingOperation(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "no signaling relay is configured",
+            ))
+        })?;
+        let operation = {
             let slot = slot_lock(&self.shared.slot);
-            let operation = slot
-                .resources
+            slot.resources
                 .as_ref()
                 .and_then(|resources| resources.endpoint.as_ref())
                 .map(SignaledEndpoint::relay_operations)
-                .ok_or(NetworkError::Closed)?;
-            (operation, self.shared.configured_relay)
+                .ok_or(NetworkError::Closed)?
         };
         operation.release(relay).await
     }

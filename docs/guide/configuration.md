@@ -14,7 +14,7 @@ Every example below is a separate file in [`examples/`](examples/). The test mod
 | Shape | Selected by | Examples |
 |---|---|---|
 | Direct-only (legacy) | no `network` object | [`server-direct.ktav`](examples/server-direct.ktav), [`client-direct.ktav`](examples/client-direct.ktav) |
-| Composed (DHT, signaling relay, Yggdrasil) | a `network` object | [`server-composed.ktav`](examples/server-composed.ktav), [`client-composed.ktav`](examples/client-composed.ktav) |
+| Composed (DHT, optional signaling relay, Yggdrasil) | a `network` object | [`server-composed.ktav`](examples/server-composed.ktav), [`client-composed.ktav`](examples/client-composed.ktav), [`server-composed-norelay.ktav`](examples/server-composed-norelay.ktav) |
 
 Without `network` the binaries run direct-only and print that the configured `fallback` is not active. With `network` they run the composed startup. There is no silent switch between the two.
 
@@ -49,11 +49,11 @@ If `network` is present, **all three sections are required** and are checked in 
 | `network.mainline.bind` | no | `0.0.0.0:0` | IPv4 socket address for the Mainline DHT UDP socket. |
 | `network.mainline.bootstrap` | yes | none | 1 to 4 numeric IPv4 `address:port` entries; port nonzero; not wildcard, multicast or broadcast. DNS names are not accepted. No public bootstrap nodes are built in. |
 | `network.signaling.bind` | no | `0.0.0.0:0` | Socket address of the libp2p signaling listener. |
-| `network.signaling.relay` | yes | none | libp2p PeerId (base58, usually starting `12D3KooW`) of the pinned relay node. |
-| `network.signaling.relay_address` | yes | none | Numeric socket address of that relay (same rules as `server_address`). |
+| `network.signaling.relay` | no (together with `relay_address`) | none | libp2p PeerId (base58, usually starting `12D3KooW`) of the pinned relay node. The pair is optional: **both fields together or neither**; exactly one present fails validation naming the missing field. |
+| `network.signaling.relay_address` | no (together with `relay`) | none | Numeric socket address of that relay (same rules as `server_address`). |
 | `network.ygg.peers` | yes | none | 1 to 4 Yggdrasil peer URIs, scheme `tcp` or `tls`, non-empty host and an explicit nonzero port. Query options such as `key`, `priority`, `password`, `maxbackoff`, `sni` are checked structurally. Never echoed in diagnostics; they may carry secrets. |
 
-No default relay, bootstrap node or Yggdrasil peer is provided or contacted by the SDK. The relay is a libp2p relay node that you must supply; this repository ships no relay program.
+No default relay, bootstrap node or Yggdrasil peer is provided or contacted by the SDK. Without the relay pair the composed startup runs without any relay connection: the Server publishes its record and serves through the DHT and Yggdrasil paths, and the Client dials the direct candidates first and then the Yggdrasil path; no relay negotiation phase exists. A configured relay is a libp2p relay node that you must supply; this repository ships no relay program.
 
 ## Validation order and error messages
 
