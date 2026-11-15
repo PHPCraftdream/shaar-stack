@@ -25,7 +25,7 @@ CEILINGS = {
     "sample_interval_ms": (100, 2000),
 }
 TIMELINE_KEYS = ("server_launch_deadline_s", "client_start_offset_s", "client_ready_wait_s",
-                 "client_exchange_s", "shutdown_grace_s", "server_end_offset_s")
+                 "client_exchange_s", "client_punch_observe_s", "shutdown_grace_s", "server_end_offset_s")
 HOST = re.compile(r"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 PEER_URI = re.compile(r"^tcp://((?:[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}):([0-9]{1,5})$")
 PEER_ID = re.compile(r"^12D3KooW[1-9A-HJ-NP-Za-km-z]{44}$")
@@ -146,9 +146,11 @@ def _validate_budgets(budgets):
     line = budgets["timeline"]
     _exact_keys(line, TIMELINE_KEYS, "budgets.timeline")
     _bounded(line, {name: budgets["job_seconds"] for name in TIMELINE_KEYS}, "budgets.timeline")
+    # The Client keeps running after the exchange to observe the punch; the Server outlasts that window.
     client_exchange_end = (line["client_start_offset_s"] + line["client_ready_wait_s"]
-                           + line["client_exchange_s"])
-    client_window = line["client_ready_wait_s"] + line["client_exchange_s"] + line["shutdown_grace_s"]
+                           + line["client_exchange_s"] + line["client_punch_observe_s"])
+    client_window = (line["client_ready_wait_s"] + line["client_exchange_s"]
+                     + line["client_punch_observe_s"] + line["shutdown_grace_s"])
     if line["server_launch_deadline_s"] >= line["client_start_offset_s"]:
         raise ContractError("timeline: the Server must launch before the Client starts")
     if client_exchange_end + 5 > line["server_end_offset_s"]:
@@ -281,10 +283,13 @@ SESSION_LINE = re.compile(
     r"protocol|deadline|stream-reset|task-failure|io|peer-closed))? "
     r"bytes_in=([0-9]{1,20}) bytes_out=([0-9]{1,20})$")
 
-# Native is unreachable by construction (no globally routable local address) and a
-# libp2p relay never carries payload, so both roles must end on the Yggdrasil
-# standby payload path.
-EXPECTED_ROUTE = "ygg-standby"
+# Native is not blocked: the products try to punch toward the other runner. Payload rides the Yggdrasil
+# standby path, and a direct Native path is an observed punch success; both are valid outcomes. The
+# signal path never carries payload in standby mode, so it is the only violation.
+ALLOWED_ROUTES = ("ygg-standby", "native")
+# Counts only: the products print no addresses on this line.
+PUNCH_LINE = re.compile(
+    r"^shaar: (client|server) punch candidates=([0-9]{1,3}) outcome=(direct|fallback) elapsed_ms=([0-9]{1,10})$")
 
 # Exact legacy wording of the dht_record_resolved claim (fallback when unobserved).
 NOT_OBSERVED = ("not observable: the products log nothing about resolution; "
@@ -325,14 +330,55 @@ def scan_product_lines(text, role):
     return route, session
 
 
-def route_violations(route, session):
-    """Observed paths must be the expected standby payload path."""
-    found = []
-    if route is not None and route["path"] != EXPECTED_ROUTE:
-        found.append(f"observed route path {route['path']} contradicts the expected {EXPECTED_ROUTE}")
-    if session is not None and session["path"] != EXPECTED_ROUTE:
-        found.append(f"observed session path {session['path']} contradicts the expected {EXPECTED_ROUTE}")
+def route_paths(text, role):
+    """Distinct route paths in the order first observed for exactly this role."""
+    seen = []
+    for line in text.splitlines():
+        parsed = parse_route_line(line)
+        if parsed and parsed["role"] == role and parsed["path"] not in seen:
+            seen.append(parsed["path"])
+    return seen
+
+
+def scan_punch(text, role):
+    """Punch attempt counts for this role: attempts, direct outcomes and the most candidates offered."""
+    found = {"attempts": 0, "direct": 0, "max_candidates": 0}
+    for line in text.splitlines():
+        match = PUNCH_LINE.fullmatch(line.strip())
+        if match and match[1] == role:
+            found["attempts"] += 1
+            found["direct"] += 1 if match[3] == "direct" else 0
+            found["max_candidates"] = max(found["max_candidates"], int(match[2]))
     return found
+
+
+def path_violations(paths):
+    """Every observed route path must be inside the allowed set."""
+    allowed = " or ".join(ALLOWED_ROUTES)
+    return [f"observed route path {path} is outside the allowed {allowed}" for path in paths if path not in ALLOWED_ROUTES]
+
+
+def route_violations(route, session):
+    """The last observed route and session paths must be inside the allowed set."""
+    found = path_violations([route["path"]] if route is not None else [])
+    if session is not None and session["path"] not in ALLOWED_ROUTES:
+        found.append(f"observed session path {session['path']} is outside the allowed {' or '.join(ALLOWED_ROUTES)}")
+    return found
+
+
+def direct_claim(paths, punch):
+    """Outcome of the direct-path attempt, from observed lines only."""
+    if "native" in paths:
+        return "observed: a direct Native path was established (route line path=native)"
+    if punch["attempts"] == 0:
+        return "not observed: the product stderr carries no punch attempt line"
+    return (f"observed: no direct path; {punch['attempts']} punch attempts (at most {punch['max_candidates']} "
+            "candidates offered), every observed route stayed on Yggdrasil standby")
+
+
+def linger_over(done_at, now, seconds):
+    """True once `seconds` have passed since `done_at`; None means the event has not happened yet."""
+    return done_at is not None and now - done_at >= seconds
 
 
 def dht_claim(route):

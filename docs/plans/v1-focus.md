@@ -1785,10 +1785,14 @@ composed Server must reserve a slot on a libp2p relay to start at all.
 Ubuntu runners, so the path is genuinely over the Internet) complete exactly one
 request/reply of fixed APP bytes in `standby` mode with a Client configured with the
 Server key only, within every budget below. Anything else is a fail, reported as is.
+From the third run on (2026-11-15, owner decision "the live smoke additionally attempts a direct
+path within its contract and records the observed route either way") the same run also records
+whether the coordinated punch produced a direct Native path; that observation never decides
+the pass.
 
 **Non-goals:** no `signal`-mode live run (its outcome depends on NAT behaviour between
-two cloud NATs, which P13 already covers in a controlled network), no load or
-efficiency measurement, no scanning, no Windows run, no real devices, no release or
+two cloud NATs, which P13 already covers in a controlled network; the standby run only
+observes whether a punch happens to succeed), no load or efficiency measurement, no scanning, no Windows run, no real devices, no release or
 legal claim, no retry or rerun, no product change.
 
 ### Exact targets
@@ -1848,13 +1852,32 @@ exercised; one run on two GitHub-hosted runners is not acceptance of the end-to-
 and real devices were not involved. The evidence artifacts are `public-smoke-server-evidence`
 and `public-smoke-client-evidence` of that run.
 
-### How Native is blocked without root
+### Native is not blocked (third run onward): the direct attempt
 
-No sudo, firewall rule or namespace is used. Native QUIC cannot connect because the
-Server runs on a cloud NAT: its published addresses are private ones, and the Client
-has no relay negotiation (silent loopback relay), so no hole punching starts. The
-harness refuses to start if a runner has any globally routable local address. The
-route is therefore established by exclusion, not observed directly (see evidence).
+The first two runs ended on Yggdrasil standby because no punch existed; the route was then
+established by exclusion. Since leaf L4 the relay-less products punch, so nothing blocks
+Native any more and no sudo, firewall rule or namespace is used. Both runners sit behind cloud
+NATs and the Server's record lists only its private addresses (`publish_address` stays off), so
+a direct path exists only if the coordinated punch succeeds: an Offer and Answer over the
+Yggdrasil control datagrams, then QUIC probes from both sides toward the NAT egress addresses.
+The harness still refuses to start if a runner has a globally routable local address.
+
+- **Contact beyond the targets above:** UDP between the two owned runners' NAT egress addresses
+  only, inside the NIC cap; no new third-party target, no scanning. The products print counts
+  only (`shaar: <role> punch candidates=<n> outcome=direct|fallback`), never addresses.
+- **Timeline:** the Client keeps running `client_punch_observe_s` (30 s) after the single
+  exchange and stops early on a `route path=native` line; the Server stays up
+  `client_punch_observe_s + 5` s after its target saw the exchange, bounded by its window end.
+  The exchange budget shrinks to 20 s (it took 0.87 s). The 120 s per-process window and every
+  byte cap are unchanged.
+- **Allowed observed paths:** `ygg-standby` (the exchange) and `native` (a punched path);
+  `ygg-signal` is a violation. Evidence carries the route sequence, the punch attempt counts and
+  `claims.direct_path`, a sentence written from the observed lines only.
+- **Meaning of the outcomes:** a direct path is an observation of a public-network punch, an
+  unpunched cloud NAT (likely: the cloud SNAT does not keep ports) is recorded as that
+  observation, and neither decides v1. The acceptance of the punch is the namespace matrix
+  (`scenarios.md` A5). The amended contract bytes have SHA-256
+  `ba8a28f77f06a85200569051d58f29d3b7f2adf18ec7c1886b737a1c42c5acf3`.
 
 ### Enforced budgets (per dispatch: one run, zero retries, two runners)
 

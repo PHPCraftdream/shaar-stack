@@ -410,10 +410,16 @@ def run_server(args, clock=time.time):
     meter = new_meter(setup)
     evidence = base_evidence("server", setup)
     product = Product(setup["exe"], config, workdir, meter, budgets["sample_interval_ms"] / 1000)
+    done = {"at": None}
+
+    def settled():
+        # The Client observes the punch after the exchange; the Server stays up for that window, bounded by its end.
+        if done["at"] is None and target.done.is_set():
+            done["at"] = clock()
+        return CONTRACT.linger_over(done["at"], clock(), budgets["timeline"]["client_punch_observe_s"] + 5)
+
     try:
-        wait_until(line["server_end_at"], product, clock, extra=lambda: target.done.is_set())
-        if target.done.is_set():
-            time.sleep(3)  # let the stream close cleanly before SIGINT
+        wait_until(line["server_end_at"], product, clock, extra=settled)
     finally:
         alive = product.alive()
         code = product.stop(budgets["timeline"]["shutdown_grace_s"])
@@ -431,6 +437,10 @@ def run_server(args, clock=time.time):
     if route is None:
         evidence["observed"]["route_fallback"] = "not observed: no structured route line in the product stderr (older binary)"
     evidence["failures"].extend(CONTRACT.route_violations(route, session))
+    text = product_stderr_text(workdir)
+    paths, punch = CONTRACT.route_paths(text, "server"), CONTRACT.scan_punch(text, "server")
+    evidence["observed"].update(route_sequence=paths, punch=punch)
+    evidence["failures"].extend(CONTRACT.path_violations(paths))
     evidence["failures"].extend(server_failures(relay is not None, totals, evidence["target"]))
     return finish("server", setup, evidence, product, meter, code, secrets)
 
@@ -454,9 +464,9 @@ def run_client(args, clock=time.time, sleep=time.sleep):
                                              network_text(setup, relay_address)), encoding="utf-8")
     meter = new_meter(setup)
     evidence = base_evidence("client", setup)
-    evidence["native_block"] = ("by construction: no globally routable local address; relay is an owned silent loopback listener"
-                                if relay_configured else
-                                "by construction: no globally routable local address; no relay is configured")
+    evidence["native_policy"] = ("Native is not blocked: no globally routable local address, so a direct path needs a punch; "
+                                 + ("relay is an owned silent loopback listener" if relay_configured
+                                    else "no relay is configured"))
     product = Product(setup["exe"], config, workdir, meter, budgets["sample_interval_ms"] / 1000)
     result = None
     try:
@@ -468,6 +478,10 @@ def run_client(args, clock=time.time, sleep=time.sleep):
             evidence["failures"].append("client not ready: listener or Yggdrasil peer connection missing")
         else:
             result = exchange(front, setup["nonce"], timing["client_exchange_s"], budgets["app"]["reply_bytes_max"])
+            if result is not None and result["match"]:
+                # One exchange only; the product keeps punching, so observe until a direct route line or the window ends.
+                wait_until(clock() + timing["client_punch_observe_s"], product, clock,
+                           extra=lambda: "native" in CONTRACT.route_paths(product_stderr_text(workdir), "client"))
     except (OSError, socket.timeout) as error:
         evidence["failures"].append("APP exchange failed: " + type(error).__name__)
     finally:
@@ -483,13 +497,16 @@ def run_client(args, clock=time.time, sleep=time.sleep):
     if route is None:
         evidence["observed"]["route_fallback"] = "not observed: no structured route line in the product stderr (older binary)"
     evidence["failures"].extend(CONTRACT.route_violations(route, session))
+    text = product_stderr_text(workdir)
+    paths, punch = CONTRACT.route_paths(text, "client"), CONTRACT.scan_punch(text, "client")
+    evidence["observed"].update(route_sequence=paths, punch=punch)
+    evidence["failures"].extend(CONTRACT.path_violations(paths))
     evidence["claims"] = {
+        "direct_path": CONTRACT.direct_claim(paths, punch),
         "dht_record_resolved": CONTRACT.dht_claim(route),
         "route": (f"observed: the client route line reports path={route['path']} resolve={route['resolve']}"
                   if route is not None else
-                  ("Yggdrasil standby inferred by exclusion (no Native path by construction, no relay configured); not directly observed"
-                   if not relay_configured else
-                   "Yggdrasil standby inferred by exclusion (no Native path by construction, no relay negotiation); not directly observed")),
+                  "not observed: no structured route line in the product stderr (older binary)"),
         "app_payload_bytes": 0 if result is None else result["request_bytes"] + result["reply_bytes"]}
     return finish("client", setup, evidence, product, meter, code, secrets)
 
