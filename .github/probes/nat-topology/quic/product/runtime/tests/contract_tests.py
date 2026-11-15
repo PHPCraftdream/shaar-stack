@@ -75,7 +75,7 @@ class ProductContractTests(unittest.TestCase):
                              ("cone", False, 0, 1), name)
             self.assertTrue(cases[name]["ygg_client_blocked"], name)
             self.assertTrue(cases[name]["relay_first"], name)
-            for absent in ("direct", "norelay", "dht_observed", "publish"):
+            for absent in ("norelay", "dht_observed", "publish", "dht_denied"):
                 self.assertNotIn(absent, cases[name], name)
         for name, blocked in (("dnat-cone-norelay-signal", False), ("dnat-cone-norelay-standby", False)):
             self.assertEqual((cases[name]["nat"], cases[name]["direct"], cases[name]["target_accepts"], cases[name]["client_exit"]),
@@ -130,7 +130,8 @@ class ProductContractTests(unittest.TestCase):
                 self.assertEqual(spec["nat"], "cone" if "cone" in name else "random", name)
             if spec.get("direct"):
                 self.assertEqual((spec["target_accepts"], spec["client_exit"]), (1, 0), name)
-            if spec["net"] == "dnat" and not spec["direct"]:
+            # dnat-sym-standby is the one fail-closed-for-direct case whose payload rides Yggdrasil (accepts 1, exit 0).
+            if spec["net"] == "dnat" and not spec["direct"] and name != "dnat-sym-standby":
                 self.assertEqual((spec["target_accepts"], spec["client_exit"]), (0, 1), name)
         literal = [{"mode": "signal", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 1},
                    {"mode": "standby", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0}]
