@@ -44,7 +44,7 @@ This page separates what was written, what ran in GitHub CI, and what has no evi
 
 - One fixed TCP target per server; no UDP forwarding; no GUI; one process per role.
 - The client listener does not authenticate local applications: any local process that can reach `listen` uses the client's access. The listener is loopback-only; protect the host.
-- Legal notices of third-party material are incomplete (`docs/legal/`); this guide gives no license clearance, and no release has been made.
+- Third-party notices assemble for the linked graph with no distributed blockers (`docs/legal/`); the elected-canonical-text rows are an engineering election on the owner's delegation — this guide still gives no license clearance, and no release has been made.
 
 ## Platforms
 

@@ -108,6 +108,7 @@ def _parsed(edges, feats):
 
 _BASE_EDGES = [(("shaar", "0.1.0"), ("tokio", "1.54.1")), (("shaar", "0.1.0"), ("hex", "0.4.3")),
                (("base256emoji", "1.0.2"), ("const-str", "0.4.3")), (("shaar", "0.1.0"), ("base256emoji", "1.0.2")),
+               (("multibase", "0.9.3"), ("base45", "3.2.0")),
                (("shaar", "0.1.0"), ("shaar-ygg", "0.1.0"))]
 
 
@@ -117,11 +118,12 @@ class CheckEdgesTests(unittest.TestCase):
         kept = [edge for edge in _BASE_EDGES if edge not in removed]
         y.check_edges(before, _parsed(kept + list(added), {}))
 
-    def test_closure_declared_and_emoji_changes_are_admitted(self):
+    def test_closure_declared_and_multibase_drop_changes_are_admitted(self):
         self.check(added=[(("shaar", "0.1.0"), ("shaar-ygg-core", "0.1.0")),
                           (("tokio", "1.54.1"), ("parking_lot", "0.12.5")),
                           (("shaar-ygg", "0.1.0"), ("tokio", "1.54.1"))],
-                   removed=[(("base256emoji", "1.0.2"), ("const-str", "0.4.3"))])
+                   removed=[(("base256emoji", "1.0.2"), ("const-str", "0.4.3")),
+                            (("multibase", "0.9.3"), ("base45", "3.2.0"))])
 
     def test_undeclared_edge_between_existing_packages_is_rejected(self):
         with self.assertRaisesRegex(AuditError, "unapproved dependency edge: hex"):
@@ -281,12 +283,12 @@ class BackendSourceTests(unittest.TestCase):
                 key = b.key(name, side)
                 feats[role][key] = ()
                 bindings[role][name] = {
-                    "package": name, "version": "1.3.0", "identity": "prepared",
+                    "package": name, "version": b.version(name), "identity": "prepared",
                     "archive_sha256": source["archive"], "tree_sha256": source[side + "_tree"],
                     "manifest_sha256": source[side + "_manifest"],
-                    "recipe_sha256": b.OLD_RECIPE if side == "old" else b.NEW_RECIPE,
+                    "recipe_sha256": b.recipe(name, side),
                 }
-                unit = _form(name, "1.3.0")
+                unit = _form(name, b.version(name))
                 unit["package"] = key
                 units[role].append(unit)
             units[role].append(_form("shaar", "0.1.0", deps=(_dep("iroh", units[role][0]),)))
@@ -318,7 +320,7 @@ class BackendSourceTests(unittest.TestCase):
                     key = b.key(name, "new")
                     value = values.pop(key)
                     if field == "version":
-                        values[(name, "1.3.1", key[2])] = value
+                        values[(name, key[1] + "-drift", key[2])] = value
                     elif field == "source":
                         values[(name, key[1], key[2] + "-drift")] = value
                     elif field == "unchanged":
@@ -372,6 +374,24 @@ class BackendSourceTests(unittest.TestCase):
         same_parsed, same_units = b.comparison_inputs(parsed, units)
         self.assertIs(same_parsed, parsed)
         self.assertIs(same_units, units)
+
+    def test_sources_keep_their_own_version_and_recipe_digests(self):
+        from baseline import backend_sources as b
+        self.assertEqual((b.version("iroh"), b.version("hickory-resolver")), ("1.3.0", "0.26.3"))
+        self.assertTrue(b.key("iroh", "new")[2].endswith(":recipe=" + b.NEW_RECIPE))
+        for side in ("old", "new"):
+            with self.subTest(side=side):
+                self.assertTrue(b.key("hickory-resolver", side)[2].endswith(
+                    ":recipe=" + b.SOURCES["hickory-resolver"][side + "_recipe"]))
+                self.assertNotIn(b.recipe("hickory-resolver", side), (b.OLD_RECIPE, b.NEW_RECIPE))
+
+    def test_hickory_resolver_is_part_of_the_exact_transition(self):
+        from baseline import backend_sources as b
+        parsed, units = self.inputs()
+        parsed["candidate"][4].pop(b.key("hickory-resolver", "new"))
+        parsed["candidate"][4][b.key("hickory-resolver", "old")] = ()
+        with self.assertRaisesRegex(AuditError, "backend source transition: hickory-resolver"):
+            b.comparison_inputs(parsed, units)
 
 
 if __name__ == "__main__":

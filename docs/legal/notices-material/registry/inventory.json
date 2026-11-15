@@ -491,31 +491,32 @@
     "historical_pre_n1": true
   },
   "counts": {
-    "registry_identity_count": 533,
-    "root_registry": 513,
+    "registry_identity_count": 532,
+    "root_registry": 512,
     "nested_registry": 215,
     "exact_root_nested_intersection": 195,
-    "root_only": 318,
+    "root_only": 317,
     "nested_only": 20,
-    "exact_archive_matched_identities": 533,
+    "exact_archive_matched_identities": 532,
+    "retired_identity_count": 1,
     "missing_archive_identities": 0,
     "current_registry_classification_counts": {
       "missing": 2,
-      "package-complete": 502,
+      "package-complete": 504,
       "preserved_complete_text": 15,
-      "reference-only": 14
+      "reference-only": 11
     },
     "current_pass_archive_count": 515,
     "current_pass_status_counts": {
       "missing": 2,
-      "package-complete": 499,
-      "reference-only": 14
+      "package-complete": 501,
+      "reference-only": 11
     },
     "current_pass_material_file_count": 894,
     "current_pass_material_bytes": 4421514,
-    "current_pass_complete_text_rows": 499,
+    "current_pass_complete_text_rows": 501,
     "current_pass_missing_evidence_rows": 2,
-    "registry_text_available_identities": 517
+    "registry_text_available_identities": 519
   },
   "extra_local_data_candidates": [
     {
@@ -3148,61 +3149,6 @@
               }
             ],
             "satisfied_by_available_text": true
-          }
-        ],
-        "component_scoped_text": []
-      }
-    },
-    {
-      "archive_data": [
-        {
-          "receipt_index": 20,
-          "url": "https://static.crates.io/crates/base45/base45-3.2.0.crate",
-          "path": "notices-registry-authorized-1109/0020.crate",
-          "bytes": 12262,
-          "sha256": "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03"
-        }
-      ],
-      "checksum": "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03",
-      "classification": "reference-only",
-      "declared_license": "MIT",
-      "materials": [],
-      "name": "base45",
-      "nested_lock": false,
-      "proposed_url": "https://static.crates.io/crates/base45/base45-3.2.0.crate",
-      "root_lock": true,
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "version": "3.2.0",
-      "manifest_evidence": [
-        {
-          "archive_member": "base45-3.2.0/Cargo.toml",
-          "bytes": 1228,
-          "sha256": "c879aa7b3c00d09e0b3cb19752b06c0d6f3802949bbaca633ed0b4c1b06c8e22",
-          "license": "MIT",
-          "license_file": null
-        }
-      ],
-      "archive_member_count": 16,
-      "decoded_tar_bytes": 51712,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
-      "terms_evidence": {
-        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
-        "declared_expression": "MIT",
-        "groups": [
-          {
-            "expression_group": "MIT",
-            "alternatives": [
-              {
-                "expression": "MIT",
-                "identifiers": [
-                  "MIT"
-                ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
-              }
-            ],
-            "satisfied_by_available_text": false
           }
         ],
         "component_scoped_text": []
@@ -12140,7 +12086,7 @@
         }
       ],
       "checksum": "0590c4a94da3372e83493b956755a6e2266830b6e4e3b101afe66e3f39477b91",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [],
       "name": "enum-assoc",
@@ -12160,7 +12106,7 @@
       ],
       "archive_member_count": 12,
       "decoded_tar_bytes": 48128,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Elected the Apache-2.0 alternative on the owner's 2026-11-14 delegation: the manifest declares MIT OR Apache-2.0, the archive carries no license-named member, and the canonical Apache-2.0 text is receipt-bound. Engineering decision, not legal advice or release authority.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -12178,20 +12124,55 @@
                 "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
               },
               {
+                "availability": "available",
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/canonical/LICENSE-APACHE",
+                    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+                    "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
-      }
+      },
+      "elected_source_binding": {
+        "provenance_class": "elected-canonical-text",
+        "archive_member_count": 12,
+        "manifest_member": "enum-assoc-1.4.1/Cargo.toml",
+        "manifest_bytes": 1355,
+        "manifest_sha256": "a35b747a99e08ce7bb239c2e0843bec0c828ceb61092217c628dcb32ec9dc442",
+        "no_license_file_members": true,
+        "canonical_text_url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+        "canonical_text_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "canonical_text_bytes": 11358,
+        "elected_alternative": "Apache-2.0",
+        "declared_alternatives": [
+          "Apache-2.0",
+          "MIT"
+        ]
+      },
+      "provenance_class": "elected-canonical-text",
+      "raw_materials": [
+        {
+          "source_file": "LICENSE-APACHE",
+          "material_path": "raw-sources/canonical/LICENSE-APACHE",
+          "role": "package_terms",
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "material_bytes": 11358,
+          "material_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ]
     },
     {
       "archive_data": [
@@ -19920,7 +19901,7 @@
         }
       ],
       "checksum": "71c02a5161c313f0cbdbadc511611893584a10a7b6153cb554bdf83ddce99ec2",
-      "classification": "reference-only",
+      "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [
         {
@@ -19958,7 +19939,7 @@
       ],
       "archive_member_count": 16,
       "decoded_tar_bytes": 76800,
-      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "review_note": "Elected the Apache-2.0 alternative on the owner's 2026-11-14 delegation: the manifest declares MIT OR Apache-2.0, the archive carries no license-named member, and the canonical Apache-2.0 text is receipt-bound. Engineering decision, not legal advice or release authority.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
         "declared_expression": "MIT OR Apache-2.0",
@@ -19976,20 +19957,55 @@
                 "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
               },
               {
+                "availability": "available",
                 "expression": "Apache-2.0",
                 "identifiers": [
                   "Apache-2.0"
                 ],
-                "availability": "unestablished",
-                "evidence": [],
-                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+                "evidence": [
+                  {
+                    "raw_material_path": "raw-sources/canonical/LICENSE-APACHE",
+                    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+                    "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+                  }
+                ]
               }
             ],
-            "satisfied_by_available_text": false
+            "satisfied_by_available_text": true
           }
         ],
         "component_scoped_text": []
-      }
+      },
+      "elected_source_binding": {
+        "provenance_class": "elected-canonical-text",
+        "archive_member_count": 16,
+        "manifest_member": "if-watch-3.2.2/Cargo.toml",
+        "manifest_bytes": 3305,
+        "manifest_sha256": "143b35b4cc0514c3250bd6a93a400a247c620e0362deecbc4dbded53c5fc5a07",
+        "no_license_file_members": true,
+        "canonical_text_url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+        "canonical_text_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "canonical_text_bytes": 11358,
+        "elected_alternative": "Apache-2.0",
+        "declared_alternatives": [
+          "Apache-2.0",
+          "MIT"
+        ]
+      },
+      "provenance_class": "elected-canonical-text",
+      "raw_materials": [
+        {
+          "source_file": "LICENSE-APACHE",
+          "material_path": "raw-sources/canonical/LICENSE-APACHE",
+          "role": "package_terms",
+          "identifiers": [
+            "Apache-2.0"
+          ],
+          "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "material_bytes": 11358,
+          "material_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ]
     },
     {
       "archive_data": [
@@ -56114,6 +56130,64 @@
       }
     }
   ],
+  "retired_identities": [
+    {
+      "archive_data": [
+        {
+          "receipt_index": 20,
+          "url": "https://static.crates.io/crates/base45/base45-3.2.0.crate",
+          "path": "notices-registry-authorized-1109/0020.crate",
+          "bytes": 12262,
+          "sha256": "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03"
+        }
+      ],
+      "checksum": "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03",
+      "classification": "reference-only",
+      "declared_license": "MIT",
+      "materials": [],
+      "name": "base45",
+      "nested_lock": false,
+      "proposed_url": "https://static.crates.io/crates/base45/base45-3.2.0.crate",
+      "root_lock": false,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "3.2.0",
+      "manifest_evidence": [
+        {
+          "archive_member": "base45-3.2.0/Cargo.toml",
+          "bytes": 1228,
+          "sha256": "c879aa7b3c00d09e0b3cb19752b06c0d6f3802949bbaca633ed0b4c1b06c8e22",
+          "license": "MIT",
+          "license_file": null
+        }
+      ],
+      "archive_member_count": 16,
+      "decoded_tar_bytes": 51712,
+      "review_note": "Only context/reference material selected; package-level complete text was not established.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT",
+        "groups": [
+          {
+            "expression_group": "MIT",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "unestablished",
+                "evidence": [],
+                "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+              }
+            ],
+            "satisfied_by_available_text": false
+          }
+        ],
+        "component_scoped_text": []
+      },
+      "retired_reason": "Left the resolved graph: the reviewed multibase 0.9.3 preparation no longer declares the base45 dependency (the Base45 encoding is removed); no lawful notice could be reproduced because no authentic license text exists upstream. The held archive evidence stays bound to receipt index 20."
+    }
+  ],
   "identity_fields": [
     "source",
     "name",
@@ -56332,7 +56406,8 @@
   "raw_source_supplement": {
     "material_bytes": 38580,
     "material_count": 8,
-    "no_license_choice_or_legal_clearance": true,
+    "no_legal_clearance": true,
+    "or_election_recorded": true,
     "package_count": 5,
     "receipt_bytes": 5542,
     "receipt_path": "raw-sources/receipts/receipt.json",
@@ -56352,6 +56427,13 @@
     "blocker_material_count": 1,
     "blocker_material_bytes": 1074,
     "blocker_package_count": 1,
-    "blocker_index_rows": 1
+    "blocker_index_rows": 1,
+    "elected_receipt_path": "raw-sources/receipts/apache-canonical-receipt.json",
+    "elected_receipt_sha256": "d1d45a8baf42cc1b6b7716c3fa61b61f398fb399de74e9b5e65ee33308c7a1db",
+    "elected_receipt_bytes": 1717,
+    "elected_material_count": 2,
+    "elected_material_bytes": 22716,
+    "elected_package_count": 2,
+    "elected_provenance_class": "elected-canonical-text"
   }
 }

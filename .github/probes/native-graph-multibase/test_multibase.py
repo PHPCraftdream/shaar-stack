@@ -32,8 +32,11 @@ EMOJI_CHECKSUMS = {
     "base256emoji": ("1.0.2", "b5e9430d9a245a77c92176e649af6e275f20839a48389859d1661e9a128d077c"),
     "const-str": ("0.4.3", "2f421161cb492475f1661ddc9815a745a1c894592070661180fdec3d4872e9c3"),
     "match-lookup": ("0.1.3", "549e39695cc0b640f3cb378053832db3d2133422d49e8dcae5c866a2aaf1f730"),
+    "base45": ("3.2.0", "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03"),
 }
 DOC_LINE = b"/// Base256Emoji (alphabet: " + recipe.ROCKET * 250 + recipe.EMOJI_DOC_SUFFIX
+BASE45_DOC = (b"/// Base45, rfc9285 (alphabet: "
+              b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:).\n")
 PREPARED_SOURCE = ("path:prepared:multibase@0.9.3:archive=" + CHECKSUM
                    + ":tree=" + "b" * 64 + ":recipe=" + "c" * 64)
 
@@ -42,9 +45,10 @@ def manifest() -> bytes:
     return (b'[package]\nname = "multibase"\nversion = "0.9.3"\nlicense = "MIT"\n'
             b'\n[dependencies.base-x]\nversion = "0.2.7"\ndefault-features = false\n'
             b'\n[dependencies.base256emoji]\nversion = "1.0.2"\n'
-            b'\n[dependencies.base45]\nversion = "3.2.0"\n'
+            b'\n[dependencies.base45]\nversion = "3.2.0"\ndefault-features = false\n'
             b'\n[dependencies.data-encoding]\nversion = "2.3.1"\n'
-            b'\n[dependencies.data-encoding-macro]\nversion = "0.1.9"\n')
+            b'\n[dependencies.data-encoding-macro]\nversion = "0.1.9"\n'
+            b'\n[features]\nstd = [\n    "data-encoding/std",\n    "base45/std",\n]\n')
 
 
 def original_files() -> dict[str, bytes]:
@@ -55,12 +59,17 @@ def original_files() -> dict[str, bytes]:
         b"impl From<base256emoji::DecodeError> for Error {\n    fn from(_: base256emoji::DecodeError) -> Self {\n"
         b"        Self::InvalidBaseString\n    }\n}\n\n"
         b"impl From<data_encoding::DecodeError> for Error {\n    fn from(_: data_encoding::DecodeError) -> Self {\n"
+        b"        Self::InvalidBaseString\n    }\n}\n\n"
+        b"impl From<base45::DecodeError> for Error {\n    fn from(_: base45::DecodeError) -> Self {\n"
         b"        Self::InvalidBaseString\n    }\n}\n"
     )
+    # Real layout: the Base45 pair sits among the early variants, the emoji pair closes the enum.
     base_rs = (
         b"build_base_enum! {\n"
-        b"    'u' => Base64Url,\n"
-        b"    'U' => Base64UrlPad,\n"
+        + b"    " + BASE45_DOC
+        + b"    'R' => Base45,\n"
+        + b"    'u' => Base64Url,\n"
+        + b"    'U' => Base64UrlPad,\n"
         + DOC_LINE
         + b"    '" + recipe.ROCKET + b"' => Base256Emoji,\n"
         + b"}\n"
@@ -84,18 +93,39 @@ def original_files() -> dict[str, bytes]:
         b"}\n"
         b"\n"
         b"derive_base_encoding! {\n    Base2, encoding::BASE2;\n}\n"
+        b"\n"
+        + BASE45_DOC
+        + b"pub(crate) struct Base45;\n"
+        b"\n"
+        b"impl BaseCodec for Base45 {\n"
+        b"    fn encode<I: AsRef<[u8]>>(input: I) -> String {\n"
+        b"        base45::encode(input.as_ref())\n"
+        b"    }\n"
+        b"\n"
+        b"    fn decode<I: AsRef<str>>(input: I) -> Result<Vec<u8>> {\n"
+        b"        let uppercased = input.as_ref().to_ascii_uppercase();\n"
+        b"        Ok(base45::decode(&uppercased)?)\n"
+        b"    }\n"
+        b"}\n"
     )
     tests_rs = (
         b"        (Base64UrlPad, \"UeWVzIG1hbmkgIQ==\"),\n"
         b'        (Base256Emoji, "' + recipe.ROCKET + b'"),\n'
         b'        (Base256Emoji, "' + recipe.ROCKET * 2 + b'"),\n'
         b'        (Base256Emoji, "' + recipe.ROCKET * 3 + b'"),\n'
+        b'        (Base45, "9"),\n'
+        b'        (Base45, "ABC"),\n'
+        b'        (Base45, "Hello + world/:-"),\n'
+        b'        (Base45, "0123456789ABCDEFGHIJ"),\n'
         b"    ];\n"
     )
     return {
         "Cargo.toml": manifest(),
         "Cargo.toml.orig": b'[dependencies]\nbase-x = { version = "0.2.7", default-features = false }\n'
-                           b'base256emoji = "1.0.2"\ndata-encoding = "2.3.1"\n',
+                           b'base256emoji = "1.0.2"\n'
+                           b'base45 = { version = "3.2.0", default-features = false }\n'
+                           b'data-encoding = "2.3.1"\n'
+                           b'[features]\nstd = ["data-encoding/std", "base45/std"]\n',
         "src/base.rs": base_rs,
         "src/error.rs": error_rs,
         "src/impls.rs": impls_rs,
@@ -122,12 +152,18 @@ class RecipeTransformTests(unittest.TestCase):
                 self.assertEqual(data, files[name], name)
                 continue
             self.assertNotIn(b"base256emoji", data.lower(), name)
+            self.assertNotIn(b"base45", data.lower(), name)
             self.assertNotIn(recipe.ROCKET, data, name)
         self.assertEqual(recipe.reverse(files, changed), files)
-        self.assertIn(b"[dependencies.base45]", changed["Cargo.toml"])
+        self.assertNotIn(b"[dependencies.base45]", changed["Cargo.toml"])
         self.assertNotIn(b"Emoji::encode", changed["src/impls.rs"])
         self.assertNotIn(b"Base256Emoji", changed["src/base.rs"])
         self.assertNotIn(b"(Base256Emoji,", changed["tests/lib.rs"])
+        self.assertNotIn(b"Base45", changed["src/base.rs"])
+        self.assertNotIn(b"Base45", changed["src/impls.rs"])
+        self.assertNotIn(b"Base45", changed["tests/lib.rs"])
+        self.assertNotIn(b"base45", changed["src/error.rs"])
+        self.assertIn(b'std = ["data-encoding/std"]', changed["Cargo.toml.orig"])
 
     def test_transform_rejects_anchor_drift(self):
         mutations = (
@@ -143,6 +179,11 @@ class RecipeTransformTests(unittest.TestCase):
                           + b'        (Base256Emoji, "' + recipe.ROCKET + b'"),\n'},
             lambda data: {**data, "Cargo.toml": data["Cargo.toml"].replace(
                 b"\n[dependencies.base45]", b"\n[dependencies.base45x]")},
+            lambda data: {**data, "Cargo.toml": data["Cargo.toml"].replace(
+                b'[dependencies.base45]\nversion = "3.2.0"\n',
+                b'[dependencies.base45]\nversion = "3.2.1"\n')},
+            lambda data: {**data, "src/base.rs": data["src/base.rs"].replace(
+                b"    'R' => Base45,\n", b"    'R' => Base45X,\n")},
             lambda data: {**data, "src/error.rs": data["src/error.rs"].replace(
                 b"impl From<base256emoji::DecodeError>", b"impl From<base256emoji::DecodeError2>")},
             lambda data: {**data, "Cargo.toml.orig": data["Cargo.toml.orig"].replace(
@@ -285,20 +326,21 @@ def product_lock() -> list[dict]:
         lock_entry("match-lookup", "0.1.3", source=REGISTRY,
                    checksum=EMOJI_CHECKSUMS["match-lookup"][1]),
         lock_entry("base-x", "0.2.11", source=REGISTRY, checksum="basex"),
-        lock_entry("base45", "3.2.0", source=REGISTRY, checksum="base45"),
+        lock_entry("base45", "3.2.0", source=REGISTRY,
+                   checksum="240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03"),
         lock_entry("data-encoding", "2.6.0", source=REGISTRY, checksum="de"),
         lock_entry("data-encoding-macro", "0.1.17", source=REGISTRY, checksum="dem"),
     ]
 
 
 def prepared_lock() -> list[dict]:
-    dropped = {"base256emoji", "const-str", "match-lookup"}
+    dropped = {"base256emoji", "const-str", "match-lookup", "base45"}
     after = [entry for entry in copy.deepcopy(product_lock())
              if entry["name"] not in dropped]
     registry = next(entry for entry in after if entry["name"] == "multibase")
     registry.clear()
     registry.update(lock_entry("multibase", "0.9.3",
-                               dependencies=["base-x", "base45", "data-encoding",
+                               dependencies=["base-x", "data-encoding",
                                              "data-encoding-macro"]))
     return after
 
@@ -308,8 +350,13 @@ class LockDeltaTests(unittest.TestCase):
         report = graph.audit_lock_delta(lock_toml(product_lock()), lock_toml(prepared_lock()))
         removed = {tuple(entry) for entry in report["removed"]}
         self.assertIn(("multibase", "0.9.3", graph.REGISTRY), removed)
+        self.assertIn(("base45", "3.2.0", graph.REGISTRY), removed)
         for name, (version, _) in EMOJI_CHECKSUMS.items():
             self.assertIn((name, version, graph.REGISTRY), removed)
+        after = next(entry for entry in prepared_lock() if entry["name"] == "multibase")
+        self.assertEqual(after["dependencies"],
+                         ["base-x", "data-encoding", "data-encoding-macro"])
+        self.assertFalse(any(entry["name"] == "base45" for entry in prepared_lock()))
         self.assertIn((("multibase", "0.9.3", REGISTRY), ("multibase", "0.9.3", "path")),
                       [tuple(entry) for entry in report["source_changed"]])
 

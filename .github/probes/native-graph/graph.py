@@ -270,31 +270,46 @@ def audit_lock_delta(before_bytes: bytes, after_bytes: bytes) -> dict[str, list[
     multibase_old = ("multibase", "0.9.3", REGISTRY)
     multibase_new = ("multibase", "0.9.3", "path")
     multibase_checksum = "7e0e4a371cbf1dfd666b658ba137763edb23c45beb43cfe369b5593cd6b437b6"
-    emoji_chain_versions = {"base256emoji": "1.0.2", "const-str": "0.4.3",
-                            "match-lookup": "0.1.3"}
-    emoji_chain_checksums = {
-        "base256emoji": "b5e9430d9a245a77c92176e649af6e275f20839a48389859d1661e9a128d077c",
-        "const-str": "2f421161cb492475f1661ddc9815a745a1c894592070661180fdec3d4872e9c3",
-        "match-lookup": "549e39695cc0b640f3cb378053832db3d2133422d49e8dcae5c866a2aaf1f730",
+    # Registry helpers the reviewed prepared multibase drops: the base256emoji
+    # chain plus the unused base45 3.2.0 dependency.
+    multibase_drops = {
+        "base256emoji": ("1.0.2", "b5e9430d9a245a77c92176e649af6e275f20839a48389859d1661e9a128d077c"),
+        "const-str": ("0.4.3", "2f421161cb492475f1661ddc9815a745a1c894592070661180fdec3d4872e9c3"),
+        "match-lookup": ("0.1.3", "549e39695cc0b640f3cb378053832db3d2133422d49e8dcae5c866a2aaf1f730"),
+        "base45": ("3.2.0", "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03"),
     }
-    emoji_chain = {(name, version, REGISTRY) for name, version in emoji_chain_versions.items()}
+    multibase_drop_keys = {(name, version, REGISTRY) for name, (version, _) in multibase_drops.items()}
     multibase_switch = multibase_old in before and multibase_new in after
     if multibase_switch:
         multibase_before, multibase_after = before[multibase_old], after[multibase_new]
         if multibase_before.get("checksum") != multibase_checksum or "checksum" in multibase_after:
             raise ValueError("multibase registry checksum replacement mismatch")
         if (multibase_before.get("dependencies", []) != ["base-x", "base256emoji", "base45", "data-encoding", "data-encoding-macro"]
-                or multibase_after.get("dependencies", []) != ["base-x", "base45", "data-encoding", "data-encoding-macro"]):
-            raise ValueError("multibase replacement must drop exactly the base256emoji edge")
-        for name, version in emoji_chain_versions.items():
+                or multibase_after.get("dependencies", []) != ["base-x", "data-encoding", "data-encoding-macro"]):
+            raise ValueError("multibase replacement must drop exactly the base256emoji edge and the base45 edge")
+        for name, (version, checksum) in multibase_drops.items():
             key = (name, version, REGISTRY)
-            if key not in before or before[key].get("checksum") != emoji_chain_checksums[name]:
-                raise ValueError("emoji-chain registry identity mismatch before removal: " + name)
+            if key not in before or before[key].get("checksum") != checksum:
+                raise ValueError("multibase drop registry identity mismatch before removal: " + name)
     permitted_removed = ({dns_old} if dns_old in before and dns_new in after else set())
     if n0_new in after and n0_old in before and before[n0_old].get("checksum") == "e2ab99dfb861450e68853d34ae665243a88b8c493d01ba957321a1e9b2312bbe":
         permitted_removed.add(n0_old)
     if multibase_switch:
-        permitted_removed |= emoji_chain | {multibase_old}
+        permitted_removed |= multibase_drop_keys | {multibase_old}
+    # Already-adopted prepared multibase (path package): the base45 edge and package leave.
+    base45_key = ("base45", "3.2.0", REGISTRY)
+    multibase_prune = (not multibase_switch and multibase_new in before and multibase_new in after
+                       and base45_key in before and base45_key not in after)
+    if multibase_prune:
+        if before[base45_key].get("checksum") != multibase_drops["base45"][1]:
+            raise ValueError("multibase base45 prune registry identity mismatch before removal")
+        prune_before, prune_after = before[multibase_new], after[multibase_new]
+        if (prune_before.get("dependencies", []) != ["base-x", "base45", "data-encoding", "data-encoding-macro"]
+                or prune_after.get("dependencies", []) != ["base-x", "data-encoding", "data-encoding-macro"]
+                or {k: v for k, v in prune_before.items() if k != "dependencies"}
+                != {k: v for k, v in prune_after.items() if k != "dependencies"}):
+            raise ValueError("multibase prune must drop exactly the base45 edge")
+        permitted_removed.add(base45_key)
     permitted_added = ALLOWED_ADDITIONS | set(REVIEWED_TRANSITIVES)
     if multibase_switch:
         permitted_added.add(multibase_new)
@@ -326,7 +341,7 @@ def audit_lock_delta(before_bytes: bytes, after_bytes: bytes) -> dict[str, list[
     for key in set(before) | set(after):
         old = before.get(key)
         new = after.get(key)
-        if key == shaar_key or key in {dns_old, dns_new}:
+        if key == shaar_key or key in {dns_old, dns_new} or (multibase_prune and key == multibase_new):
             continue
         if old is not None and new is not None and old != new:
             raise ValueError(f"unchanged lock identity changed fields: {key}")
@@ -360,14 +375,18 @@ def audit_lock_delta(before_bytes: bytes, after_bytes: bytes) -> dict[str, list[
             if field != "dependencies" and shaar_old.get(field) != shaar_new.get(field):
                 raise ValueError(f"shaar lock fields changed beyond reviewed dependency edges: {field}")
     if multibase_switch:
-        dropped = emoji_chain | {multibase_old}
+        dropped = multibase_drop_keys | {multibase_old}
         if not dropped <= removed or dropped & set(after):
-            raise ValueError("multibase emoji chain removal must be complete and exclusive")
+            raise ValueError("multibase drop removal (base256emoji chain and base45) must be complete and exclusive")
         for owner, package in after.items():
             for dependency in package.get("dependencies", []):
-                if dependency.split()[0] in emoji_chain_versions:
-                    raise ValueError(f"retained lock package still references a removed emoji-chain helper: {owner}")
+                if dependency.split()[0] in multibase_drops:
+                    raise ValueError(f"retained lock package still references a removed multibase helper: {owner}")
         source_changes.append((multibase_old, multibase_new))
+    if multibase_prune:
+        for owner, package in after.items():
+            if any(dependency.split()[0] == "base45" for dependency in package.get("dependencies", [])):
+                raise ValueError(f"retained lock package still references the removed base45 package: {owner}")
     return {"added": sorted(added), "removed": sorted(removed), "source_changed": source_changes}
 
 

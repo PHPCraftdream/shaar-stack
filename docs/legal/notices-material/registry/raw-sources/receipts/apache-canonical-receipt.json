@@ -1,0 +1,36 @@
+{
+  "schema": "canonical-license-acquisition-v1",
+  "authorization": {
+    "user_words": "\u041f\u043e\u0433\u0443\u0433\u043b\u0438, \u043f\u043e\u0441\u043c\u043e\u0442\u0440\u0438 \u0438\u0445 github; \u043d\u0435 \u0437\u043d\u0430\u044e, \u043f\u043e\u0434\u0443\u043c\u0430\u0439 \u0438 \u0440\u0435\u0448\u0438 \u0441\u0430\u043c, \u0433\u043b\u0430\u0432\u043d\u043e\u0435 \u0447\u0442\u043e\u0431\u044b \u0437\u0430\u043a\u043e\u043d\u043d\u043e \u0432\u0441\u0451 \u0431\u044b\u043b\u043e.",
+    "date": "2026-11-14",
+    "scope": "One exact GET of the canonical Apache-2.0 text from www.apache.org serving the elected MIT OR Apache-2.0 alternatives of enum-assoc@1.4.1 and if-watch@3.2.2; inert DATA only"
+  },
+  "bounds": {
+    "requests_max": 1,
+    "per_object_bytes_max": 65536,
+    "redirects": 0,
+    "retries": 0,
+    "concurrency": 1
+  },
+  "execution_or_import": false,
+  "records": [
+    {
+      "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+      "source_file": "LICENSE-APACHE",
+      "identities": [
+        "enum-assoc@1.4.1",
+        "if-watch@3.2.2"
+      ],
+      "status": "completed",
+      "http_status": 200,
+      "date": "2026-11-14",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "redirects": 0
+    }
+  ],
+  "status": "completed",
+  "date": "2026-11-14",
+  "body_bytes_total": 11358,
+  "note": "One GET without redirects, retries or fallback URLs; no request timing was recorded for this acquisition; the text is retained byte-exact and never synthesized. Electing the Apache-2.0 alternative is an engineering decision on the owner's 2026-11-14 delegation, not legal advice and not release authority."
+}

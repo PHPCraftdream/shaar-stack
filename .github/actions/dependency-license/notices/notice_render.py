@@ -6,17 +6,23 @@ import json
 import notice_corpus as corpus
 
 GENERATOR = "shaar-notices 1"
+ELECTED_PROVENANCE = "elected-canonical-text"
 ROLE_ORDER = {"package_terms": 0, "package_embedded_terms": 1, "component_terms": 2, "legal_context": 3}
 PREAMBLE = (
     "This file reproduces, byte for byte, the license and notice texts retained from the upstream\n"
     "sources of every third-party package linked into the products named below for the stated target.\n"
     "Where a package declares alternatives joined by OR, the texts of all alternatives are listed and\n"
-    "no alternative is elected. Identical texts are printed once and referenced by number. Each text\n"
-    "is framed by BEGIN and END lines; its byte count and SHA-256 are on the BEGIN line, and one\n"
-    "newline is added before the END line. A package marked provenance=<class> has texts that are not\n"
-    "the license files of its packaged revision: predecessor-repository means the text comes from the\n"
-    "repository the package was extracted from; package-license-index means the package's own LICENSE\n"
-    "names the retained files that carry its terms. This file is not a legal determination.\n"
+    "no alternative is elected, except a package marked provenance=elected-canonical-text, where a\n"
+    "reviewed election recorded on the owner's delegation chose the Apache-2.0 alternative and the\n"
+    "retained text is the canonical Apache License 2.0, not a file from the package. Identical texts\n"
+    "are printed once and referenced by number. Each text is framed by BEGIN and END lines; its byte\n"
+    "count and SHA-256 are on the BEGIN line, and one newline is added before the END line. A package\n"
+    "marked provenance=<class> has texts that are not the license files of its packaged revision:\n"
+    "predecessor-repository means the text comes from the repository the package was extracted from;\n"
+    "package-license-index means the package's own LICENSE names the retained files that carry its\n"
+    "terms; elected-canonical-text means the package's own manifest offers the Apache-2.0 alternative,\n"
+    "the package ships no license file, and the text is the canonical Apache-2.0 license. This file is\n"
+    "not a legal determination.\n"
 )
 
 
@@ -50,6 +56,8 @@ def render_notices(root, target, products, entries, digests, blockers):
         kind = entry.kind + (" provenance=" + entry.provenance if entry.provenance else "")
         lines.append("%s %s | %s | %s%s | %s\n" % (entry.name, entry.version, entry.declared, kind, state,
                                                   " ".join(refs) or "-"))
+        if entry.provenance == ELECTED_PROVENANCE:
+            lines.append("  note: Elected under the declared %s alternatives; the package ships no license file; the text is the canonical Apache-2.0 license.\n" % entry.declared)
     head = ["THIRD-PARTY NOTICES\n", "Target: %s\n" % target, "Products: %s\n" % ", ".join(products),
             "Generator: %s\n" % GENERATOR, "Registry inventory sha256: %s\n" % digests["registry"],
             "Prepared inventory sha256: %s\n" % digests["prepared"],

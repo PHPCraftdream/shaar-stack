@@ -31,6 +31,7 @@ _EMOJI_DROPS = {
     "base256emoji": ("1.0.2", "b5e9430d9a245a77c92176e649af6e275f20839a48389859d1661e9a128d077c"),
     "const-str": ("0.4.3", "2f421161cb492475f1661ddc9815a745a1c894592070661180fdec3d4872e9c3"),
     "match-lookup": ("0.1.3", "549e39695cc0b640f3cb378053832db3d2133422d49e8dcae5c866a2aaf1f730"),
+    "base45": ("3.2.0", "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03"),
 }
 _DEPENDENCY_OWNER_FIELDS = ("package", "target", "kind", "crate_types", "context", "triple", "features")
 
@@ -304,7 +305,7 @@ def _candidate_matches_control(parsed, unitsets):
             _need(unitsets["approved_route"] == unitsets["candidate"],
                   "candidate compiler units differ from approved route")
         return
-    _need(registry_key is not None and present and len(chain_keys) == 3,
+    _need(registry_key is not None and present and len(chain_keys) == len(_EMOJI_DROPS),
           "approved multibase transition control state mismatch")
     _need(set(cf) - set(xf) == chain_keys | {registry_key},
           "unapproved control-to-candidate package removal")
@@ -325,11 +326,11 @@ def _candidate_matches_control(parsed, unitsets):
           and binding.get("archive_sha256") == _APPROVED_ARCHIVES["multibase"],
           "candidate multibase is not the pinned prepared archive")
     _need(not any(u["package"][0] in _EMOJI_DROPS for u in unitsets["candidate"]),
-          "removed emoji-chain package still compiles")
+          "removed multibase helper package still compiles")
     for unit in unitsets["candidate"]:
         for dep in unit.get("dependencies", []):
             _need(dep["unit"]["package"][0] not in _EMOJI_DROPS,
-                  "retained unit still depends on a removed emoji-chain package: " + unit["package"][0])
+                  "retained unit still depends on a removed multibase helper package: " + unit["package"][0])
 
     def _unit_form(unit):
         # Compare units by identity, dependency edges and dependency-owner fields;

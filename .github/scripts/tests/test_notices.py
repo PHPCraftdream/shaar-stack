@@ -73,7 +73,7 @@ class Env:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
 
-    def reg(self, name, declared, files, classification="package-complete"):
+    def reg(self, name, declared, files, classification="package-complete", provenance=""):
         materials, texts = [], []
         for rel, data, role in files:
             path = "packages/%s/%s" % (name, rel)
@@ -85,7 +85,7 @@ class Env:
                 texts.append(sha(data))
         row = {"name": name, "version": "1.0.0", "source": SRC, "checksum": sha(name.encode()),
                "classification": classification, "declared_license": declared, "materials": materials,
-               "review_note": "synthetic"}
+               "review_note": "synthetic", **({"provenance_class": provenance} if provenance else {})}
         if texts:
             alternatives = [{"availability": "available", "evidence": [{"sha256": t}]} for t in texts]
             row["terms_evidence"] = {"groups": [{"satisfied_by_available_text": True, "alternatives": alternatives}]}
@@ -418,6 +418,11 @@ class GeneratorTests(unittest.TestCase):
         self.assertEqual(linux["notices"]["sha256"], sha((out / linux["notices"]["file"]).read_bytes()))
 
     def test_blockers_and_not_distributed_evidence(self):
+        self.env.edges["shaar-server"].append(("elected", None, None))
+        self.env.sources["elected"] = SRC
+        self.env.reg("elected", "MIT OR Apache-2.0", [("LICENSE-APACHE", APACHE, "package_terms")],
+                     provenance=notice_render.ELECTED_PROVENANCE)
+        self.env.write()
         self.generate()
         linux, windows = self.env.manifest("out", LINUX), self.env.manifest("out", WINDOWS)
         self.assertEqual([b["name"] for b in windows["blockers"]], ["gapw"])
@@ -430,6 +435,11 @@ class GeneratorTests(unittest.TestCase):
         notice = (self.env.tmp / "out" / ("THIRD-PARTY-NOTICES-%s.txt" % WINDOWS)).read_text("utf-8")
         self.assertIn("RELEASE BLOCKERS", notice)
         self.assertIn("gapw 1.0.0 | MIT | registry INCOMPLETE | -", notice)
+        self.assertIn("elected 1.0.0 | MIT OR Apache-2.0 | registry provenance=elected-canonical-text", notice)
+        self.assertIn("  note: Elected under the declared MIT OR Apache-2.0 alternatives; the package ships no license file; the text is the canonical Apache-2.0 license.", notice)
+        head = notice.split("PACKAGES (")[0]
+        self.assertNotIn("elected 1.0.0", head.split("RELEASE BLOCKERS:", 1)[1])
+        self.assertEqual(head.count("elected-canonical-text"), 2)  # PREAMBLE mentions the class twice
 
     def test_unlinked_identities_never_reach_the_output(self):
         out = self.generate()
@@ -615,10 +625,10 @@ class RepositoryContractTests(unittest.TestCase):
         return json.loads(raw)
 
     def test_corpus_counts_and_reviewed_gaps(self):
-        self.assertEqual(len(self.entries), 550)
-        self.assertEqual(sum(1 for e in self.entries.values() if e.complete), 534)
+        self.assertEqual(len(self.entries), 549)
+        self.assertEqual(sum(1 for e in self.entries.values() if e.complete), 536)
         notices.check_gap_policy(self.policy, self.entries)
-        self.assertEqual(len(self.policy["gap_table"]), 16)
+        self.assertEqual(len(self.policy["gap_table"]), 13)
         self.assertEqual(sorted(self.policy["targets"]), [WINDOWS, LINUX])
         self.assertEqual(self.policy["products"], ["shaar-client", "shaar-server"])
 

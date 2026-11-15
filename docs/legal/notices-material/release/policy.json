@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "note": "Reviewed release scope. Targets are the CI hosts; cfg lists are `rustc --print cfg --target <triple>` output. Gaps must equal the corpus identities without complete authentic text; each is a release blocker only where it is linked.",
+ "note": "Reviewed release scope. Targets are the CI hosts; cfg lists are `rustc --print cfg --target <triple>` output. Gaps must equal the corpus identities without complete authentic text; each is a release blocker only where it is linked. No distributed blocker remains; the elected-canonical-text rows record an engineering election made on the owner's 2026-11-14 delegation, not legal clearance.",
  "products": ["shaar-client", "shaar-server"],
  "first_party": ["shaar 0.1.0", "shaar-client 0.1.0", "shaar-p2p 0.1.0", "shaar-platform 0.1.0", "shaar-server 0.1.0", "shaar-ygg 0.1.0", "shaar-ygg-core 0.1.0"],
  "targets": {
@@ -8,11 +8,8 @@
   "x86_64-unknown-linux-gnu": {"cfg": ["debug_assertions", "panic=\"unwind\"", "target_abi=\"\"", "target_arch=\"x86_64\"", "target_endian=\"little\"", "target_env=\"gnu\"", "target_family=\"unix\"", "target_feature=\"fxsr\"", "target_feature=\"sse\"", "target_feature=\"sse2\"", "target_has_atomic=\"16\"", "target_has_atomic=\"32\"", "target_has_atomic=\"64\"", "target_has_atomic=\"8\"", "target_has_atomic=\"ptr\"", "target_has_atomic_primitive_alignment=\"16\"", "target_has_atomic_primitive_alignment=\"32\"", "target_has_atomic_primitive_alignment=\"64\"", "target_has_atomic_primitive_alignment=\"8\"", "target_has_atomic_primitive_alignment=\"ptr\"", "target_os=\"linux\"", "target_pointer_width=\"64\"", "target_vendor=\"unknown\"", "unix"]}
  },
  "gaps": [
-  {"name": "base45", "version": "3.2.0", "reason": "no license file in any revision of the repository (all refs) or in any of the 8 published crate versions (the packaged VCS state is also dirty); only README/manifest declare MIT"},
   {"name": "block2", "version": "0.6.2", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
   {"name": "dispatch2", "version": "0.3.1", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
-  {"name": "enum-assoc", "version": "1.4.1", "reason": "no license file in any revision of the repository or in any of the 27 non-yanked published crate versions; only the manifest declares MIT OR Apache-2.0"},
-  {"name": "if-watch", "version": "3.2.2", "reason": "no license file in any revision of the repository (including the dvc94ch fork) or in any of the 23 published crate versions; README and manifest declare MIT OR Apache-2.0"},
   {"name": "objc2", "version": "0.6.5", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
   {"name": "objc2-core-foundation", "version": "0.3.2", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},
   {"name": "objc2-core-wlan", "version": "0.3.2", "reason": "pinned repository root holds only LICENSE.md, a licensing statement with an Apple SDK caveat, not the operative license texts"},

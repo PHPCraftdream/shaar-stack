@@ -303,3 +303,13 @@ Per-target notices assembly, the applicable sets (372 third-party identities on 
 classified not distributed and the 5 remaining distributed blockers (`base45`,
 `enum-assoc`, `futures-bounded`, `if-watch`, `ring`) are recorded in `notice-evidence.md`
 under "Deterministic notices assembly and check". The corpus itself is unchanged.
+
+## Notices assembly state pointer — 2026-11-14
+
+Current state: 0 distributed release blockers on both targets (`release_ready` true in both
+committed manifests), 13 reviewed gaps not distributed, corpus counts 549 third-party identities
+/ 536 complete (532 registry + 17 path). `enum-assoc@1.4.1` and `if-watch@3.2.2` are resolved by
+the new `elected-canonical-text` provenance class; `base45@3.2.0` is retired from the graph by
+the reviewed multibase recipe (pending the operator's adoption of the CI-resolved lock).
+Details, digests and non-claims live in `notice-evidence.md` under "Three remaining distributed
+notice blockers closed — 2026-11-14".
