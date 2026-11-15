@@ -574,6 +574,30 @@ new abstractions or infrastructure polishing without an observable acceptance ne
 Each stage closes only after its own acceptance and integration/cleanup obligations
 are met. External blockers are explicit; no unconfirmed assumption is promoted to fact.
 
+#### Local pre-push checks (shared prepared sources)
+
+The root `Cargo.toml` `[patch]` entries point at `target/...` sources, and offline resolution
+needs every locked crates.io package. Both are prepared once in the primary checkout's ignored
+`target/` from archives that are already on the machine, without any download:
+
+1. `python -I .github/actions/prepare-sources/local_prepare.py --archives <dir>` finds each pinned
+   source archive by its SHA-256, runs only the existing prepare-only recipes and refuses on a
+   missing archive or digest mismatch (one status line per recipe).
+2. `python -I .github/actions/prepare-sources/local_vendor.py --search <cargo registry cache> --search <dir>`
+   extracts every locked crates.io package whose archive matches its `Cargo.lock` checksum into
+   `target/vendor/` and writes `target/local-vendor.toml`, a cargo config that replaces crates.io
+   by that directory. Nothing is written outside the repository.
+3. Each new worktree under `worktrees/` links the store from its root: `cmd /c mklink /J target
+   <primary checkout>	arget` (Windows) or `ln -s <primary checkout>/target target`;
+   `local_prepare.py` creates the link itself when `target` is missing.
+
+Pre-push rule for every leaf, repeated in every worker prompt: `cargo fmt` for the owned packages
+and, for each affected crate, `cargo clippy --config target/local-vendor.toml -p <crate>
+--all-targets --locked --offline -- -D warnings` with the CI features. The `--config` argument
+must stand AFTER `clippy`: the clippy driver starts its own cargo and forwards only what follows
+the subcommand. The local toolchain may be older than CI's, so a clean local run is a strong
+pre-check, not proof; CI stays the acceptance.
+
 ### 6.4. Bounded delivery commitment after the second process review
 
 The immediate outcome is runnable direct-only Server and Client in `develop`, not
