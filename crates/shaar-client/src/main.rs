@@ -327,7 +327,7 @@ async fn run_auto() -> Result<(), Box<dyn Error>> {
 enum FirstRunState {
     Ready {
         config: Box<ClientConfig>,
-        identity: Identity,
+        identity: Box<Identity>,
         block: Vec<String>,
     },
     MissingKey {
@@ -417,7 +417,7 @@ async fn first_run_state(
     );
     Ok(FirstRunState::Ready {
         config: Box::new(config),
-        identity: provisioned.identity,
+        identity: Box::new(provisioned.identity),
         block,
     })
 }
@@ -440,7 +440,7 @@ async fn run_first_run(
             config,
             identity,
             block,
-        }) => run_configured(*config, identity, Some(block.as_slice())).await,
+        }) => run_configured(*config, *identity, Some(block.as_slice())).await,
     }
 }
 
