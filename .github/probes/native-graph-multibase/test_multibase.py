@@ -32,6 +32,7 @@ EMOJI_CHECKSUMS = {
     "base256emoji": ("1.0.2", "b5e9430d9a245a77c92176e649af6e275f20839a48389859d1661e9a128d077c"),
     "const-str": ("0.4.3", "2f421161cb492475f1661ddc9815a745a1c894592070661180fdec3d4872e9c3"),
     "match-lookup": ("0.1.3", "549e39695cc0b640f3cb378053832db3d2133422d49e8dcae5c866a2aaf1f730"),
+    "base45": ("3.2.0", "240e56f4d3c453c36faacb695c535a4d5f8c7d23dac175014f32eb0a71012a03"),
 }
 DOC_LINE = b"/// Base256Emoji (alphabet: " + recipe.ROCKET * 250 + recipe.EMOJI_DOC_SUFFIX
 BASE45_DOC = (b"/// Base45, rfc9285 (alphabet: "
