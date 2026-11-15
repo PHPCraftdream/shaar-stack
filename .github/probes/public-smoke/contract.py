@@ -266,3 +266,77 @@ def app_request(nonce):
 
 def app_reply(nonce):
     return b"shaar-public-smoke/v1 rep " + nonce.encode("ascii") + b"\n"
+
+
+# Observed stderr lines: documented grammar, stable across this smoke's binary.
+ROUTE_LINE = re.compile(
+    r"^shaar-(client|server): route path=(native|ygg-signal|ygg-standby) "
+    r"candidates=record:([0-9]{1,10}),hint:([0-9]{1,10}) "
+    r"resolve=(found|not-found|timeout|cached) elapsed_ms=([0-9]{1,10})$")
+SESSION_LINE = re.compile(
+    r"^shaar-(server|client): session path=(native|ygg-signal|ygg-standby) result=(ok|error)"
+    r"(?: error=(invalid-target|capacity|access-denied|path-unavailable|target-unavailable|"
+    r"protocol|deadline|stream-reset|task-failure|io|peer-closed))? "
+    r"bytes_in=([0-9]{1,20}) bytes_out=([0-9]{1,20})$")
+
+# Native is unreachable by construction (no globally routable local address) and a
+# libp2p relay never carries payload, so both roles must end on the Yggdrasil
+# standby payload path.
+EXPECTED_ROUTE = "ygg-standby"
+
+# Exact legacy wording of the dht_record_resolved claim (fallback when unobserved).
+NOT_OBSERVED = ("not observable: the products log nothing about resolution; "
+                "inferred only from the exchange succeeding by key alone")
+
+
+def parse_route_line(line):
+    match = ROUTE_LINE.fullmatch(line.strip())
+    if not match:
+        return None
+    return {"role": match[1], "path": match[2], "record": int(match[3]), "hint": int(match[4]),
+            "resolve": match[5], "elapsed_ms": int(match[6])}
+
+
+def parse_session_line(line):
+    match = SESSION_LINE.fullmatch(line.strip())
+    if not match:
+        return None
+    return {"role": match[1], "path": match[2], "result": match[3], "error": match[4],
+            "bytes_in": int(match[5]), "bytes_out": int(match[6])}
+
+
+def scan_product_lines(text, role):
+    """Last route and session line for exactly this role; (None, None) when absent."""
+    route = session = None
+    for line in text.splitlines():
+        parsed_route = parse_route_line(line)
+        if parsed_route and parsed_route["role"] == role:
+            route = parsed_route
+        parsed_session = parse_session_line(line)
+        if parsed_session and parsed_session["role"] == role:
+            session = parsed_session
+    return route, session
+
+
+def route_violations(route, session):
+    """Observed paths must be the expected standby payload path."""
+    found = []
+    if route is not None and route["path"] != EXPECTED_ROUTE:
+        found.append(f"observed route path {route['path']} contradicts the expected {EXPECTED_ROUTE}")
+    if session is not None and session["path"] != EXPECTED_ROUTE:
+        found.append(f"observed session path {session['path']} contradicts the expected {EXPECTED_ROUTE}")
+    return found
+
+
+def dht_claim(route):
+    """Claim wording for the DHT record lookup, from the observed client route line."""
+    if route is None:
+        return NOT_OBSERVED
+    if route["resolve"] == "found":
+        return (f"observed: the Client resolved the DHT record; the route line counted "
+                f"{route['record']} record candidates")
+    if route["resolve"] == "not-found":
+        return "observed: the DHT record lookup completed without addresses"
+    if route["resolve"] == "timeout":
+        return "observed: the DHT record lookup produced no answer in time"
+    return NOT_OBSERVED

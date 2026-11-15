@@ -1,14 +1,15 @@
 use std::{future::Future, net::SocketAddr};
 
-use iroh::endpoint::{Connection, ConnectionError, VarInt};
+use iroh::endpoint::{Connection, VarInt};
 use tokio::{
     net::TcpStream,
     task::{JoinError, JoinSet},
 };
 
-use super::{STREAM_LIMIT, Session, session::ACCESS_DENIED};
+use super::{STREAM_LIMIT, Session};
 
 mod error;
+pub mod observe;
 mod protocol;
 mod pump;
 
@@ -26,6 +27,11 @@ pub struct ServeReport {
     pub completed: u64,
     pub failed: u64,
     pub cancelled: u64,
+    /// Sums over fully completed streams only (from_peer at the server = bytes
+    /// received from the peer; to_peer = bytes sent to the peer); cancelled or
+    /// failed streams contribute nothing.
+    pub bytes_in: u64,
+    pub bytes_out: u64,
 }
 
 impl ServeReport {
@@ -34,7 +40,11 @@ impl ServeReport {
         result: Result<Result<ForwardStats, ForwardError>, JoinError>,
     ) -> Result<(), ForwardError> {
         match result {
-            Ok(Ok(_)) => self.completed = self.completed.saturating_add(1),
+            Ok(Ok(stats)) => {
+                self.completed = self.completed.saturating_add(1);
+                self.bytes_in = self.bytes_in.saturating_add(stats.from_peer);
+                self.bytes_out = self.bytes_out.saturating_add(stats.to_peer);
+            }
             Ok(Err(_)) => self.failed = self.failed.saturating_add(1),
             Err(error) if error.is_cancelled() => self.cancelled = self.cancelled.saturating_add(1),
             Err(_) => return Err(ForwardError::TaskFailure),
@@ -66,12 +76,9 @@ impl Session {
         }
         .await;
         result.map_err(|error| match self.connection.close_reason() {
-            Some(ConnectionError::ApplicationClosed(reason))
-                if reason.error_code == VarInt::from_u32(ACCESS_DENIED) =>
-            {
-                ForwardError::AccessDenied
-            }
-            Some(_) => ForwardError::PathUnavailable,
+            // Denied and clean-close classification flows through the shared
+            // mapping; without a close reason the original error stays.
+            Some(reason) => ForwardError::from_connection_error(reason),
             None => error,
         })
     }
@@ -113,7 +120,13 @@ impl Session {
                                 pump::pump(stream, tcp).await
                             });
                         }
-                        Err(_) => break Err(ForwardError::PathUnavailable),
+                        Err(reason) => match ForwardError::from_connection_error(reason) {
+                            // The peer's application close is a clean session
+                            // end; only a non-application failure is a lost path.
+                            ForwardError::PeerClosed => break Ok(()),
+                            ForwardError::AccessDenied => break Err(ForwardError::AccessDenied),
+                            _ => break Err(ForwardError::PathUnavailable),
+                        },
                     }
                 }
             }

@@ -9,7 +9,7 @@ use tokio::{
 };
 
 use super::{
-    ForwardError, STREAM_LIMIT,
+    ForwardError, ForwardStats, STREAM_LIMIT, ServeReport,
     tests::{sessions, tcp_pair},
 };
 
@@ -137,7 +137,10 @@ async fn stop_closes_active_tcp_workers_and_joins_their_results() {
         let report = report.unwrap();
         assert_eq!(report.completed, 0);
         assert_eq!(report.failed + report.cancelled, 1);
-        assert!(matches!(result, Err(ForwardError::PathUnavailable)));
+        assert!(
+            matches!(result, Err(ForwardError::PeerClosed)),
+            "the server's clean application close is not a path failure"
+        );
         assert_eq!(
             connected.streams.available_permits(),
             usize::from(STREAM_LIMIT)
@@ -341,4 +344,114 @@ async fn truncated_request_or_status_is_protocol_failure_not_generic_io() {
             tokio::join!(server.close(), client.close());
         }
     }).await.expect("truncated protocol fields deadline");
+}
+
+/// The clean peer close classification, unit-checked without any network.
+#[test]
+fn from_connection_error_classifies_application_and_transport_closes() {
+    use iroh::endpoint::ApplicationClose;
+    assert!(matches!(
+        ForwardError::from_connection_error(ConnectionError::ApplicationClosed(ApplicationClose {
+            error_code: VarInt::from_u32(0),
+            reason: "".into(),
+        })),
+        ForwardError::PeerClosed
+    ));
+    assert!(matches!(
+        ForwardError::from_connection_error(ConnectionError::LocallyClosed),
+        ForwardError::PathUnavailable
+    ));
+    assert!(matches!(
+        ForwardError::from_io(
+            ReadError::ConnectionLost(ConnectionError::ApplicationClosed(ApplicationClose {
+                error_code: VarInt::from_u32(0),
+                reason: "".into(),
+            }))
+            .into()
+        ),
+        ForwardError::PeerClosed
+    ));
+    assert!(matches!(
+        ForwardError::from_io(ReadError::ConnectionLost(ConnectionError::LocallyClosed).into()),
+        ForwardError::PathUnavailable
+    ));
+}
+
+/// THE acceptance test: the peer's clean application close (Session::drop,
+/// code 0) ends serve() as Ok with the completed stream's byte sums. Fails on
+/// the old code, where serve() returned Err(PathUnavailable).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_clean_peer_close_ends_the_served_session_ok_with_completed_stream_bytes() {
+    tokio::time::timeout(Duration::from_secs(25), async {
+        let (server, client, mut accepted, connected) = sessions().await;
+        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = target.local_addr().unwrap();
+        const PAYLOAD: usize = 19;
+        const REPLY: usize = 7;
+        let target_io = async {
+            let (mut tcp, _) = target.accept().await.unwrap();
+            let mut received = vec![0u8; PAYLOAD];
+            tcp.read_exact(&mut received).await.unwrap();
+            tcp.write_all(&vec![0x21; REPLY]).await.unwrap();
+            tcp.shutdown().await.unwrap();
+        };
+        let (report, (), ()) = tokio::join!(
+            accepted.serve(address, std::future::pending()),
+            async move {
+                let (mut app, bridge) = tcp_pair().await;
+                let (stats, ()) = tokio::join!(connected.forward(bridge), async {
+                    app.write_all(&vec![0x42u8; PAYLOAD]).await.unwrap();
+                    app.shutdown().await.unwrap();
+                    let mut reply = Vec::new();
+                    app.read_to_end(&mut reply).await.unwrap();
+                    assert_eq!(reply.len(), REPLY);
+                });
+                assert_eq!(
+                    stats.expect("forward completed"),
+                    ForwardStats {
+                        to_peer: u64::try_from(PAYLOAD).unwrap(),
+                        from_peer: u64::try_from(REPLY).unwrap(),
+                    }
+                );
+                // The pump finished; the Session drop performs the clean
+                // application close that ends the served session.
+                drop(connected);
+            },
+            target_io,
+        );
+        let report = report.expect("a clean peer close ends the served session ok");
+        assert_eq!(
+            report,
+            ServeReport {
+                completed: 1,
+                failed: 0,
+                cancelled: 0,
+                bytes_in: u64::try_from(PAYLOAD).unwrap(),
+                bytes_out: u64::try_from(REPLY).unwrap(),
+            }
+        );
+        tokio::join!(server.close(), client.close());
+    })
+    .await
+    .expect("clean peer close acceptance deadline");
+}
+
+/// Endpoint teardown is a LOCAL close, never a peer application close: serve()
+/// must still report a lost path, proving the fix did not turn every close
+/// into a clean end.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_non_application_close_stays_a_path_error() {
+    tokio::time::timeout(Duration::from_secs(25), async {
+        let (server, _client, mut accepted, _connected) = sessions().await;
+        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = target.local_addr().unwrap();
+        let (result, ()) = tokio::join!(accepted.serve(address, std::future::pending()), async {
+            // Give accept_bi a chance to arm before the local teardown.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            server.close().await;
+        });
+        assert!(matches!(result, Err(ForwardError::PathUnavailable)));
+    })
+    .await
+    .expect("local endpoint teardown classification deadline");
 }

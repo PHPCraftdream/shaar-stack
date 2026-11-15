@@ -110,6 +110,43 @@ Stop either binary with Ctrl-C (SIGINT) or, on Unix, SIGTERM (the signal service
 
 Policy defaults (**Source**; not configurable from the files; the SDK exposes them through `RoleOptions`): a native attempt has 3 s; up to 6 attempts with a 500 ms backoff doubling to a 4 s cap; payload fails over after the native path has been down 2 s; it returns to native after native has been stable for 5 s. Only **new** TCP streams use a new route; an established stream ends with its connection and is never replayed or migrated. Standby requires `network.ygg.peers` on both sides, and the Yggdrasil transport only dials out to the configured peers (it opens no listening port).
 
+## Session observability lines (stable grammar)
+
+This section is **Source** (written in this leaf; CI execution pending).
+
+Both binaries print operator-facing lines on **stderr** with a fixed grammar (`crates/shaar/src/network/forwarding/observe.rs`). Lines carry only counts and typed tokens — never key material, addresses, or third-party data.
+
+Client route line — printed once per successful dial (per route decision):
+
+```text
+shaar-client: route path=<P> candidates=record:<R>,hint:<H> resolve=<X> elapsed_ms=<MS>
+```
+
+Server route line — printed once per accepted session:
+
+```text
+shaar-server: route path=<P>
+```
+
+Session line — printed exactly once per reaped session, by either product:
+
+```text
+<shaar-server|shaar-client>: session path=<P> result=ok bytes_in=<N> bytes_out=<M>
+<shaar-server|shaar-client>: session path=<P> result=error error=<TOKEN> bytes_in=0 bytes_out=0
+```
+
+Values:
+
+- `path` P ∈ {`native`, `ygg-signal`, `ygg-standby`}. `ygg-signal` is reserved for future signal-mode negotiation routes and is not emitted today.
+- `resolve` X ∈ {`found`, `not-found`, `timeout`, `cached`}: `found` = a fresh Mainline lookup returned addresses (the `record:` count is the taken candidate count, capped at the 4-candidate bound); `not-found` = the lookup completed with zero addresses; `timeout` = the lookup produced no answer in its budget (this also covers a resolver runtime failure — no answer is the observable fact); `cached` = no lookup happened for this decision (candidates were already carried: the configured hint or the retained list of an earlier resolve).
+- The `ygg-standby` client route line carries the LAST native resolve observation of that dial cycle (the standby fallback never consults the record itself; with no native attempt yet it reports `cached` with zero counts).
+- `elapsed_ms` measures the dial that produced the route (from its start to the established link), saturating at `u64::MAX`.
+- `result=ok` means the session ended without a forwarding error: a completed/normal stop OR the peer's clean application close (`peer-closed` is never rendered as an error). `result=error` names the typed cause via `error` ∈ {`invalid-target`, `capacity`, `access-denied`, `path-unavailable`, `target-unavailable`, `protocol`, `deadline`, `stream-reset`, `task-failure`, `io`, `peer-closed`}; on error lines the byte counts are literal zeros (unknown).
+- Classification rule: only the peer's APPLICATION-level close is a clean end; locally-closed teardown, transport failures and timeouts remain typed errors.
+- `bytes_in`/`bytes_out` are totals over FULLY completed streams only: at the server, `bytes_in` counts bytes received from the peer (forwarded toward the target) and `bytes_out` the bytes sent back; cancelled or interrupted streams contribute nothing; a session that ended before any stream completed reports zeros.
+
+Consumers: the public smoke harness (`.github/probes/public-smoke/`) reads these lines from the product stderr and fails a run whose observed path contradicts its expectation. Absence of the lines (older binaries) keeps the previous inferred wording.
+
 ## What the DHT record discloses
 
 The server publishes one signed record under its own key in the Mainline DHT (**Source**, `crates/shaar/src/native_discovery`, `startup/resources/maintain.rs`). It contains only IP socket addresses reported by the native QUIC endpoint: at most 4 entries, port nonzero, not wildcard/multicast/broadcast, not in the Yggdrasil range, IPv6 only if it has no scope id and is not link-local; IPv4-mapped IPv6 is stored as IPv4. If the endpoint reports more than 4 addresses the snapshot is replaced by an empty one. Relay, libp2p and Yggdrasil addresses are rejected by the record profile and are never published. The record does not contain the allowlist, the target or any config value. Signed age is limited to 300 s, DNS TTL is 30 s, and the record is withdrawn during a normal shutdown.

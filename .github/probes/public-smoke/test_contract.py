@@ -363,5 +363,100 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("if: ${{ inputs.public_smoke", self.jobs()[name])
 
 
+class ObservabilityTests(unittest.TestCase):
+    ERROR_TOKENS = ("invalid-target", "capacity", "access-denied", "path-unavailable",
+                    "target-unavailable", "protocol", "deadline", "stream-reset",
+                    "task-failure", "io", "peer-closed")
+
+    def test_route_line_round_trips_all_values(self):
+        for path in ("native", "ygg-signal", "ygg-standby"):
+            for resolve in ("found", "not-found", "timeout", "cached"):
+                line = (f"shaar-client: route path={path} candidates=record:2,hint:0 "
+                        f"resolve={resolve} elapsed_ms=42")
+                self.assertEqual(CONTRACT.parse_route_line(line),
+                                 {"role": "client", "path": path, "record": 2, "hint": 0,
+                                  "resolve": resolve, "elapsed_ms": 42}, line)
+        server = CONTRACT.parse_route_line(
+            "shaar-server: route path=ygg-standby candidates=record:7,hint:9 resolve=cached elapsed_ms=1")
+        self.assertEqual(server, {"role": "server", "path": "ygg-standby", "record": 7, "hint": 9,
+                                  "resolve": "cached", "elapsed_ms": 1})
+
+    def test_session_line_round_trips_all_values(self):
+        for role in ("server", "client"):
+            for path in ("native", "ygg-signal", "ygg-standby"):
+                line = (f"shaar-{role}: session path={path} result=ok "
+                        f"bytes_in=128 bytes_out=64")
+                self.assertEqual(CONTRACT.parse_session_line(line),
+                                 {"role": role, "path": path, "result": "ok", "error": None,
+                                  "bytes_in": 128, "bytes_out": 64}, line)
+        for token in self.ERROR_TOKENS:
+            line = f"shaar-client: session path=ygg-standby result=error error={token} bytes_in=0 bytes_out=0"
+            self.assertEqual(CONTRACT.parse_session_line(line),
+                             {"role": "client", "path": "ygg-standby", "result": "error",
+                              "error": token, "bytes_in": 0, "bytes_out": 0}, token)
+        self.assertIsNone(CONTRACT.parse_session_line(
+            "shaar-client: session path=ygg-standby result=error bytes_in=0 bytes_out=0"))
+
+    def test_scan_keeps_the_last_line_per_role_and_ignores_noise(self):
+        first = "shaar-client: route path=ygg-signal candidates=record:1,hint:0 resolve=timeout elapsed_ms=10"
+        last = "shaar-client: route path=ygg-standby candidates=record:3,hint:1 resolve=found elapsed_ms=20"
+        server = "shaar-server: route path=ygg-standby candidates=record:5,hint:2 resolve=found elapsed_ms=30"
+        text = "noise\nmore noise\n" + first + "\nmiddle\n" + last + "\n" + server + "\n"
+        route, session = CONTRACT.scan_product_lines(text, "client")
+        self.assertEqual(route, {"role": "client", "path": "ygg-standby", "record": 3, "hint": 1,
+                                 "resolve": "found", "elapsed_ms": 20})
+        self.assertIsNone(session)
+        route, session = CONTRACT.scan_product_lines(text, "server")
+        self.assertEqual(route["record"], 5)
+        self.assertIsNone(session)
+        self.assertEqual(CONTRACT.scan_product_lines("", "client"), (None, None))
+
+    def test_route_violations_carry_the_observed_value(self):
+        route = {"role": "client", "path": "native"}
+        found = CONTRACT.route_violations(route, None)
+        self.assertEqual(len(found), 1)
+        self.assertIn("native", found[0])
+        self.assertIn("ygg-standby", found[0])
+        session = {"role": "client", "path": "ygg-signal", "result": "ok", "error": None,
+                   "bytes_in": 1, "bytes_out": 1}
+        found = CONTRACT.route_violations(None, session)
+        self.assertEqual(len(found), 1)
+        self.assertIn("ygg-signal", found[0])
+        self.assertEqual(CONTRACT.route_violations({"role": "client", "path": "ygg-standby"},
+                                                   {"role": "client", "path": "ygg-standby"}), [])
+        self.assertEqual(CONTRACT.route_violations(None, None), [])
+
+    def test_dht_claim_mapping(self):
+        found = CONTRACT.dht_claim({"resolve": "found", "record": 6})
+        self.assertIn("resolved the DHT record", found)
+        self.assertIn("6", found)
+        self.assertEqual(CONTRACT.dht_claim({"resolve": "not-found"}),
+                         "observed: the DHT record lookup completed without addresses")
+        self.assertEqual(CONTRACT.dht_claim({"resolve": "timeout"}),
+                         "observed: the DHT record lookup produced no answer in time")
+        self.assertIs(CONTRACT.dht_claim({"resolve": "cached"}), CONTRACT.NOT_OBSERVED)
+        self.assertIs(CONTRACT.dht_claim(None), CONTRACT.NOT_OBSERVED)
+
+    def test_malformed_lines_do_not_parse(self):
+        bad_route = [
+            "shaar-client: route path=ygg-standby candidates=record:1,hint:0 resolve=found elapsed_ms=1 trailing",
+            "shaar-client: route path=bogus candidates=record:1,hint:0 resolve=found elapsed_ms=1",
+            "shaar-client: route path=ygg-standby resolve=found elapsed_ms=1",
+            "shaar-client: route path=ygg-standby candidates=record:-1,hint:0 resolve=found elapsed_ms=1",
+            "shaar-client: route path=ygg-standby candidates=record:x,hint:0 resolve=found elapsed_ms=1",
+        ]
+        for line in bad_route:
+            self.assertIsNone(CONTRACT.parse_route_line(line), line)
+        bad_session = [
+            "shaar-client: session path=ygg-standby result=ok bytes_in=1 bytes_out=1 tail",
+            "shaar-client: session path=nope result=ok bytes_in=1 bytes_out=1",
+            "shaar-client: session result=ok bytes_in=1 bytes_out=1",
+            "shaar-client: session path=ygg-standby result=ok bytes_in=-1 bytes_out=1",
+            "shaar-client: session path=ygg-standby result=ok bytes_in=many bytes_out=1",
+        ]
+        for line in bad_session:
+            self.assertIsNone(CONTRACT.parse_session_line(line), line)
+
+
 if __name__ == "__main__":
     unittest.main()

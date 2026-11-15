@@ -14,7 +14,7 @@ pub use admission::{Allowlist, Endpoint, Limits};
 // payload endpoint from the admitted bridge (a production consumer exists).
 pub(crate) use admission::ygg::YggEndpoint;
 pub use error::NetworkError;
-pub use forwarding::{ForwardError, ForwardStats, ServeReport};
+pub use forwarding::{ForwardError, ForwardStats, ServeReport, observe};
 pub use session::Session;
 pub use signaling::{
     DiscoveredRelay, DiscoveryConfig, SignaledEndpoint, bind_signaling,
