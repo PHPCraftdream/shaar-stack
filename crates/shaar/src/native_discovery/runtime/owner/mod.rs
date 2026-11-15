@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
-use std::net::SocketAddrV4;
+use std::net::{IpAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -13,7 +13,7 @@ use n0_mainline::{MutableItem, OwnedDht, OwnedPutAdmissionError, OwnedPutError};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
-pub(crate) use self::resolver::ResolvedAddresses;
+pub(crate) use self::resolver::{ReflexiveTally, ResolvedAddresses};
 use self::resolver::{ResolveError, ResolverState};
 use super::super::address::SnapshotError;
 #[cfg(test)]
@@ -155,12 +155,15 @@ pub(crate) struct RuntimeOwner {
     commands: mpsc::Sender<Command>,
     stop: Option<oneshot::Sender<()>>,
     publisher: Option<JoinHandle<()>>,
+    reflexive: Option<JoinHandle<()>>,
+    reflexive_stop: Option<oneshot::Sender<()>>,
     dht: Option<OwnedDht>,
     close_error: Option<RuntimeError>,
     clock: Clock,
     clock_fault: Arc<AtomicBool>,
     resolver: ResolverState,
     publication: watch::Receiver<PublicationStatus>,
+    public_address: watch::Receiver<Option<IpAddr>>,
 }
 
 impl RuntimeOwner {
@@ -191,11 +194,23 @@ impl RuntimeOwner {
         let dht = OwnedDht::new(bind, bootstrap)?;
         let handle = dht.handle();
         let key = endpoint_key(&identity)?;
+        // Self-lookup target computed before `key` moves into the publisher spawn.
+        let reflexive_target = MutableItem::target_from_key(key.as_bytes(), None);
+        let reflexive_handle = dht.handle();
         let (commands, receiver) = mpsc::channel(COMMANDS);
         let (stop, stop_receiver) = oneshot::channel();
+        let (reflexive_stop, reflexive_stop_receiver) = oneshot::channel();
         let owner_clock = clock.clone();
         let (publication_tx, publication) =
             watch::channel(PublicationStatus::Pending { generation: 0 });
+        let (reflexive_tx, public_address) = watch::channel(None);
+        let reflexive = tokio::spawn(resolver::reflexive_loop(
+            reflexive_handle,
+            reflexive_target,
+            ReflexiveTally::new(),
+            reflexive_tx,
+            reflexive_stop_receiver,
+        ));
         let publisher = tokio::spawn(loop_state::publisher_loop(
             identity,
             key,
@@ -209,12 +224,15 @@ impl RuntimeOwner {
             commands,
             stop: Some(stop),
             publisher: Some(publisher),
+            reflexive: Some(reflexive),
+            reflexive_stop: Some(reflexive_stop),
             dht: Some(dht),
             close_error: None,
             clock: owner_clock.clone(),
             clock_fault: Arc::new(AtomicBool::new(false)),
             resolver: ResolverState::new(owner_clock),
             publication,
+            public_address,
         })
     }
 
@@ -414,7 +432,7 @@ impl RuntimeOwner {
     }
 
     pub(crate) fn is_closed(&self) -> bool {
-        self.publisher.is_none() && self.dht.is_none()
+        self.publisher.is_none() && self.reflexive.is_none() && self.dht.is_none()
     }
     pub(crate) fn has_pending_cleanup(&self) -> bool {
         !self.is_closed()
@@ -438,6 +456,22 @@ impl RuntimeOwner {
         self.publication.clone()
     }
 
+    /// Synchronous snapshot of the advisory reflexive public IP (initially
+    /// `None`). Advisory only: never published (leaf L3 boundary).
+    // Consumed by the L3 wiring; only tests read it until then.
+    #[allow(dead_code)]
+    pub(crate) fn public_address(&self) -> Option<IpAddr> {
+        *self.public_address.borrow()
+    }
+
+    /// Watch clone of the reflexive public IP. `changed()` on tokio watch is
+    /// cancel-safe.
+    // Consumed by the L3 wiring; only tests read it until then.
+    #[allow(dead_code)]
+    pub(crate) fn public_address_watch(&self) -> watch::Receiver<Option<IpAddr>> {
+        self.public_address.clone()
+    }
+
     pub(crate) async fn withdraw(&self) -> Result<(), RuntimeError> {
         let (reply, response) = oneshot::channel();
         self.commands
@@ -458,10 +492,13 @@ impl RuntimeOwner {
     }
 
     pub(crate) async fn close(&mut self) -> Result<(), RuntimeError> {
-        if self.publisher.is_none() && self.dht.is_none() {
+        if self.is_closed() {
             return self.close_error.clone().map_or(Ok(()), Err);
         }
         if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(stop) = self.reflexive_stop.take() {
             let _ = stop.send(());
         }
         match tokio::time::timeout(CLOSE_BOUND, self.close_inner()).await {
@@ -480,6 +517,12 @@ impl RuntimeOwner {
                 }
             }
         }
+        if let Some(reflexive) = self.reflexive.as_mut() {
+            // A reflexive join Err (panic) is IGNORED on purpose: an advisory
+            // watcher must not alter the publication close contract.
+            let _ = reflexive.await;
+            self.reflexive = None;
+        }
         if let Some(dht) = self.dht.as_mut() {
             match dht.close().await {
                 Ok(()) => self.dht = None,
@@ -497,6 +540,12 @@ impl Drop for RuntimeOwner {
         }
         if let Some(publisher) = self.publisher.take() {
             publisher.abort();
+        }
+        if let Some(stop) = self.reflexive_stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(reflexive) = self.reflexive.take() {
+            reflexive.abort();
         }
         if let Some(mut dht) = self.dht.take() {
             dht.request_stop();

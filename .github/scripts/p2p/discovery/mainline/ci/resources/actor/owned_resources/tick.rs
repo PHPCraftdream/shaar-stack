@@ -174,6 +174,12 @@ impl Actor {
                 .collect::<Vec<_>>()
                 .into();
             let network_completed = query.owned_network_completed();
+            // The owned tick returns before the public path's `cleanup_done_queries`, the only
+            // writer of `core.public_address`; apply the BEP 42 votes of this finished query
+            // here, before the completion is delivered, so `info()` observes them.
+            if let Some(address) = query.best_address() {
+                self.core.public_address = Some(address);
+            }
             if let Some(owner) = self.owned_resources.as_mut() {
                 owner.response_operations.remove(&operation);
                 if let Some(waiters) = owner.completions.remove(&target) {

@@ -518,6 +518,15 @@ API (`OwnedDhtHandle::info()`,
 (`crates/shaar/src/native_discovery/runtime/owner/mod.rs:12,158,406`). So: parse yes, vote
 yes, expose yes — the SDK only has to read it.
 
+**Correction from the L2 CI evidence:** the owned actor profile returns from `actor::tick`
+through `tick_owned` before `cleanup_done_queries`, the only writer of `core.public_address`,
+so the votes of owned GET queries were counted and then dropped and `Info::public_address()`
+stayed `None` (the L2 majority fixture failed on both runners although every GET reached its
+peer). The reviewed owned-actor recipe
+(`.github/scripts/p2p/discovery/mainline/ci/resources/actor/owned_resources/tick.rs`) now
+applies `best_address()` of each finished owned GET query before the completion is delivered;
+no other behavior of the pinned crate changes.
+
 Reliability and caveats: `best_address` is a per-query majority with nondeterministic tie
 breaking (HashMap iteration, `iterative_query.rs:133-139`); the "changed address → confirm by
 pinging" branch is dead in this pinned version (the overwrite at `core.rs:389` precedes the
