@@ -299,7 +299,8 @@ def parse_route_line(line):
 
 def parse_session_line(line):
     match = SESSION_LINE.fullmatch(line.strip())
-    if not match:
+    # An error result carries exactly one typed token; an ok result carries none.
+    if not match or (match[3] == "error") != (match[4] is not None):
         return None
     return {"role": match[1], "path": match[2], "result": match[3], "error": match[4],
             "bytes_in": int(match[5]), "bytes_out": int(match[6])}
