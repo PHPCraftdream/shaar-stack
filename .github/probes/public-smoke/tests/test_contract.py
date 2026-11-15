@@ -330,7 +330,7 @@ class WorkflowTests(unittest.TestCase):
             block = jobs[name]
             self.assertIn("runs-on: ubuntu-latest", block)
             minutes = int(re.search(r"timeout-minutes: (\d+)", block)[1])
-            self.assertLessEqual(minutes, 90 if name == "public-smoke-build" else 12, name)
+            self.assertLessEqual(minutes, 90 if name == "public-smoke-build" else 18, name)
             for forbidden in ("sudo", "apt-get", "secrets.", "continue-on-error", "retry", "ip netns"):
                 self.assertNotIn(forbidden, block, name)
         self.assertNotIn("secrets.", self.text)
@@ -338,6 +338,19 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("needs: public-smoke-build", jobs[name])
             self.assertIn("if: always()", jobs[name])
         self.assertIn("permissions:\n  contents: read", self.text)
+
+    def test_window_origin_margin_survives_runner_queueing_without_widening_contact(self):
+        # Runs 43760623868 and 43762751996: the role jobs started 1 s to 6 min after the origin.
+        margin = int(re.search(r"t0=\$\(\( \$\(date \+%s\) \+ (\d+) \)\)", self.text)[1])
+        self.assertGreaterEqual(margin, 600)
+        line = CONTRACT.load_contract()[0]["budgets"]["timeline"]
+        needed = margin + line["server_end_offset_s"] + line["shutdown_grace_s"]
+        for name in ("public-smoke-server", "public-smoke-client"):
+            block = self.jobs()[name]
+            step = int(re.search(r"enforced caps\n\s+timeout-minutes: (\d+)", block)[1])
+            job = int(re.search(r"timeout-minutes: (\d+)", block)[1])
+            self.assertGreaterEqual(step * 60, needed, name)
+            self.assertGreater(job, step, name)
 
     def test_build_is_normal_and_artifacts_carry_no_keys(self):
         build = self.jobs()["public-smoke-build"]

@@ -1949,6 +1949,14 @@ gh workflow run "SDK lockfile preparation" --repo <repo> --ref <branch> \
   -f public_smoke_contract_sha256=<that digest>
 ```
 
+Window origin: the two role jobs start independently, so the build fixes a shared origin
+`t0` (build end plus 600 s) and each role waits idle until its offset from it. Two
+dispatches on 2026-11-15 (runs 43760623868 and 43762751996, both on a2abd4a) failed with
+no public contact from the late role: GitHub started the role jobs 1 s to 6 min after
+the origin that then carried a 90 s margin. The margin and the role step and job timeouts
+(15 and 18 minutes) were widened for that idle wait only; the contact windows and every
+traffic, connection and time cap of the contract are unchanged.
+
 One-command entry (leaf PUNCH-SMOKE, decision of 2026-11-15): the same dispatch as a
 script that only drives the `gh` CLI. The compile and the run stay in CI; the script
 runs no product and contacts no public target itself.
