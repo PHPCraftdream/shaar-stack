@@ -207,22 +207,43 @@ fn resolve_data_dir_rules_are_platform_exact() {
     #[cfg(windows)]
     {
         assert_eq!(
-            resolve_data_dir(|name| if name == "APPDATA" {
-                os("C:/u/AppData")
-            } else {
-                None
+            resolve_data_dir(|name| match name {
+                "LOCALAPPDATA" => os("C:/u/AppData/Local"),
+                "APPDATA" => os("C:/u/AppData/Roaming"),
+                _ => None,
             })
             .unwrap(),
-            PathBuf::from("C:/u/AppData").join("shaar")
+            PathBuf::from("C:/u/AppData/Local").join("shaar"),
+            "LOCALAPPDATA wins even when APPDATA is also set"
         );
         assert!(matches!(
-            resolve_data_dir(|_| None),
-            Err(ProvisionError::MissingEnv("APPDATA"))
+            resolve_data_dir(|name| if name == "APPDATA" {
+                os("C:/u/AppData/Roaming")
+            } else {
+                None
+            }),
+            Err(ProvisionError::MissingEnv("LOCALAPPDATA"))
         ));
         assert!(matches!(
-            resolve_data_dir(|name| if name == "APPDATA" { os("") } else { None }),
-            Err(ProvisionError::MissingEnv("APPDATA"))
+            resolve_data_dir(|name| match name {
+                "LOCALAPPDATA" => os(""),
+                "APPDATA" => os("C:/u/AppData/Roaming"),
+                _ => None,
+            }),
+            Err(ProvisionError::MissingEnv("LOCALAPPDATA"))
         ));
+        let missing = resolve_data_dir(|name| {
+            if name == "APPDATA" {
+                os("C:/u/AppData/Roaming")
+            } else {
+                None
+            }
+        })
+        .unwrap_err();
+        assert_eq!(
+            missing.to_string(),
+            "no per-user data directory: set LOCALAPPDATA"
+        );
     }
     #[cfg(not(windows))]
     {

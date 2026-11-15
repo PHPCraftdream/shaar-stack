@@ -41,8 +41,8 @@ Both binaries can now set themselves up with zero configuration. Label: **Source
 
 ### Data directory
 
-- Windows: `%APPDATA%\shaar`. Unix: `$XDG_DATA_HOME/shaar` when `XDG_DATA_HOME` is non-empty and absolute, otherwise `$HOME/.local/share/shaar` (this works on macOS and on Termux/Android, which only set `HOME`).
-- Only the environment variables `APPDATA` (Windows) and `XDG_DATA_HOME` and `HOME` (Unix) are read; none of them are set by default anywhere. If none is usable the binary fails with `first run: no per-user data directory: set ...`.
+- Windows: `%LOCALAPPDATA%\shaar` — the machine-local profile, so the device key never roams to other machines or a file server. Unix: `$XDG_DATA_HOME/shaar` when `XDG_DATA_HOME` is non-empty and absolute, otherwise `$HOME/.local/share/shaar` (this works on macOS and on Termux/Android, which only set `HOME`).
+- Only the environment variables `LOCALAPPDATA` (Windows) and `XDG_DATA_HOME` and `HOME` (Unix) are read (`APPDATA` is never read); none of them are set by default anywhere. If none is usable the binary fails with `first run: no per-user data directory: set ...`.
 - The role directory (`server/` or `client/`) is created with owner-only permissions on Unix (`0o700`, recursive) at creation time. An **existing** directory is reused and its permissions are never silently changed. On Windows `create_dir_all` inherits the per-user profile ACL (no new FFI).
 
 ### Files created per role
@@ -159,7 +159,7 @@ Messages are printed on stderr as `shaar-server: ...` / `shaar-client: ...`; exi
 
 | Message | Cause and action |
 |---|---|
-| `first run: no per-user data directory: set ...` | None of `APPDATA` (Windows) or `XDG_DATA_HOME` / `HOME` (Unix) is usable. Set one and retry. |
+| `first run: no per-user data directory: set ...` | None of `LOCALAPPDATA` (Windows) or `XDG_DATA_HOME` / `HOME` (Unix) is usable. Set one and retry. |
 | `first run: ...` (other first-run provisioning errors) | The data directory or a file could not be provisioned (for example a corrupt key or too-broad key permissions; the key is never repaired, regenerated or overwritten). Fix the cause and retry; existing files are never overwritten. |
 | `no forward target configured` / `next step: run shaar-server <target:port> or set target: in <config path>` | Bare `shaar-server`: it provisioned but has no forward target. Pass the target as a positional argument or add `target:` to the generated `server.ktav`. |
 | `no server key configured` / `next step: run shaar-client <server-public-key> <server-address>` | Bare `shaar-client`: it provisioned but has no pinned server key. Run it again with the server's public key and address. |
