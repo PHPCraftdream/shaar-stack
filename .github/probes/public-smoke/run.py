@@ -2,8 +2,9 @@
 """Public-network smoke harness: `validate`, `server`, `client` (CI-only, stdlib only).
 
 Runs the normal shaar-server / shaar-client binaries once each over the public
-Mainline DHT, a pinned libp2p relay and public Yggdrasil peers, with every cap of
-contract.json enforced by the metering thread. No retries, no load, no secrets:
+Mainline DHT and public Yggdrasil peers, with the libp2p relay only when the
+contract pins one (relay-less over DHT and Yggdrasil otherwise), and with every
+cap of contract.json enforced by the metering thread. No retries, no load, no secrets:
 the identities are disposable and derived from public run metadata.
 """
 
@@ -70,8 +71,8 @@ def resolve_targets(contract, getaddrinfo=socket.getaddrinfo):
         allowed.update(parsed)
         ygg.append({"uri": entry["uri"], "all": ips})
     relay = targets["libp2p_relay"]
-    relay_ip = ipaddress.ip_address(relay["address"].rsplit(":", 1)[0])
-    return {"bootstrap": bootstrap, "ygg": ygg, "ygg_allowed": allowed, "relay_allowed": {relay_ip}}
+    relay_allowed = set() if relay is None else {ipaddress.ip_address(relay["address"].rsplit(":", 1)[0])}
+    return {"bootstrap": bootstrap, "ygg": ygg, "ygg_allowed": allowed, "relay_allowed": relay_allowed}
 
 
 def interface_addresses(text):
@@ -117,6 +118,16 @@ def free_port():
     port = probe.getsockname()[1]
     probe.close()
     return port
+
+
+def silent_relay(relay_configured):
+    """Owned silent loopback relay for the Client, or (None, None) without a relay."""
+    if not relay_configured:
+        return None, None
+    silent = socket.socket()
+    silent.bind(("127.0.0.1", 0))
+    silent.listen(8)
+    return silent, "%s:%d" % silent.getsockname()
 
 
 class Target(threading.Thread):
@@ -295,9 +306,15 @@ def common_setup(args, role, env=os.environ):
 
 
 def network_text(setup, relay_address):
+    """Rendered `network` text; no relay lines when the contract has no relay target."""
     relay = setup["contract"]["targets"]["libp2p_relay"]
-    return CONTRACT.render_network([row["used"] for row in setup["resolved"]["bootstrap"]], relay["peer_id"],
-                                   relay_address, [row["uri"] for row in setup["resolved"]["ygg"]])
+    bootstrap = [row["used"] for row in setup["resolved"]["bootstrap"]]
+    peers = [row["uri"] for row in setup["resolved"]["ygg"]]
+    if relay is None:
+        if relay_address is not None:
+            raise Abort("relay address given without a relay target")
+        return CONTRACT.render_network(bootstrap, peers=peers)
+    return CONTRACT.render_network(bootstrap, relay["peer_id"], relay_address, peers)
 
 
 def new_meter(setup):
@@ -307,14 +324,41 @@ def new_meter(setup):
     return BUDGET.Meter(setup["contract"]["budgets"]["per_job"], allowed, rx + tx)
 
 
+def server_failures(relay_configured, totals, target):
+    """Server pass/fail rules; a relay connection is required only when one is configured."""
+    found = []
+    if target["accepts"] != 1 or not target["request_ok"] or target["errors"]:
+        found.append("the target did not see exactly one valid authorized exchange")
+    if totals["ygg_connections"] < 1:
+        found.append("no Yggdrasil peer connection observed")
+    if relay_configured and totals["relay_connections"] < 1:
+        found.append("no relay connection observed")
+    return found
+
+
+def client_failures(result, failures):
+    """Client APP pass/fail rules; 'no APP reply' is added only when nothing else failed."""
+    found = []
+    if result is not None and not result["match"]:
+        found.append("APP reply did not match")
+    if result is None and not failures:
+        found.append("no APP reply")
+    return found
+
+
 def base_evidence(role, setup):
     budgets = setup["contract"]["budgets"]
+    relay = setup["contract"]["targets"]["libp2p_relay"]
     return {"schema": 1, "role": role, "source_revision": setup["dispatch"]["revision"],
             "run_id": setup["dispatch"]["run_id"], "run_attempt": 1, "contract_sha256": setup["digest"],
             "product_sha256": setup["binary_digest"], "native_gate": "off (checked in manifest)",
             "public_keys": setup["pubs"], "budgets": budgets["per_job"],
             "resolved": {"mainline_bootstrap": setup["resolved"]["bootstrap"], "ygg_peers": setup["resolved"]["ygg"],
-                         "relay": setup["contract"]["targets"]["libp2p_relay"]["address"]},
+                         "relay": None if relay is None else relay["address"]},
+            "relay_expectation": ("none configured: no relay target in the contract; the composed products start "
+                                  "without signaling relay fields and no relay connection is required or asserted"
+                                  if relay is None else
+                                  "the pinned contract relay: a Server reservation connection is required"),
             "runner_addresses": setup["addresses"], "failures": [], "status": "fail"}
 
 
@@ -343,10 +387,12 @@ def run_server(args, clock=time.time):
     (workdir / "allowlist.txt").write_text(setup["pubs"]["client"] + "\n", encoding="utf-8")
     target = Target(setup["nonce"], budgets["app"]["request_bytes_max"], budgets["app"]["reply_bytes_max"])
     target.start()
-    relay = setup["contract"]["targets"]["libp2p_relay"]["address"]
+    relay = setup["contract"]["targets"]["libp2p_relay"]
     host, port = target.address
     config = workdir / "server.ktav"
-    config.write_text(CONTRACT.render_server(f"{host}:{port}", network_text(setup, relay)), encoding="utf-8")
+    config.write_text(CONTRACT.render_server(f"{host}:{port}",
+                                             network_text(setup, None if relay is None else relay["address"])),
+                      encoding="utf-8")
     while clock() < setup["t0"]:  # shared window origin: never launch before it
         time.sleep(0.5)
     if clock() > line["server_launch_by"]:
@@ -369,12 +415,7 @@ def run_server(args, clock=time.time):
                             "server_alive_until_stop": alive}
     if not alive:
         evidence["failures"].append("server exited before the end of its window")
-    if target.accepts != 1 or not target.request_ok or target.errors:
-        evidence["failures"].append("the target did not see exactly one valid authorized exchange")
-    if totals["ygg_connections"] < 1:
-        evidence["failures"].append("no Yggdrasil peer connection observed")
-    if totals["relay_connections"] < 1:
-        evidence["failures"].append("no relay connection observed")
+    evidence["failures"].extend(server_failures(relay is not None, totals, evidence["target"]))
     return finish("server", setup, evidence, product, meter, code, secrets)
 
 
@@ -389,16 +430,17 @@ def run_client(args, clock=time.time, sleep=time.sleep):
         sleep(0.5)
     workdir, secrets = setup["workdir"], list(setup["seeds"].values())
     KEYS.write_key_file(workdir / "client.key", setup["seeds"]["client"])
-    silent = socket.socket()  # owned silent relay: the Client negotiates nothing, so Native stays blocked
-    silent.bind(("127.0.0.1", 0))
-    silent.listen(8)
+    relay_configured = setup["contract"]["targets"]["libp2p_relay"] is not None
+    silent, relay_address = silent_relay(relay_configured)
     front = free_port()
     config = workdir / "client.ktav"
     config.write_text(CONTRACT.render_client(setup["pubs"]["server"], f"127.0.0.1:{front}",
-                                             network_text(setup, "%s:%d" % silent.getsockname())), encoding="utf-8")
+                                             network_text(setup, relay_address)), encoding="utf-8")
     meter = new_meter(setup)
     evidence = base_evidence("client", setup)
-    evidence["native_block"] = "by construction: no globally routable local address; relay is an owned silent loopback listener"
+    evidence["native_block"] = ("by construction: no globally routable local address; relay is an owned silent loopback listener"
+                                if relay_configured else
+                                "by construction: no globally routable local address; no relay is configured")
     product = Product(setup["exe"], config, workdir, meter, budgets["sample_interval_ms"] / 1000)
     result = None
     try:
@@ -414,15 +456,15 @@ def run_client(args, clock=time.time, sleep=time.sleep):
         evidence["failures"].append("APP exchange failed: " + type(error).__name__)
     finally:
         code = product.stop(timing["shutdown_grace_s"])
-        silent.close()
+        if silent is not None:
+            silent.close()
     evidence["app"] = result
-    if result is not None and not result["match"]:
-        evidence["failures"].append("APP reply did not match")
-    if result is None and not evidence["failures"]:
-        evidence["failures"].append("no APP reply")
+    evidence["failures"].extend(client_failures(result, evidence["failures"]))
     evidence["claims"] = {
         "dht_record_resolved": "not observable: the products log nothing about resolution; inferred only from the exchange succeeding by key alone",
-        "route": "Yggdrasil standby inferred by exclusion (no Native path by construction, no relay negotiation); not directly observed",
+        "route": ("Yggdrasil standby inferred by exclusion (no Native path by construction, no relay configured); not directly observed"
+                  if not relay_configured else
+                  "Yggdrasil standby inferred by exclusion (no Native path by construction, no relay negotiation); not directly observed"),
         "app_payload_bytes": 0 if result is None else result["request_bytes"] + result["reply_bytes"]}
     return finish("client", setup, evidence, product, meter, code, secrets)
 

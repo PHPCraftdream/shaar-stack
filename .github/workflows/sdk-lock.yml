@@ -32,7 +32,7 @@ on:
           - faults
         default: base
       public_smoke:
-        description: Bounded live smoke over public networks (needs a recorded approval, a pinned relay and the contract digest below)
+        description: Bounded live smoke over public networks (needs a recorded approval and the contract digest below; the libp2p relay is optional and the products run relay-less over DHT and Yggdrasil without one)
         required: false
         type: boolean
         default: false
@@ -272,7 +272,7 @@ jobs:
           python-version: "3.11"
       - name: Unit-test the smoke harness (pure; no network)
         run: python -I -m unittest discover -s .github/probes/public-smoke -p "test_*.py"
-      - name: Validate the contract, recorded approval, relay target and meter availability
+      - name: Validate the contract, recorded approval and meter availability
         env:
           SOURCE_REVISION: ${{ inputs.source_revision }}
           CONTRACT_SHA256: ${{ inputs.public_smoke_contract_sha256 }}
