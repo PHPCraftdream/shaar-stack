@@ -34,7 +34,6 @@ struct StartupSettings {
     ygg_peers: Option<Vec<String>>,
     app_peers: Vec<PublicKey>,
     mode: Fallback,
-    /// Opt-in publication of the observed public address in the record.
     publish: PublishAddress,
     /// When true, native/signaling and Ygg payload endpoints share ONE
     /// bounded admission pool instead of fresh per-endpoint pools.
@@ -235,14 +234,13 @@ impl SharedResourcesStart {
         let ygg_peers = network.ygg().map(|settings| settings.peers().to_vec());
         let app_peers = plan.app_peers().to_vec();
         let mode = plan.fallback();
-        let publish = plan.publish_address();
         let settings = StartupSettings {
             signaling_bind,
             mainline,
             ygg_peers,
             app_peers,
             mode,
-            publish,
+            publish: plan.publish_address(),
             shared_admission,
         };
         let (status_tx, status_rx) = watch::channel(Status::Pending);
