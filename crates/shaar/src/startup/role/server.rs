@@ -365,13 +365,10 @@ impl ServerRole {
                     // checks `has_reservation` first and pauses on the
                     // controller's own scale; state lives in `parts`.
                     let mut reserve_failed = false;
-                    loop {
-                        // Relay-optional composition (L0): without configured
-                        // relay settings the reservation phase does not
-                        // exist — go live without any reserve attempt.
-                        let Some(relay_addr) = parts.relay_addr else {
-                            break;
-                        };
+                    // Relay-optional composition (L0): without configured relay
+                    // settings the reservation phase does not exist — go live
+                    // without any reserve attempt.
+                    while let Some(relay_addr) = parts.relay_addr {
                         // An already-active record short-circuits for free.
                         if parts
                             .relay_ops
