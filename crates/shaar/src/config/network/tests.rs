@@ -97,11 +97,9 @@ fn assert_shared(network: &NetworkSettings) {
         SocketAddr::from(([0, 0, 0, 0], 0)),
         "default signaling bind"
     );
-    assert_eq!(sig.relay_peer_id(), &relay_peer_id());
-    assert_eq!(
-        sig.relay_address(),
-        SocketAddr::from(([192, 0, 2, 20], 7000))
-    );
+    let (peer, relay_address) = sig.relay().expect("fixture carries the relay pair");
+    assert_eq!(peer, &relay_peer_id());
+    assert_eq!(*relay_address, SocketAddr::from(([192, 0, 2, 20], 7000)));
     let y = network.ygg().expect("ygg always present");
     assert_eq!(
         y.peers(),
@@ -386,6 +384,79 @@ fn signaling_fields_are_enforced() {
         );
         assert_redacted(&err, &[bad]);
     }
+}
+
+#[test]
+fn signaling_without_relay_fields_parses_for_both_roles() {
+    let text = network_text(MAINLINE_DEFAULT, "    signaling: {}\n", YGG_TWO_PEERS);
+    let cfg = ServerConfig::from_text(&text, &ServerOverrides::default())
+        .expect("relay-less signaling section validates");
+    let sig = cfg
+        .network()
+        .expect("network object present")
+        .signaling()
+        .expect("signaling section");
+    assert_eq!(
+        sig.bind(),
+        SocketAddr::from(([0, 0, 0, 0], 0)),
+        "default signaling bind"
+    );
+    assert!(sig.relay().is_none(), "no relay fields, no relay pair");
+
+    let text = client_network_text(
+        MAINLINE_DEFAULT,
+        "    signaling: {\n        bind: 127.0.0.1:0\n    }\n",
+        YGG_TWO_PEERS,
+    );
+    let cfg = ClientConfig::from_text(&text, &ClientOverrides::default())
+        .expect("relay-less client network validates");
+    let sig = cfg
+        .network()
+        .expect("network object present")
+        .signaling()
+        .expect("signaling section");
+    assert_eq!(
+        sig.bind(),
+        "127.0.0.1:0"
+            .parse::<SocketAddr>()
+            .expect("static loopback literal")
+    );
+    assert!(sig.relay().is_none(), "no relay fields, no relay pair");
+}
+
+#[test]
+fn exactly_one_relay_field_names_the_missing_one_for_both_roles() {
+    let relay = relay_peer_id_text();
+
+    // Only `relay_address` present: `relay` is named.
+    let text = network_text(
+        MAINLINE_DEFAULT,
+        "    signaling: {\n        relay_address: 192.0.2.20:7000\n    }\n",
+        YGG_TWO_PEERS,
+    );
+    let err = ServerConfig::from_text(&text, &ServerOverrides::default()).unwrap_err();
+    assert!(matches!(
+        err,
+        ConfigError::Validation {
+            field: "network.signaling.relay",
+            kind: ValidationKind::MissingRequired
+        }
+    ));
+
+    // Only `relay` present: `relay_address` is named (client role).
+    let text = client_network_text(
+        MAINLINE_DEFAULT,
+        &format!("    signaling: {{\n        relay: {relay}\n    }}\n"),
+        YGG_TWO_PEERS,
+    );
+    let err = ClientConfig::from_text(&text, &ClientOverrides::default()).unwrap_err();
+    assert!(matches!(
+        err,
+        ConfigError::Validation {
+            field: "network.signaling.relay_address",
+            kind: ValidationKind::MissingRequired
+        }
+    ));
 }
 
 #[test]

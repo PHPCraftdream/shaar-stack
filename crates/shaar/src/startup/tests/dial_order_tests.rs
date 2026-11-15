@@ -318,3 +318,29 @@ async fn denied_key_refusal_still_ends_the_attempt_immediately() {
         "no waiting on a denied key"
     );
 }
+
+/// L0: with no configured relay the negotiation phase does not exist. The
+/// direct phase still ends bounded (one silent local candidate costs its
+/// one-second slice, the list is exhausted) and the negotiation guard
+/// answers `None`, so the attempt ends typed without any relay dial.
+#[tokio::test(start_paused = true)]
+async fn no_configured_relay_ends_the_attempt_typed_after_the_direct_phase() {
+    let private = SocketAddr::from(([10, 0, 2, 2], 4242));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut candidates = dialed(&[private]);
+    let started = Instant::now();
+    let outcome = dial_candidate_list(
+        &mut candidates,
+        started + Duration::from_secs(3),
+        connect_seam(Arc::clone(&calls), dialed(&[private])),
+    )
+    .await
+    .expect("the direct phase ends bounded without a fatal error");
+    assert!(outcome.is_none(), "the exhausted list reaches negotiation");
+    assert_eq!(started.elapsed(), Duration::from_secs(1));
+    assert_eq!(
+        negotiation_target(&None),
+        None,
+        "no configured relay: the negotiation phase does not exist"
+    );
+}

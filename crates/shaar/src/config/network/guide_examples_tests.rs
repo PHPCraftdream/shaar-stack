@@ -16,6 +16,8 @@ const SERVER_COMPOSED: &str =
     include_str!("../../../../../docs/guide/examples/server-composed.ktav");
 const CLIENT_COMPOSED: &str =
     include_str!("../../../../../docs/guide/examples/client-composed.ktav");
+const SERVER_COMPOSED_NO_RELAY: &str =
+    include_str!("../../../../../docs/guide/examples/server-composed-norelay.ktav");
 
 // RFC 8032 section 7.1 test-vector 1 public key used by the examples.
 const SERVER_KEY: [u8; 32] = [
@@ -70,9 +72,10 @@ fn assert_composed_network(network: &NetworkSettings) {
     assert_eq!(bootstrap, ["192.0.2.10:6881", "192.0.2.11:6881"]);
     let signaling = network.signaling().expect("signaling section");
     assert_eq!(signaling.bind(), "0.0.0.0:0".parse::<SocketAddr>().unwrap());
-    assert_eq!(signaling.relay_peer_id().to_string(), RELAY_ID);
+    let (relay_peer_id, relay_address) = signaling.relay().expect("composed example pins a relay");
+    assert_eq!(relay_peer_id.to_string(), RELAY_ID);
     assert_eq!(
-        signaling.relay_address(),
+        *relay_address,
         "192.0.2.20:4001".parse::<SocketAddr>().unwrap()
     );
     let ygg = network.ygg().expect("ygg section");
@@ -124,6 +127,29 @@ fn composed_client_example_parses_with_documented_values() {
     assert_eq!(config.listen().to_string(), "127.0.0.1:2222");
     assert_eq!(config.fallback(), Fallback::Standby);
     assert_composed_network(config.network().expect("network object"));
+}
+
+#[test]
+fn relay_less_composed_server_example_parses_without_a_relay_pair() {
+    let config = server(SERVER_COMPOSED_NO_RELAY);
+    assert_eq!(config.target().to_string(), "127.0.0.1:8080");
+    assert_eq!(config.key_file(), Path::new("server.key"));
+    assert_eq!(config.fallback(), Fallback::Standby);
+    let network = config.network().expect("network object");
+    let signaling = network.signaling().expect("signaling section");
+    assert!(
+        signaling.relay().is_none(),
+        "the relay-less example carries no relay pair"
+    );
+    assert_eq!(signaling.bind(), "0.0.0.0:0".parse::<SocketAddr>().unwrap());
+    let mainline = network.mainline().expect("mainline section");
+    let bootstrap: Vec<String> = mainline.bootstrap().iter().map(|a| a.to_string()).collect();
+    assert_eq!(bootstrap, ["192.0.2.10:6881", "192.0.2.11:6881"]);
+    let ygg = network.ygg().expect("ygg section");
+    assert_eq!(
+        ygg.peers(),
+        ["tcp://192.0.2.30:1514", "tls://192.0.2.31:1515"]
+    );
 }
 
 #[test]

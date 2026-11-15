@@ -128,11 +128,12 @@ fn valid_server_plan_exposes_network_and_raw_peers() {
         app_peer(&peer_identity(PEER_B_SEED)),
     ];
     let plan = preflight_server(&config, &identity, &peers).expect("valid preflight");
+    let signaling = plan.network().signaling().expect("signaling present");
     assert_eq!(
-        plan.network()
-            .signaling()
-            .expect("signaling present")
-            .relay_address()
+        signaling
+            .relay()
+            .expect("fixture pins a relay")
+            .1
             .to_string(),
         "192.0.2.20:7000"
     );
@@ -220,6 +221,23 @@ fn application_peer_equal_to_pinned_relay_is_an_application_role_conflict() {
         }
     ));
     assert_redacted(&error, &key_material());
+}
+
+#[test]
+fn relay_less_composed_plan_passes_preflight_for_both_roles() {
+    let network_block = "network: {\n    mainline: {\n        bind: 0.0.0.0:0\n        \
+         bootstrap: [\n            192.0.2.10:6881\n        ]\n    }\n    signaling: {}\n    \
+         ygg: {\n        peers: [\n            tcp://127.0.0.1:9001\n        ]\n    }\n}\n";
+    let identity = local_identity();
+    let server_text = format!("target: 127.0.0.1:9000\n{network_block}");
+    let server = ServerConfig::from_text(&server_text, &ServerOverrides::default())
+        .expect("relay-less server text parses");
+    preflight_server(&server, &identity, &[]).expect("the relay-less server plan passes preflight");
+
+    let client_text = format!("server: {RFC8032_PUB_HEX}\n{network_block}");
+    let client = ClientConfig::from_text(&client_text, &ClientOverrides::default())
+        .expect("relay-less client text parses");
+    preflight_client(&client, &identity, &[]).expect("the relay-less client plan passes preflight");
 }
 
 #[test]

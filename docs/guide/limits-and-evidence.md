@@ -10,7 +10,7 @@ This page separates what was written, what ran in GitHub CI, and what has no evi
 - Evidence exists for Linux (Ubuntu CI runners, amd64) and Windows (CI runners, amd64) only. **Unverified**: macOS, BSD, ARM, mobile, containers.
 - Key-file permission checks exist for Unix (mode bits) and Windows (owner-only ACL). On other platforms only type and size are checked.
 - The controlled NAT and UDP-blockade fixture is Linux-only (network namespaces on a disposable runner). Windows was never run under NAT conditions.
-- No TUN, VPN, root privilege or router change is used or required. The products need outbound UDP (QUIC, Mainline) and outbound TCP (libp2p relay, Yggdrasil peers) and bind local UDP and TCP sockets.
+- No TUN, VPN, root privilege or router change is used or required. The products need outbound UDP (QUIC, Mainline) and outbound TCP (libp2p relay when configured, Yggdrasil peers) and bind local UDP and TCP sockets.
 
 ### NAT and direct QUIC
 
@@ -23,7 +23,7 @@ This page separates what was written, what ran in GitHub CI, and what has no evi
 ### Relay (libp2p)
 
 - The relay is signaling only: it never carries application bytes (**Verified** in the controlled fixtures by an oracle that requires zero application STREAM/DATAGRAM frames on relay and custom paths).
-- You must supply a libp2p relay (`network.signaling.relay` and `relay_address`, a numeric address). This repository contains no relay program. Only owned test relays were used in CI. **Unverified**: public Amino relays, relay capacity and rate limits in production, relay outages beyond the owned-fixture outage case.
+- The relay is optional (leaf L0, 2026-11-14 owner decision: DHT and Yggdrasil are the only helper infrastructure). With `network.signaling.relay` and `relay_address` both present, behavior is unchanged: the Server reserves the relay at startup (typed `relay reservation failed at startup` on a dead relay) and the Client reaches relay negotiation after its direct candidates. With neither field present, the composed startup starts with no relay connection at all: the Server skips reservation, the Client dials direct candidates and then the Yggdrasil path. Exactly one of the two fields is a configuration error naming the missing field. This repository contains no relay program. Only owned test relays were used in CI. **Unverified**: public Amino relays, relay capacity and rate limits in production, relay outages beyond the owned-fixture outage case; the relay-less startup is covered by unit, config and role tests only — no end-to-end relay-less run has been executed yet.
 
 ### Yggdrasil
 

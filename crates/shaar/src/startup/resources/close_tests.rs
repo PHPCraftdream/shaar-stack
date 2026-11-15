@@ -23,7 +23,7 @@ fn shared_with(resources: StartupResources) -> Arc<SharedState> {
     let (status_tx, status_rx) = watch::channel(Status::Pending);
     let (completion_tx, _) = watch::channel(None);
     Arc::new(SharedState {
-        configured_relay: loopback_relay(),
+        configured_relay: Some(loopback_relay()),
         slot: std::sync::Mutex::new(super::super::CompositionSlot {
             resources: Some(resources),
             closing: None,

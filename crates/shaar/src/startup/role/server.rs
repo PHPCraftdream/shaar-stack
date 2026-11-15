@@ -14,6 +14,9 @@
 //! key-directed negotiation through the relay reachable for connecting
 //! clients; it is released during the role's joined close while signaling is
 //! still alive, and reconciled carrier-side by the endpoint close otherwise.
+//! This reservation lifecycle applies ONLY when a relay is configured: the
+//! relay-optional composition (leaf L0) skips the reservation entirely and
+//! goes live directly.
 //!
 //! Cancellation contract: waiter cancellation of [`ServerRole::start`],
 //! [`ServerRole::run`] or [`ServerRole::shutdown`] never drops an owner —
@@ -319,10 +322,8 @@ impl ServerRole {
                         .config
                         .network()
                         .and_then(|network| network.signaling())
-                        .and_then(|signaling| {
-                            RelayAddr::new(*signaling.relay_peer_id(), signaling.relay_address())
-                                .ok()
-                        });
+                        .and_then(|signaling| signaling.relay())
+                        .and_then(|(peer_id, address)| RelayAddr::new(*peer_id, *address).ok());
                     let payload = resources.take_ygg_payload();
                     // Live-role transfer: `None` fails truthfully.
                     let transferred = resources.take_native_live();
@@ -338,11 +339,7 @@ impl ServerRole {
                         Some((endpoint, relay_ops)) => {
                             parts.endpoint = Some(endpoint);
                             parts.relay_ops = Some(relay_ops);
-                            if parts.relay_addr.is_none() {
-                                Some(StartupError::NetworkRequired)
-                            } else {
-                                None
-                            }
+                            None
                         }
                         // Truthful startup failure, never a silent fallback.
                         None => Some(StartupError::Close {
@@ -368,11 +365,10 @@ impl ServerRole {
                     // checks `has_reservation` first and pauses on the
                     // controller's own scale; state lives in `parts`.
                     let mut reserve_failed = false;
-                    loop {
-                        let Some(relay_addr) = parts.relay_addr else {
-                            reserve_failed = true;
-                            break;
-                        };
+                    // Relay-optional composition (L0): without configured relay
+                    // settings the reservation phase does not exist — go live
+                    // without any reserve attempt.
+                    while let Some(relay_addr) = parts.relay_addr {
                         // An already-active record short-circuits for free.
                         if parts
                             .relay_ops

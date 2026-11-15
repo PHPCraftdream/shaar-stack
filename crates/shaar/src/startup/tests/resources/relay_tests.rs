@@ -110,3 +110,57 @@ async fn bounded_reservation_succeeds_and_readiness_stays_truthful() {
     probe_claim_free(SEED, "identity claim released").await;
     probe_claim_free(TRANSIT_SEED, "transit claim released").await;
 }
+
+// Unique per test (parallel #[tokio::test]s must never share an
+// identity/transit seed): identity 0xEB, transit 0xEC. L0: no relay fixture
+// at all — the composition must admit without any reservation phase.
+const NO_RELAY_SEED: u8 = 0xEB;
+const NO_RELAY_TRANSIT_SEED: u8 = 0xEC;
+
+/// Removes the helper's configured `relay`/`relay_address` lines, leaving
+/// the signaling section with its bind only (the L0 relay-less shape).
+fn strip_configured_relay_fields(text: &str) -> String {
+    let relay_line = format!("        relay: {}\n", super::relay_peer_id_text());
+    let text = text
+        .replace(&relay_line, "")
+        .replace("        relay_address: 192.0.2.20:7000\n", "");
+    assert!(!text.contains("relay"), "both relay fields removed");
+    text
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn relay_less_composition_admits_without_a_reservation_phase() {
+    let (transit, transit_port) = start_listener(NO_RELAY_TRANSIT_SEED).await;
+    let text = strip_configured_relay_fields(&server_config_text(
+        SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0),
+        &[SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 9)],
+        "127.0.0.1:0".parse().expect("signaling bind"),
+        &[format!("tcp://127.0.0.1:{transit_port}")],
+        None,
+    ));
+    let config = parse_server_config(&text);
+    let identity = identity(NO_RELAY_SEED);
+    let mut start: SharedResourcesStart = start_composition(&identity, &config, &[]);
+    let resources: SharedResources = wait_admitted(&mut start).await;
+
+    let ready = resources.readiness().await;
+    assert!(
+        !ready.relay_reserved,
+        "no relay is configured: nothing is reserved"
+    );
+    assert!(ready.native_bound, "native endpoint bound");
+    assert!(ready.signal_bound.is_some(), "signaling endpoint bound");
+    assert_eq!(ready.ygg, YggPhase::BridgeOnly);
+
+    tokio::time::timeout(BUDGET, start.shutdown())
+        .await
+        .expect("shutdown joins within the budget")
+        .expect("shutdown is clean");
+    let closed = tokio::time::timeout(Duration::from_secs(10), transit.close()).await;
+    assert!(
+        closed.is_ok() && closed.expect("checked").is_ok(),
+        "transit close"
+    );
+    probe_claim_free(NO_RELAY_SEED, "relay-less identity claim released").await;
+    probe_claim_free(NO_RELAY_TRANSIT_SEED, "relay-less transit claim released").await;
+}

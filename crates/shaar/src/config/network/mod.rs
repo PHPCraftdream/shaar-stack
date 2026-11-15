@@ -124,12 +124,13 @@ impl MainlineNetwork {
     }
 }
 
-/// Validated signaling relay settings.
+/// Validated signaling settings for the composed startup. The signaling
+/// bind is always present (default `0.0.0.0:0`); the relay pair is optional
+/// (leaf L0): both `network.signaling.relay*` fields together or neither.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalingNetwork {
     bind: SocketAddr,
-    relay_peer_id: PeerId,
-    relay_address: SocketAddr,
+    relay: Option<(PeerId, SocketAddr)>,
 }
 
 impl SignalingNetwork {
@@ -138,14 +139,10 @@ impl SignalingNetwork {
         self.bind
     }
 
-    /// Public peer id of the relay node.
-    pub fn relay_peer_id(&self) -> &PeerId {
-        &self.relay_peer_id
-    }
-
-    /// Numeric relay destination address.
-    pub fn relay_address(&self) -> SocketAddr {
-        self.relay_address
+    /// The configured relay pair (public relay peer id, numeric relay
+    /// address), when both `network.signaling.relay*` fields are present.
+    pub fn relay(&self) -> Option<&(PeerId, SocketAddr)> {
+        self.relay.as_ref()
     }
 }
 
@@ -283,24 +280,33 @@ fn parse_signaling(raw: SignalingFile) -> Result<SignalingNetwork, ConfigError> 
         None => SocketAddr::from_str("0.0.0.0:0").expect("static wildcard literal parses"),
     };
 
-    let relay_text = raw
-        .relay
-        .as_deref()
-        .ok_or_else(|| ConfigError::validation(FIELD_RELAY, ValidationKind::MissingRequired))?;
-    let relay_peer_id = PeerId::from_str(relay_text)
-        .map_err(|_| ConfigError::validation(FIELD_RELAY, ValidationKind::InvalidKey))?;
+    // Relay-optional pair (L0): both fields or neither; exactly one present
+    // names the missing one by its own field. Values are validated only when
+    // the pair is present and never echoed.
+    let relay = match (raw.relay.as_deref(), raw.relay_address.as_deref()) {
+        (None, None) => None,
+        (Some(_), None) => {
+            return Err(ConfigError::validation(
+                FIELD_RELAY_ADDRESS,
+                ValidationKind::MissingRequired,
+            ));
+        }
+        (None, Some(_)) => {
+            return Err(ConfigError::validation(
+                FIELD_RELAY,
+                ValidationKind::MissingRequired,
+            ));
+        }
+        (Some(relay_text), Some(address_text)) => {
+            let relay_peer_id = PeerId::from_str(relay_text)
+                .map_err(|_| ConfigError::validation(FIELD_RELAY, ValidationKind::InvalidKey))?;
+            let relay_address = parse_socket_addr(FIELD_RELAY_ADDRESS, address_text)?;
+            require_dial_destination(FIELD_RELAY_ADDRESS, relay_address)?;
+            Some((relay_peer_id, relay_address))
+        }
+    };
 
-    let relay_text = raw.relay_address.as_deref().ok_or_else(|| {
-        ConfigError::validation(FIELD_RELAY_ADDRESS, ValidationKind::MissingRequired)
-    })?;
-    let relay_address = parse_socket_addr(FIELD_RELAY_ADDRESS, relay_text)?;
-    require_dial_destination(FIELD_RELAY_ADDRESS, relay_address)?;
-
-    Ok(SignalingNetwork {
-        bind,
-        relay_peer_id,
-        relay_address,
-    })
+    Ok(SignalingNetwork { bind, relay })
 }
 
 /// Composed-infrastructure peer-URI validation using the SAME URL parser the
