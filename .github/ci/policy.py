@@ -13,6 +13,13 @@ PACKAGES = {
 NESTED = {"shaar-ygg-core": "crates/shaar-ygg-core/Cargo.toml"}
 # Manifests that link the Yggdrasil adapter into the guarded normal SDK graph; changing one runs the graph proof.
 GRAPH_INPUTS = frozenset({"crates/shaar-ygg/Cargo.toml", "crates/shaar-ygg-core/Cargo.toml"})
+# Recipes whose prepared trees the graph proof compares by digest against the control revision's own
+# preparation (fixture/baseline prepare_sources); editing one changes those digests, so the proof must run.
+GRAPH_RECIPES = (
+    ".github/scripts/backend/", ".github/scripts/p2p/prepare.py",
+    ".github/scripts/p2p/discovery/simple_dns/prepare.py", ".github/scripts/p2p/discovery/dns/",
+    ".github/scripts/p2p/discovery/resolver/", ".github/scripts/p2p/discovery/kad/",
+)
 SUITES = {
     "protocols": ("shaar-p2p", ("carrier::driver::protocols::", "infrastructure::tests::identification::")),
     "carrier-core": ("shaar-p2p", ("carrier::driver::tests::", "carrier::driver::fault_tests::", "carrier::driver::boundary::tests::", "carrier::driver::events::request_owner::tests::")),
@@ -247,7 +254,7 @@ def select(paths, *, full=False):
             flags["identity_probe"] = True
         suites.update(owned)
         reasons.append({"path": path, "suites": owned})
-    if GRAPH_INPUTS & set(paths) and not full:
+    if (GRAPH_INPUTS & set(paths) or any(path.startswith(GRAPH_RECIPES) for path in paths)) and not full:
         flags["native_graph"] = True
         add(target("shaar", kind="test", name="native_graph_witness"))
     flags.update(full=full, rust=full or bool(targets), product=bool(targets))

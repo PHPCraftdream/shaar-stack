@@ -75,14 +75,17 @@ class PolicyTests(unittest.TestCase):
         full = POLICY.select([], full=True)
         self.assertTrue(full["selection"]["publication"])
 
-    def test_yggdrasil_linking_manifests_select_the_graph_proof(self):
+    def test_graph_inputs_and_control_prepared_recipes_select_the_graph_proof(self):
         witness = POLICY.target("shaar", kind="test", name="native_graph_witness")
-        for path in ("crates/shaar-ygg/Cargo.toml", "crates/shaar-ygg-core/Cargo.toml"):
+        for path in ("crates/shaar-ygg/Cargo.toml", "crates/shaar-ygg-core/Cargo.toml",
+                     ".github/scripts/backend/prepare.py", ".github/scripts/p2p/discovery/resolver/prepare.py",
+                     ".github/scripts/p2p/discovery/kad/kad.py", ".github/scripts/p2p/discovery/dns/prepare.py"):
             with self.subTest(path=path):
                 result = POLICY.select([path])
                 self.assertTrue(result["selection"]["native_graph"])
                 self.assertIn(witness, result["targets"])
-        for path in ("crates/shaar/src/path/mod.rs", "Cargo.lock", "crates/shaar/Cargo.toml"):
+        for path in ("crates/shaar/src/path/mod.rs", "Cargo.lock", "crates/shaar/Cargo.toml",
+                     ".github/scripts/p2p/discovery/mainline/prepare.py"):
             with self.subTest(path=path):
                 other = POLICY.select([path, "Cargo.toml"] if path == "Cargo.lock" else [path])
                 self.assertFalse(other["selection"]["native_graph"])
@@ -119,7 +122,8 @@ class PolicyTests(unittest.TestCase):
 
         for filename in ("prepare.py", "checks.py", "graph_checks.py"):
             result = POLICY.select([".github/scripts/p2p/discovery/simple_dns/" + filename])
-            self.assertEqual(result["targets"], [POLICY.target("shaar", (selector,))])
+            self.assertIn(POLICY.target("shaar", (selector,)), result["targets"])
+            self.assertEqual(result["selection"]["native_graph"], filename == "prepare.py")
             self.assertFalse(result["selection"]["full"])
 
         source = POLICY.select(["crates/shaar/src/native_discovery/record.rs"])
@@ -348,15 +352,16 @@ class PolicyTests(unittest.TestCase):
             POLICY.select([".github/scripts/unowned-mainline.py"])
 
     def test_dependency_proofs_only_follow_changed_dependency_owner(self):
-        cases = {".github/scripts/p2p/discovery/resolver/prepare.py": "resolver",
-                 ".github/scripts/p2p/discovery/kad/kad.py": "kad",
-                 ".github/scripts/p2p/relay/fixtures/wire/run.py": "relay",
-                 ".github/scripts/tests/noq_driver/prepare.py": "backend"}
-        for path, owner in cases.items():
+        graph = [POLICY.target("shaar", kind="test", name="native_graph_witness")]
+        cases = {".github/scripts/p2p/discovery/resolver/prepare.py": (["resolver", "native_graph"], graph),
+                 ".github/scripts/p2p/discovery/kad/kad.py": (["kad", "native_graph"], graph),
+                 ".github/scripts/p2p/relay/fixtures/wire/run.py": (["relay"], []),
+                 ".github/scripts/tests/noq_driver/prepare.py": (["backend"], [])}
+        for path, (owners, targets) in cases.items():
             with self.subTest(path=path):
                 result = POLICY.select([path])
-                self.assertEqual([k for k in POLICY.DOMAINS if result["selection"][k]], [owner])
-                self.assertFalse(result["targets"])
+                self.assertEqual([k for k in POLICY.DOMAINS if result["selection"][k]], owners)
+                self.assertEqual(result["targets"], targets)
                 self.assertTrue(result["selection"]["prepare"])
 
     def test_docs_and_ci_policy_do_not_compile_rust(self):
