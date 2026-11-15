@@ -43,3 +43,40 @@ async fn admission_gate_prefers_closed_session_when_both_branches_are_ready() {
     client.close().await;
     server.close().await;
 }
+
+#[tokio::test]
+async fn admission_gate_prefers_observed_session_closure_when_ready_together() {
+    let client_identity = Identity::from_seed([101; 32]);
+    let server_identity = Identity::from_seed([102; 32]);
+    let client = Endpoint::bind(
+        &client_identity,
+        "127.0.0.1:0".parse().unwrap(),
+        Allowlist::default(),
+        Limits::new(1).unwrap(),
+    )
+    .await
+    .unwrap();
+    let mut server = Endpoint::bind(
+        &server_identity,
+        "127.0.0.1:0".parse().unwrap(),
+        Allowlist::new(&[client.id()]).unwrap(),
+        Limits::new(1).unwrap(),
+    )
+    .await
+    .unwrap();
+    let (connected, accepted) = tokio::try_join!(
+        client.connect(server.id(), server.local_addr()),
+        server.accept(),
+    )
+    .unwrap();
+
+    accepted.close();
+    // This await synchronizes on the SDK closure event; the subsequent gate
+    // polls closed() and its ready admission branch together, without timing.
+    assert!(matches!(connected.closed().await, NetworkError::Closed));
+    assert!(!admission_live(&connected).await);
+
+    connected.close();
+    client.close().await;
+    server.close().await;
+}

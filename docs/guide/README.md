@@ -25,9 +25,24 @@ Labels: **Verified** = exercised by tests that ran in GitHub CI; **Source** = re
 
 The direct-only shape is the simplest path and is described first.
 
-## Quick start: direct-only
+## Quick start (zero-configuration first run) **Source**
 
-You need the `shaar-server` and `shaar-client` binaries (CI builds them; see [operations.md](operations.md#binaries)) and a program to create keys ([`examples/keygen.rs`](examples/keygen.rs), a tiny crate depending on `shaar`; the binaries cannot create keys).
+The binaries can now set themselves up. Each binary, run with no arguments, creates a per-user data directory (`shaar-server`: `<data>/server/`, `shaar-client`: `<data>/client/`) containing a config template, an Ed25519 key file (`shaar.key`, never overwritten) and — for the server only — a comment-only `allowed.txt` template (an empty allowlist denies everyone). On Unix the role directory is created with owner-only permissions; an existing directory is reused and never re-permissioned. Existing files are reported as `kept:` and left byte-for-byte untouched, so second runs are idempotent. The generated configs are direct-only (no `network` object).
+
+For details on the data directory rules, the exact stdout contract and what the first run deliberately does **not** do, see [operations.md](operations.md#first-run).
+
+1. **Provision and read the server key.** On the server machine run `shaar-server` with no arguments. It prints the summary lines, then `public_key=<64 lowercase hex>`, then `no forward target configured` and `next step: run shaar-server <target:port> or set target: in <config path>`, and exits with a failure status — a bare run never guesses the TCP forward target.
+2. **Start the server with a target.** Run `shaar-server 127.0.0.1:8080`, where the target is your local TCP service. It prints the readiness line `bound=<ip:port> public_key=<hex>` first, then the operator block (`allowlist <path>: empty - append each client's public key as one line, then restart the server to admit it`, then `forward target: <target>`). Give each client your machine's reachable address with the bound port, plus the public key.
+3. **Provision the client.** On the client machine run `shaar-client` with no arguments (if `./client.ktav` exists in the working directory it is used as before; otherwise the data directory is provisioned). It prints the summary lines and `public_key=<64 lowercase hex>` — your own key for the server allowlist — then `no server key configured` and `next step: run shaar-client <server-public-key> <server-address>`, and exits with a failure status.
+4. **Allowlist yourself.** Append your public key as one line to `<data>/server/allowed.txt` on the server host, then **restart the server** (the allowlist is read once at startup).
+5. **Connect.** Run `shaar-client <server-public-key> <server-ip>:<bound-port>`. The key and address are persisted into the generated `client.ktav` at first generation only (later positional values are per-run overrides). It prints `listening=<ip:port>` first, then the summary, `your public key for the server allowlist: public_key=<own hex>`, `pinned server: public_key=<server hex> address=<addr>` and `add your key as one line to the server allowlist file, then restart the server`. Connect your application to the printed `listening=` address; its TCP stream is forwarded to the server's `target`. A client whose key is not in `allowed.txt` is refused and the target sees no connection.
+6. **Stop** both with Ctrl-C.
+
+If something fails, [operations.md](operations.md#error-messages-and-recovery) maps each message to a cause.
+
+## Quick start with explicit config files
+
+You need the `shaar-server` and `shaar-client` binaries (CI builds them; see [operations.md](operations.md#binaries)) and a program to create keys ([`examples/keygen.rs`](examples/keygen.rs), a tiny crate depending on `shaar`).
 
 1. **Keys.** Create one identity per side and note the printed public keys:
 
@@ -56,4 +71,4 @@ Same keys and allowlist (at most 16 allowlisted clients in this shape). In addit
 
 ## Tests that keep this guide honest
 
-`crates/shaar/src/config/guide_examples_tests.rs` loads the four `.ktav` examples verbatim and asserts their values and the quoted validation messages; `crates/shaar-server/src/tests/allowlist.rs` parses `allowlist.txt` with the production parser; `crates/shaar/tests/sdk_network.rs` compiles and runs `keygen.rs`. The CI impact map (`.github/ci/policy.py`) selects them when an example changes.
+`crates/shaar/src/config/guide_examples_tests.rs` loads the four `.ktav` examples verbatim and asserts their values and the quoted validation messages; `crates/shaar-server/src/tests/allowlist.rs` parses `allowlist.txt` with the production parser; `crates/shaar/tests/sdk_network.rs` compiles and runs `keygen.rs`; `crates/shaar/src/identity/provision/tests.rs` covers the provisioning layer; binary first-run tests exercise the two binaries' first-run flows, and the ignored process case `process_smoke::startup::real_first_run_bootstrap_without_arguments` is run by CI's process-feedback job. The CI impact map (`.github/ci/policy.py`) selects them when an example changes.

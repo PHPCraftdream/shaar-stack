@@ -18,10 +18,16 @@
 //! remains inside the worker.
 
 mod error;
+pub mod provision;
 mod store;
 mod ygg;
 
 pub use error::IdentityError;
+pub use provision::{
+    FileState, ProvisionError, ProvisionPaths, ProvisionReport, Provisioned, Role,
+    allowlist_template_text, client_config_text, default_data_dir, first_run_summary_lines,
+    path_as_config_value, provision, resolve_data_dir, role_dir,
+};
 
 use std::net::Ipv6Addr;
 use std::path::PathBuf;

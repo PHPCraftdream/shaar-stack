@@ -5,8 +5,14 @@ use std::{
 };
 
 use shaar::{
-    config::{ClientConfig, ClientEndpointOverrides, ClientOverrides, Fallback, MAX_CONFIG_BYTES},
-    identity::Identity,
+    config::{
+        ClientConfig, ClientEndpointOverrides, ClientOverrides, ConfigError, Fallback,
+        MAX_CONFIG_BYTES, ValidationKind,
+    },
+    identity::{
+        Identity,
+        provision::{Role, default_data_dir, first_run_summary_lines, provision},
+    },
     network::{Allowlist, Endpoint, ForwardError, Limits, NetworkError, Session},
 };
 use tokio::{
@@ -20,26 +26,46 @@ const MAX_ATTEMPTS: u32 = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
 const BACKOFF: Duration = Duration::from_millis(250);
 
+/// Startup selection: explicit config file, zero-config auto mode, or the
+/// guided first run with positional server key/address.
 #[derive(Debug, PartialEq, Eq)]
-struct Cli {
-    config: PathBuf,
+enum Invocation {
+    Config(PathBuf),
+    Auto,
+    FirstRun {
+        server: Option<String>,
+        server_address: Option<String>,
+    },
 }
 
-fn parse_cli(args: impl IntoIterator<Item = String>) -> Result<Cli, &'static str> {
+fn parse_invocation(args: impl IntoIterator<Item = String>) -> Result<Invocation, &'static str> {
     let mut args = args.into_iter();
     let _ = args.next();
-    match (args.next(), args.next(), args.next()) {
-        (None, None, None) => Ok(Cli {
-            config: "client.ktav".into(),
+    let positionals: Vec<String> = args.collect();
+    match positionals.as_slice() {
+        [] => Ok(Invocation::Auto),
+        [flag, path] if flag == "--config" && !path.is_empty() => {
+            Ok(Invocation::Config(path.into()))
+        }
+        [server] if !server.starts_with('-') => Ok(Invocation::FirstRun {
+            server: Some(server.clone()),
+            server_address: None,
         }),
-        (Some(flag), Some(path), None) if flag == "--config" && !path.is_empty() => Ok(Cli {
-            config: path.into(),
-        }),
-        _ => Err("usage: shaar-client [--config PATH]"),
+        [server, address] if !server.starts_with('-') && !address.starts_with('-') => {
+            Ok(Invocation::FirstRun {
+                server: Some(server.clone()),
+                server_address: Some(address.clone()),
+            })
+        }
+        _ => Err("usage: shaar-client [--config PATH] | [server-key [server-address]]"),
     }
 }
 
-async fn read_config(path: &std::path::Path) -> Result<ClientConfig, Box<dyn Error>> {
+async fn read_config(
+    path: &std::path::Path,
+    over: &ClientOverrides,
+    endpoint_over: &ClientEndpointOverrides,
+) -> Result<ClientConfig, Box<dyn Error>> {
     use tokio::io::AsyncReadExt;
     let file = tokio::fs::File::open(path).await?;
     let mut bytes = Vec::with_capacity(4096);
@@ -51,26 +77,27 @@ async fn read_config(path: &std::path::Path) -> Result<ClientConfig, Box<dyn Err
     }
     Ok(ClientConfig::from_text_with_endpoint_overrides(
         std::str::from_utf8(&bytes)?,
-        &ClientOverrides::default(),
-        &ClientEndpointOverrides::default(),
+        over,
+        endpoint_over,
     )?)
 }
 
-fn peer_from_config(config: &ClientConfig) -> Result<String, std::fmt::Error> {
-    let mut hex = String::with_capacity(64);
-    for byte in config.server_key_bytes() {
-        write!(&mut hex, "{byte:02x}")?;
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(&mut hex, "{byte:02x}").expect("hex formatting cannot fail");
     }
-    Ok(hex)
+    hex
+}
+
+fn peer_from_config(config: &ClientConfig) -> Result<String, std::fmt::Error> {
+    Ok(hex_bytes(config.server_key_bytes()))
 }
 
 /// Operator banner: the client's own key as `public_key`, the pinned server
 /// key separately as `server`.
 fn composed_banner(identity: &Identity, server_hex: &str, fallback: &str, hint: &str) -> String {
-    let mut own = String::with_capacity(64);
-    for byte in identity.public_key_bytes() {
-        write!(&mut own, "{byte:02x}").expect("hex formatting cannot fail");
-    }
+    let own = hex_bytes(&identity.public_key_bytes());
     format!(
         "composed startup: public_key={own} server={server_hex} fallback={fallback} server_address={hint}"
     )
@@ -142,10 +169,25 @@ async fn abort_workers(
 }
 
 /// cancel-safe: NO — dropping the binary future can abandon joined cleanup.
-async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
-    let config = read_config(&config_path).await?;
-    let key_hex = peer_from_config(&config)?;
+async fn run_from_config(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
+    let config = read_config(
+        &config_path,
+        &ClientOverrides::default(),
+        &ClientEndpointOverrides::default(),
+    )
+    .await?;
     let identity = Identity::load(config.key_file().to_path_buf()).await?;
+    run_configured(config, identity, None).await
+}
+
+/// Shared startup tail: composed or legacy direct-only. `announce` lines are
+/// printed right after each readiness line; `None` keeps today's output.
+async fn run_configured(
+    config: ClientConfig,
+    identity: Identity,
+    announce: Option<&[String]>,
+) -> Result<(), Box<dyn Error>> {
+    let key_hex = peer_from_config(&config)?;
     // Composed startup: the shared role layer owns dialing and fallback; the
     // configured fallback is genuinely honored here, and server_address is
     // only an optional explicit direct-address hint.
@@ -190,16 +232,17 @@ async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
         let mut primary: Option<shaar::startup::StartupError> = match started {
             Some(Ok(())) => {
                 // Announce the bound listener while the run loop serves.
-                let mut announce = std::pin::pin!(role.listening());
+                let mut listening = std::pin::pin!(role.listening());
                 let mut announced = false;
                 let mut run = std::pin::pin!(role.run(&mut shutdown));
                 loop {
                     tokio::select! {
                         result = &mut run => break result.err(),
-                        address = &mut announce, if !announced => {
+                        address = &mut listening, if !announced => {
                             announced = true;
                             if let Some(address) = address {
                                 println!("listening={address}");
+                                print_announce(announce);
                             }
                         }
                     }
@@ -254,7 +297,151 @@ async fn run(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
     };
     let endpoint = Endpoint::bind(&identity, bind, Allowlist::default(), Limits::new(1)?).await?;
     println!("listening={}", listener.local_addr()?);
+    print_announce(announce);
     coordinate(listener, endpoint, key_hex, address).await
+}
+
+/// Print the first-run guidance block, one line per stdout line, in order.
+fn print_announce(announce: Option<&[String]>) {
+    for line in announce.into_iter().flatten() {
+        println!("{line}");
+    }
+}
+
+/// Preserves today's `./client.ktav` behavior; a stat error is reported,
+/// not silently treated as absent.
+async fn legacy_config_present(path: &std::path::Path) -> Result<bool, std::io::Error> {
+    tokio::fs::try_exists(path).await
+}
+
+async fn run_auto() -> Result<(), Box<dyn Error>> {
+    match legacy_config_present(std::path::Path::new("client.ktav")).await {
+        Ok(true) => run_from_config(PathBuf::from("client.ktav")).await,
+        Ok(false) => run_first_run(None, None).await,
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// First-run decision: ready to start, or a guided next step the operator
+/// must take (a client cannot guess the server key or address).
+enum FirstRunState {
+    Ready {
+        config: Box<ClientConfig>,
+        identity: Box<Identity>,
+        block: Vec<String>,
+    },
+    MissingKey {
+        block: Vec<String>,
+        error: String,
+    },
+    MissingAddress {
+        block: Vec<String>,
+        error: String,
+    },
+}
+
+async fn first_run_state(
+    base: &std::path::Path,
+    server: Option<String>,
+    server_address: Option<String>,
+) -> Result<FirstRunState, String> {
+    let provisioned = provision(
+        Role::Client,
+        base,
+        server.as_deref(),
+        server_address.as_deref(),
+    )
+    .await
+    .map_err(|error| format!("first run: {error}"))?;
+    let summary = first_run_summary_lines(Role::Client, &provisioned.report, &provisioned.identity);
+    let config = read_config(
+        &provisioned.report.paths.config,
+        &ClientOverrides {
+            server: server.clone(),
+            ..Default::default()
+        },
+        &ClientEndpointOverrides {
+            server_address: server_address.clone(),
+        },
+    )
+    .await;
+    let config = match config {
+        Ok(config) => config,
+        Err(error) => {
+            if let Some(ConfigError::Validation {
+                field: "server",
+                kind: ValidationKind::MissingRequired,
+            }) = error.downcast_ref::<ConfigError>()
+            {
+                let mut block = summary;
+                block.push("no server key configured".to_owned());
+                block.push(
+                    "next step: run shaar-client <server-public-key> <server-address>".to_owned(),
+                );
+                return Ok(FirstRunState::MissingKey {
+                    block,
+                    error: error.to_string(),
+                });
+            }
+            return Err(format!("configuration: {error}"));
+        }
+    };
+    if config.network().is_none() && config.server_address().is_none() {
+        let mut block = summary;
+        block.push("no server address configured".to_owned());
+        block.push(format!(
+            "next step: run shaar-client {} <server-address>",
+            hex_bytes(config.server_key_bytes())
+        ));
+        return Ok(FirstRunState::MissingAddress {
+            block,
+            error: "server_address is required for direct-only operation without network settings"
+                .to_owned(),
+        });
+    }
+    let mut block = summary;
+    block.push(format!(
+        "your public key for the server allowlist: public_key={}",
+        hex_bytes(&provisioned.identity.public_key_bytes())
+    ));
+    block.push(format!(
+        "pinned server: public_key={} address={}",
+        hex_bytes(config.server_key_bytes()),
+        config
+            .server_address()
+            .map(|address| address.to_string())
+            .unwrap_or_else(|| "none".to_owned())
+    ));
+    block.push(
+        "add your key as one line to the server allowlist file, then restart the server".to_owned(),
+    );
+    Ok(FirstRunState::Ready {
+        config: Box::new(config),
+        identity: Box::new(provisioned.identity),
+        block,
+    })
+}
+
+async fn run_first_run(
+    server: Option<String>,
+    server_address: Option<String>,
+) -> Result<(), Box<dyn Error>> {
+    let base = default_data_dir().map_err(|error| format!("first run: {error}"))?;
+    match first_run_state(&base, server, server_address).await {
+        Err(error) => Err(error.into()),
+        Ok(FirstRunState::MissingKey { block, error })
+        | Ok(FirstRunState::MissingAddress { block, error }) => {
+            for line in block {
+                println!("{line}");
+            }
+            Err(error.into())
+        }
+        Ok(FirstRunState::Ready {
+            config,
+            identity,
+            block,
+        }) => run_configured(*config, *identity, Some(block.as_slice())).await,
+    }
 }
 
 async fn coordinate(
@@ -394,8 +581,13 @@ async fn start_until_shutdown<T>(
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    let result = match parse_cli(env::args()) {
-        Ok(cli) => run(cli.config).await,
+    let result = match parse_invocation(env::args()) {
+        Ok(Invocation::Config(path)) => run_from_config(path).await,
+        Ok(Invocation::Auto) => run_auto().await,
+        Ok(Invocation::FirstRun {
+            server,
+            server_address,
+        }) => run_first_run(server, server_address).await,
         Err(error) => Err(error.into()),
     };
     match result {
@@ -423,182 +615,37 @@ mod admission_tests;
 mod operator_tests;
 
 #[cfg(test)]
+mod first_run_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        sync::oneshot,
-    };
 
     #[test]
     fn cli_path_selection_and_rejection() {
+        assert_eq!(parse_invocation(["client".into()]), Ok(Invocation::Auto));
         assert_eq!(
-            parse_cli(["client".into()]).unwrap().config,
-            PathBuf::from("client.ktav")
+            parse_invocation(["client".into(), "--config".into(), "x.ktav".into()]),
+            Ok(Invocation::Config(PathBuf::from("x.ktav")))
         );
         assert_eq!(
-            parse_cli(["client".into(), "--config".into(), "x.ktav".into()])
-                .unwrap()
-                .config,
-            PathBuf::from("x.ktav")
+            parse_invocation(["client".into(), "abc".into()]),
+            Ok(Invocation::FirstRun {
+                server: Some("abc".to_owned()),
+                server_address: None
+            })
         );
-        assert!(parse_cli(["client".into(), "--config".into()]).is_err());
-        assert!(parse_cli(["client".into(), "x".into()]).is_err());
-    }
-
-    #[tokio::test]
-    async fn coordinator_forwards_and_reconnects_after_session_loss() {
-        tokio::time::timeout(Duration::from_secs(20), async {
-            let client_identity = Identity::from_seed([91; 32]);
-            let server_identity = Identity::from_seed([92; 32]);
-            let client = Endpoint::bind(
-                &client_identity,
-                "127.0.0.1:0".parse().unwrap(),
-                Allowlist::default(),
-                Limits::new(1).unwrap(),
-            )
-            .await
-            .unwrap();
-            let mut server = Endpoint::bind(
-                &server_identity,
-                "127.0.0.1:0".parse().unwrap(),
-                Allowlist::new(&[client.id()]).unwrap(),
-                Limits::new(1).unwrap(),
-            )
-            .await
-            .unwrap();
-            let server_address = server.local_addr();
-            let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let target_address = target.local_addr().unwrap();
-            let (close_first, close_first_rx) = oneshot::channel::<()>();
-            let (first_done, first_done_rx) = oneshot::channel::<()>();
-            let (first_finished, first_finished_rx) = oneshot::channel::<()>();
-            let target_task = tokio::spawn(async move {
-                let mut tasks = JoinSet::new();
-                let mut first_done = Some(first_done);
-                for index in 0..2 {
-                    let (mut stream, _) = target.accept().await.unwrap();
-                    let done = if index == 0 { first_done.take() } else { None };
-                    tasks.spawn(async move {
-                        let mut bytes = Vec::new();
-                        stream.read_to_end(&mut bytes).await.unwrap();
-                        stream.write_all(&bytes).await.unwrap();
-                        stream.shutdown().await.unwrap();
-                        if let Some(done) = done {
-                            let _ = done.send(());
-                        }
-                    });
-                }
-                while let Some(result) = tasks.join_next().await {
-                    result.unwrap();
-                }
-            });
-            let server_task = tokio::spawn(async move {
-                let mut first = server.accept().await.unwrap();
-                first
-                    .serve(target_address, async {
-                        let _ = close_first_rx.await;
-                    })
-                    .await
-                    .unwrap();
-                drop(first);
-                let _ = first_finished.send(());
-                let mut second = server.accept().await.unwrap();
-                let result = second.serve(target_address, std::future::pending()).await;
-                assert!(matches!(
-                    result,
-                    Err(shaar::network::ForwardError::PathUnavailable)
-                ));
-                drop(second);
-                server
-            });
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let local = listener.local_addr().unwrap();
-            let (shutdown, shutdown_rx) = oneshot::channel::<()>();
-            let coordinator = tokio::spawn(coordinate_until(
-                listener,
-                client,
-                server_key(&server_identity),
-                server_address,
-                async move {
-                    let _ = shutdown_rx.await;
-                    Ok(())
-                },
-            ));
-            let mut first_app = tcp_connect(local).await;
-            first_app.write_all(b"first stream").await.unwrap();
-            first_app.shutdown().await.unwrap();
-            let mut first_response = Vec::new();
-            first_app.read_to_end(&mut first_response).await.unwrap();
-            assert_eq!(first_response, b"first stream");
-            let _ = first_done_rx.await;
-            let _ = close_first.send(());
-            let _ = first_finished_rx.await;
-            let mut next_app = tcp_connect(local).await;
-            next_app
-                .write_all(b"new stream after session loss")
-                .await
-                .unwrap();
-            next_app.shutdown().await.unwrap();
-            let mut next_response = Vec::new();
-            next_app.read_to_end(&mut next_response).await.unwrap();
-            assert_eq!(next_response, b"new stream after session loss");
-            drop(first_app);
-            drop(next_app);
-            let _ = shutdown.send(());
-            coordinator.await.unwrap().unwrap();
-            target_task.await.unwrap();
-            server_task.await.unwrap().close().await;
-        })
-        .await
-        .expect("coordinator integration deadline");
-    }
-
-    #[tokio::test]
-    async fn admission_gate_prefers_observed_session_closure_when_ready_together() {
-        let client_identity = Identity::from_seed([101; 32]);
-        let server_identity = Identity::from_seed([102; 32]);
-        let client = Endpoint::bind(
-            &client_identity,
-            "127.0.0.1:0".parse().unwrap(),
-            Allowlist::default(),
-            Limits::new(1).unwrap(),
-        )
-        .await
-        .unwrap();
-        let mut server = Endpoint::bind(
-            &server_identity,
-            "127.0.0.1:0".parse().unwrap(),
-            Allowlist::new(&[client.id()]).unwrap(),
-            Limits::new(1).unwrap(),
-        )
-        .await
-        .unwrap();
-        let (connected, accepted) = tokio::try_join!(
-            client.connect(server.id(), server.local_addr()),
-            server.accept(),
-        )
-        .unwrap();
-
-        accepted.close();
-        // This await synchronizes on the SDK closure event; the subsequent gate
-        // polls closed() and its ready admission branch together, without timing.
-        assert!(matches!(connected.closed().await, NetworkError::Closed));
-        assert!(!admission_live(&connected).await);
-
-        connected.close();
-        client.close().await;
-        server.close().await;
-    }
-
-    fn server_key(identity: &Identity) -> String {
-        let mut result = String::new();
-        for byte in identity.public_key_bytes() {
-            write!(&mut result, "{byte:02x}").unwrap();
-        }
-        result
-    }
-    async fn tcp_connect(address: SocketAddr) -> TcpStream {
-        TcpStream::connect(address).await.unwrap()
+        assert!(parse_invocation(["client".into(), "--config".into()]).is_err());
+        assert!(parse_invocation(["client".into(), "-x".into()]).is_err());
+        assert!(parse_invocation(["client".into(), "a".into(), "b".into(), "c".into()]).is_err());
+        assert!(
+            parse_invocation([
+                "client".into(),
+                "--config".into(),
+                "x.ktav".into(),
+                "extra".into()
+            ])
+            .is_err()
+        );
     }
 }

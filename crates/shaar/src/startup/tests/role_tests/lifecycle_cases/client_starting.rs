@@ -189,7 +189,7 @@ async fn client_role_starts_without_relay_fields() {
             .expect("relay-less client config parses");
         let role_identity = identity(RELAYLESS_CLIENT);
         let (log, _client_log_unused) = role_logs();
-        let mut role = ClientRole::with_events(
+        let role = ClientRole::with_events(
             config.clone(),
             &role_identity,
             Limits::new(4).expect("fixture limits"),
