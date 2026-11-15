@@ -431,14 +431,22 @@ on the pinned stack. Record CI results and open risks.
 Acceptance: all mandatory first-version scenarios are confirmed; no blocking questions
 remain. This includes Yggdrasil implementation, interoperability and the composed
 fallback matrix; a native-only green is not v1 acceptance. Include controlled
-blockade resilience as required by the user on 2026-11-04. The still-open exact
-public-target gate remains an explicit blocker, never an assumed pass.
+blockade resilience as required by the user on 2026-11-04. The public live smoke
+runs only through its recorded contract (two bounded runs executed by
+2026-11-15, see [v1-focus.md](v1-focus.md)); its result is a bounded observation,
+and real devices, legal clearance and release stay explicit gates, never an
+assumed pass.
 Publishing crates, a GitHub release, a version change, commit, and push — only
 on a separate explicit user request.
 
 ## 6. Delivery order and feedback
 
 ### 6.1. Current evidence and immediate priority
+
+> Historical record (2026-10-29 to 2026-11-04) of the D1 delivery. D1 and stages
+> P01–P12, P14 and P15 are accepted since then. The current distance to v1, the
+> active leaves and the remaining order are kept in
+> [v1-focus.md](v1-focus.md), not in this section or in section 6.2.
 
 P03's strict payload gate, controlled NAT recovery and production dependency delivery,
 and P06's authenticated native forwarding are accepted; they are not current research
