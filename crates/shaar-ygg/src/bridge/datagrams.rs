@@ -193,16 +193,36 @@ fn end(budget: Duration) -> Result<Instant, DatagramError> {
 }
 
 pub(super) struct Register {
-    peer: [u8; 32],
-    live: Arc<AtomicBool>,
-    sender: mpsc::Sender<Vec<u8>>,
-    reply: oneshot::Sender<Result<(), DatagramError>>,
+    pub(super) peer: [u8; 32],
+    pub(super) live: Arc<AtomicBool>,
+    pub(super) sender: mpsc::Sender<Vec<u8>>,
+    pub(super) reply: oneshot::Sender<Result<(), DatagramError>>,
+    /// True routes admission and delivery through the independent control table.
+    pub(super) control: bool,
 }
 
 pub(super) async fn open(
     shared: &Arc<Shared>,
     peer: [u8; 32],
     budget: Duration,
+) -> Result<PeerDatagrams, DatagramError> {
+    open_with(shared, peer, budget, false).await
+}
+
+/// Identical admission as `open`, against the independent control table.
+pub(super) async fn open_control(
+    shared: &Arc<Shared>,
+    peer: [u8; 32],
+    budget: Duration,
+) -> Result<PeerDatagrams, DatagramError> {
+    open_with(shared, peer, budget, true).await
+}
+
+async fn open_with(
+    shared: &Arc<Shared>,
+    peer: [u8; 32],
+    budget: Duration,
+    control: bool,
 ) -> Result<PeerDatagrams, DatagramError> {
     if shared.closed.load(Ordering::Acquire) {
         return Err(DatagramError::Closed);
@@ -232,6 +252,7 @@ pub(super) async fn open(
         live,
         sender,
         reply,
+        control,
     });
     timeout_at(deadline, answered)
         .await
@@ -252,21 +273,29 @@ struct Entry {
 #[derive(Default)]
 pub(super) struct Registry {
     peers: HashMap<[u8; 32], Entry>,
+    control: HashMap<[u8; 32], Entry>,
 }
 
 impl Registry {
     pub(super) fn prune(&mut self) {
         self.peers
             .retain(|_, entry| entry.live.load(Ordering::Acquire));
+        self.control
+            .retain(|_, entry| entry.live.load(Ordering::Acquire));
     }
 
     pub(super) fn register(&mut self, request: Register, closed: bool) {
         self.prune();
+        let table = if request.control {
+            &mut self.control
+        } else {
+            &mut self.peers
+        };
         let error = if closed || !request.live.load(Ordering::Acquire) {
             Some(DatagramError::Closed)
-        } else if self.peers.contains_key(&request.peer) {
+        } else if table.contains_key(&request.peer) {
             Some(DatagramError::AlreadyRegistered)
-        } else if self.peers.len() >= MAX_DATAGRAM_PEERS {
+        } else if table.len() >= MAX_DATAGRAM_PEERS {
             Some(DatagramError::Busy)
         } else {
             None
@@ -277,7 +306,7 @@ impl Registry {
         }
         let peer = request.peer;
         let live = Arc::clone(&request.live);
-        self.peers.insert(
+        table.insert(
             peer,
             Entry {
                 live: request.live,
@@ -287,23 +316,29 @@ impl Registry {
         // Cancellation after admission cannot leave an ownerless registration charged.
         if request.reply.send(Ok(())).is_err() {
             live.store(false, Ordering::Release);
-            self.peers.remove(&peer);
+            if request.control {
+                self.control.remove(&peer);
+            } else {
+                self.peers.remove(&peer);
+            }
         }
     }
 
     pub(super) fn deliver(&self, peer: &[u8; 32], bytes: &[u8]) -> bool {
-        let Some(entry) = self.peers.get(peer) else {
-            return false;
-        };
-        if !entry.live.load(Ordering::Acquire) {
-            return false;
+        deliver_to(&self.peers, peer, bytes)
+    }
+
+    /// Deliver to the independent control table; mirrors `deliver` exactly.
+    pub(super) fn deliver_control(&self, peer: &[u8; 32], bytes: &[u8]) -> bool {
+        deliver_to(&self.control, peer, bytes)
+    }
+
+    /// Offers one datagram to both tables and reports which accepted it.
+    pub(super) fn deliver_both(&self, peer: &[u8; 32], bytes: &[u8]) -> Delivery {
+        Delivery {
+            payload: self.deliver(peer, bytes),
+            control: self.deliver_control(peer, bytes),
         }
-        let Ok(permit) = entry.sender.try_reserve() else {
-            return false;
-        };
-        // The shared receive scratch buffer cannot be borrowed by an asynchronous consumer.
-        permit.send(bytes.to_vec());
-        true
     }
 
     pub(super) fn close(&mut self) {
@@ -311,7 +346,40 @@ impl Registry {
             entry.live.store(false, Ordering::Release);
         }
         self.peers.clear();
+        for entry in self.control.values() {
+            entry.live.store(false, Ordering::Release);
+        }
+        self.control.clear();
     }
+}
+
+/// Outcome of offering one datagram to the payload and control tables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Delivery {
+    pub(super) payload: bool,
+    pub(super) control: bool,
+}
+
+impl Delivery {
+    /// Refused only when NEITHER table took it; a control-only delivery is not a drop.
+    pub(super) fn refused(self) -> bool {
+        !self.payload && !self.control
+    }
+}
+
+fn deliver_to(table: &HashMap<[u8; 32], Entry>, peer: &[u8; 32], bytes: &[u8]) -> bool {
+    let Some(entry) = table.get(peer) else {
+        return false;
+    };
+    if !entry.live.load(Ordering::Acquire) {
+        return false;
+    }
+    let Ok(permit) = entry.sender.try_reserve() else {
+        return false;
+    };
+    // The shared receive scratch buffer cannot be borrowed by an asynchronous consumer.
+    permit.send(bytes.to_vec());
+    true
 }
 
 #[cfg(test)]
@@ -321,6 +389,33 @@ mod tests {
     type Reply = oneshot::Receiver<Result<(), DatagramError>>;
 
     fn request(peer: u8) -> (Register, Arc<AtomicBool>, mpsc::Receiver<Vec<u8>>, Reply) {
+        request_with(peer, false)
+    }
+
+    #[test]
+    fn delivery_is_refused_only_when_neither_table_accepts() {
+        let mut registry = Registry::default();
+        let peer = [4u8; 32];
+        let none = registry.deliver_both(&peer, b"x");
+        assert!(none.refused() && !none.payload && !none.control);
+
+        let (control, _live, _rx, _reply) = request_with(4, true);
+        registry.register(control, false);
+        let only_control = registry.deliver_both(&peer, b"x");
+        assert_eq!((only_control.payload, only_control.control), (false, true));
+        assert!(!only_control.refused(), "a control delivery is not a drop");
+
+        let (payload, _live2, _rx2, _reply2) = request_with(4, false);
+        registry.register(payload, false);
+        let both = registry.deliver_both(&peer, b"x");
+        assert_eq!((both.payload, both.control), (true, true));
+        assert!(!both.refused());
+    }
+
+    fn request_with(
+        peer: u8,
+        control: bool,
+    ) -> (Register, Arc<AtomicBool>, mpsc::Receiver<Vec<u8>>, Reply) {
         let live = Arc::new(AtomicBool::new(true));
         let (sender, receiver) = mpsc::channel(DATAGRAM_QUEUE_CAPACITY);
         let (reply, response) = oneshot::channel();
@@ -330,6 +425,7 @@ mod tests {
                 live: Arc::clone(&live),
                 sender,
                 reply,
+                control,
             },
             live,
             receiver,

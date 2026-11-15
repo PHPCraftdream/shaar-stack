@@ -422,6 +422,32 @@ impl SharedResources {
         slot.orphan_ygg.push(pair);
     }
 
+    /// Clone of the retained Yggdrasil bridge; `None` when the slot is
+    /// closing or the bridge has not been retained (or was already closed).
+    /// Synchronous (slot lock only, no await), therefore trivially cancel-safe.
+    pub(crate) fn ygg_bridge(&self) -> Option<std::sync::Arc<shaar_ygg::YggBridge>> {
+        let slot = slot_lock(&self.shared.slot);
+        slot.resources
+            .as_ref()?
+            .ygg
+            .as_ref()?
+            .bridge
+            .as_ref()
+            .cloned()
+    }
+
+    /// Synchronous snapshot of the retained native owner's advisory reflexive
+    /// public IP (leaf L2); `None` when no owner is retained. Advisory only:
+    /// never published (leaf L3 boundary). Cancel-safe (no await).
+    pub(crate) fn public_address(&self) -> Option<std::net::IpAddr> {
+        let slot = slot_lock(&self.shared.slot);
+        slot.resources
+            .as_ref()?
+            .owner
+            .as_ref()
+            .and_then(RuntimeOwner::public_address)
+    }
+
     /// Transfers paired payload endpoint/pump. Caller closes them before the remaining bridge.
     pub(crate) fn take_ygg_payload(&self) -> Option<(YggEndpoint, YggPump)> {
         let mut slot = slot_lock(&self.shared.slot);

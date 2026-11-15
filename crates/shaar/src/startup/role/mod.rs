@@ -10,7 +10,7 @@
 mod client;
 mod dialers;
 mod server;
-mod server_close;
+pub(in crate::startup) mod server_close;
 
 use crate::path::{ConfigError, Dialer, PolicyConfig, StandbyOwner};
 #[cfg(test)]

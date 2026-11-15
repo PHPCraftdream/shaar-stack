@@ -2,7 +2,8 @@
 //!
 //! Readiness requires an authenticated nonce round trip, not merely an accepted send.
 //! Carrier registrations authorize session-key peers; APP modes and reliability belong
-//! above this unreliable datagram layer. Call `close` to prove joined shutdown.
+//! above this unreliable datagram layer. Payload and control tables are independent;
+//! an incoming datagram is offered to both. Call `close` to prove joined shutdown.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -72,6 +73,7 @@ struct Shared {
     nonces: NonceSource,
     ignored: AtomicU64,
     queued_datagrams: AtomicU64,
+    control_datagrams: AtomicU64,
     dropped_datagrams: AtomicU64,
     carrier_submitted_datagrams: AtomicU64,
     datagrams: mpsc::Sender<Register>,
@@ -115,12 +117,16 @@ impl Shared {
             return;
         }
         if let Some(inner) = codec::decode(bytes) {
-            let counter = if registry.deliver(&from, inner) {
-                &self.queued_datagrams
-            } else {
-                &self.dropped_datagrams
-            };
-            counter.fetch_add(1, Ordering::Relaxed);
+            let delivery = registry.deliver_both(&from, inner);
+            if delivery.payload {
+                self.queued_datagrams.fetch_add(1, Ordering::Relaxed);
+            }
+            if delivery.control {
+                self.control_datagrams.fetch_add(1, Ordering::Relaxed);
+            }
+            if delivery.refused() {
+                self.dropped_datagrams.fetch_add(1, Ordering::Relaxed);
+            }
             return;
         }
         let Some(frame) = Frame::decode(bytes) else {
@@ -210,6 +216,7 @@ impl YggBridge {
             nonces: NonceSource::new(),
             ignored: AtomicU64::new(0),
             queued_datagrams: AtomicU64::new(0),
+            control_datagrams: AtomicU64::new(0),
             dropped_datagrams: AtomicU64::new(0),
             carrier_submitted_datagrams: AtomicU64::new(0),
             datagrams,
@@ -245,7 +252,12 @@ impl YggBridge {
         self.shared.queued_datagrams.load(Ordering::Relaxed)
     }
 
-    /// Valid envelopes refused for missing/revoked registration or a full receiver.
+    /// Valid carrier datagrams admitted to a locally registered CONTROL capability.
+    pub fn control_datagrams(&self) -> u64 {
+        self.shared.control_datagrams.load(Ordering::Relaxed)
+    }
+
+    /// Valid envelopes refused by BOTH tables (missing/revoked registration or a full receiver).
     pub fn dropped_datagrams(&self) -> u64 {
         self.shared.dropped_datagrams.load(Ordering::Relaxed)
     }
@@ -267,6 +279,18 @@ impl YggBridge {
         budget: Duration,
     ) -> Result<PeerDatagrams, DatagramError> {
         datagrams::open(&self.shared, peer, budget).await
+    }
+
+    /// Register the peer against the independent CONTROL table; a payload registration
+    /// for the same peer may coexist. Only local code can create this capability; callers
+    /// must apply their peer policy before registration.
+    /// cancel-safe: yes — dropping an unacknowledged capability revokes its registration.
+    pub async fn open_control_datagrams(
+        &self,
+        peer: [u8; 32],
+        budget: Duration,
+    ) -> Result<PeerDatagrams, DatagramError> {
+        datagrams::open_control(&self.shared, peer, budget).await
     }
 
     /// Prove reachability by an authenticated nonce round trip. Cancel-safe.

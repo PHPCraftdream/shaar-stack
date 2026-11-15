@@ -21,6 +21,8 @@ use super::fixtures::{
     start_listener, tuned_policy,
 };
 
+mod punch_case;
+
 // Unique seeds (see the fixtures.rs discipline comment): server 0x5E, client
 // 0x5F, transit 0x60.
 const CASE_S_SERVICE: u8 = 0x5E;

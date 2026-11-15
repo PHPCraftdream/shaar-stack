@@ -518,3 +518,30 @@ async fn cancellation_of_an_admitted_control_handshake_does_not_defeat_explicit_
         assert!(eof, "joined close left the admitted TCP negotiation alive");
     }).await.expect("cancelled control operation joined close deadline");
 }
+
+/// Finding 3 regression: the accept future must stay `Send` (the
+/// previous Mutex-guard-across-await design made it `!Send`) and the
+/// punch probe handle must stay cloneable and shareable.
+#[tokio::test(flavor = "current_thread")]
+async fn accept_future_is_send() {
+    fn assert_send<T: Send>(_: &T) {}
+    fn assert_sync<T: Sync>(_: &T) {}
+    fn assert_clone<T: Clone>(_: &T) {}
+    let mut endpoint = SignaledEndpoint::bind(
+        &Identity::generate(),
+        loopback(),
+        loopback(),
+        &[],
+        Limits::new(1).unwrap(),
+    )
+    .await
+    .unwrap();
+    let probes = endpoint.probe_handle();
+    assert_send(&probes);
+    assert_sync(&probes);
+    assert_clone(&probes);
+    // Reference the accept future WITHOUT polling it: on the rejected
+    // Mutex-guard-across-await design this temporary is `!Send`.
+    assert_send(&endpoint.accept());
+    endpoint.close().await.unwrap();
+}

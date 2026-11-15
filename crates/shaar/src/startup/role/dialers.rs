@@ -2,7 +2,9 @@
 //!
 //! Native priority is fixed: direct candidates first — public/reflexive-scope
 //! candidates ahead of private/local-scope ones, every private/local connect
-//! bounded by a fixed slice (R1) — then key-directed relay negotiation, which
+//! bounded by a fixed slice (R1) — then punch coordination (leaf L4, only
+//! when the relay-less composition carries a punch channel), then
+//! key-directed relay negotiation, which
 //! exists only when the signaling settings pin a relay (L0), and
 //! Yggdrasil only ever on the standby owner's fallback side. All dials are
 //! bounded by the caller-supplied attempt deadline; a link completed after
@@ -19,7 +21,7 @@ use tokio::time::{Instant, timeout_at};
 
 use crate::native_discovery::runtime::owner::RuntimeError;
 use crate::network::observe::{ResolveObservation, RoutePath, client_route, elapsed_ms, emit};
-use crate::network::signaling::RelayOperations;
+use crate::network::signaling::{RelayOperations, punch};
 use crate::network::{
     ForwardError, ForwardStats, NetworkError, Session, SignaledEndpoint, YggEndpoint,
 };
@@ -60,6 +62,8 @@ fn fatal_peer_error(error: &NetworkError) -> bool {
 /// The client role keeps the endpoint behind an [`Arc`] because dialing only
 /// uses `&self` methods; the role never accepts native sessions, so no
 /// exclusive access is required and no interior mutability is introduced.
+/// The punch phase exists only when the channel is present, which the role
+/// creates only for the relay-less composition.
 pub(crate) struct NativeDialer {
     endpoint: Arc<SignaledEndpoint>,
     peer: PublicKey,
@@ -70,6 +74,11 @@ pub(crate) struct NativeDialer {
     /// only when the signaling settings carry `relay`/`relay_address` (L0).
     /// The reserved lease is owned here and released in [`Dialer::close`].
     relay: Option<(RelayAddr, RelayOperations)>,
+    /// NAT hole-punch channel (leaf L4); present only for the relay-less
+    /// composition over a retained Yggdrasil bridge.
+    punch: Option<punch::PunchChannel>,
+    /// Wrapping epoch distinguishing successive punch attempts.
+    punch_epoch: u32,
     lease: Option<RelayLease>,
     /// Shared OBS-1 resolve observation written after every route decision.
     note: tokio::sync::watch::Sender<Option<ResolveObservation>>,
@@ -80,6 +89,8 @@ pub(crate) struct NativeDialer {
 }
 
 impl NativeDialer {
+    // The test build adds the event log; the production signature stays at seven.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         endpoint: Arc<SignaledEndpoint>,
         peer: PublicKey,
@@ -87,6 +98,7 @@ impl NativeDialer {
         candidates: Vec<SocketAddr>,
         relay: Option<(RelayAddr, RelayOperations)>,
         note: tokio::sync::watch::Sender<Option<ResolveObservation>>,
+        punch: Option<punch::PunchChannel>,
         #[cfg(test)] events: Option<super::RoleEventLog>,
     ) -> Self {
         let hint_count = candidates.len();
@@ -97,6 +109,8 @@ impl NativeDialer {
             candidates,
             refresh_after_loss: false,
             relay,
+            punch,
+            punch_epoch: 0,
             lease: None,
             note,
             hint_count,
@@ -282,7 +296,10 @@ impl Dialer for NativeDialer {
     /// candidates ahead of private/local-scope ones, every private/local
     /// connect bounded by a fixed slice and a timed-out candidate dropped
     /// from the list (R1) — then relay negotiation only when a relay is
-    /// configured, all direct candidates failed and time remains. A failed cold Mainline lookup does
+    /// configured, all direct candidates failed and time remains. When the
+    /// relay-less composition carries a punch channel, punch coordination runs
+    /// between the candidate phase and relay negotiation, bounded by the
+    /// remaining attempt deadline. A failed cold Mainline lookup does
     /// NOT end the attempt: the pinned relay is addressed by key alone, so
     /// the dial still reaches relay negotiation. Native priority is
     /// unchanged (direct candidates first, relay negotiation second).
@@ -326,6 +343,41 @@ impl Dialer for NativeDialer {
                 elapsed_ms(started),
             ));
             return Ok(session);
+        }
+        // Punch coordination (leaf L4, design R5): only the relay-less
+        // composition carries a punch channel. The phase is bounded by the
+        // remaining attempt deadline; every failure falls through to the
+        // unchanged typed end of the attempt, so the fallback budget is intact.
+        if let Some(channel) = self.punch.as_mut() {
+            self.punch_epoch = self.punch_epoch.wrapping_add(1);
+            let reflexive = self.resources.public_address();
+            let candidates = punch::local_candidates(self.endpoint.local_addr(), reflexive);
+            let endpoint = Arc::clone(&self.endpoint);
+            if let Some(session) = punch::client_attempt(
+                channel,
+                move |address| {
+                    let endpoint = Arc::clone(&endpoint);
+                    async move { endpoint.connect(peer, address).await }
+                },
+                candidates,
+                self.punch_epoch,
+                deadline,
+                "client",
+            )
+            .await
+            {
+                #[cfg(test)]
+                if let Some(events) = &self.events {
+                    events.capture_native(&session);
+                }
+                // A punched session is a Native route like any direct one.
+                emit(client_route(
+                    RoutePath::Native,
+                    observation,
+                    elapsed_ms(started),
+                ));
+                return Ok(session);
+            }
         }
         // Relay negotiation only when a relay is configured and time remains:
         // exhausting the list exactly at the deadline still ends the attempt

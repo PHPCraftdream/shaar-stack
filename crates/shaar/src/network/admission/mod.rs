@@ -124,7 +124,62 @@ pub struct Endpoint {
     pending: Pending,
 }
 
+/// Slotless probe capability for NAT-hole-punch bursts (leaf L4 review
+/// Finding 3): shares the endpoint's UDP socket through a clone of the
+/// underlying iroh handle; takes no admission slot, consults no
+/// allowlist and never builds a `Session`. Burst volume is bounded by
+/// the responder's `BURST_CONCURRENCY_CAP` and the per-peer interval.
+///
+/// Cloning the handle keeps the iroh endpoint object alive, but
+/// `Endpoint::close` does not depend on remaining clones (it closes the
+/// shared socket state); the responder is aborted AND joined before the
+/// composition closes the endpoint, so no handle outlives the close.
+#[derive(Clone)]
+pub(crate) struct ProbeHandle {
+    inner: iroh::Endpoint,
+}
+
+// Compile-time auto-trait guarantees for the spawned responder closures.
+const _: () = {
+    const fn assert_probe_traits<T: Clone + Send + Sync>() {}
+    assert_probe_traits::<ProbeHandle>();
+};
+
+impl ProbeHandle {
+    /// One bounded punch probe of one peer-claimed candidate: validates
+    /// against the dial policy, connects the raw inner endpoint under
+    /// [`crate::network::signaling::punch::PROBE_SLICE`], and closes any
+    /// completed connection at once with application code 0. Returns
+    /// whether the handshake completed (the NAT mapping opened).
+    pub(crate) async fn probe(&self, peer: PublicKey, address: SocketAddr) -> bool {
+        if !policy::dial_address(address) {
+            return false;
+        }
+        let remote = EndpointAddr::from_parts(peer, [TransportAddr::Ip(address)]);
+        match tokio::time::timeout(
+            crate::network::signaling::punch::PROBE_SLICE,
+            self.inner.connect(remote, ALPN),
+        )
+        .await
+        {
+            Ok(Ok(connection)) => {
+                connection.close(VarInt::from_u32(0), b"");
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 impl Endpoint {
+    /// Slotless NAT-punch probe capability over the same native socket: no
+    /// admission slot, no allowlist consult, no `Session` is built.
+    pub(in crate::network) fn probe_handle(&self) -> ProbeHandle {
+        ProbeHandle {
+            inner: self.inner.clone(),
+        }
+    }
+
     /// Binds without n0, relays, port mapping or external address lookup.
     /// cancel-safe: NO — a cancelled bind must not be treated as successful startup.
     pub async fn bind(

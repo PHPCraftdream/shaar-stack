@@ -458,16 +458,15 @@ impl RuntimeOwner {
 
     /// Synchronous snapshot of the advisory reflexive public IP (initially
     /// `None`). Advisory only: never published (leaf L3 boundary).
-    // Consumed by the L3 wiring; only tests read it until then.
-    #[allow(dead_code)]
+    // Consumed by the L4 NAT hole-punch wiring (dialer phase and server responder).
     pub(crate) fn public_address(&self) -> Option<IpAddr> {
         *self.public_address.borrow()
     }
 
     /// Watch clone of the reflexive public IP. `changed()` on tokio watch is
     /// cancel-safe.
-    // Consumed by the L3 wiring; only tests read it until then.
-    #[allow(dead_code)]
+    // Read only by cfg(test) fixtures in production; kept available for tests.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn public_address_watch(&self) -> watch::Receiver<Option<IpAddr>> {
         self.public_address.clone()
     }

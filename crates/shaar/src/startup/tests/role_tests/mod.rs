@@ -7,7 +7,7 @@
 //! endpoint, no legacy server-address shortcut.
 
 mod denial_cases;
-mod fixtures;
+pub(super) mod fixtures;
 mod lifecycle_cases;
 mod location_cases;
 mod signal_cases;

@@ -12,10 +12,10 @@ use crate::{
 use super::{DiscoveredRelay, DiscoveryConfig, check_peers, owner::Owned, peer_id};
 
 #[cfg(test)]
-#[path = "discovery_tests.rs"]
+#[path = "tests/discovery_tests.rs"]
 mod discovery_tests;
 #[cfg(test)]
-#[path = "owned_tests.rs"]
+#[path = "tests/owned_tests.rs"]
 mod tests;
 
 #[cfg(test)]
@@ -338,6 +338,12 @@ impl SignaledEndpoint {
     /// by a later call; failed attempts are reported once no attempt remains.
     pub async fn accept(&mut self) -> Result<Session, NetworkError> {
         self.endpoint.accept().await
+    }
+
+    /// Slotless NAT-punch probe capability over the same native socket (no
+    /// admission slot, no allowlist, no `Session`).
+    pub(crate) fn probe_handle(&self) -> crate::network::admission::ProbeHandle {
+        self.endpoint.probe_handle()
     }
 
     /// Keeps signaling alive during QUIC drain, then joins carrier and pump.
