@@ -340,3 +340,32 @@ async fn joined_close_error_after_terminal_withdrawal_permits_quiescence() {
         "the retained close error stays recorded"
     );
 }
+
+/// Regression (first privileged punch dispatch): after startup the owner lives
+/// in the maintenance task, so the retained composition must still report the
+/// voted public address; without it the punch offers zero candidates.
+#[tokio::test]
+async fn public_address_follows_the_vote_watch_once_the_owner_moved_into_maintenance() {
+    let mut maintenance = Maintenance::spawn_failing_for_tests();
+    let (votes_tx, votes) = watch::channel::<Option<std::net::IpAddr>>(None);
+    maintenance.votes = votes;
+    let (owner_commands, _requests) = mpsc::channel(1);
+    let resources = SharedResources {
+        shared: shared_with(StartupResources {
+            endpoint: None,
+            native_transferred: false,
+            native_quiesced: false,
+            maintenance: Some(maintenance),
+            owner: None,
+            withdrawal_done: false,
+            ygg: None,
+        }),
+        owner_commands,
+    };
+    assert_eq!(resources.public_address(), None, "no vote yet");
+    let vote: std::net::IpAddr = "203.0.113.2".parse().expect("documentation address");
+    votes_tx.send_replace(Some(vote));
+    assert_eq!(resources.public_address(), Some(vote));
+    votes_tx.send_replace(None);
+    assert_eq!(resources.public_address(), None, "a withdrawn vote is gone");
+}

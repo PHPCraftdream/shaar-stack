@@ -436,16 +436,23 @@ impl SharedResources {
             .cloned()
     }
 
-    /// Synchronous snapshot of the retained native owner's advisory reflexive
-    /// public IP (leaf L2); `None` when no owner is retained. Advisory only:
-    /// never published (leaf L3 boundary). Cancel-safe (no await).
+    /// Synchronous snapshot of the advisory reflexive public IP (leaf L2);
+    /// `None` until a majority vote exists or once closed. Published only on
+    /// the Server's `publish_address: plain` opt-in. After startup the owner
+    /// lives in the maintenance task, so its vote watch is read. Cancel-safe.
     pub(crate) fn public_address(&self) -> Option<std::net::IpAddr> {
         let slot = slot_lock(&self.shared.slot);
-        slot.resources
-            .as_ref()?
+        let resources = slot.resources.as_ref()?;
+        resources
             .owner
             .as_ref()
             .and_then(RuntimeOwner::public_address)
+            .or_else(|| {
+                resources
+                    .maintenance
+                    .as_ref()
+                    .and_then(|maintenance| *maintenance.votes.borrow())
+            })
     }
 
     /// Transfers paired payload endpoint/pump. Caller closes them before the remaining bridge.
