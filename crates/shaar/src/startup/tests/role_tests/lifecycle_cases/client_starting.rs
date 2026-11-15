@@ -27,6 +27,8 @@ const CANCEL_BUDGET: Duration = Duration::from_secs(150);
 // per the fixtures.rs discipline.
 const RELAYLESS_CLIENT: u8 = 0x7B;
 const RELAYLESS_TRANSIT: u8 = 0x7C;
+// Pinned server key only (never started as a role): it must differ from the client identity.
+const RELAYLESS_SERVER: u8 = 0x7D;
 
 pub(super) async fn shutdown_client_while_starting<S>(
     config: &'static ClientConfig,
@@ -174,7 +176,7 @@ async fn client_role_starts_without_relay_fields() {
         };
         let (transit, transit_port) = start_listener(RELAYLESS_TRANSIT).await;
         let transit_uri = format!("tcp://127.0.0.1:{transit_port}");
-        let server_key_hex = pub_key_hex(&identity(RELAYLESS_CLIENT));
+        let server_key_hex = pub_key_hex(&identity(RELAYLESS_SERVER));
         let mainline_bind = format!("127.0.0.1:{}", reserve_udp_port());
         let signaling_bind = format!("127.0.0.1:{}", reserve_tcp_port());
         let text = format!(
