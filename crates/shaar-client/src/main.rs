@@ -97,7 +97,7 @@ fn peer_from_config(config: &ClientConfig) -> Result<String, std::fmt::Error> {
 /// Operator banner: the client's own key as `public_key`, the pinned server
 /// key separately as `server`.
 fn composed_banner(identity: &Identity, server_hex: &str, fallback: &str, hint: &str) -> String {
-    let own = hex_bytes(identity.public_key_bytes());
+    let own = hex_bytes(&identity.public_key_bytes());
     format!(
         "composed startup: public_key={own} server={server_hex} fallback={fallback} server_address={hint}"
     )
@@ -232,13 +232,13 @@ async fn run_configured(
         let mut primary: Option<shaar::startup::StartupError> = match started {
             Some(Ok(())) => {
                 // Announce the bound listener while the run loop serves.
-                let mut announce = std::pin::pin!(role.listening());
+                let mut listening = std::pin::pin!(role.listening());
                 let mut announced = false;
                 let mut run = std::pin::pin!(role.run(&mut shutdown));
                 loop {
                     tokio::select! {
                         result = &mut run => break result.err(),
-                        address = &mut announce, if !announced => {
+                        address = &mut listening, if !announced => {
                             announced = true;
                             if let Some(address) = address {
                                 println!("listening={address}");
@@ -407,7 +407,7 @@ async fn first_run_state(
     let mut block = summary;
     block.push(format!(
         "your public key for the server allowlist: public_key={}",
-        hex_bytes(provisioned.identity.public_key_bytes())
+        hex_bytes(&provisioned.identity.public_key_bytes())
     ));
     block.push(format!(
         "pinned server: public_key={} address={}",
