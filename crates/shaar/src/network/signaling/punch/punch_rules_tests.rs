@@ -182,7 +182,7 @@ async fn client_probes_skip_link_local_but_keep_loopback_and_private_lan_under_t
     let calls = Arc::new(Mutex::new(Vec::<SocketAddr>::new()));
     let loopback = v4([127, 0, 0, 1], 4433);
     let private = v4([10, 0, 0, 1], 4433);
-    let silent = vec![private];
+    let silent = [private];
     let calls_for_seam = Arc::clone(&calls);
     let session = Arc::new(Mutex::new(Some(direct_session().await)));
     let connect = move |address: SocketAddr| {

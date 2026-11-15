@@ -218,7 +218,7 @@ fn loopback_and_documentation_candidates_are_accepted() {
 fn duplicate_and_v4_mapped_duplicates_decode_none() {
     let a = v4([203, 0, 113, 10], 1);
     let mapped = SocketAddr::new(IpAddr::V6("::ffff:203.0.113.10".parse().unwrap()), 1);
-    assert_eq!(candidate_allowed(mapped), true, "mapped passes predicate");
+    assert!(candidate_allowed(mapped), "mapped passes predicate");
     let bytes = encode(&offer(1, vec![a, a])).expect("encode does not dedupe");
     assert_eq!(decode(&bytes), None, "exact duplicate");
     let bytes = encode(&offer(1, vec![a, mapped])).expect("encode does not canonicalize");

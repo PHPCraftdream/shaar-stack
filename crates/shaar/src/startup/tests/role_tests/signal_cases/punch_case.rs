@@ -238,8 +238,8 @@ async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero()
             let listener_ready = |event: &RoleEvent| matches!(event, RoleEvent::ListenerReady(_));
             let listener_address = client_log
                 .find(&listener_ready)
-                .and_then(|event| match event {
-                    RoleEvent::ListenerReady(address) => Some(address),
+                .map(|event| match event {
+                    RoleEvent::ListenerReady(address) => address,
                     other => panic!("unexpected listener event: {other:?}"),
                 })
                 .expect("client listener became ready before dialing");
