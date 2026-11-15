@@ -335,8 +335,6 @@ enum FirstRunState {
         error: String,
     },
     MissingAddress {
-        config: ClientConfig,
-        identity: Identity,
         block: Vec<String>,
         error: String,
     },
@@ -364,7 +362,6 @@ async fn first_run_state(
         },
         &ClientEndpointOverrides {
             server_address: server_address.clone(),
-            ..Default::default()
         },
     )
     .await;
@@ -397,8 +394,6 @@ async fn first_run_state(
             hex_bytes(config.server_key_bytes())
         ));
         return Ok(FirstRunState::MissingAddress {
-            config,
-            identity: provisioned.identity,
             block,
             error: "server_address is required for direct-only operation without network settings"
                 .to_owned(),
@@ -435,7 +430,7 @@ async fn run_first_run(
     match first_run_state(&base, server, server_address).await {
         Err(error) => Err(error.into()),
         Ok(FirstRunState::MissingKey { block, error })
-        | Ok(FirstRunState::MissingAddress { block, error, .. }) => {
+        | Ok(FirstRunState::MissingAddress { block, error }) => {
             for line in block {
                 println!("{line}");
             }

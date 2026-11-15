@@ -132,7 +132,7 @@ async fn first_run_with_key_but_no_address_reports_missing_address() {
     let state = first_run_state(&dir.0, Some(key_hex.clone()), None)
         .await
         .expect("first run MissingAddress");
-    let FirstRunState::MissingAddress { block, error, .. } = state else {
+    let FirstRunState::MissingAddress { block, error } = state else {
         panic!("expected MissingAddress");
     };
     assert_eq!(block[4], "no server address configured");
