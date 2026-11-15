@@ -49,8 +49,13 @@ fn server_config_text_round_trips_with_target_missing() {
     let text = server_config_text(&paths);
     let err = ServerConfig::from_text(&text, &ServerOverrides::default()).unwrap_err();
     assert!(
-        matches!(err, crate::config::ConfigError::Validation(ref e)
-            if e.field == "target" && e.kind == crate::config::ValidationKind::MissingRequired),
+        matches!(
+            err,
+            crate::config::ConfigError::Validation {
+                field: "target",
+                kind: crate::config::ValidationKind::MissingRequired
+            }
+        ),
         "unexpected error: {err}"
     );
     let text = format!("target: 127.0.0.1:8080\n{text}");
@@ -82,8 +87,13 @@ fn client_config_text_round_trips_with_server_fields() {
     let bare = client_config_text(&paths, None, None);
     let err = ClientConfig::from_text(&bare, &ClientOverrides::default()).unwrap_err();
     assert!(
-        matches!(err, crate::config::ConfigError::Validation(ref e)
-            if e.field == "server" && e.kind == crate::config::ValidationKind::MissingRequired),
+        matches!(
+            err,
+            crate::config::ConfigError::Validation {
+                field: "server",
+                kind: crate::config::ValidationKind::MissingRequired
+            }
+        ),
         "unexpected error: {err}"
     );
 }
