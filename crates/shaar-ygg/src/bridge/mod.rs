@@ -3,7 +3,8 @@
 //! Readiness requires an authenticated nonce round trip, not merely an accepted send.
 //! Carrier registrations authorize session-key peers; APP modes and reliability belong
 //! above this unreliable datagram layer. Payload and control tables are independent;
-//! an incoming datagram is offered to both. Call `close` to prove joined shutdown.
+//! an incoming datagram is delivered only to the table its envelope addresses.
+//! Call `close` to prove joined shutdown.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -30,6 +31,7 @@ mod datagrams;
 pub use carrier::YggCarrier;
 pub use carrier_pump::YggPump;
 
+use codec::Channel;
 pub use datagrams::{
     DATAGRAM_QUEUE_CAPACITY, DatagramError, DatagramSender, MAX_DATAGRAM_PEERS, PeerDatagrams,
 };
@@ -116,17 +118,13 @@ impl Shared {
         if self.closed.load(Ordering::Acquire) {
             return;
         }
-        if let Some(inner) = codec::decode(bytes) {
-            let delivery = registry.deliver_both(&from, inner);
-            if delivery.payload {
-                self.queued_datagrams.fetch_add(1, Ordering::Relaxed);
-            }
-            if delivery.control {
-                self.control_datagrams.fetch_add(1, Ordering::Relaxed);
-            }
-            if delivery.refused() {
-                self.dropped_datagrams.fetch_add(1, Ordering::Relaxed);
-            }
+        if let Some((channel, inner)) = codec::decode(bytes) {
+            let counter = match (registry.deliver_on(channel, &from, inner), channel) {
+                (false, _) => &self.dropped_datagrams,
+                (true, Channel::Payload) => &self.queued_datagrams,
+                (true, Channel::Control) => &self.control_datagrams,
+            };
+            counter.fetch_add(1, Ordering::Relaxed);
             return;
         }
         let Some(frame) = Frame::decode(bytes) else {
@@ -257,7 +255,7 @@ impl YggBridge {
         self.shared.control_datagrams.load(Ordering::Relaxed)
     }
 
-    /// Valid envelopes refused by BOTH tables (missing/revoked registration or a full receiver).
+    /// Valid envelopes refused by the table they address (missing/revoked registration or a full receiver).
     pub fn dropped_datagrams(&self) -> u64 {
         self.shared.dropped_datagrams.load(Ordering::Relaxed)
     }

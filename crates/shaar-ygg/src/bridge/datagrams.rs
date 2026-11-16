@@ -9,6 +9,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, timeout_at};
 
+use super::codec::Channel;
 use super::{Shared, codec};
 use crate::YggError;
 
@@ -61,6 +62,8 @@ pub struct DatagramSender {
     shared: Arc<Shared>,
     peer: [u8; 32],
     live: Arc<AtomicBool>,
+    /// The receive table of the peer this capability's datagrams are addressed to.
+    channel: Channel,
 }
 
 impl DatagramSender {
@@ -99,7 +102,7 @@ impl DatagramSender {
                 tokio::sync::TryAcquireError::Closed => DatagramError::Closed,
                 tokio::sync::TryAcquireError::NoPermits => DatagramError::Busy,
             })?;
-        let frame = codec::encode(bytes).ok_or(DatagramError::Oversize {
+        let frame = codec::encode_on(self.channel, bytes).ok_or(DatagramError::Oversize {
             len: bytes.len(),
             mtu,
         })?;
@@ -243,6 +246,11 @@ async fn open_with(
             shared: Arc::clone(shared),
             peer,
             live: Arc::clone(&live),
+            channel: if control {
+                Channel::Control
+            } else {
+                Channel::Payload
+            },
         },
         receiver,
     };
@@ -333,11 +341,11 @@ impl Registry {
         deliver_to(&self.control, peer, bytes)
     }
 
-    /// Offers one datagram to both tables and reports which accepted it.
-    pub(super) fn deliver_both(&self, peer: &[u8; 32], bytes: &[u8]) -> Delivery {
-        Delivery {
-            payload: self.deliver(peer, bytes),
-            control: self.deliver_control(peer, bytes),
+    /// Offers one datagram to the single table its envelope addresses.
+    pub(super) fn deliver_on(&self, channel: Channel, peer: &[u8; 32], bytes: &[u8]) -> bool {
+        match channel {
+            Channel::Payload => self.deliver(peer, bytes),
+            Channel::Control => self.deliver_control(peer, bytes),
         }
     }
 
@@ -350,20 +358,6 @@ impl Registry {
             entry.live.store(false, Ordering::Release);
         }
         self.control.clear();
-    }
-}
-
-/// Outcome of offering one datagram to the payload and control tables.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct Delivery {
-    pub(super) payload: bool,
-    pub(super) control: bool,
-}
-
-impl Delivery {
-    /// Refused only when NEITHER table took it; a control-only delivery is not a drop.
-    pub(super) fn refused(self) -> bool {
-        !self.payload && !self.control
     }
 }
 
@@ -393,23 +387,63 @@ mod tests {
     }
 
     #[test]
-    fn delivery_is_refused_only_when_neither_table_accepts() {
+    fn a_datagram_reaches_only_the_table_its_channel_addresses() {
         let mut registry = Registry::default();
         let peer = [4u8; 32];
-        let none = registry.deliver_both(&peer, b"x");
-        assert!(none.refused() && !none.payload && !none.control);
+        assert!(!registry.deliver_on(Channel::Payload, &peer, b"x"));
+        assert!(!registry.deliver_on(Channel::Control, &peer, b"x"));
 
-        let (control, _live, _rx, _reply) = request_with(4, true);
+        let (control, _live, mut control_rx, _reply) = request_with(4, true);
         registry.register(control, false);
-        let only_control = registry.deliver_both(&peer, b"x");
-        assert_eq!((only_control.payload, only_control.control), (false, true));
-        assert!(!only_control.refused(), "a control delivery is not a drop");
+        assert!(
+            !registry.deliver_on(Channel::Payload, &peer, b"p"),
+            "a control registration does not take payload datagrams"
+        );
+        assert!(registry.deliver_on(Channel::Control, &peer, b"c"));
+        assert_eq!(control_rx.try_recv(), Ok(b"c".to_vec()));
 
-        let (payload, _live2, _rx2, _reply2) = request_with(4, false);
+        let (payload, _live2, mut payload_rx, _reply2) = request_with(4, false);
         registry.register(payload, false);
-        let both = registry.deliver_both(&peer, b"x");
-        assert_eq!((both.payload, both.control), (true, true));
-        assert!(!both.refused());
+        assert!(registry.deliver_on(Channel::Payload, &peer, b"p"));
+        assert_eq!(payload_rx.try_recv(), Ok(b"p".to_vec()));
+        assert!(
+            control_rx.try_recv().is_err(),
+            "payload never copied to control"
+        );
+        assert!(registry.deliver_on(Channel::Control, &peer, b"c"));
+        assert_eq!(control_rx.try_recv(), Ok(b"c".to_vec()));
+        assert!(
+            payload_rx.try_recv().is_err(),
+            "control never copied to payload"
+        );
+    }
+
+    #[test]
+    fn payload_traffic_spends_no_control_queue_slots() {
+        let mut registry = Registry::default();
+        let peer = [5u8; 32];
+        let (control, _live, mut control_rx, _reply) = request_with(5, true);
+        let (payload, _live2, mut payload_rx, _reply2) = request_with(5, false);
+        registry.register(control, false);
+        registry.register(payload, false);
+        for _ in 0..DATAGRAM_QUEUE_CAPACITY {
+            assert!(registry.deliver_on(Channel::Payload, &peer, b"data"));
+        }
+        assert!(
+            !registry.deliver_on(Channel::Payload, &peer, b"overflow"),
+            "the payload queue is full"
+        );
+        assert!(
+            control_rx.try_recv().is_err(),
+            "no payload copy in the control queue"
+        );
+        for _ in 0..DATAGRAM_QUEUE_CAPACITY {
+            assert!(
+                registry.deliver_on(Channel::Control, &peer, b"offer"),
+                "every control slot is still free"
+            );
+        }
+        assert_eq!(payload_rx.try_recv(), Ok(b"data".to_vec()));
     }
 
     fn request_with(
