@@ -17,9 +17,10 @@ use std::time::Duration;
 use iroh_base::{EndpointId, PublicKey};
 use shaar_p2p::{RelayAddr, RelayLease};
 use tokio::net::TcpStream;
+use tokio::task::JoinHandle;
 use tokio::time::{Instant, timeout_at};
 
-use crate::native_discovery::runtime::owner::RuntimeError;
+use crate::native_discovery::runtime::owner::{ResolvedAddresses, RuntimeError};
 use crate::network::observe::{ResolveObservation, RoutePath, client_route, elapsed_ms, emit};
 use crate::network::signaling::{RelayOperations, punch};
 use crate::network::{
@@ -48,6 +49,25 @@ const RESOLVE_BUDGET: Duration = Duration::from_secs(5);
 /// ended every attempt before its punch phase began (live smoke 43784413811: nine
 /// attempts, `reason=deadline` after 0 ms, two thirds of them with a candidate).
 const RESOLVE_BUDGET_WITH_PUNCH: Duration = Duration::from_secs(1);
+
+/// One lookup at a time on a task of its own. An attempt that gives up waiting leaves the
+/// task running and the next attempt collects it: a live lookup outlasts a 3 s attempt and
+/// only a lookup that finishes can answer, so cancelling it every attempt answered nothing
+/// and made the owner repeat the whole query (live smoke 43788557511: `CandidateLimit`,
+/// three times the DHT bytes). `None` is an unfinished or failed lookup.
+async fn await_held<T, F>(slot: &mut Option<JoinHandle<T>>, until: Instant, start: F) -> Option<T>
+where
+    F: FnOnce() -> JoinHandle<T>,
+{
+    let mut task = slot.take().unwrap_or_else(start);
+    match timeout_at(until, &mut task).await {
+        Ok(joined) => joined.ok(),
+        Err(_) => {
+            *slot = Some(task);
+            None
+        }
+    }
+}
 
 /// The instant by which the record lookup of this attempt must have answered.
 fn resolve_budget(now: Instant, deadline: Instant, punch_present: bool) -> Instant {
@@ -86,6 +106,8 @@ pub(crate) struct NativeDialer {
     resources: SharedResources,
     candidates: Vec<SocketAddr>,
     refresh_after_loss: bool,
+    /// The record lookup an attempt stopped waiting for; the next attempt collects it.
+    pending_resolve: Option<JoinHandle<Result<ResolvedAddresses, RuntimeError>>>,
     /// Configured relay pair (pinned address, retained ops handle); present
     /// only when the signaling settings carry `relay`/`relay_address` (L0).
     /// The reserved lease is owned here and released in [`Dialer::close`].
@@ -124,6 +146,7 @@ impl NativeDialer {
             resources,
             candidates,
             refresh_after_loss: false,
+            pending_resolve: None,
             relay,
             punch,
             punch_epoch: 0,
@@ -155,16 +178,20 @@ impl NativeDialer {
         } else {
             let key = EndpointId::from_bytes(self.peer.as_bytes()).map_err(|_| DialError)?;
             let budget = resolve_budget(Instant::now(), deadline, self.punch.is_some());
-            let answer = timeout_at(budget, async {
-                if self.refresh_after_loss {
-                    self.resources.resolve_fresh(key).await
-                } else {
-                    self.resources.resolve(key).await
-                }
+            let answer = await_held(&mut self.pending_resolve, budget, || {
+                let resources = self.resources.clone();
+                let fresh = self.refresh_after_loss;
+                tokio::spawn(async move {
+                    if fresh {
+                        resources.resolve_fresh(key).await
+                    } else {
+                        resources.resolve(key).await
+                    }
+                })
             })
             .await;
             match answer {
-                Ok(Ok(resolved)) => {
+                Some(Ok(resolved)) => {
                     let mut addresses: Vec<SocketAddr> = resolved
                         .addresses()
                         .iter()
@@ -176,7 +203,7 @@ impl NativeDialer {
                     ResolveObservation::from_answer(Some(self.candidates.len()))
                 }
                 // A failed or unfinished lookup answers nothing (stable value: timeout).
-                Ok(Err(_)) | Err(_) => ResolveObservation::from_answer(None),
+                Some(Err(_)) | None => ResolveObservation::from_answer(None),
             }
         };
         let _ = self.note.send(Some(observation));
@@ -446,6 +473,10 @@ impl Dialer for NativeDialer {
     /// error is invented here.
     /// cancel-safe: yes — an interrupted close is resumable by another call.
     async fn close(&mut self) -> Result<(), DialError> {
+        // Aborting drops the waiter, which makes the owner cancel the lookup cleanly.
+        if let Some(lookup) = self.pending_resolve.take() {
+            lookup.abort();
+        }
         if self.lease.take().is_some()
             && let Some((relay_addr, ops)) = self.relay.as_ref()
         {

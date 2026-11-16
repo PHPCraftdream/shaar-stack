@@ -1951,6 +1951,24 @@ live network within a 3 s attempt; the Yggdrasil standby carried every smoke, an
 criterion for a cold DHT lookup holds only in the fixtures. That needs its own leaf (the lookup
 must outlive its waiter and cache its answer).
 
+**Tenth dispatch, punch phase unblocked (2026-11-16, upstream run 43788557511, source `429f9f7`,
+contract digest `6ee285ea…`):** passed over Yggdrasil standby (one exact exchange, 43 bytes each
+way, zero violations). **The first coordinated punch on a public network took place and found no
+direct path.** The Client ran ten attempts, every one ending `reason=probe` after about 2 s, six of
+them carrying its own candidate (its address was exposed at 14.6 s); the Server received ten
+Offers, answered every one, and ran six probe bursts toward the Client's candidate
+(`outcome=fallback reason=probe`, 0.5 s each). Both sides therefore probed each other's candidate
+in the same moment with the candidate learned from the DHT, and neither QUIC handshake completed.
+The candidate pairs a runner's public IP with the local port of its QUIC socket, which is right
+only for a NAT that keeps the port; the traces carry no port, so whether the cloud NAT remaps
+ports or filters differently is not established, and the contract records this as the observed
+route either way. **Side effect found in the same run:** each attempt now waited one second for
+the record lookup and then cancelled it, so the owner restarted the whole query every time; the
+Client's DHT traffic rose to 1.13 MB (0.35 MB before, cap 1.5 MiB) and one reflexive window ended
+`failed:CandidateLimit`. Leaf DHT-L2 stops cancelling: the attempt hands the lookup to a task of
+its own, a later attempt collects the same lookup, and the owner's cancel-on-give-up contract is
+unchanged.
+
 ### Native is not blocked (third run onward): the direct attempt
 
 The first two runs ended on Yggdrasil standby because no punch existed; the route was then
