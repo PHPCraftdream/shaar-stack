@@ -12,7 +12,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, timeout, timeout_at};
+use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 use crate::identity::Identity;
 use crate::network::signaling::SignaledEndpoint;
@@ -509,9 +509,20 @@ async fn native_loss_is_observed_while_the_same_signaling_connection_stays_alive
         assert!(control.connection.close_reason().is_none());
         assert!(accepted.connection.close_reason().is_none());
         assert!(control.connection.paths().iter().all(|path| !path.is_ip()));
+        // Loss is observed 2-4 s after the block while the signaling keepalive fires every
+        // NATIVE_PATH_KEEPALIVE, so allow the next PING instead of sampling at the loss instant.
+        let fresh = timeout(super::NATIVE_PATH_KEEPALIVE * 3, async {
+            while custom_pings(&control) <= before {
+                sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await;
         assert!(
-            custom_pings(&control) > before,
-            "fresh signaling control arrived while Native was blocked"
+            fresh.is_ok(),
+            "no fresh signaling control while Native was blocked: before={before} after={} elapsed={:?} paths={:?}",
+            custom_pings(&control),
+            blocked_at.elapsed(),
+            describe()
         );
         // Re-entry after loss must immediately observe the current state.
         timeout(Duration::from_secs(1), control.native_lost())
