@@ -184,6 +184,7 @@ async fn serve_peer<L, P>(
             punch::trace_offer(offer.candidates.len(), "none");
             continue;
         }
+        punch::trace_ports("server", &candidates, &offer.candidates);
         let answer = PunchMessage {
             kind: Kind::Answer,
             epoch: offer.epoch,

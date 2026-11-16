@@ -159,3 +159,34 @@ fn the_offer_line_carries_counts_and_the_answer_fate_only() {
         );
     }
 }
+
+#[test]
+fn the_ports_line_carries_ports_only_never_addresses() {
+    let own: Vec<SocketAddr> = vec![
+        "203.0.113.5:40001".parse().expect("own public"),
+        "10.0.0.2:40001".parse().expect("own private"),
+    ];
+    let peer: Vec<SocketAddr> = vec!["198.51.100.7:51234".parse().expect("peer public")];
+    let line = super::ports_line("client", &own, &peer);
+    assert_eq!(line, "shaar: client punch ports own=40001,40001 peer=51234");
+    for fragment in ["203.0.113", "10.0.0.2", "198.51.100"] {
+        assert!(!line.contains(fragment), "no address in {line}");
+    }
+    assert_eq!(
+        super::ports_line("server", &[], &[]),
+        "shaar: server punch ports own=- peer=-"
+    );
+}
+
+#[test]
+fn the_ports_line_is_bounded_by_the_candidate_limit() {
+    let many: Vec<SocketAddr> = (1..=20_u16)
+        .map(|port| SocketAddr::from(([192, 0, 2, 1], 40_000 + port)))
+        .collect();
+    let line = super::ports_line("server", &many, &many);
+    let listed = line.matches(',').count() + 2;
+    assert!(
+        listed <= 2 * super::MAX_CANDIDATES,
+        "at most MAX_CANDIDATES ports per side: {line}"
+    );
+}

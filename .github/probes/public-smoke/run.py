@@ -440,7 +440,7 @@ def run_server(args, clock=time.time):
     text = product_stderr_text(workdir)
     paths, punch = CONTRACT.route_paths(text, "server"), CONTRACT.scan_punch(text, "server")
     evidence["observed"].update(route_sequence=paths, punch=punch, offers=CONTRACT.scan_offers(text),
-                                reflexive=CONTRACT.scan_reflexive(text))
+                                reflexive=CONTRACT.scan_reflexive(text), ports=CONTRACT.scan_ports(text, "server"))
     evidence["failures"].extend(CONTRACT.path_violations(paths))
     evidence["failures"].extend(server_failures(relay is not None, totals, evidence["target"]))
     return finish("server", setup, evidence, product, meter, code, secrets)
@@ -500,7 +500,8 @@ def run_client(args, clock=time.time, sleep=time.sleep):
     evidence["failures"].extend(CONTRACT.route_violations(route, session))
     text = product_stderr_text(workdir)
     paths, punch = CONTRACT.route_paths(text, "client"), CONTRACT.scan_punch(text, "client")
-    evidence["observed"].update(route_sequence=paths, punch=punch, reflexive=CONTRACT.scan_reflexive(text))
+    evidence["observed"].update(route_sequence=paths, punch=punch, reflexive=CONTRACT.scan_reflexive(text),
+                                ports=CONTRACT.scan_ports(text, "client"))
     evidence["failures"].extend(CONTRACT.path_violations(paths))
     evidence["claims"] = {
         "direct_path": CONTRACT.direct_claim(paths, punch),

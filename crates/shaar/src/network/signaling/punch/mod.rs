@@ -432,7 +432,10 @@ where
                     kind: Kind::Answer,
                     epoch: answer_epoch,
                     candidates: answer_candidates,
-                }) if answer_epoch == epoch => break answer_candidates,
+                }) if answer_epoch == epoch => {
+                    trace_ports("client", &offer.candidates, &answer_candidates);
+                    break answer_candidates;
+                }
                 _ => continue,
             },
         }
@@ -517,6 +520,31 @@ pub(crate) fn trace_line(
         },
         reason.token()
     )
+}
+
+/// The ports of one exchange: own and peer candidate PORTS only, never addresses. A NAT that
+/// rewrites the source port shows as a peer port that differs from what the peer bound.
+pub(crate) fn ports_line(role: &str, own: &[SocketAddr], peer: &[SocketAddr]) -> String {
+    let ports = |addresses: &[SocketAddr]| {
+        if addresses.is_empty() {
+            return "-".to_owned();
+        }
+        let ports: Vec<String> = addresses
+            .iter()
+            .take(MAX_CANDIDATES)
+            .map(|address| address.port().to_string())
+            .collect();
+        ports.join(",")
+    };
+    format!(
+        "shaar: {role} punch ports own={} peer={}",
+        ports(own),
+        ports(peer)
+    )
+}
+
+pub(crate) fn trace_ports(role: &str, own: &[SocketAddr], peer: &[SocketAddr]) {
+    eprintln!("{}", ports_line(role, own, peer));
 }
 
 /// The Server's trace of one received Offer: how many candidates it offered and
