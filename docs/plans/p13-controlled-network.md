@@ -827,7 +827,7 @@ R4 flag, reviewed together with the L0 schema change that makes the signaling re
 optional; (5) confirm that a punched direct path always outranks standby Yggdrasil payload
 (north-star step 4) once a punch exists.
 
-### 7. L3b design note: encrypted published address (proposal, awaiting owner approval)
+### 7. L3b design note: encrypted published address (proposal v2, owner wants it implemented; awaiting confirmation of the modes)
 
 Requested on 2026-11-15, scope confirmed on 2026-11-16: an opt-in mode in which only holders of
 the decryption keys learn the Server's real IP address from the DHT record. This note is the
@@ -878,5 +878,30 @@ key or sequence number is rejected; the record stays within 1000 bytes at the re
 limit and configuration validation rejects an allowlist beyond it with the offending field named;
 `encrypted` leaves `off` the default and changes nothing for `plain`.
 
-**Decisions requested.** Scheme (a) or (b); permission for the dependency edge on the locked
-primitives; acceptance of the recipient limit; permission to start the leaf.
+**Owner direction of 2026-11-16 and note v2.** The owner answered that the feature must be
+implemented for a fixed set of users, for an unlimited number of users, and for specific users
+(the third phrase is cut off in the answer). This makes the choice between (a) and (b) moot:
+both are wanted, so the record carries one content key K and K is wrapped for every kind of reader
+that is configured. The readers are declared in the Server configuration (field names are
+provisional until the owner confirms the modes):
+
+- *Fixed users*: every key of the Server's allowlist (scheme (a), one X25519 wrap per client).
+- *Specific users*: an explicit list of client keys that need not equal the allowlist (the same
+  wrap as above, for the keys named in the list). This is my reading of the third phrase.
+- *Unlimited users*: one shared secret from the configuration; K is wrapped once under a key
+  derived from it with HKDF, so any number of holders can read, at the price of the (b) properties:
+  a second secret outside the one-key model, out-of-band distribution, and revocation by changing
+  the secret for everyone.
+
+Limits that stay: the record value is at most 1000 bytes, so per-key wraps (fixed plus specific
+users together) are capped at about a dozen; the shared-secret wrap costs one more wrap of 48
+bytes and has no recipient limit. A configuration that exceeds the cap fails validation naming
+the field; nothing is dropped silently. The default stays `off`, `plain` is unchanged. A client
+that is no reader keeps the rendezvous and Yggdrasil paths exactly as with `off`.
+
+**Decisions requested (v2).** (1) What "specific users" means (the reading above, or another);
+(2) the scheme above: one content key, wrapped per key and once under the shared secret; (3) the
+dependency edge from `shaar` to the locked primitives; (4) the cap of about a dozen key wraps;
+(5) permission to start the leaf. The acceptance list above is extended with: a holder of the
+shared secret decrypts, a wrong secret does not, and a record with both kinds of readers is
+decrypted by either kind.

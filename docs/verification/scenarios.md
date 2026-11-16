@@ -615,7 +615,7 @@ server growth after client restarts 0 fds, 0 threads and 0.19 MiB, server stop i
 
 | # | Item | Kind | State |
 |---|---|---|---|
-| 1 | Encrypted reflexive address (L3b, the opt-in of 2026-11-15) | owner decision | The design note is in `p13-controlled-network.md` section 7 (envelopes to the allowlisted keys, about a dozen recipients, direct dependencies on crates already locked). No cryptographic code exists. The owner decides whether L3b is part of the first version and approves the scheme and the dependencies |
+| 1 | Encrypted reflexive address (L3b, the opt-in of 2026-11-15) | owner decision made, work open | On 2026-11-16 the owner decided that L3b is part of the first version, for a fixed set of users, an unlimited number of users and specific users. The design note v2 (`p13-controlled-network.md` section 7: one content key wrapped per key and once under a shared secret) awaits the owner's confirmation of the modes; no cryptographic code exists yet. Finishing it reopens the final checks: a full-scope run, the platform builds and a re-measurement on the new product code |
 | 2 | Direct path between real networks | product risk, bounded observation | Thirteen live dispatches: ten passed over Yggdrasil, none obtained a direct path between the two cloud runners. The last one (43870725952) shows the Server never learned its public address (five reflexive windows skipped), so it answered none of 30 Offers. By the decision of 2026-11-15 this is an observation, neither a pass nor a failure. Further live work stays inside the recorded contract |
 | 3 | Real devices and networks (E2), Android execution | gated | No home, mobile or cafe network and no device ran the products; Android is build-only |
 | 4 | NAT variety (A6) | not established | Only port-preserving cone (direct) and fully random ports (no direct path, `standby` carries) were run |
@@ -627,7 +627,8 @@ server growth after client restarts 0 fds, 0 threads and 0.19 MiB, server stop i
 
 ### 12.6 What this section does and does not conclude
 
-Every mandatory scenario of the matrix is accepted, or tested with its limits recorded, or gated as listed above, and no
-blocking question is open apart from item 1. The version has **not** been shown to punch through real home or cloud NATs;
+Every mandatory scenario of the matrix is accepted, or tested with its limits recorded, or gated as listed above. On
+2026-11-16 the owner accepted this report with its open risks and added L3b to the first version, so the first version is
+accepted only together with item 1 once that is implemented and its final checks are repeated. The version has **not** been shown to punch through real home or cloud NATs;
 what is shown is the mechanism in the controlled fixture, the fail-closed and fallback behavior around it, and a live
 fallback over Yggdrasil that works every time it was tried. Nothing here is published, tagged or versioned.
