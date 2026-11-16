@@ -35,11 +35,19 @@ pub(super) async fn startup_scenario(temp: &Temp, processes: &mut Processes) -> 
     fs::write(&busy_config, format!("server: {server_key}\nserver_address: 127.0.0.1:1\nlisten: {tcp_address}\nkey_file:: client.key\nfallback: signal\n"))
         .map_err(|error| error.to_string())?;
     let busy_error = failed_start(processes, &client_exe, &busy_config, &temp.0).await?;
-    if !["(os error 98)", "(os error 10048)", "(os error 10013)"]
-        .iter()
-        .any(|marker| busy_error.contains(marker))
+    // EADDRINUSE: 98 on Linux, 48 on macOS; 10048 and 10013 are the Windows bind refusals.
+    if ![
+        "(os error 98)",
+        "(os error 48)",
+        "(os error 10048)",
+        "(os error 10013)",
+    ]
+    .iter()
+    .any(|marker| busy_error.contains(marker))
     {
-        return Err("busy client listener did not report an expected bind failure".into());
+        return Err(format!(
+            "busy client listener did not report an expected bind failure: {busy_error}"
+        ));
     }
     drop((tcp, udp));
     Ok(())
