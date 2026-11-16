@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::{CarrierHandle, Link, Received};
 
-use super::{Inbound, state::Shared};
+use super::{Inbound, PUNCH_MAGIC, PunchInbound, state::Shared};
 
 const WORKERS: usize = 8;
 
@@ -16,6 +16,7 @@ pub struct SignalingPump {
     pub(super) handle: CarrierHandle,
     pub(super) incoming: mpsc::Receiver<Received>,
     pub(super) deliver: mpsc::Sender<Inbound>,
+    pub(super) punch: mpsc::Sender<PunchInbound>,
 }
 
 impl Drop for SignalingPump {
@@ -40,6 +41,7 @@ impl SignalingPump {
             self.handle.clone(),
             &mut self.incoming,
             &self.deliver,
+            &self.punch,
         );
         tokio::pin!(workers, receive, stop);
         let result = tokio::select! {
@@ -87,6 +89,7 @@ async fn receive_loop(
     handle: CarrierHandle,
     incoming: &mut mpsc::Receiver<Received>,
     deliver: &mpsc::Sender<Inbound>,
+    punch: &mpsc::Sender<PunchInbound>,
 ) -> io::Result<()> {
     let mut links = handle.links();
     {
@@ -112,6 +115,12 @@ async fn receive_loop(
                 }
                 let Ok(source) = source else { continue; };
                 if !shared.matches(&source, link) { continue; }
+                // Punch coordination is signaling beside the QUIC packets: bounded, dropped when
+                // full, and never handed to iroh. The peer is the authenticated link's.
+                if received.packet.as_bytes().starts_with(PUNCH_MAGIC) {
+                    let _ = punch.try_send(PunchInbound { peer: received.peer, packet: received.packet });
+                    continue;
+                }
                 permit.send(Inbound { received, source });
             }
         }

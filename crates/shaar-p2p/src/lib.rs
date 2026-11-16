@@ -11,7 +11,7 @@ mod dns;
 mod executor;
 mod packet;
 
-pub use bridge::{SignalingPump, SignalingTransport};
+pub use bridge::{PUNCH_MAGIC, PunchInbound, PunchPort, SignalingPump, SignalingTransport};
 pub use carrier::{
     Carrier, CarrierHandle, DiscoveredRelay, Link, Received, RelayAddr, RelayLease, Route,
 };
