@@ -8,7 +8,7 @@ import shutil
 import tomllib
 
 # Targeted-CI-verified product graph, minus only the explicit owned-DNS edge.
-BASELINE_LOCK = "83485160462fd7bc94d06fe00c49fefbd28688ff3bba612c10f34115e5662c00"
+BASELINE_LOCK = "aeb67dd0f0924d2543c743e0cdff05bd440a4143d7bf5078620bdc6a0ab99e67"
 DEPENDENCY = 'hickory-resolver = { version = "=0.26.3", default-features = false, features = ["tokio"] }\n'
 ANCHOR = 'name = "shaar-p2p"\nversion = "0.1.0"\ndependencies = [\n "asynchronous-codec",\n "futures",\n'
 FORBIDDEN = {"__tls", "__https", "__quic", "__h3", "toml", "recursor"}
