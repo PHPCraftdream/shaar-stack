@@ -588,8 +588,13 @@ needs every locked crates.io package. Both are prepared once in the primary chec
    `target/vendor/` and writes `target/local-vendor.toml`, a cargo config that replaces crates.io
    by that directory. Nothing is written outside the repository.
 3. Each new worktree under `worktrees/` links the store from its root: `cmd /c mklink /J target
-   <primary checkout>	arget` (Windows) or `ln -s <primary checkout>/target target`;
+   <primary checkout>\target` (Windows) or `ln -s <primary checkout>/target target`;
    `local_prepare.py` creates the link itself when `target` is missing.
+4. Before `git worktree remove`, delete the link itself: `cmd /c rmdir target` in the worktree root
+   (`rm target` for a symlink), then check that the primary `target/` still lists its content.
+   Removing a worktree whose `target` is a Windows junction follows the link and empties the
+   primary `target/` (it happened on 2026-11-16 and was repaired offline by running steps 1 and 2
+   again from the downloaded archives; only the build cache had to be rebuilt).
 
 Pre-push rule for every leaf, repeated in every worker prompt: `cargo fmt` for the owned packages
 and, for each affected crate, `cargo clippy --config target/local-vendor.toml -p <crate>
