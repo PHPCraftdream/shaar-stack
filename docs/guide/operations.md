@@ -149,14 +149,16 @@ Hole-punch diagnostics — tokens and counts only, never an address:
 
 ```text
 shaar: <client|server> punch candidates=<N> outcome=<direct|fallback> reason=<direct|deadline|no-answer|closed|probe> elapsed_ms=<MS>
+shaar: <client|server> punch ports own=<PORTS|-> peer=<PORTS|->
 shaar: server punch offer candidates=<N> answer=<sent|none|refused>
 shaar: reflexive window outcome=<skipped|empty|observed> lookup=<ok|incomplete|bounded|failed:<ERROR>> info=<some|none|failed> elapsed_ms=<MS>
 shaar: reflexive window outcome=exposed elapsed_ms=<MS>
 ```
 
 - A punch attempt names why it ended. `candidates` counts what this side offered; a side that does not yet know its public address offers none.
+- `punch ports` lists the ports of the candidates this side offered (`own`) and of those the peer offered or answered (`peer`), comma separated and at most four per side, `-` for none; it never prints an address. A peer port that differs from the port the peer bound means a NAT rewrote the source port, which the candidate (public IP plus local QUIC port) cannot reach. The Client prints it when the Answer arrives, the Server when it answers an Offer.
 - The Server answers an Offer only when it has candidates of its own; `answer=none` means it had none to answer with.
-- One reflexive window is one lookup of the DHT address watcher. `lookup` says how the window's own lookup ended (`ok` completed; `incomplete` finished without a network answer; `bounded` hit the 10 s bound; `failed:<ERROR>` carried a typed error) and `info` what the DHT actor held afterwards (`some` an address, `none` no vote yet, `failed` the read did not finish). A completed lookup counts whatever it read; any other lookup still counts an address that another finished query already learned, and never counts "no vote" as evidence. `exposed` marks the first majority of two agreeing windows, which is what the punch offers as a candidate.
+- One reflexive window is one lookup of the DHT address watcher. `lookup` says how the window's own lookup ended (`ok` completed; `incomplete` finished without a network answer; `bounded` hit the 10 s bound; `failed:<ERROR>` carried a typed error) and `info` what the DHT actor held afterwards (`some` an address, `none` no vote yet, `failed` the read did not finish). A completed lookup counts whatever it read; any other lookup still counts an address that another finished query already learned, and never counts "no vote" as evidence. `exposed` marks the first majority of two agreeing windows; only that majority is ever published in the record (`publish_address = plain`). The punch offers the address of the latest window that observed one as soon as it exists (a single DHT vote, never published) and switches to the majority once it is exposed, so a side can offer a candidate before two windows agree. One forged vote can therefore make a side offer a wrong IP; the peer then probes at most four candidates per attempt and one burst per interval.
 
 Consumers: the public smoke harness (`.github/probes/public-smoke/`) reads these lines from the product stderr and fails a run whose observed path contradicts its expectation. Absence of the lines (older binaries) keeps the previous inferred wording.
 
