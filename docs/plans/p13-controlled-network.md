@@ -827,7 +827,7 @@ R4 flag, reviewed together with the L0 schema change that makes the signaling re
 optional; (5) confirm that a punched direct path always outranks standby Yggdrasil payload
 (north-star step 4) once a punch exists.
 
-### 7. L3b design note: encrypted published address (proposal v2, owner wants it implemented; awaiting confirmation of the modes)
+### 7. L3b design note: encrypted published address (v3: two options, scope approved, leaf started)
 
 Requested on 2026-11-15, scope confirmed on 2026-11-16: an opt-in mode in which only holders of
 the decryption keys learn the Server's real IP address from the DHT record. This note is the
@@ -845,7 +845,8 @@ any peer that connects directly (QUIC reveals it by design); anything from a cli
 holds a decryption right and leaks it. Forged DHT votes (a separate risk of the reflexive
 source) are not addressed here.
 
-**Candidate schemes.**
+**Candidate schemes** (the first proposal, kept as history; the last paragraph of this section, note v3,
+replaces its recommendation and its acceptance list).
 
 - (a) *Sealed envelopes to the allowlisted client keys.* Each publication draws a random content
   key K and encrypts the address list with an AEAD, binding the record key and sequence number
@@ -878,30 +879,43 @@ key or sequence number is rejected; the record stays within 1000 bytes at the re
 limit and configuration validation rejects an allowlist beyond it with the offending field named;
 `encrypted` leaves `off` the default and changes nothing for `plain`.
 
-**Owner direction of 2026-11-16 and note v2.** The owner answered that the feature must be
-implemented for a fixed set of users, for an unlimited number of users, and for specific users
-(the third phrase is cut off in the answer). This makes the choice between (a) and (b) moot:
-both are wanted, so the record carries one content key K and K is wrapped for every kind of reader
-that is configured. The readers are declared in the Server configuration (field names are
-provisional until the owner confirms the modes):
+**Owner direction of 2026-11-16 and note v3.** The owner approved the leaf, the use of the locked
+primitives and a cap of about a dozen keys, and then simplified the surface: there are exactly
+**two publication options**, an open one and one encrypted with a key that the client must know.
+Schemes (a) (an envelope per client key) and the three kinds of readers of note v2 are replaced
+by one mechanism, because the audience is simply whoever is given the key: a fixed set of users,
+specific users or an unlimited number of users differ only in how widely the key is shared.
 
-- *Fixed users*: every key of the Server's allowlist (scheme (a), one X25519 wrap per client).
-- *Specific users*: an explicit list of client keys that need not equal the allowlist (the same
-  wrap as above, for the keys named in the list). This is my reading of the third phrase.
-- *Unlimited users*: one shared secret from the configuration; K is wrapped once under a key
-  derived from it with HKDF, so any number of holders can read, at the price of the (b) properties:
-  a second secret outside the one-key model, out-of-band distribution, and revocation by changing
-  the secret for everyone.
+- **Configuration.** `publish_address` is `off` (the default: nothing published), `plain` (open,
+  unchanged) or `encrypted`. With `encrypted` the Server also names `address_keys_file`, a file
+  with one to eight keys, one 64-hex-digit key per line (a key is 32 random bytes; an empty
+  file, a malformed line or more than eight keys fails validation naming the field). The Client
+  names an optional `address_key_file` with the one key it holds. Keys live in files, never
+  inline, like the identity key.
+- **Record.** Each publication draws a fresh random content key K and encrypts the address list
+  with ChaCha20-Poly1305 under K and a random nonce, binding the Server key and the record
+  sequence number as associated data. K is wrapped once per configured key: the wrapping key is
+  HKDF-SHA256 of that key with the Server key as salt and a fixed purpose label, the wrap is
+  ChaCha20-Poly1305 again, and a four-byte hint (derived by HKDF with another label) lets a
+  reader find its wrap without trying every one. With the header, the ciphertext and about 64
+  bytes per key, eight keys stay well inside the 1000-byte value (`MAX_DNS_BYTES`). The cap is
+  eight, not a dozen, because the record also carries the other published entries.
+- **Reader.** A Client that holds a key finds its wrap by hint, unwraps K, decrypts the list and
+  uses the addresses like the published ones. A Client without a key, or with a wrong key, gets
+  no address from the record and keeps the rendezvous (L4) and Yggdrasil paths, exactly as with
+  `off`; a malformed or tampered record is rejected like any other unreadable record.
+- **Dependencies.** Only `chacha20poly1305` and `hkdf` from the locked set (and `sha2` if the
+  lock needs it for `hkdf`); `x25519-dalek`, `curve25519-dalek`, `ed25519-dalek` and `crypto_box`
+  are no longer needed. No new package and no version change. No home-made construction.
+- **Rotation and revocation.** Rotating a key means writing a new file on the Server and
+  giving the new key to the clients; a key removed from the Server file stops wrapping from the
+  next publication, and records already published stay readable by its former holders until
+  they expire (the same limit as before).
+- **Acceptance (ordinary CI).** A holder of any configured key decrypts the exact addresses; a
+  wrong key does not; a flipped ciphertext, wrap or hint, a swapped Server key or sequence number
+  is rejected; two keys decrypt the same record; the record stays within 1000 bytes at eight
+  keys; the configuration rejects every invalid combination naming the field (a key file with
+  `plain` or `off`, no key file with `encrypted`, nine keys, a bad line); `off` stays the default
+  and `plain` is byte-identical. The namespace check (two privileged dispatches are authorized)
+  shows that a Client holding the key still reaches a direct path through the cone NATs.
 
-Limits that stay: the record value is at most 1000 bytes, so per-key wraps (fixed plus specific
-users together) are capped at about a dozen; the shared-secret wrap costs one more wrap of 48
-bytes and has no recipient limit. A configuration that exceeds the cap fails validation naming
-the field; nothing is dropped silently. The default stays `off`, `plain` is unchanged. A client
-that is no reader keeps the rendezvous and Yggdrasil paths exactly as with `off`.
-
-**Decisions requested (v2).** (1) What "specific users" means (the reading above, or another);
-(2) the scheme above: one content key, wrapped per key and once under the shared secret; (3) the
-dependency edge from `shaar` to the locked primitives; (4) the cap of about a dozen key wraps;
-(5) permission to start the leaf. The acceptance list above is extended with: a holder of the
-shared secret decrypts, a wrong secret does not, and a record with both kinds of readers is
-decrypted by either kind.
