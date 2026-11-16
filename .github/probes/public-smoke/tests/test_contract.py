@@ -182,9 +182,9 @@ class ContractTests(unittest.TestCase):
 
     def test_timeline_is_consistent(self):
         full, _ = runnable()
-        for key, value in (("server_launch_deadline_s", 20), ("server_end_offset_s", 99), ("server_end_offset_s", 106),
+        for key, value in (("server_launch_deadline_s", 20), ("server_end_offset_s", 96), ("server_end_offset_s", 106),
                            ("client_exchange_s", 80), ("client_exchange_s", 301), ("shutdown_grace_s", 16),
-                           ("client_punch_observe_s", 40), ("client_punch_observe_s", 0)):
+                           ("client_punch_observe_s", 54), ("client_punch_observe_s", 0)):
             changed = copy.deepcopy(full)
             changed["budgets"]["timeline"][key] = value
             with self.subTest(key=key, value=value), self.assertRaises(CONTRACT.ContractError):

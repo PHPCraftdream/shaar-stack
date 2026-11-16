@@ -1914,6 +1914,24 @@ passed on the Yggdrasil fallback alone. Leaf DHT-L1 caps a round at the operatio
 room (the caps themselves unchanged) in the two visit loops of the owned patch, with a query-level
 and an actor-level regression test; the next live smoke is the check.
 
+**Eighth dispatch, after DHT-L1 (2026-11-16, upstream run 43779762033, source `8149259`, same
+contract digest):** passed over Yggdrasil standby once more (one exact exchange, 43 bytes each way
+in 0.84 s, zero violations) and confirmed the leaf on the network: no `RpcLimit` in any window,
+lookups end `ok` or bounded with `info=some`, and both roles learned a public address (Client
+exposed at 24.0 s, Server at 35.3 s after their starts; two agreeing windows each, the second one
+counted although its own lookup hit the 10 s bound, which is what the info read is for). The
+route line now reads `resolve=cached` where it read `timeout` before. **First punch exchange on a
+public network, and no direct path:** the Server answered two Offers with its candidate and the
+Client probed it twice (`reason=probe`, about 2.1 s each, `direct=0`), but the Client had no
+candidate of its own yet, so the Server had nothing to probe back and a one-sided probe cannot
+open the Server's NAT. The Client's one attempt that did carry a candidate (`candidates=1`) ended
+`reason=deadline` after 0 ms: its record lookup spent the 3 s attempt deadline before the punch
+phase began. The observation window closed 30 s after the exchange, a few seconds after the
+Client's own address was known. **Established:** the cloud NAT has still not been tried with a
+coordinated punch; the limits are the 20 to 35 s each side needs to learn its address, the 3 s
+attempt budget the punch phase shares with the record lookup, and the 30 s observation window.
+The next step shortens the fast-start pauses and widens the observation window (see Timeline).
+
 ### Native is not blocked (third run onward): the direct attempt
 
 The first two runs ended on Yggdrasil standby because no punch existed; the route was then
@@ -1927,19 +1945,23 @@ The harness still refuses to start if a runner has a globally routable local add
 - **Contact beyond the targets above:** UDP between the two owned runners' NAT egress addresses
   only, inside the NIC cap; no new third-party target, no scanning. The products print counts
   only (`shaar: <role> punch candidates=<n> outcome=direct|fallback`), never addresses.
-- **Timeline:** the Client keeps running `client_punch_observe_s` (30 s) after the single
+- **Timeline:** the Client keeps running `client_punch_observe_s` after the single
   exchange and stops early on a `route path=native` line; the Server stays up
   `client_punch_observe_s + 5` s after its target saw the exchange, bounded by its window end.
-  The exchange budget shrinks to 20 s (it took 0.87 s). The 120 s per-process window and every
-  byte cap are unchanged.
+  The observation window was 30 s with a 25 s readiness wait and a 20 s exchange budget; after
+  the live traces showed that each side needs 20 to 35 s to learn its public address (two
+  DHT lookups of 6 to 10 s each), it is 45 s, with a 12 s readiness wait (took 1 to 2 s) and a
+  15 s exchange budget (took 0.8 to 6.7 s): the Client now ends at most 92 s after the origin
+  (20 + 12 + 15 + 45). The 120 s per-process window and every byte cap are unchanged.
 - **Allowed observed paths:** `ygg-standby` (the exchange) and `native` (a punched path);
   `ygg-signal` is a violation. Evidence carries the route sequence, the punch attempt counts and
   `claims.direct_path`, a sentence written from the observed lines only.
 - **Meaning of the outcomes:** a direct path is an observation of a public-network punch, an
   unpunched cloud NAT (likely: the cloud SNAT does not keep ports) is recorded as that
   observation, and neither decides v1. The acceptance of the punch is the namespace matrix
-  (`scenarios.md` A5). The amended contract bytes have SHA-256
-  `ba8a28f77f06a85200569051d58f29d3b7f2adf18ec7c1886b737a1c42c5acf3`.
+  (`scenarios.md` A5). The contract bytes of the first six dispatches had SHA-256
+  `ba8a28f77f06a85200569051d58f29d3b7f2adf18ec7c1886b737a1c42c5acf3`; the amended timeline above
+  has `6ee285ea56c21e252c01e4114c80582a3d12b5aa55f354b908eac0fb24be3e34`.
 
 ### Enforced budgets (per dispatch: one run, zero retries, two runners)
 
@@ -1949,8 +1971,8 @@ JSON can only tighten them. They restate the 2026-11-04 conditional bounds.
 | Budget | Value | Enforcement |
 |---|---|---|
 | Runs | 1 per dispatch, Linux only; rerun refused (`GITHUB_RUN_ATTEMPT` must be 1) | Inline check in the plan job and in the harness |
-| Product window | at most 120 s per process: Server T0 to T0+105 plus 15 s stop grace, Client T0+20 to at most T0+95 plus grace | Absolute epoch deadlines from one shared origin; SIGINT then kill of the owned PID |
-| Job | 5 min step limit, 12 min job limit | GitHub `timeout-minutes` |
+| Product window | at most 120 s per process: Server T0 to T0+105 plus 15 s stop grace, Client T0+20 to at most T0+92 plus grace | Absolute epoch deadlines from one shared origin; SIGINT then kill of the owned PID |
+| Job | 15 min step limit, 18 min job limit (the first minutes are an idle wait for the shared origin) | GitHub `timeout-minutes` |
 | Yggdrasil TCP connections | at most 2 per job (4 per run) | Metered per socket; a third connection is a violation |
 | Relay TCP connections | at most 2 (Server only; only when the contract pins a relay) | Metered per socket; without a relay the row stays zero and is not asserted |
 | Bytes per job | NIC rx+tx at most 5 MiB (10 MiB per run); Yggdrasil TCP 3 MiB; relay TCP 256 KiB (zero without a relay); DHT/UDP (NIC minus TCP) 1.5 MiB | Metered every 500 ms; a breach kills the product |
