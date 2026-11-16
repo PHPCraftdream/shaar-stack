@@ -393,7 +393,7 @@ impl Dialer for NativeDialer {
         // unchanged typed end of the attempt, so the fallback budget is intact.
         if let Some(channel) = self.punch.as_mut() {
             self.punch_epoch = self.punch_epoch.wrapping_add(1);
-            let reflexive = self.resources.public_address();
+            let reflexive = self.resources.punch_address();
             let candidates = punch::local_candidates(self.endpoint.local_addr(), reflexive);
             let endpoint = Arc::clone(&self.endpoint);
             if let Some(session) = punch::client_attempt(

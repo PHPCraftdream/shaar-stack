@@ -53,7 +53,7 @@ fn candidate_provider(
         if let Some(candidates) = punch_candidates_for_tests() {
             return candidates;
         }
-        punch::local_candidates(local, resources.public_address())
+        punch::local_candidates(local, resources.punch_address())
     }
 }
 
