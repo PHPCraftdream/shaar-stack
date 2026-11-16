@@ -90,31 +90,76 @@ fn unknown_terminal_datagram_tx_is_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "application frames crossed unclassified path")]
-fn unknown_terminal_stream_rx_is_rejected() {
-    let mut history = role_history_with_controls();
-    let mut unknown = PathStats::default();
-    unknown.frame_rx.stream = 1;
-    history.terminal_parts(
-        terminal_paths_with_control_native()
-            .into_iter()
-            .chain([(iroh::endpoint::PathId::from(3_u32), unknown)]),
-        1,
-        0,
-    );
+fn unknown_terminal_rx_is_the_peers_tx_and_is_not_rejected() {
+    // Regression of FLAKE-W1: a path that closed before iroh registered its address carries
+    // only RX in its terminal snapshot; the peer's own oracle bounds the matching TX.
+    for (stream_rx, datagram_rx) in [(75, 0), (0, 3), (75, 3)] {
+        let mut history = role_history_with_controls();
+        let mut unknown = PathStats::default();
+        unknown.frame_rx.stream = stream_rx;
+        unknown.frame_rx.datagram = datagram_rx;
+        history.terminal_parts(
+            terminal_paths_with_control_native()
+                .into_iter()
+                .chain([(iroh::endpoint::PathId::from(3_u32), unknown)]),
+            1,
+            0,
+        );
+        assert!(history.paths[3].remote.is_none() && history.paths[3].terminal_seen);
+    }
 }
 
 #[test]
-#[should_panic(expected = "application frames crossed unclassified path")]
-fn unknown_terminal_datagram_rx_is_rejected() {
-    let mut history = role_history_with_controls();
-    let mut unknown = PathStats::default();
-    unknown.frame_rx.datagram = 1;
+fn unknown_terminal_stream_rx_supplies_the_native_receive_half() {
+    // The observed FLAKE-W1 shape: the classified native path only transmitted.
+    let mut history = RoleHistory::new();
+    history.path(
+        iroh::endpoint::PathId::ZERO,
+        &TransportAddr::Custom(iroh_base::CustomAddr::from_parts(7, &[1])),
+    );
+    history.path(
+        iroh::endpoint::PathId::from(1_u32),
+        &TransportAddr::Ip("127.0.0.1:443".parse().expect("fixture native address")),
+    );
+    let mut sent = PathStats::default();
+    sent.frame_tx.stream = 5;
+    let mut received = PathStats::default();
+    received.frame_rx.stream = 75;
     history.terminal_parts(
-        terminal_paths_with_control_native()
-            .into_iter()
-            .chain([(iroh::endpoint::PathId::from(3_u32), unknown)]),
-        1,
+        [
+            (iroh::endpoint::PathId::ZERO, PathStats::default()),
+            (iroh::endpoint::PathId::from(1_u32), sent),
+            (iroh::endpoint::PathId::from(2_u32), received),
+        ],
+        5,
+        0,
+    );
+    assert!(history.native_tx && history.native_rx);
+}
+
+#[test]
+#[should_panic(expected = "no native STREAM round trip observed")]
+fn unknown_terminal_datagram_rx_is_not_native_stream_evidence() {
+    let mut history = RoleHistory::new();
+    history.path(
+        iroh::endpoint::PathId::ZERO,
+        &TransportAddr::Custom(iroh_base::CustomAddr::from_parts(7, &[1])),
+    );
+    history.path(
+        iroh::endpoint::PathId::from(1_u32),
+        &TransportAddr::Ip("127.0.0.1:443".parse().expect("fixture native address")),
+    );
+    let mut sent = PathStats::default();
+    sent.frame_tx.stream = 5;
+    let mut received = PathStats::default();
+    received.frame_rx.datagram = 9;
+    history.terminal_parts(
+        [
+            (iroh::endpoint::PathId::ZERO, PathStats::default()),
+            (iroh::endpoint::PathId::from(1_u32), sent),
+            (iroh::endpoint::PathId::from(2_u32), received),
+        ],
+        5,
         0,
     );
 }

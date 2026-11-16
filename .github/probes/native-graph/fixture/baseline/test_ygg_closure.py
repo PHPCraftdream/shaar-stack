@@ -77,6 +77,15 @@ class ReduceMetadataTests(unittest.TestCase):
         candidate[("evil", "1.0.0", _REG + ":" + "c" * 64)] = ()
         self.assertNotEqual(y.reduce_metadata(_control(), candidate), _control())
 
+    def test_sealed_address_aead_admits_only_the_alloc_feature(self):
+        key = ("chacha20poly1305", "0.10.1", _REG + ":" + "d" * 64)
+        control = {**_control(), key: ()}
+        candidate = {**_candidate(), key: ("alloc",)}
+        self.assertEqual(y.reduce_metadata(control, candidate), control)
+        candidate[key] = ("alloc", "std")
+        with self.assertRaisesRegex(AuditError, "unapproved feature change: chacha20poly1305 \\+alloc,std"):
+            y.reduce_metadata(control, candidate)
+
     def test_undeclared_feature_changes_are_rejected(self):
         mutations = (
             (_TOKIO, ("full", "parking_lot", "rt", "test-util", "time")),
@@ -141,6 +150,28 @@ class CheckEdgesTests(unittest.TestCase):
                 self.check(added=[edge])
         with self.assertRaisesRegex(AuditError, "unapproved dependency edge: shaar-ygg"):
             self.check(added=[(("shaar-ygg", "0.1.0"), ("evil", "1.0.0"))])
+
+    def test_only_the_three_sealed_address_direct_edges_are_admitted(self):
+        for name, version in (("chacha20poly1305", "0.10.1"), ("hkdf", "0.13.0"), ("sha2", "0.11.1")):
+            with self.subTest(name=name):
+                self.check(added=[(("shaar", "0.1.0"), (name, version))])
+        for name, version in (("chacha20poly1305", "0.10.2"), ("aead", "0.5.2")):
+            with self.subTest(refused=name), self.assertRaisesRegex(
+                    AuditError, "unapproved dependency edge: shaar -> " + name):
+                self.check(added=[(("shaar", "0.1.0"), (name, version))])
+        self.assertEqual(set(y.SEALED_ADDRESS_EDGES) - y.METADATA_EDGES, set())
+        self.assertEqual(set(y.SEALED_ADDRESS_EDGES) - y.UNIT_EDGES, set())
+
+    def test_every_unapproved_edge_is_reported_in_one_error(self):
+        with self.assertRaises(AuditError) as caught:
+            self.check(added=[(("hex", "0.4.3"), ("tokio", "1.54.1")), (("tokio", "1.54.1"), ("hex", "0.4.3")),
+                              (("shaar", "0.1.0"), ("sha2", "0.11.1"))],
+                       removed=[(("shaar", "0.1.0"), ("hex", "0.4.3"))])
+        message = str(caught.exception)
+        self.assertIn("unapproved dependency edge: hex -> tokio", message)
+        self.assertIn("unapproved dependency edge: tokio -> hex", message)
+        self.assertIn("unapproved dependency edge removal: shaar -> hex", message)
+        self.assertNotIn("sha2", message, "an approved edge is not reported")
 
     def test_native_observer_admits_only_the_exact_existing_futures_edge(self):
         self.check(added=[(("shaar", "0.1.0"), ("futures", "0.3.34"))])

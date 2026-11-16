@@ -141,6 +141,15 @@ units, and dependencies, constrain feature growth, and admit only declared addit
 Aux-probe `owner` digests cascade through feature changes and are ignored because owner units
 are compared directly. Without the closure strict equality is unchanged.
 
+The encrypted address publication (leaf L3b) adds three direct declarations from `shaar` to
+packages that were already locked and reachable (`chacha20poly1305` 0.10.1 through `snow`,
+`hkdf` 0.13.0 through `libp2p-identity`, `sha2` 0.11.1): the lock gains no package. They are
+admitted as exact pairs in `SEALED_ADDRESS_EDGES`, and the only feature growth is `alloc` of
+`chacha20poly1305` (`snow` enables none of its features). The three audits of the comparison
+(`reduce_metadata`, `check_edges`, `check_units`) now collect every offender of their pass and
+raise one error naming all of them, so a graph change is reviewed in one CI cycle instead of one
+reported item per cycle.
+
 ## Reviewed multibase removal (authored, pending CI)
 
 The product removes `base256emoji` 1.0.2 (emoji-table license/notice provenance could not be

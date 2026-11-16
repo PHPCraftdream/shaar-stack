@@ -276,21 +276,22 @@ impl RoleHistory {
                 self.native_tx |= stats.frame_tx.stream > 0;
                 self.native_rx |= stats.frame_rx.stream > 0;
             }
-            None => assert_eq!(
-                [
-                    stats.frame_tx.stream,
-                    stats.frame_tx.datagram,
-                    stats.frame_rx.stream,
-                    stats.frame_rx.datagram
-                ],
-                [0; 4],
-                "application frames crossed unclassified path {:?}: stats {stats:?}; known paths {:?}",
-                self.paths[index].id,
-                self.paths
-                    .iter()
-                    .map(|path| (path.id, path.remote.as_ref(), path.terminal_seen))
-                    .collect::<Vec<_>>()
-            ),
+            None => {
+                // A path that closed before iroh registered its address leaves only a terminal
+                // snapshot. APP TX stays forbidden there; RX is the peer's TX, which the peer's
+                // own role oracle confines to classified native paths, so it counts as native.
+                assert_eq!(
+                    [stats.frame_tx.stream, stats.frame_tx.datagram],
+                    [0; 2],
+                    "application frames crossed unclassified path {:?}: stats {stats:?}; known paths {:?}",
+                    self.paths[index].id,
+                    self.paths
+                        .iter()
+                        .map(|path| (path.id, path.remote.as_ref(), path.terminal_seen))
+                        .collect::<Vec<_>>()
+                );
+                self.native_rx |= stats.frame_rx.stream > 0;
+            }
             Some(other) => panic!("unclassified role transport: {other:?}"),
         }
     }
