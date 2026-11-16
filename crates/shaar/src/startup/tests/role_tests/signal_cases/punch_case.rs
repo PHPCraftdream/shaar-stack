@@ -340,7 +340,7 @@ async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero()
         let echo_counts = |who: &'static str, bridge: &std::sync::Arc<shaar_ygg::YggBridge>| {
             // The payload table admitted nothing. `dropped` is not asserted: an
             // Offer that reaches a peer before it registered its control
-            // capability is legitimately refused by both tables.
+            // capability is legitimately refused by the control table.
             assert_eq!(
                 bridge.queued_datagrams(),
                 0,

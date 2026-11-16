@@ -10,7 +10,10 @@ use tokio::time::{Instant, sleep, timeout};
 
 use crate::frame::{FRAME_LEN, Frame, Kind};
 use crate::test_support::{BUDGET, close_within, poll_until, start_dialer, start_listener};
-use crate::{MAX_PENDING_PROBES, ProbeError, YggBridge, YggTransport};
+use crate::{
+    DATAGRAM_QUEUE_CAPACITY, DatagramSender, MAX_PENDING_PROBES, PeerDatagrams, ProbeError,
+    YggBridge, YggTransport,
+};
 
 /// A key nobody runs: probes to it can only time out.
 const DEAD_KEY: [u8; 32] = [0x55; 32];
@@ -275,4 +278,92 @@ async fn close_joins_the_task_releases_waiters_and_is_idempotent() {
     })
     .await;
     TcpListener::bind(("127.0.0.1", port)).expect("the listening port is free again");
+}
+
+/// Send `bytes` every 50 ms until `observed` holds: early datagrams can be lost while
+/// the path is still being discovered.
+async fn send_datagram_until(sender: &DatagramSender, bytes: &[u8], observed: impl Fn() -> bool) {
+    let deadline = Instant::now() + BUDGET;
+    while !observed() {
+        assert!(Instant::now() < deadline, "the datagram was never observed");
+        sender
+            .send(bytes, Duration::from_secs(1))
+            .await
+            .expect("carrier send");
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Everything already queued for one capability, until it stays quiet for 300 ms.
+async fn drain(capability: &mut PeerDatagrams) -> Vec<Vec<u8>> {
+    let mut seen = Vec::new();
+    while let Ok(received) = timeout(Duration::from_millis(300), capability.recv()).await {
+        seen.push(received.expect("the capability is live"));
+    }
+    seen
+}
+
+#[tokio::test]
+async fn payload_and_control_datagrams_reach_only_their_own_capability_and_counter() {
+    let (server, port) = start_listener(0xB1).await;
+    let client = start_dialer(0xB2, port).await;
+    let (server_key, client_key) = (server.public_key(), client.public_key());
+    let server = YggBridge::new(server, [client_key]);
+    let client = YggBridge::new(client, [server_key]);
+    let mut server_payload = server
+        .open_datagrams(client_key, BUDGET)
+        .await
+        .expect("server payload capability");
+    let mut server_control = server
+        .open_control_datagrams(client_key, BUDGET)
+        .await
+        .expect("server control capability");
+    let client_payload = client
+        .open_datagrams(server_key, BUDGET)
+        .await
+        .expect("client payload capability");
+    let client_control = client
+        .open_control_datagrams(server_key, BUDGET)
+        .await
+        .expect("client control capability");
+    client
+        .probe(server_key, BUDGET)
+        .await
+        .expect("the route is ready");
+    let (payload_sender, control_sender) = (client_payload.sender(), client_control.sender());
+
+    // More payload datagrams than one queue holds: none may reach, or spend a slot of,
+    // the control queue.
+    let goal = u64::try_from(DATAGRAM_QUEUE_CAPACITY + 4).expect("small goal");
+    send_datagram_until(&payload_sender, b"data", || {
+        server.queued_datagrams() >= goal || server.dropped_datagrams() > 0
+    })
+    .await;
+    assert_eq!(server.control_datagrams(), 0, "payload is never control");
+    // The control side sees nothing until a control datagram is sent: a payload copy in
+    // the control queue would show up here.
+    assert!(drain(&mut server_control).await.is_empty());
+
+    send_datagram_until(&control_sender, b"offer", || {
+        server.control_datagrams() >= 1
+    })
+    .await;
+    let control = drain(&mut server_control).await;
+    assert!(
+        !control.is_empty() && control.iter().all(|datagram| datagram == b"offer"),
+        "the control queue holds only control datagrams: {control:?}"
+    );
+    let payload = drain(&mut server_payload).await;
+    assert!(
+        !payload.is_empty() && payload.iter().all(|datagram| datagram == b"data"),
+        "the payload queue holds only payload datagrams: {payload:?}"
+    );
+    assert!(
+        payload.len() <= DATAGRAM_QUEUE_CAPACITY,
+        "a queue never exceeds its capacity"
+    );
+
+    for bridge in [&client, &server] {
+        close_bridge_within(bridge).await;
+    }
 }
