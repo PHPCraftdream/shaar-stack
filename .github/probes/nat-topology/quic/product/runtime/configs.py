@@ -49,19 +49,24 @@ def relay_binding(case, relay_peer):
     return relay_peer
 
 
-def server_text(case, key_file, allowlist_file, ports, relay_peer, ns=None):
-    """ns: namespace the Server runs in when it differs from the case's Server namespace (relay filler Servers)."""
+def server_text(case, key_file, allowlist_file, ports, relay_peer, ns=None, address_key=None):
+    """ns: namespace the Server runs in when it differs from the case's Server namespace (relay filler Servers).
+    address_key: key file of the encrypted publication; required exactly when the case publishes encrypted."""
     spec = contract.CASES[case]
     bind_ip = contract.ip_for(ns or spec["server_ns"])
     head = [f"target: 127.0.0.1:{contract.TARGET_PORT}"]
-    if spec.get("publish") == "plain":
+    publish = spec.get("publish")
+    contract.require((address_key is not None) == (publish == "encrypted"), "the key file and the encrypted publication go together")
+    if publish == "plain":
         head.append("publish_address: plain")
+    elif publish == "encrypted":
+        head += ["publish_address: encrypted", f"address_key_file:: {owned_path(address_key)}"]
     head += [f"allowlist_path:: {owned_path(allowlist_file)}",
              f"key_file:: {owned_path(key_file)}", f"fallback: {mode_value(spec['mode'])}"]
     return "\n".join(head) + "\n" + network_text(bind_ip, ports, relay_binding(case, relay_peer))
 
 
-def client_text(case, server_key, key_file, ports, relay_peer, hint=None):
+def client_text(case, server_key, key_file, ports, relay_peer, hint=None, address_key=None):
     """The Client names only the Server public key; hint (an IPv6 socket address) is the optional direct-address hint of the IPv6 cases."""
     spec = contract.CASES[case]
     contract.require(contract.hex_value(server_key, 64), "Server key must be 64 lowercase hex characters")
@@ -70,6 +75,10 @@ def client_text(case, server_key, key_file, ports, relay_peer, hint=None):
     if hint is not None:
         contract.require(type(hint) is str and re.fullmatch(r"\[[0-9a-f:]{2,39}\]:[0-9]{1,5}", hint) is not None, "invalid IPv6 direct-address hint")
         head.append(f"server_address:: {hint}")
+    # The Client of an encrypted case holds the key that opens the Server's record; no other case names a key file.
+    contract.require((address_key is not None) == (spec.get("publish") == "encrypted"), "the Client key file and the encrypted publication go together")
+    if address_key is not None:
+        head.append(f"address_key_file:: {owned_path(address_key)}")
     return "\n".join(head) + "\n" + network_text(contract.client_bind(spec), ports, relay_binding(case, relay_peer))
 
 

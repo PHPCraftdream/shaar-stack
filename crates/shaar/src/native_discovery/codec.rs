@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
+use crate::identity::address_key::{AddressKey, is_sealed, open_addresses};
 use crate::native_discovery::address::{SnapshotError, validate_addresses_with_snapshot};
 use iroh_base::EndpointId;
 use iroh_dns::pkarr::SignedPacket;
@@ -84,6 +85,10 @@ pub(crate) enum DecodeError {
     InvalidAddress,
     InvalidSequence,
     OverLimit,
+    /// The record seals its addresses and no address key is configured: nothing to dial.
+    Sealed,
+    /// The address key does not open the sealed value, or the value was altered.
+    SealRejected,
 }
 impl From<SnapshotError> for DecodeError {
     fn from(error: SnapshotError) -> Self {
@@ -96,10 +101,18 @@ impl From<SnapshotError> for DecodeError {
     }
 }
 
-/// Reuse the signed-envelope verifier for an unsalted native mutable item.
+/// The key a Client holds, with the signed timestamp the seal of one record is bound to.
+pub(super) struct Opener<'a> {
+    key: &'a AddressKey,
+    timestamp_us: u64,
+}
+
+/// Reuse the signed-envelope verifier for an unsalted native mutable item. `address_key` opens a
+/// record that seals its addresses (leaf L3b).
 pub(super) fn decode_mutable_record(
     item: &n0_mainline::MutableItem,
     expected: EndpointId,
+    address_key: Option<&AddressKey>,
 ) -> Result<DecodedRecord, DecodeError> {
     if item.salt().is_some() {
         return Err(DecodeError::InvalidPacket);
@@ -117,13 +130,23 @@ pub(super) fn decode_mutable_record(
     envelope[96..SIGNED_HEADER_BYTES].copy_from_slice(&item.seq().to_be_bytes());
     let end = SIGNED_HEADER_BYTES + value.len();
     envelope[SIGNED_HEADER_BYTES..end].copy_from_slice(value);
-    decode_record(&envelope[..end], expected)
+    decode_record_with(&envelope[..end], expected, address_key)
 }
 
 /// Verify the upstream signed envelope, then enforce this leaf's strict DNS/TXT profile.
+#[cfg(test)]
 pub(super) fn decode_record(
     bytes: &[u8],
     expected: EndpointId,
+) -> Result<DecodedRecord, DecodeError> {
+    decode_record_with(bytes, expected, None)
+}
+
+/// `decode_record` that also opens a sealed address list with `address_key`.
+pub(super) fn decode_record_with(
+    bytes: &[u8],
+    expected: EndpointId,
+    address_key: Option<&AddressKey>,
 ) -> Result<DecodedRecord, DecodeError> {
     if bytes.len() < SIGNED_HEADER_BYTES || bytes.len() > SignedPacket::MAX_BYTES {
         return Err(DecodeError::InvalidPacket);
@@ -161,7 +184,14 @@ pub(super) fn decode_record(
         return Err(DecodeError::InvalidSequence);
     }
 
-    let profile = parse_dns_profile(dns, key)?;
+    let opener = address_key
+        .map(|key| {
+            u64::try_from(timestamp)
+                .map(|timestamp_us| Opener { key, timestamp_us })
+                .map_err(|_| DecodeError::InvalidSequence)
+        })
+        .transpose()?;
+    let profile = parse_dns_profile_with(dns, key, opener)?;
     Ok(DecodedRecord {
         key,
         signed_sequence: timestamp,
@@ -179,7 +209,18 @@ fn parse_complete_dns(dns: &[u8]) -> Result<Packet<'_>, DecodeError> {
 }
 
 /// Parse and validate DNS profile bytes; this helper does not authenticate signatures.
+#[cfg(test)]
 pub(super) fn parse_dns_profile(dns: &[u8], key: EndpointId) -> Result<DnsProfile, DecodeError> {
+    parse_dns_profile_with(dns, key, None)
+}
+
+/// `parse_dns_profile` that also opens a sealed address list (`user-data` with the reserved mark
+/// and no `addr` record) when an `opener` is given.
+pub(super) fn parse_dns_profile_with(
+    dns: &[u8],
+    key: EndpointId,
+    opener: Option<Opener<'_>>,
+) -> Result<DnsProfile, DecodeError> {
     if dns.len() > MAX_DNS_BYTES || dns.len() < 12 || dns[..2] != [0, 0] || dns[2..4] != [0x80, 0] {
         return Err(DecodeError::InvalidPacket);
     }
@@ -256,7 +297,19 @@ pub(super) fn parse_dns_profile(dns: &[u8], key: EndpointId) -> Result<DnsProfil
             _ => return Err(DecodeError::MalformedAddress),
         }
     }
-    if addresses.is_empty() {
+    let sealed = metadata
+        .first()
+        .map(|(_, value)| value.as_str())
+        .filter(|value| is_sealed(value));
+    if let Some(value) = sealed {
+        // The sealed list replaces the plain addresses; both in one record are ambiguous.
+        if !addresses.is_empty() {
+            return Err(DecodeError::MalformedAddress);
+        }
+        let opener = opener.ok_or(DecodeError::Sealed)?;
+        addresses = open_addresses(opener.key, key.as_bytes(), opener.timestamp_us, value)
+            .map_err(|_| DecodeError::SealRejected)?;
+    } else if addresses.is_empty() {
         return Err(DecodeError::MalformedAddress);
     }
     let (raw_addresses, canonical_addresses) =

@@ -28,6 +28,9 @@ pub(crate) struct ClientFile {
     /// CLI override has had its chance to replace it (`parse_fallback`).
     #[serde(default)]
     fallback: Option<String>,
+    /// File with the key that opens an encrypted address record of the Server.
+    #[serde(default)]
+    address_key_file: Option<String>,
     #[serde(default)]
     network: Option<super::network::NetworkFile>,
 }
@@ -66,6 +69,7 @@ pub struct ClientConfig {
     server_address: Option<SocketAddr>,
     key_file: PathBuf,
     fallback: Fallback,
+    address_key_file: Option<PathBuf>,
     network: Option<NetworkSettings>,
 }
 
@@ -93,6 +97,12 @@ impl ClientConfig {
     /// Fallback transport selection.
     pub fn fallback(&self) -> Fallback {
         self.fallback
+    }
+
+    /// Key file that opens an encrypted address record of the Server; without it such a record
+    /// yields no address and the other paths are used.
+    pub fn address_key_file(&self) -> Option<&Path> {
+        self.address_key_file.as_deref()
     }
 
     /// Optional shared network settings; absence keeps the legacy
@@ -153,6 +163,17 @@ impl ClientConfig {
         require_nonempty_path("key_file", &key_file)?;
 
         let network = super::network::parse(file.network)?;
+        let address_key_file = file.address_key_file.map(PathBuf::from);
+        if let Some(path) = &address_key_file {
+            require_nonempty_path("address_key_file", path)?;
+            // Records are resolved only by the composed startup.
+            if network.is_none() {
+                return Err(ConfigError::validation(
+                    "address_key_file",
+                    ValidationKind::NotApplicable,
+                ));
+            }
+        }
 
         Ok(ClientConfig {
             server_key: *key.as_bytes(),
@@ -160,6 +181,7 @@ impl ClientConfig {
             server_address,
             key_file,
             fallback,
+            address_key_file,
             network,
         })
     }

@@ -129,6 +129,11 @@ def dnat(spec, counters, result):
         contract.require(contract.PUNCH_DIRECT in lines[contract.PUNCH_DIRECT], "Client punch did not end on the direct path")
         found = re.search(r"candidates=(\d+)", lines[contract.PUNCH_DIRECT])
         contract.require(found is not None and int(found.group(1)) >= 1, "Client punch had no candidates to dial")
+        if spec.get("publish") == "encrypted":
+            # The only record the Client could read was sealed, so a resolved record candidate proves the key opened it.
+            record = re.search(r"candidates=record:(\d+),hint:\d+ resolve=(found|cached)", lines[contract.ROUTE_LINE])
+            contract.require(record is not None and int(record.group(1)) >= 1,
+                             "the Client route line shows no candidate from the sealed record: the key did not open it")
         return
     # The relay variants keep today's fail-closed oracle on purpose, also after leaf L4b: without a reflexive source on either
     # side there is no candidate to exchange, so a Server config naming a relay still produces today's behaviour.

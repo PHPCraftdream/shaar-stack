@@ -657,3 +657,38 @@ fn overrides_and_legacy_fields_interoperate() {
     assert_eq!(cfg.listen().to_string(), "127.0.0.1:2345");
     assert!(cfg.network().is_some(), "network object survives overrides");
 }
+
+#[test]
+fn a_client_address_key_is_optional_and_needs_the_shared_network() {
+    let base = client_network_text(MAINLINE_DEFAULT, &signaling_with_relay(None), YGG_TWO_PEERS);
+    let parse = |text: &str| ClientConfig::from_text(text, &ClientOverrides::default());
+    assert_eq!(parse(&base).unwrap().address_key_file(), None);
+
+    let keyed = format!("address_key_file:: keys/address.key\n{base}");
+    assert_eq!(
+        parse(&keyed).unwrap().address_key_file(),
+        Some(Path::new("keys/address.key"))
+    );
+
+    let empty = parse(&format!("address_key_file:: \n{base}")).unwrap_err();
+    assert!(matches!(
+        empty,
+        ConfigError::Validation {
+            field: "address_key_file",
+            ..
+        }
+    ));
+
+    // Without the shared network object no record is resolved, so a key cannot apply.
+    let legacy = parse(&format!(
+        "server: {RFC8032_PUB_HEX}\naddress_key_file:: keys/address.key\n"
+    ))
+    .unwrap_err();
+    assert!(matches!(
+        legacy,
+        ConfigError::Validation {
+            field: "address_key_file",
+            kind: ValidationKind::NotApplicable
+        }
+    ));
+}

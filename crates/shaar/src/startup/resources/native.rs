@@ -46,7 +46,7 @@ impl super::SharedResourcesStart {
             false,
             false,
             shared_admission,
-            Some(super::start::StageGates {
+            Some(super::test_access::StageGates {
                 after_bridge: None,
                 after_native_close: None,
                 native_bind: Some(SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, 0))),

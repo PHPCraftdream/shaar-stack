@@ -17,6 +17,7 @@
 //! waiter detaches it and does NOT stop running native I/O. Failure cleanup
 //! remains inside the worker.
 
+pub(crate) mod address_key;
 mod error;
 pub mod provision;
 mod store;

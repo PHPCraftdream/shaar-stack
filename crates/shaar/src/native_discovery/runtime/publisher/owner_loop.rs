@@ -17,7 +17,6 @@ use super::flight::{
     finish_completed, make_refresh, make_replacement, replace_queued, revoke, send_deadline,
 };
 use crate::identity::Identity;
-use iroh_base::EndpointId;
 
 /// Single source of truth for the publication refresh window; the reflexive
 /// self-lookup in the owner aligns to it.
@@ -34,14 +33,13 @@ enum Event {
 
 pub(super) async fn publisher_loop(
     identity: Identity,
-    key: EndpointId,
+    mut state: PublisherState,
     handle: OwnedDhtHandle,
     mut commands: mpsc::Receiver<Command>,
     mut stop: oneshot::Receiver<()>,
     clock: Clock,
     publication: watch::Sender<PublicationStatus>,
 ) {
-    let mut state = PublisherState::new(key);
     let publication_view = publication.subscribe();
     let mut timer = tokio::time::interval(REFRESH);
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

@@ -34,7 +34,7 @@ pub(crate) use maintain::Maintenance;
 // the former unused-imports expectation is retired, not replaced.
 pub(crate) use start::SharedResourcesStart;
 #[cfg(test)]
-pub(crate) use start::StageControls;
+pub(crate) use test_access::StageControls;
 
 pub(crate) const MAX_SNAPSHOT_ADDRESSES: usize = 4;
 

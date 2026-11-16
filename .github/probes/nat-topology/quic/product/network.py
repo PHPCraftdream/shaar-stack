@@ -32,6 +32,7 @@ PROFILES = {
     "dnat-cone-relay-signal": {**_DNAT, "tcp_a": ("relay",), "nat": "cone", "dht_drop": True},
     "dnat-cone-relay-standby": {**_DNAT, "tcp_a": ("relay",), "nat": "cone", "dht_drop": True},
     "dnat-cone-norelay-signal": _PUNCH, "dnat-cone-norelay-standby": _PUNCH,
+    "dnat-cone-encrypted-signal": _PUNCH, "dnat-cone-encrypted-standby": _PUNCH,
     "dnat-cone-relaypunch-signal": _PUNCH_RELAY, "dnat-cone-relaypunch-standby": _PUNCH_RELAY,
     "dnat-cone-dhtdrop-signal": {**_PUNCH, "dht_drop": True},
     "dnat-sym-signal": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},

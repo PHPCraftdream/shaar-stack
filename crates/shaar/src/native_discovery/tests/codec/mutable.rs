@@ -26,7 +26,8 @@ fn independent_mutable_item(
 fn independent_native_record_survives_real_mutable_item_field_handoff() {
     let sequence = 1_700_000_000_000_000;
     let item = independent_mutable_item(sequence, None, &INDEPENDENT_NATIVE_RECORD[104..]);
-    let decoded = decode_mutable_record(&item, id(PUB1)).expect("external native record fields");
+    let decoded =
+        decode_mutable_record(&item, id(PUB1), None).expect("external native record fields");
     assert_eq!(
         decoded.signed_bytes.as_slice(),
         INDEPENDENT_NATIVE_RECORD.as_slice()
@@ -37,7 +38,7 @@ fn independent_native_record_survives_real_mutable_item_field_handoff() {
         &[socket(Ipv4Addr::LOCALHOST.into(), 9000)]
     );
     assert_eq!(
-        decode_mutable_record(&item, id(PUB2)),
+        decode_mutable_record(&item, id(PUB2), None),
         Err(DecodeError::WrongKey)
     );
 }
@@ -62,6 +63,6 @@ fn mutable_item_field_handoff_rejects_salt_negative_sequence_and_oversize_before
         ),
     ] {
         let item = independent_mutable_item(sequence, salt, value);
-        assert_eq!(decode_mutable_record(&item, id(PUB1)), Err(expected));
+        assert_eq!(decode_mutable_record(&item, id(PUB1), None), Err(expected));
     }
 }

@@ -69,6 +69,14 @@ CASES = {
     # It is the norelay-signal case with ONLY the Client's DHT answers dropped: no record, no reflexive vote, nothing to offer.
     "dnat-cone-dhtdrop-signal": {**DNAT, "mode": "signal", "nat": "cone", "direct": False, "norelay": True, "dht_observed": True,
                                  "publish": "plain", "dht_denied": True, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 1},
+    # The L3b pair: the relay-less punch pair with the Server publishing the SEALED record (publish_address: encrypted) and the
+    # Client holding the key. The record the WAN helper stored carries no plain address (checked on its real bytes, see
+    # validate_publication) and the Client route line must show a candidate resolved from the record, so the key opened it.
+    # Expected: the same direct path as the plain pair. The oracle was written before any run.
+    "dnat-cone-encrypted-signal": {**DNAT, "mode": "signal", "nat": "cone", "direct": True, "norelay": True, "dht_observed": True,
+                                   "publish": "encrypted", "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
+    "dnat-cone-encrypted-standby": {**DNAT, "mode": "standby", "nat": "cone", "direct": True, "norelay": True, "dht_observed": True,
+                                    "publish": "encrypted", "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
     # Deliberate A6 negative control: fully random port mappings, must NOT flip.
     "dnat-sym-signal": {**DNAT, "mode": "signal", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 1},
     "dnat-sym-standby": {**DNAT, "mode": "standby", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
@@ -255,7 +263,7 @@ def validate_ready(event, role, nonce, pid):
         raise ValueError("unreviewed helper role")
 
 
-def validate_publication(event, nonce, server_key):
+def validate_publication(event, nonce, server_key, sealed=False):
     require(hex_value(server_key, 64), "invalid expected service public key")
     require(event.get("nonce") == nonce and type(event.get("sequence")) is int and 0 <= event["sequence"] < 2 ** 63,
             "publication nonce/sequence mismatch")
@@ -266,6 +274,16 @@ def validate_publication(event, nonce, server_key):
     require(int.from_bytes(bytes.fromhex(envelope)[96:104], "big") == event["sequence"],
             "publication sequence differs from the observed signed envelope")
     addresses = event.get("native_addresses", [])
+    if sealed:
+        # Encrypted publication: the stored signed record holds a sealed value and no plain address, and none of the owned
+        # addresses appears in its real bytes, neither as text nor as octets.
+        require(event.get("sealed") is True and addresses == [], "the encrypted publication is not a sealed record without plain addresses")
+        raw = bytes.fromhex(envelope)
+        for value in IPS.values():
+            octets = bytes(int(part) for part in value.split("."))
+            require(value.encode("ascii") not in raw and octets not in raw, "an owned address appears in the sealed record")
+        return event
+    require(event.get("sealed", False) is False, "the plain publication is unexpectedly sealed")
     require(type(addresses) is list and 1 <= len(addresses) <= 4
             and all(type(value) is str and 1 <= len(value) <= 100 for value in addresses),
             "actual signed Server publication lacks bounded Native addresses")

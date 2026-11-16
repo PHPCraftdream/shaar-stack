@@ -30,7 +30,7 @@ class ProductContractTests(unittest.TestCase):
             "relay-denied-signal", "failover-standby", "failover-signal", "denied-blocked-standby", "dht-drop-signal",
             "outage-standby", "dnat-cone-signal", "dnat-cone-standby", "dnat-cone-relay-signal", "dnat-cone-relay-standby",
             "dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby",
-            "dnat-cone-dhtdrop-signal", "dnat-sym-signal", "dnat-sym-standby",
+            "dnat-cone-dhtdrop-signal", "dnat-cone-encrypted-signal", "dnat-cone-encrypted-standby", "dnat-sym-signal", "dnat-sym-standby",
             "hole-signal", "hole-standby", "switch-signal", "switch-standby", "relay-full-signal", "relay-full-standby",
             "ipv6-signal", "ipv6-standby", "denied-native-signal", "recover-standby"])
         self.assertEqual(contract.PHASE_SECONDS, 1200)
@@ -60,7 +60,8 @@ class ProductContractTests(unittest.TestCase):
         self.assertEqual(contract.DHT_OBSERVED_ENV, "SHAAR_NAT_DHT_OBSERVED")
         opted = {name for name, spec in contract.CASES.items() if contract.DHT_OBSERVED_KEY in spec}
         self.assertEqual(opted, {"dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal",
-                                 "dnat-cone-relaypunch-standby", "dnat-cone-dhtdrop-signal"})
+                                 "dnat-cone-relaypunch-standby", "dnat-cone-dhtdrop-signal", "dnat-cone-encrypted-signal",
+                                 "dnat-cone-encrypted-standby"})
 
     def test_new_row_cases_declare_their_flows_exits_and_identities(self):
         cases = contract.CASES
@@ -198,6 +199,37 @@ class ProductContractTests(unittest.TestCase):
             changed[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):
                 contract.validate_publication(changed, nonce, key)
+
+    def test_encrypted_cases_are_the_relay_less_punch_pair_with_a_sealed_record(self):
+        cases = contract.CASES
+        for name, mode in (("dnat-cone-encrypted-signal", "signal"), ("dnat-cone-encrypted-standby", "standby")):
+            twin = cases[name.replace("encrypted", "norelay")]
+            self.assertEqual(cases[name]["publish"], "encrypted", name)
+            self.assertEqual(cases[name]["mode"], mode, name)
+            # Only the publication differs from the plain relay-less pair, whose direct path is already accepted.
+            self.assertEqual({key: value for key, value in cases[name].items() if key != "publish"},
+                             {key: value for key, value in twin.items() if key != "publish"}, name)
+
+    def test_sealed_publication_has_no_plain_address_and_hides_every_owned_address(self):
+        nonce, key = "a" * 32, "b" * 64
+        for sealed_bytes in (b"\x01" * 96, b"shaar1.AbCd-_" * 8):
+            envelope = key + "0" * 128 + (7).to_bytes(8, "big").hex() + sealed_bytes.hex()
+            sealed = {"nonce": nonce, "sequence": 7, "signed_envelope_hex": envelope, "native_addresses": [], "sealed": True}
+            self.assertIs(contract.validate_publication(sealed, nonce, key, sealed=True), sealed)
+            # A plain record is not accepted for an encrypted case, and a sealed record not for a plain case.
+            with self.assertRaises(ValueError):
+                contract.validate_publication(dict(sealed, sealed=False), nonce, key, sealed=True)
+            with self.assertRaises(ValueError):
+                contract.validate_publication(dict(sealed, native_addresses=["203.0.113.10:40001"]), nonce, key, sealed=True)
+            with self.assertRaises(ValueError):
+                contract.validate_publication(sealed, nonce, key)
+        base = key + "0" * 128 + (7).to_bytes(8, "big").hex()
+        for value in contract.IPS.values():
+            for leaked in (value.encode("ascii"), bytes(int(part) for part in value.split("."))):
+                changed = {"nonce": nonce, "sequence": 7, "signed_envelope_hex": base + b"xx".hex() + leaked.hex(),
+                           "native_addresses": [], "sealed": True}
+                with self.subTest(value=value, leaked=leaked), self.assertRaises(ValueError):
+                    contract.validate_publication(changed, nonce, key, sealed=True)
 
     def test_normal_product_manifest_cannot_use_test_profiles_or_enable_the_packet_gate(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -347,7 +379,7 @@ class NetworkContractTests(unittest.TestCase):
         self.assertNotIn("counter name hole_in", switch)
         stateful = 'lanin ip daddr %s meta l4proto udp counter name hole_in drop comment "p13-stateful-in"'
         for case in ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby",
-                     "dnat-cone-dhtdrop-signal"):
+                     "dnat-cone-dhtdrop-signal", "dnat-cone-encrypted-signal", "dnat-cone-encrypted-standby"):
             self.assertIn(stateful % "203.0.113.1", rules("rtr_a", case), case)
             self.assertIn(stateful % "203.0.113.2", rules("rtr_b", case), case)
             self.assertNotIn("ct state", rules("rtr_a", case), case)

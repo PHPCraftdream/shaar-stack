@@ -66,8 +66,6 @@ pub enum ValidationKind {
     /// The field is valid in general but has no effect in this configuration
     /// shape, so it is rejected instead of being silently ignored.
     NotApplicable,
-    /// The spelling is reserved for a later mode and is refused until it exists.
-    NotYetAvailable,
 }
 
 /// Configuration error: loading, parsing, or validation.

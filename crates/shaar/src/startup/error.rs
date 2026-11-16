@@ -43,6 +43,9 @@ pub enum StartupError {
     /// The pinned-relay destination reservation could not be established at
     /// startup. Names the stage only; never relay addresses or upstream text.
     RelayReserve,
+    /// The address key file could not be read or is not a valid key. Names the stage only;
+    /// never the path text or key material.
+    AddressKey,
 }
 
 impl fmt::Display for StartupError {
@@ -70,6 +73,7 @@ impl fmt::Display for StartupError {
             Self::InvalidPolicy => write!(f, "path policy configuration rejected"),
             Self::Exhausted => write!(f, "no usable path remained within the attempt budget"),
             Self::RelayReserve => write!(f, "relay reservation failed at startup"),
+            Self::AddressKey => write!(f, "address key file could not be loaded"),
         }
     }
 }

@@ -163,3 +163,42 @@ async fn payload_stage_fault_after_ygg_acquisition_rolls_back_the_bridge_owned_t
     );
     probe_claim_free(PAYLOAD_TRANSIT_SEED, "transit claim released").await;
 }
+
+/// L3b: the address key is read before anything binds, so an unreadable key fails the start
+/// cleanly, names only the stage and leaves every port free.
+#[tokio::test]
+async fn an_unreadable_address_key_is_fatal_redacted_and_binds_nothing() {
+    const KEY_SEED: u8 = 0xED;
+    const KEY_PATH: &str = "no-such-dir/address-key-sentinel.key";
+    let signaling_port = reserve_tcp_port();
+    let text = server_config_text(
+        SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, reserve_udp_port()),
+        &[SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 9)],
+        format!("127.0.0.1:{signaling_port}")
+            .parse()
+            .expect("signaling bind"),
+        &["tcp://127.0.0.1:9".to_string()],
+        None,
+    );
+    let config = parse_server_config(&format!(
+        "publish_address: encrypted\naddress_key_file:: {KEY_PATH}\n{text}"
+    ));
+    let identity = identity(KEY_SEED);
+    let mut start: SharedResourcesStart = start_composition(&identity, &config, &[]);
+
+    let fatal = tokio::time::timeout(BUDGET, start.wait())
+        .await
+        .expect("fatal wait finishes within the budget")
+        .expect_err("an unreadable address key must be fatal");
+    assert_eq!(fatal, StartupError::AddressKey);
+    join_fatal_shutdown(&mut start, fatal.clone()).await;
+
+    let rendered = format!("{fatal} {fatal:?}");
+    assert!(
+        !rendered.contains("address-key-sentinel"),
+        "the key path leaked through error rendering: {rendered}"
+    );
+    let rebound = TcpListener::bind(("127.0.0.1", signaling_port))
+        .expect("nothing bound the signaling port before the key failed");
+    drop(rebound);
+}

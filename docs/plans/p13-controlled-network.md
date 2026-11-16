@@ -827,7 +827,7 @@ R4 flag, reviewed together with the L0 schema change that makes the signaling re
 optional; (5) confirm that a punched direct path always outranks standby Yggdrasil payload
 (north-star step 4) once a punch exists.
 
-### 7. L3b design note: encrypted published address (v3: two options, scope approved, leaf started)
+### 7. L3b design note: encrypted published address (v4: two options, one key, implemented)
 
 Requested on 2026-11-15, scope confirmed on 2026-11-16: an opt-in mode in which only holders of
 the decryption keys learn the Server's real IP address from the DHT record. This note is the
@@ -879,43 +879,52 @@ key or sequence number is rejected; the record stays within 1000 bytes at the re
 limit and configuration validation rejects an allowlist beyond it with the offending field named;
 `encrypted` leaves `off` the default and changes nothing for `plain`.
 
-**Owner direction of 2026-11-16 and note v3.** The owner approved the leaf, the use of the locked
-primitives and a cap of about a dozen keys, and then simplified the surface: there are exactly
+**Owner direction of 2026-11-16, note v3 and the implemented form (note v4).** The owner approved
+the leaf, the use of the locked primitives and then simplified the surface: there are exactly
 **two publication options**, an open one and one encrypted with a key that the client must know.
 Schemes (a) (an envelope per client key) and the three kinds of readers of note v2 are replaced
-by one mechanism, because the audience is simply whoever is given the key: a fixed set of users,
-specific users or an unlimited number of users differ only in how widely the key is shared.
+by one mechanism, because the audience is simply whoever is given the key. Note v3 proposed up to
+eight keys per Server with a wrap per key. Reading the pinned `iroh-dns` showed that this does not
+fit: it can publish only the `addr`, `relay` and `user-data` attributes at a chosen signed
+timestamp (the lower-level TXT builder is crate-private and the prepared patch is not changed for
+this leaf), and `user-data` holds at most 245 characters. The sealed list therefore travels in
+`user-data` and the Server holds **exactly one key**; several audiences need several Servers, or
+a reviewed patch of the prepared `iroh-dns`, which was not made and is a decision for the owner.
 
 - **Configuration.** `publish_address` is `off` (the default: nothing published), `plain` (open,
-  unchanged) or `encrypted`. With `encrypted` the Server also names `address_keys_file`, a file
-  with one to eight keys, one 64-hex-digit key per line (a key is 32 random bytes; an empty
-  file, a malformed line or more than eight keys fails validation naming the field). The Client
-  names an optional `address_key_file` with the one key it holds. Keys live in files, never
-  inline, like the identity key.
-- **Record.** Each publication draws a fresh random content key K and encrypts the address list
-  with ChaCha20-Poly1305 under K and a random nonce, binding the Server key and the record
-  sequence number as associated data. K is wrapped once per configured key: the wrapping key is
-  HKDF-SHA256 of that key with the Server key as salt and a fixed purpose label, the wrap is
-  ChaCha20-Poly1305 again, and a four-byte hint (derived by HKDF with another label) lets a
-  reader find its wrap without trying every one. With the header, the ciphertext and about 64
-  bytes per key, eight keys stay well inside the 1000-byte value (`MAX_DNS_BYTES`). The cap is
-  eight, not a dozen, because the record also carries the other published entries.
-- **Reader.** A Client that holds a key finds its wrap by hint, unwraps K, decrypts the list and
-  uses the addresses like the published ones. A Client without a key, or with a wrong key, gets
-  no address from the record and keeps the rendezvous (L4) and Yggdrasil paths, exactly as with
-  `off`; a malformed or tampered record is rejected like any other unreadable record.
-- **Dependencies.** Only `chacha20poly1305` and `hkdf` from the locked set (and `sha2` if the
-  lock needs it for `hkdf`); `x25519-dalek`, `curve25519-dalek`, `ed25519-dalek` and `crypto_box`
-  are no longer needed. No new package and no version change. No home-made construction.
-- **Rotation and revocation.** Rotating a key means writing a new file on the Server and
-  giving the new key to the clients; a key removed from the Server file stops wrapping from the
-  next publication, and records already published stay readable by its former holders until
-  they expire (the same limit as before).
-- **Acceptance (ordinary CI).** A holder of any configured key decrypts the exact addresses; a
-  wrong key does not; a flipped ciphertext, wrap or hint, a swapped Server key or sequence number
-  is rejected; two keys decrypt the same record; the record stays within 1000 bytes at eight
-  keys; the configuration rejects every invalid combination naming the field (a key file with
-  `plain` or `off`, no key file with `encrypted`, nine keys, a bad line); `off` stays the default
-  and `plain` is byte-identical. The namespace check (two privileged dispatches are authorized)
+  unchanged) or `encrypted`. With `encrypted` the Server also names `address_key_file` (required;
+  rejected with `off` and `plain`). The Client names an optional `address_key_file` (only with the
+  `network` object). The key file has the identity key format: exactly 32 raw bytes, owner-only,
+  loaded by the same open-handle checks, never inline. An unreadable key stops the start before
+  anything binds (`address key file could not be loaded`).
+- **Record.** The list that `plain` would publish (the snapshot and the voted public address, at
+  most four entries) is sealed per publication: the AEAD key is HKDF-SHA256 of the 32-byte secret
+  with the Server key and a fresh random 16-byte salt as the HKDF salt and the purpose label
+  `shaar address seal v1`; the cipher is ChaCha20-Poly1305 with a fixed zero nonce (safe, since the
+  key is unique per publication); the associated data are a version label, the Server key and the
+  signed timestamp in microseconds. The plaintext is a count and, per address, a family byte, the
+  octets and the port. The value is `shaar1.` plus the base64url of `salt || ciphertext || tag`
+  (at most 153 characters even for four IPv6 entries, within the 245 that `user-data` allows). The record carries no `addr` entry. The salt comes from the same OS entropy as identity
+  generation, so no new dependency edge exists for randomness.
+- **Reader.** A Client that holds the key opens the value after the signature check, validates the
+  addresses with the same profile as plain ones (port, wildcard, multicast, IPv6 scope) and uses
+  them as published. A Client without a key gets a typed `Sealed` outcome (no address, the other
+  paths are used); a wrong key, a flipped byte, a changed Server key or a re-signed timestamp is
+  `SealRejected`. A record that mixes plain `addr` entries with a sealed value is rejected as
+  ambiguous. The mark `shaar1.` is reserved at the start of `user-data` for this purpose.
+- **Dependencies.** `chacha20poly1305` (no default features, `alloc` only), `hkdf` and `sha2` from
+  the locked set: direct edges of the `shaar` package, no new package and no version change. No
+  home-made construction.
+- **Rotation and revocation.** Rotating the key means writing a new file on the Server and giving
+  it to the clients; records already published stay readable by their former holders until they
+  expire (300 s, the signed-age limit).
+- **Acceptance (ordinary CI), written and awaiting a run.** A holder of the key opens the exact
+  addresses; a wrong key, a flipped value, a different signed timestamp and a missing key are
+  distinguished and none yields an address; the signed record contains neither the address text
+  nor its octets; plain and sealed entries together are rejected; a sealed value with an invalid
+  address is rejected like a plain one; a publisher with a seal publishes no `addr` and re-seals on
+  refresh; `plain` is unchanged and `off` stays the default; the configuration rejects every
+  invalid combination naming the field; an unreadable key file stops the composed start before any
+  bind with a redacted message. The namespace check (two privileged dispatches are authorized)
   shows that a Client holding the key still reaches a direct path through the cone NATs.
 

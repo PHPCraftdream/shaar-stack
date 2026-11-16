@@ -32,9 +32,12 @@ pub(crate) struct ServerFile {
     /// CLI override has had its chance to replace it (`parse_fallback`).
     #[serde(default)]
     fallback: Option<String>,
-    /// Unvalidated raw value of the opt-in public-address publication (`off|plain`).
+    /// Unvalidated raw value of the opt-in public-address publication (`off|plain|encrypted`).
     #[serde(default)]
     publish_address: Option<String>,
+    /// File with the key that seals the published address (`publish_address: encrypted`).
+    #[serde(default)]
+    address_key_file: Option<String>,
     #[serde(default)]
     network: Option<super::network::NetworkFile>,
 }
@@ -69,6 +72,7 @@ pub struct ServerConfig {
     allowlist_path: PathBuf,
     fallback: Fallback,
     publish_address: PublishAddress,
+    address_key_file: Option<PathBuf>,
     network: Option<NetworkSettings>,
 }
 
@@ -98,9 +102,15 @@ impl ServerConfig {
         self.fallback
     }
 
-    /// Whether the DHT record also carries the NAT-observed public address.
+    /// Whether the DHT record also carries the NAT-observed public address, and whether it is sealed.
     pub fn publish_address(&self) -> PublishAddress {
         self.publish_address
+    }
+
+    /// Key file that seals the published address; present exactly when `publish_address` is
+    /// `encrypted`.
+    pub fn address_key_file(&self) -> Option<&Path> {
+        self.address_key_file.as_deref()
     }
 
     /// Optional shared network settings; absence keeps the legacy
@@ -140,6 +150,25 @@ impl ServerConfig {
         );
         let fallback = parse_fallback(file.fallback.as_deref(), over.fallback)?;
         let publish_address = parse_publish_address(file.publish_address.as_deref())?;
+        let address_key_file = file.address_key_file.map(PathBuf::from);
+        if let Some(path) = &address_key_file {
+            require_nonempty_path("address_key_file", path)?;
+        }
+        match (publish_address, &address_key_file) {
+            (PublishAddress::Encrypted, None) => {
+                return Err(ConfigError::validation(
+                    "address_key_file",
+                    ValidationKind::MissingRequired,
+                ));
+            }
+            (PublishAddress::Encrypted, Some(_)) | (_, None) => {}
+            (_, Some(_)) => {
+                return Err(ConfigError::validation(
+                    "address_key_file",
+                    ValidationKind::NotApplicable,
+                ));
+            }
+        }
 
         let target_text = target_raw
             .ok_or_else(|| ConfigError::validation("target", ValidationKind::MissingRequired))?;
@@ -177,6 +206,7 @@ impl ServerConfig {
             allowlist_path,
             fallback,
             publish_address,
+            address_key_file,
             network,
         })
     }
@@ -205,16 +235,56 @@ mod tests {
     }
 
     #[test]
-    fn encrypted_is_reserved_and_refused_with_the_field_name() {
+    fn encrypted_needs_its_key_file_and_names_the_field_when_it_is_missing() {
+        let config =
+            parse("publish_address: encrypted\naddress_key_file:: /keys/address.key\n").unwrap();
+        assert_eq!(config.publish_address(), PublishAddress::Encrypted);
+        assert_eq!(
+            config.address_key_file(),
+            Some(Path::new("/keys/address.key"))
+        );
         let error = parse("publish_address: encrypted\n").unwrap_err();
         assert!(matches!(
             error,
             ConfigError::Validation {
-                field: "publish_address",
-                kind: ValidationKind::NotYetAvailable
+                field: "address_key_file",
+                kind: ValidationKind::MissingRequired
             }
         ));
-        assert!(error.to_string().contains("publish_address"));
+        assert!(error.to_string().contains("address_key_file"));
+        let empty = parse("publish_address: encrypted\naddress_key_file:: \n").unwrap_err();
+        assert!(matches!(
+            empty,
+            ConfigError::Validation {
+                field: "address_key_file",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_key_file_without_encrypted_publication_is_not_applicable() {
+        for mode in ["", "publish_address: off\n", "publish_address: plain\n"] {
+            let error =
+                parse(&format!("{mode}address_key_file:: /keys/address.key\n")).unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    ConfigError::Validation {
+                        field: "address_key_file",
+                        kind: ValidationKind::NotApplicable
+                    }
+                ),
+                "{mode:?}: {error}"
+            );
+        }
+        assert_eq!(parse("").unwrap().address_key_file(), None);
+        assert_eq!(
+            parse("publish_address: plain\n")
+                .unwrap()
+                .address_key_file(),
+            None
+        );
     }
 
     #[test]

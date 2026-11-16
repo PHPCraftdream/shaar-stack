@@ -9,8 +9,8 @@ use crate::config::PublishAddress;
 
 const MAX_ADDRESSES: usize = 4;
 
-/// The address list to publish: the endpoint snapshot and, only with the
-/// opt-in `plain` mode and a usable vote, ONE extra entry (the voted public IP
+/// The address list to publish: the endpoint snapshot and, only with an
+/// opt-in mode (`plain` or `encrypted`) and a usable vote, ONE extra entry (the voted public IP
 /// with the local QUIC port). The cap of four holds: when the snapshot is
 /// already full its last (least specific) local entry yields its slot. `off`,
 /// no vote, an unusable vote or no local IP address leave the snapshot
@@ -25,7 +25,7 @@ pub(crate) fn compose_published(
     publish: PublishAddress,
 ) -> Vec<TransportAddr> {
     let mut addresses = base.to_vec();
-    if publish != PublishAddress::Plain {
+    if publish == PublishAddress::Off {
         return addresses;
     }
     let Some(ip) = vote else {
@@ -204,6 +204,25 @@ mod publish_tests {
         expected.push(ip("8.8.8.8", 7777));
         assert_eq!(composed, expected);
         assert!(validate_transport_addresses(&composed).is_ok());
+    }
+
+    #[test]
+    fn encrypted_composes_the_same_list_as_plain_and_the_sealing_happens_later() {
+        let encrypted = |base: &[TransportAddr], voted| {
+            compose_published(base, voted, PublishAddress::Encrypted)
+        };
+        let plain =
+            |base: &[TransportAddr], voted| compose_published(base, voted, PublishAddress::Plain);
+        for voted in [
+            vote("8.8.8.8"),
+            vote("2001:db8::1"),
+            vote("127.0.0.1"),
+            None,
+        ] {
+            assert_eq!(encrypted(&local(), voted), plain(&local(), voted));
+            assert_eq!(encrypted(&[], voted), plain(&[], voted));
+        }
+        assert_ne!(encrypted(&local(), vote("8.8.8.8")), local());
     }
 
     #[test]
