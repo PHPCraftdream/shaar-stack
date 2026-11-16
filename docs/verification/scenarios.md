@@ -539,3 +539,95 @@ selection map, so this measurement stays valid for that product code. One run pe
 
 The largest change against 11.5 is the composed steady RSS, +0.7 MiB, far inside its ceiling of 96 MiB. The
 ceilings are not tightened here. The raw reports are the `resource-budget` artifact of the dispatch.
+
+## 12. P16 first-version readiness (2026-11-16)
+
+Prepared on `65617d3` (the product code is that of `f166782`, the L4b merge; everything after it is documentation and the
+namespace harness). This is the cross-check that development plan P16 asks for. It creates no evidence of its own: every
+statement cites a run or a section above. Whether the first version is accepted is the owner's decision; the open risks and
+gates the owner must weigh are in 12.5.
+
+### 12.1 The end-to-end scenario, step by step
+
+| Step | What is established | Evidence | Limits |
+|---|---|---|---|
+| 1. Server publishes a signed record under its key | accepted | A1; real signed Mainline record in the composed role tests; live DHT works since DHT-L1 | A reflexive address is published only with `publish_address: plain` (default off, owner decision 2026-11-15) |
+| 2. Client knows only the Server key | accepted | A1 (key-only discovery, exact APP) | |
+| 3. Client resolves the record and tries direct QUIC | accepted | A1, A3, A4; P10 first byte in 12.2 | On a live DHT the record lookup outlives a 3 s attempt (DHT-L2 hands it to a task of its own); the first-byte criterion for a cold lookup is proven in the fixtures only |
+| 4. Negotiate over libp2p or Yggdrasil signaling and hole-punch | tested in the namespace fixture: direct path through two port-preserving cone NATs with a stateful input policy, exact APP, **without a relay** (Yggdrasil rendezvous, 2026-11-15 and again 2026-11-16) and **with a pinned relay while Yggdrasil is closed to the Client** (carrier rendezvous, dispatch 43867617110) | A5 | Not established: symmetric NAT (A6: no direct path, `standby` carries over Yggdrasil), CGNAT, real home networks, and any direct path between the two cloud runners of the live smoke (13 bounded dispatches, none obtained; see 12.5) |
+| 5. UDP blocked: Yggdrasil | accepted | B1 (`standby` exact), B2 (`signal` fails closed), C7, D3 (failover 7.0 s in the namespace run 43870509412, 9.03 to 9.05 s in the P10 fixture) | Public Yggdrasil interoperability is a bounded observation (E3) |
+| 6. Allowlist, then one fixed TCP target | accepted | G1, G2 (also over the Yggdrasil path), C8 and C9 (libp2p and `signal` carry no APP) | |
+
+Every namespace row above was executed once per case; the matrix does not claim a distribution.
+
+### 12.2 Efficiency criteria of 2026-11-05, recomputed on the final product code
+
+Source: the retained `p10-*.csv` files of the full-scope fork run 43861074349 on `f166782` (both OS green), nearest-rank p95
+over 20 samples, read with a stdlib script as inert data.
+
+| Criterion | Limit | Linux | Windows |
+|---|---|---|---|
+| First byte, known address | 3 s | 112.2 ms | 111.6 ms |
+| First byte, cold DHT lookup | 10 s | 114.1 ms | 128.0 ms |
+| Failover to Yggdrasil under blocking of every IP path | 10 s | 9.029 s | 9.051 s |
+| Share of connections that end on the direct path | 95 % | 98.387 % (61 of 62) | 98.387 % (61 of 62) |
+
+All four hold. The known-address value is about 30 ms above the campaign of `361e169` (80.4 to 81.1 ms on Linux); samples
+move by that much between runs on shared runners and both startup limits are far away. The criteria are measured in
+a controlled fixture, never on the public network.
+
+### 12.3 Resources (P14), re-measured on the final code
+
+Dispatch 43875890398 on `65617d3` (release products, loopback only): **38 of 38 rows inside their ceilings** (19 direct, 19
+composed). Composed steady RSS 23.6 MiB server and 23.0 MiB client against 96 MiB, idle CPU 0.08 % and 0.14 % against 2 %,
+round trip p95 0.457 ms, bulk echo 95.0 MiB/s against a floor of 20, 6.4 MiB accepted from a never-reading target against 32,
+server growth after client restarts 0 fds, 0 threads and 0.19 MiB, server stop in 4.2 ms. The ceilings stay as approved on
+2026-11-14.
+
+### 12.4 CI and legal checks on the final code
+
+- Full-scope fork run 43861074349 on `f166782`: green on Linux and Windows. Libtest totals: Linux 1,057 passed, 0 failed, 21
+  ignored (23 binaries); Windows 1,064 passed, 0 failed, 15 ignored (23 binaries); the Windows-only SDK-parallelism
+  diagnostic step 1,611 passed and 0 failed over 3 binaries. Later commits (harness cases,
+  documentation) were checked by targeted runs: fork 43866538507 and 43873666590, upstream develop 43867542657, 43869466418
+  and 43874597907, all green on both OS.
+- Privileged namespace matrix, all six authorized dispatches used: 43867617110 (`punch`, 5 of 5 cases) and 43870509412
+  (`base`, 12 of 12 cases) on the final product code; earlier dispatches are indexed in 10.1.
+- Platform builds (build only, nothing executed, packaged or released): fork run 43874797967 on `65617d3`: Linux
+  x86_64, Windows x86_64, macOS aarch64 and Android aarch64 built. **macOS x86_64 was not built on this SHA**: the job never
+  started in three attempts (the first run and two re-runs, each cancelled after about 15 minutes of queueing with "The job
+  was not acquired by Runner of type hosted even after multiple attempts" and GitHub's notice about macOS arm64 runner
+  capacity), so this is a runner-capacity event with no build output either way. The same target built from the same
+  sources up to `1e6da6c` (fork run 43834970372), and the macOS aarch64 job built the final sources with the same toolchain
+  in this run. A re-run when capacity returns would close the row. Android stays build-only: no device or emulator ran it.
+- First execution on macOS: the `Process feedback` matrix of 2026-11-16 (run 43846060445) ran the 13 reviewed process
+  cases on `macos-latest` (aarch64) and passed; debug products, loopback only.
+- Licence gate: cargo-deny reports `licenses ok` in the full-scope run, and the Linux notice manifest of that run lists 371
+  linked packages, 0 release blockers, 13 reviewed not-distributed identities and `release_ready` true (the Windows manifest
+  is retained in the same run and was not re-read in this pass). The licence texts are authentic upstream files; the
+  elections of 2026-11-14 are an engineering decision, not legal advice.
+- Reproducibility: every build uses the pinned toolchain 1.99.1, the locked graph and prepared sources with verified
+  checksums. Byte-for-byte reproducibility of the binaries is not claimed and was not tested.
+- Secrets: the unit oracles of `security.md` (SEC-CFG-02, SEC-KEY-03) cover logs and `Debug` output; the live smoke evidence
+  schema carries public keys only. No repository-wide scan of CI artifacts for secret material exists.
+
+### 12.5 Open risks and gates for the owner
+
+| # | Item | Kind | State |
+|---|---|---|---|
+| 1 | Encrypted reflexive address (L3b, the opt-in of 2026-11-15) | owner decision | The design note is in `p13-controlled-network.md` section 7 (envelopes to the allowlisted keys, about a dozen recipients, direct dependencies on crates already locked). No cryptographic code exists. The owner decides whether L3b is part of the first version and approves the scheme and the dependencies |
+| 2 | Direct path between real networks | product risk, bounded observation | Thirteen live dispatches: ten passed over Yggdrasil, none obtained a direct path between the two cloud runners. The last one (43870725952) shows the Server never learned its public address (five reflexive windows skipped), so it answered none of 30 Offers. By the decision of 2026-11-15 this is an observation, neither a pass nor a failure. Further live work stays inside the recorded contract |
+| 3 | Real devices and networks (E2), Android execution | gated | No home, mobile or cafe network and no device ran the products; Android is build-only |
+| 4 | NAT variety (A6) | not established | Only port-preserving cone (direct) and fully random ports (no direct path, `standby` carries) were run |
+| 5 | Long-period NAT keepalive (D4), circuit exhaustion and Client-side relay exhaustion (C5) | not established | Single NAT recovery and Server reservation exhaustion are accepted; the rest needs real devices or a new case |
+| 6 | The reflexive address comes from the Mainline DHT only | design limit | A side that cannot learn it offers no candidate; an unanswered Offer holds the Client for up to 1.5 s per attempt (answering with an empty list would end the wait; not done) |
+| 7 | Windows flake `pinned_relay_negotiation_carries_native_payload_with_zero_relay_payload` (FLAKE-W1) | open defect | A diagnostic is merged; the fix waits for a repeat of the failure. It did not repeat in the six Windows runs listed in 12.4 |
+| 8 | Privileged dispatches | resource | All six authorized dispatches are used; any further namespace run needs a new grant |
+| 9 | Public-network, legal, release gates | gated | Publishing crates, a release, a version change, commit and push, public peers beyond the recorded contract and legal clearance of the notices stay separate explicit requests |
+
+### 12.6 What this section does and does not conclude
+
+Every mandatory scenario of the matrix is accepted, or tested with its limits recorded, or gated as listed above, and no
+blocking question is open apart from item 1. The version has **not** been shown to punch through real home or cloud NATs;
+what is shown is the mechanism in the controlled fixture, the fail-closed and fallback behavior around it, and a live
+fallback over Yggdrasil that works every time it was tried. Nothing here is published, tagged or versioned.
