@@ -19,7 +19,8 @@ import phase_tests  # noqa: E402  (reuses the synthetic evidence/mutation factor
 import verdicts  # noqa: E402
 
 NONCE, SOURCE = "d" * 32, "a" * 40
-DIRECT_CONE = ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby")
+DIRECT_CONE = ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby")
+RELAY_PUNCH = ("dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby")
 PUNCH_MUTATIONS = ("no-route-line", "no-punch-line", "punch-fallback", "punch-zero", "no-markers", "route-relay")
 
 
@@ -67,7 +68,7 @@ class DirectConeVerdictTests(unittest.TestCase):
         for name in DIRECT_CONE:
             spec = contract.CASES[name]
             self.assertTrue(spec["direct"], name)
-            verdicts.dnat(spec, peer_counters(ygg=9), direct_result())
+            verdicts.dnat(spec, peer_counters(ygg=0 if spec.get("relay_punch") else 9, relay_tcp=40 if spec.get("relay_punch") else 0), direct_result())
             with self.subTest(case=name):
                 self.assertEqual(phase.verify_product_case(phase_tests.evidence(name), name, SOURCE, NONCE),
                                  {"forwarded_bytes": 2000, "active_seconds": 12.5})
@@ -88,6 +89,20 @@ class DirectConeVerdictTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 verdicts.dnat(contract.CASES["dnat-cone-norelay-signal"], counters, result)
 
+    def test_relay_punch_cones_need_relay_signaling_and_no_ygg(self):
+        for name in RELAY_PUNCH:
+            spec = contract.CASES[name]
+            with self.subTest(case=name):
+                verdicts.dnat(spec, peer_counters(ygg=0, relay_tcp=40), direct_result())
+                with self.assertRaises(ValueError):
+                    verdicts.dnat(spec, peer_counters(ygg=0, relay_tcp=0), direct_result())
+                with self.assertRaises(ValueError):
+                    verdicts.dnat(spec, peer_counters(ygg=9, relay_tcp=40), direct_result())
+                with self.assertRaises(ValueError):
+                    verdicts.dnat(spec, peer_counters(sent=0, received=0, ygg=0, relay_tcp=40), direct_result())
+                with self.assertRaises(ValueError):
+                    phase.verify_product_case(phase_tests.mutate(name, "no-relay-negotiation"), name, SOURCE, NONCE)
+
     def test_norelay_direct_cones_need_ygg_rendezvous_traffic(self):
         for name in ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby"):
             spec = contract.CASES[name]
@@ -99,7 +114,7 @@ class DirectConeVerdictTests(unittest.TestCase):
 
 class FailClosedVerdictTests(unittest.TestCase):
     def test_relay_configured_cones_keep_todays_fail_closed_oracle(self):
-        # All four A5 relay-configured cones stay unflipped until L4b (the merged punch needs a relay-less config).
+        # All four A5 relay-configured cones stay unflipped after L4b: none has a reflexive source to exchange.
         for name in ("dnat-cone-signal", "dnat-cone-standby", "dnat-cone-relay-signal", "dnat-cone-relay-standby"):
             spec = contract.CASES[name]
             self.assertFalse(spec["direct"], name)
@@ -143,7 +158,8 @@ class PunchGroupTests(unittest.TestCase):
     def test_punch_group_membership(self):
         punch = [entry[2] for entry in phase.GROUPS["punch"] if entry[1] == "product"]
         self.assertEqual(punch, list(phase.PUNCH_CASES))
-        self.assertEqual(set(punch), {"dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal"})
+        self.assertEqual(set(punch), {"dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal",
+                                      "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby"})
         nat = [entry[2] for entry in phase.GROUPS["nat"] if entry[1] == "product"]
         self.assertIn("dnat-cone-signal", nat)
         self.assertIn("dnat-cone-standby", nat)

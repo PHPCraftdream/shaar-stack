@@ -56,6 +56,19 @@ class ConfigTests(unittest.TestCase):
                 self.assertEqual(server.count("publish_address: plain\n"), 1 if spec.get("publish") == "plain" else 0, case)
                 self.assertNotIn("publish_address", client)
 
+    def test_relaypunch_cases_pin_the_relay_and_publish_the_reflexive_endpoint(self):
+        for case in ("dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby"):
+            server = configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, RELAY)
+            client = configs.client_text(case, KEY, "/w/keys/client.key", PORTS, RELAY)
+            for text in (server, client):
+                self.assertIn(f"relay: {RELAY}\nrelay_address: 203.0.113.10:{PORTS['relay']}\n", text, case)
+            self.assertEqual(server.count("publish_address: plain\n"), 1, case)
+            self.assertNotIn("server_address", client)
+            with self.assertRaises(ValueError):
+                configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, None)
+            with self.assertRaises(ValueError):
+                configs.client_text(case, KEY, "/w/keys/client.key", PORTS, None)
+
     def test_norelay_cases_bind_without_relay_and_mismatches_are_rejected(self):
         for case in ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal"):
             server = configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, None)

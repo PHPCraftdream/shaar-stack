@@ -65,6 +65,8 @@ def evidence(case):
         if spec.get("relay_first"):
             routers["rtr_a"]["counters"]["dht_drop"]["packets"] = 3
             routers["rtr_a"]["counters"]["relay_tcp"]["packets"] = 40
+        if spec.get("relay_punch"):
+            routers["rtr_a"]["counters"]["relay_tcp"]["packets"] = 40
     elif net == "relay":
         observations = {"target": {"accepts": 0}, "relay_full": {"server_exit": 1, "seconds": 31.0,
                                                                   "message": "shaar-server: composed startup: relay reservation failed at startup"}}
@@ -298,6 +300,7 @@ class EvidenceTests(unittest.TestCase):
                 names += ("ygg-used",) if spec["ygg_client_blocked"] and not spec["direct"] else ()
                 names += ("punch-missing", "punch-garbled", "punch-unknown-status") if spec["nat"] == "cone" else ()
                 names += ("no-relay-negotiation", "no-dht-drop-seen") if spec.get("relay_first") else ()
+                names += ("no-relay-negotiation",) if spec.get("relay_punch") else ()
                 names += ("no-dht-drop-seen",) if spec.get("dht_denied") else ()
             names += MUTATIONS.get("flow:" + spec.get("flow", "single"), ())
             if spec.get("flow") == "denied-key":
@@ -325,7 +328,7 @@ class PlanTests(unittest.TestCase):
         products = sum(1 for entry in phase.PLAN if entry[1] == "product")
         controls = len(phase.PLAN) - products
         self.assertEqual((products, controls), (12, 3))
-        self.assertEqual(len(contract.CASES), 31)
+        self.assertEqual(len(contract.CASES), 33)
         # The worst case of every case at its ceiling does not fit 20 minutes; admission control refuses a case
         # that cannot finish, and the expected total (about 8 minutes) leaves the margin recorded in the contract.
         self.assertGreater(products * contract.CASE_SECONDS, contract.PHASE_SECONDS)
@@ -352,7 +355,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(len(covered), len(contract.CASES))
         self.assertEqual(phase.allocated(phase.GROUPS["nat"]), 48 * 1024 * 1024)
         self.assertEqual(phase.allocated(phase.GROUPS["faults"]), 32 * 1024 * 1024)
-        self.assertEqual(phase.allocated(phase.GROUPS["punch"]), 20 * 1024 * 1024)
+        self.assertEqual(phase.allocated(phase.GROUPS["punch"]), 28 * 1024 * 1024)
         punch_names = [entry[0] for entry in phase.GROUPS["punch"] if entry[1] == "product"]
         self.assertEqual(punch_names, list(phase.PUNCH_CASES))
         self.assertEqual([entry[2] for entry in phase.GROUPS["nat"] if entry[1] == "product"], list(phase.NAT_CASES))
