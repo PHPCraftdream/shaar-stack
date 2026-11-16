@@ -207,6 +207,26 @@ fn documented_server_validation_messages() {
             "allowlist_path: ",
             invalid("allowlist_path", "EmptyPath"),
         ),
+        (
+            "fallback: signal",
+            "fallback: signal\npublish_address: bogus",
+            invalid("publish_address", "InvalidEnum"),
+        ),
+        (
+            "fallback: signal",
+            "fallback: signal\npublish_address: encrypted",
+            invalid("address_key_file", "MissingRequired"),
+        ),
+        (
+            "fallback: signal",
+            "fallback: signal\naddress_key_file:: keys/address.key",
+            invalid("address_key_file", "NotApplicable"),
+        ),
+        (
+            "fallback: signal",
+            "fallback: signal\npublish_address: encrypted\naddress_key_file:: ",
+            invalid("address_key_file", "EmptyPath"),
+        ),
     ];
     for (from, to, expected) in cases {
         assert_eq!(
