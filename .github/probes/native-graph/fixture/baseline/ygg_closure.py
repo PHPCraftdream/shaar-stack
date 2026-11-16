@@ -130,6 +130,9 @@ FIRST_UNITS = frozenset({
     ('asn1-rs', '0.7.2'),
     ('asn1-rs-derive', '0.6.0'),
     ('asn1-rs-impl', '0.2.0'),
+    # Leaf L3b: the sealed-address AEAD and its stream cipher compile for the first time.
+    ('chacha20', '0.9.1'),
+    ('chacha20poly1305', '0.10.1'),
     ('curve25519-dalek', '4.1.3'),
     ('der-parser', '10.0.0'),
     ('errno', '0.3.14'),

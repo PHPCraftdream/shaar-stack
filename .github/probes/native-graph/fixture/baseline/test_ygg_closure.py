@@ -224,6 +224,17 @@ class CheckUnitsTests(unittest.TestCase):
         candidate.append(_form("winnow", "1.0.4"))
         y.check_units(self.control, candidate)
 
+    def test_sealed_address_aead_units_are_first_units_and_nothing_else_is(self):
+        aead = _form("chacha20poly1305", "0.10.1", ("alloc",))
+        stream = _form("chacha20", "0.9.1")
+        control = [_form("shaar", "0.1.0")]
+        candidate = copy.deepcopy(control)
+        candidate[0]["dependencies"].append(_dep("chacha20poly1305", aead))
+        candidate += [aead, stream]
+        y.check_units(control, candidate)
+        with self.assertRaisesRegex(AuditError, "unapproved candidate unit: chacha20@0.10.2"):
+            y.check_units(control, candidate + [_form("chacha20", "0.10.2")])
+
     def test_declared_product_edge_to_tokio_passes(self):
         product = _form("shaar-ygg", "0.1.0")
         control = [product, self.tokio]

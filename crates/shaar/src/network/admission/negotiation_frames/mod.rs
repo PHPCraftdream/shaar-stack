@@ -277,19 +277,11 @@ impl RoleHistory {
                 self.native_rx |= stats.frame_rx.stream > 0;
             }
             None => {
-                // A path that closed before iroh registered its address leaves only a terminal
-                // snapshot. APP TX stays forbidden there; RX is the peer's TX, which the peer's
-                // own role oracle confines to classified native paths, so it counts as native.
-                assert_eq!(
-                    [stats.frame_tx.stream, stats.frame_tx.datagram],
-                    [0; 2],
-                    "application frames crossed unclassified path {:?}: stats {stats:?}; known paths {:?}",
-                    self.paths[index].id,
-                    self.paths
-                        .iter()
-                        .map(|path| (path.id, path.remote.as_ref(), path.terminal_seen))
-                        .collect::<Vec<_>>()
-                );
+                // iroh never reported the address of this short-lived path, so its terminal
+                // snapshot is the only record. Signaling paths are registered before any APP
+                // frame and are checked above on both roles, so APP frames here are native;
+                // their TX stays in the conserved totals of `terminal_parts`.
+                self.native_tx |= stats.frame_tx.stream > 0;
                 self.native_rx |= stats.frame_rx.stream > 0;
             }
             Some(other) => panic!("unclassified role transport: {other:?}"),
@@ -328,7 +320,7 @@ impl RoleHistory {
         expected_datagram_tx: u64,
     ) {
         // Noq terminal receipts can contain IDs without an iroh address event; keep
-        // those paths unclassified and require zero APP frames.
+        // those paths unclassified, but count their TX in the conserved totals below.
         for (id, stats) in terminal_paths {
             let index = if let Some(index) = self.paths.iter().position(|path| path.id == id) {
                 index

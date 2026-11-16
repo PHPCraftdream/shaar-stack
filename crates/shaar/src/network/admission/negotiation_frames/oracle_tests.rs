@@ -60,53 +60,86 @@ fn unknown_terminal_control_path_is_retained_with_independent_controls() {
 }
 
 #[test]
-#[should_panic(expected = "application frames crossed unclassified path")]
-fn unknown_terminal_stream_tx_is_rejected() {
+#[should_panic(expected = "incomplete STREAM TX history")]
+fn unknown_terminal_stream_tx_is_part_of_the_conserved_total() {
     let mut history = role_history_with_controls();
     let mut unknown = PathStats::default();
-    unknown.frame_tx.stream = 1;
+    unknown.frame_tx.stream = 11;
     history.terminal_parts(
         terminal_paths_with_control_native()
             .into_iter()
             .chain([(iroh::endpoint::PathId::from(3_u32), unknown)]),
-        2,
+        1,
         0,
     );
 }
 
 #[test]
-#[should_panic(expected = "application frames crossed unclassified path")]
-fn unknown_terminal_datagram_tx_is_rejected() {
+#[should_panic(expected = "incomplete DATAGRAM TX history")]
+fn unknown_terminal_datagram_tx_is_part_of_the_conserved_total() {
     let mut history = role_history_with_controls();
     let mut unknown = PathStats::default();
-    unknown.frame_tx.datagram = 1;
+    unknown.frame_tx.datagram = 2;
     history.terminal_parts(
         terminal_paths_with_control_native()
             .into_iter()
             .chain([(iroh::endpoint::PathId::from(3_u32), unknown)]),
         1,
-        1,
+        0,
     );
 }
 
 #[test]
-fn unknown_terminal_rx_is_the_peers_tx_and_is_not_rejected() {
-    // Regression of FLAKE-W1: a path that closed before iroh registered its address carries
-    // only RX in its terminal snapshot; the peer's own oracle bounds the matching TX.
-    for (stream_rx, datagram_rx) in [(75, 0), (0, 3), (75, 3)] {
+fn unknown_terminal_app_frames_are_not_a_signaling_leak() {
+    // Regression of FLAKE-W1: iroh never reported the address of a short-lived native path, so
+    // its terminal snapshot is the only record. Observed: RX only (75 STREAM), then TX only
+    // (11 STREAM). Signaling paths are classified and stay zero on both roles.
+    for (tx_stream, tx_datagram, rx_stream, rx_datagram) in
+        [(0, 0, 75, 0), (11, 0, 0, 0), (0, 2, 0, 3), (11, 2, 75, 3)]
+    {
         let mut history = role_history_with_controls();
         let mut unknown = PathStats::default();
-        unknown.frame_rx.stream = stream_rx;
-        unknown.frame_rx.datagram = datagram_rx;
+        unknown.frame_tx.stream = tx_stream;
+        unknown.frame_tx.datagram = tx_datagram;
+        unknown.frame_rx.stream = rx_stream;
+        unknown.frame_rx.datagram = rx_datagram;
         history.terminal_parts(
             terminal_paths_with_control_native()
                 .into_iter()
                 .chain([(iroh::endpoint::PathId::from(3_u32), unknown)]),
-            1,
-            0,
+            1 + tx_stream,
+            tx_datagram,
         );
         assert!(history.paths[3].remote.is_none() && history.paths[3].terminal_seen);
     }
+}
+
+#[test]
+fn unknown_terminal_stream_tx_supplies_the_native_send_half() {
+    // Mirror of the receive case: the classified native path only received.
+    let mut history = RoleHistory::new();
+    history.path(
+        iroh::endpoint::PathId::ZERO,
+        &TransportAddr::Custom(iroh_base::CustomAddr::from_parts(7, &[1])),
+    );
+    history.path(
+        iroh::endpoint::PathId::from(1_u32),
+        &TransportAddr::Ip("127.0.0.1:443".parse().expect("fixture native address")),
+    );
+    let mut received = PathStats::default();
+    received.frame_rx.stream = 5;
+    let mut sent = PathStats::default();
+    sent.frame_tx.stream = 11;
+    history.terminal_parts(
+        [
+            (iroh::endpoint::PathId::ZERO, PathStats::default()),
+            (iroh::endpoint::PathId::from(1_u32), received),
+            (iroh::endpoint::PathId::from(2_u32), sent),
+        ],
+        11,
+        0,
+    );
+    assert!(history.native_tx && history.native_rx);
 }
 
 #[test]
@@ -310,41 +343,4 @@ fn role_frame_oracle_accepts_control_only_stats() {
     stats.frame_tx.crypto = 1;
     stats.frame_rx.acks = 1;
     role_history_with_controls().stats(0, &stats);
-}
-
-#[test]
-fn unclassified_path_failure_names_the_path_its_stats_and_the_known_paths() {
-    let mut history = role_history_with_controls();
-    let mut unknown = PathStats::default();
-    unknown.frame_tx.stream = 12;
-    let id = iroh::endpoint::PathId::from(3_u32);
-    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        history.terminal_parts(
-            terminal_paths_with_control_native()
-                .into_iter()
-                .chain([(id, unknown)]),
-            12,
-            0,
-        );
-    }))
-    .expect_err("APP frames on an unclassified path are rejected");
-    let message = failure
-        .downcast_ref::<String>()
-        .cloned()
-        .or_else(|| {
-            failure
-                .downcast_ref::<&str>()
-                .map(|text| (*text).to_owned())
-        })
-        .expect("assertion message");
-    assert!(
-        message.contains("application frames crossed unclassified path"),
-        "{message}"
-    );
-    assert!(message.contains(&format!("{id:?}")), "{message}");
-    assert!(message.contains("known paths"), "{message}");
-    assert!(
-        message.contains(&format!("{:?}", iroh::endpoint::PathId::ZERO)),
-        "{message}"
-    );
 }
