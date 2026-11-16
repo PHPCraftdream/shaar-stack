@@ -30,10 +30,7 @@ pub enum Fallback {
     Standby,
 }
 
-/// Whether the Server publishes its NAT-observed public address in the DHT record.
-///
-/// The spelling `encrypted` is reserved for a later opt-in mode; the field
-/// shape already admits it, and validation refuses it until it exists.
+/// Whether the Server publishes its NAT-observed public address in the DHT record, and how.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PublishAddress {
     /// Private-address-only records, byte-identical to a build without the setting.
@@ -42,6 +39,9 @@ pub enum PublishAddress {
     /// One extra record entry: the DHT-voted public IP with the local QUIC port.
     /// The vote is untrusted and the address is readable by anyone who looks up the key.
     Plain,
+    /// The whole address list (the snapshot and the voted public address) is sealed under a key
+    /// the Client must hold (`address_key_file`); the record carries no plain address.
+    Encrypted,
 }
 
 /// Validate the `publish_address` file value (absent means `off`).
@@ -49,10 +49,7 @@ pub(crate) fn parse_publish_address(raw: Option<&str>) -> Result<PublishAddress,
     match raw {
         None | Some("off") => Ok(PublishAddress::Off),
         Some("plain") => Ok(PublishAddress::Plain),
-        Some("encrypted") => Err(ConfigError::validation(
-            "publish_address",
-            ValidationKind::NotYetAvailable,
-        )),
+        Some("encrypted") => Ok(PublishAddress::Encrypted),
         Some(_) => Err(ConfigError::validation(
             "publish_address",
             ValidationKind::InvalidEnum,

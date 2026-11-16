@@ -33,8 +33,9 @@ class ConfigTests(unittest.TestCase):
         for case, spec in contract.CASES.items():
             with self.subTest(case=case):
                 peer = None if spec.get("norelay") else RELAY
-                server = configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, peer)
-                client = configs.client_text(case, KEY, "/w/keys/client.key", PORTS, peer)
+                sealed = "/w/keys/address.key" if spec.get("publish") == "encrypted" else None
+                server = configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, peer, address_key=sealed)
+                client = configs.client_text(case, KEY, "/w/keys/client.key", PORTS, peer, address_key=sealed)
                 self.assertIn(f"target: 127.0.0.1:{contract.TARGET_PORT}\n", server)
                 self.assertIn(f"fallback: {spec['mode']}\n", server)
                 self.assertIn(f"bind: {contract.ip_for(spec['server_ns'])}:0\n", server)
@@ -54,6 +55,9 @@ class ConfigTests(unittest.TestCase):
                     self.assertIn(f"tcp://203.0.113.10:{PORTS['transit']}\n", text)
                     self.assertTrue(text.endswith("}\n"))
                 self.assertEqual(server.count("publish_address: plain\n"), 1 if spec.get("publish") == "plain" else 0, case)
+                self.assertEqual(server.count("publish_address: encrypted\n"), 1 if sealed else 0, case)
+                self.assertEqual(server.count("address_key_file::"), 1 if sealed else 0, case)
+                self.assertEqual(client.count("address_key_file::"), 1 if sealed else 0, case)
                 self.assertNotIn("publish_address", client)
 
     def test_relaypunch_cases_pin_the_relay_and_publish_the_reflexive_endpoint(self):
@@ -68,6 +72,32 @@ class ConfigTests(unittest.TestCase):
                 configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, None)
             with self.assertRaises(ValueError):
                 configs.client_text(case, KEY, "/w/keys/client.key", PORTS, None)
+
+    def test_encrypted_cases_name_the_key_file_on_both_sides_and_no_other_case_does(self):
+        for case in ("dnat-cone-encrypted-signal", "dnat-cone-encrypted-standby"):
+            server = configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, None, address_key="/w/keys/address.key")
+            client = configs.client_text(case, KEY, "/w/keys/client.key", PORTS, None, address_key="/w/keys/address.key")
+            self.assertEqual(server.count("publish_address: encrypted\n"), 1, case)
+            self.assertEqual(server.count("address_key_file:: /w/keys/address.key\n"), 1, case)
+            self.assertEqual(client.count("address_key_file:: /w/keys/address.key\n"), 1, case)
+            self.assertNotIn("publish_address", client)
+            self.assertNotIn("relay:", server + client)
+            # The key file and the encrypted publication go together, on both sides.
+            with self.assertRaises(ValueError):
+                configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, None)
+            with self.assertRaises(ValueError):
+                configs.client_text(case, KEY, "/w/keys/client.key", PORTS, None)
+            with self.assertRaises(ValueError):
+                configs.server_text(case, "/w/keys/server.key", "/w/allow.txt", PORTS, None, address_key="relative/address.key")
+        for other in ("native-signal", "dnat-cone-norelay-signal", "dnat-cone-relaypunch-signal"):
+            relay = None if contract.CASES[other].get("norelay") else RELAY
+            for text in (configs.server_text(other, "/w/keys/server.key", "/w/allow.txt", PORTS, relay),
+                         configs.client_text(other, KEY, "/w/keys/client.key", PORTS, relay)):
+                self.assertNotIn("address_key_file", text)
+            with self.assertRaises(ValueError):
+                configs.server_text(other, "/w/keys/server.key", "/w/allow.txt", PORTS, relay, address_key="/w/keys/address.key")
+            with self.assertRaises(ValueError):
+                configs.client_text(other, KEY, "/w/keys/client.key", PORTS, relay, address_key="/w/keys/address.key")
 
     def test_norelay_cases_bind_without_relay_and_mismatches_are_rejected(self):
         for case in ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal"):

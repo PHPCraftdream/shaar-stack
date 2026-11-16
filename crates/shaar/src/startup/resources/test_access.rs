@@ -4,6 +4,7 @@ use super::{
     slot_lock,
 };
 use iroh::EndpointAddr;
+use std::net::SocketAddr;
 use std::sync::PoisonError;
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -175,4 +176,28 @@ impl Maintenance {
             terminal_failure: None,
         }
     }
+}
+
+pub(crate) struct StageControls {
+    pub(crate) after_bridge: Option<(oneshot::Receiver<()>, oneshot::Sender<()>)>,
+    pub(crate) after_native_close: Option<(oneshot::Receiver<()>, oneshot::Sender<()>)>,
+}
+
+pub(super) struct StageGates {
+    pub(super) after_bridge: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+    pub(super) after_native_close: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+    pub(super) native_bind: Option<SocketAddr>,
+}
+
+#[expect(
+    clippy::type_complexity,
+    reason = "Returns both endpoints of two one-shot stage gates"
+)]
+pub(super) fn stage_pair() -> (
+    (oneshot::Sender<()>, oneshot::Receiver<()>),
+    (oneshot::Receiver<()>, oneshot::Sender<()>),
+) {
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    ((entered_tx, release_rx), (entered_rx, release_tx))
 }

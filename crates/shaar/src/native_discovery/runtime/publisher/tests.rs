@@ -438,6 +438,72 @@ fn clock_rate_comparison_handles_full_clock_delta_ranges_without_overflow() {
     assert_eq!(state.check_clock(sample(i64::MAX, u64::MAX)), Ok(()));
 }
 
+#[test]
+fn a_sealing_publisher_publishes_no_plain_address_and_only_the_key_opens_it() {
+    use crate::identity::address_key::AddressKey;
+    use crate::native_discovery::codec::{DecodeError, decode_record_with};
+
+    let identity = test_identity();
+    let secret = AddressKey::from_bytes([0x5a; 32]);
+    let mut state = PublisherState::new(test_key(&identity)).with_seal(Some(secret.clone()));
+    let (_, packet) = state
+        .replace(
+            &identity,
+            &[test_address()],
+            sample(1_700_000_000_000_000, 0),
+        )
+        .expect("sealed publication");
+    let bytes = packet.expect("packet").bytes;
+    let signed = iroh_dns::pkarr::SignedPacket::from_bytes(&bytes).expect("verify signature");
+    let endpoint = iroh_dns::endpoint_info::EndpointInfo::from_pkarr_signed_packet(&signed)
+        .expect("decode endpoint info");
+    assert_eq!(
+        endpoint.ip_addrs().count(),
+        0,
+        "no plain address is published"
+    );
+    assert!(
+        !bytes.windows(9).any(|window| window == b"127.0.0.1"),
+        "the address text is not in the record"
+    );
+    let expected: SocketAddr = "127.0.0.1:9000".parse().expect("loopback address");
+    let opened = decode_record_with(&bytes, test_key(&identity), Some(&secret)).expect("opened");
+    assert_eq!(opened.addresses(), &[expected]);
+    assert_eq!(
+        decode_record_with(&bytes, test_key(&identity), None),
+        Err(DecodeError::Sealed)
+    );
+
+    // A refresh seals again under the new timestamp, with a fresh salt.
+    let (_, refreshed) = state
+        .refresh(&identity, sample(1_700_000_001_000_000, 1_000_000))
+        .expect("sealed refresh");
+    let refreshed = refreshed.expect("refreshed packet").bytes;
+    assert_ne!(refreshed, bytes);
+    let reopened =
+        decode_record_with(&refreshed, test_key(&identity), Some(&secret)).expect("reopened");
+    assert_eq!(reopened.addresses(), &[expected]);
+}
+
+#[test]
+fn an_unsealed_publisher_keeps_the_plain_address_records() {
+    let identity = test_identity();
+    let mut state = PublisherState::new(test_key(&identity)).with_seal(None);
+    let (_, packet) = state
+        .replace(
+            &identity,
+            &[test_address()],
+            sample(1_700_000_000_000_000, 0),
+        )
+        .expect("plain publication");
+    let signed = iroh_dns::pkarr::SignedPacket::from_bytes(&packet.expect("packet").bytes)
+        .expect("verify signature");
+    let endpoint = iroh_dns::endpoint_info::EndpointInfo::from_pkarr_signed_packet(&signed)
+        .expect("decode endpoint info");
+    assert_eq!(endpoint.ip_addrs().count(), 1);
+    assert!(endpoint.user_data().is_none());
+}
+
 fn test_identity() -> crate::identity::Identity {
     crate::identity::Identity::from_seed([0x36; 32])
 }

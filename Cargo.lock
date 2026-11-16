@@ -4229,7 +4229,9 @@ dependencies = [
 name = "shaar"
 version = "0.1.0"
 dependencies = [
+ "chacha20poly1305",
  "futures",
+ "hkdf",
  "iroh",
  "iroh-base",
  "iroh-dns",
@@ -4242,6 +4244,7 @@ dependencies = [
  "netwatch",
  "serde",
  "serde_bencode",
+ "sha2 0.11.1",
  "shaar-p2p",
  "shaar-platform",
  "shaar-ygg",

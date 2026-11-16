@@ -8,6 +8,8 @@
 //! peer slice. The plan carries validated borrows only; resource
 //! composition belongs to later leaves.
 
+use std::path::Path;
+
 use iroh_base::PublicKey;
 use libp2p_identity::PeerId;
 
@@ -30,6 +32,8 @@ pub(crate) struct ComposedStartupPlan<'a> {
     mode: Fallback,
     /// Opt-in publication of the NAT-observed public address (Server only).
     publish: PublishAddress,
+    /// Key file that seals (Server) or opens (Client) an encrypted address record.
+    address_key_file: Option<&'a Path>,
 }
 
 impl ComposedStartupPlan<'_> {
@@ -52,6 +56,11 @@ impl ComposedStartupPlan<'_> {
     pub(crate) fn publish_address(&self) -> PublishAddress {
         self.publish
     }
+
+    /// The address key file, when configured.
+    pub(crate) fn address_key_file(&self) -> Option<&Path> {
+        self.address_key_file
+    }
 }
 
 /// Preflight for the composed server role (no configured remote service key).
@@ -65,6 +74,7 @@ pub(crate) fn preflight_server<'a>(
         &[],
         config.fallback(),
         config.publish_address(),
+        config.address_key_file(),
         identity,
         app_peers,
     )
@@ -86,6 +96,7 @@ pub(crate) fn preflight_client<'a>(
         &[service_key],
         config.fallback(),
         PublishAddress::Off,
+        config.address_key_file(),
         identity,
         app_peers,
     )
@@ -96,6 +107,7 @@ fn preflight_shared<'a>(
     service_keys: &[PublicKey],
     mode: Fallback,
     publish: PublishAddress,
+    address_key_file: Option<&'a Path>,
     identity: &Identity,
     app_peers: &'a [PublicKey],
 ) -> Result<ComposedStartupPlan<'a>, StartupError> {
@@ -153,6 +165,7 @@ fn preflight_shared<'a>(
         app_peers,
         mode,
         publish,
+        address_key_file,
     })
 }
 

@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use iroh_base::PublicKey;
@@ -12,6 +13,7 @@ use tokio::task::JoinHandle;
 
 use crate::config::{Fallback, PublishAddress};
 use crate::identity::Identity;
+use crate::identity::address_key::AddressKey;
 use crate::native_discovery::runtime::owner::RuntimeOwner;
 use crate::network::{Allowlist, Limits, SignaledEndpoint, YggEndpoint};
 use crate::startup::error::StartupError;
@@ -20,6 +22,8 @@ use crate::startup::ygg_start::start_ygg_same_identity;
 
 use super::close::{quiesce_native, run_ordered_close};
 use super::maintain::Maintenance;
+#[cfg(test)]
+use super::test_access::{StageControls, StageGates, stage_pair};
 use super::{
     OwnerRequest, SharedResources, SharedState, StartupResources, Status, YggResources, slot_lock,
 };
@@ -35,36 +39,10 @@ struct StartupSettings {
     app_peers: Vec<PublicKey>,
     mode: Fallback,
     publish: PublishAddress,
+    address_key_file: Option<PathBuf>,
     /// When true, native/signaling and Ygg payload endpoints share ONE
     /// bounded admission pool instead of fresh per-endpoint pools.
     shared_admission: bool,
-}
-
-#[cfg(test)]
-pub(crate) struct StageControls {
-    pub(crate) after_bridge: Option<(oneshot::Receiver<()>, oneshot::Sender<()>)>,
-    pub(crate) after_native_close: Option<(oneshot::Receiver<()>, oneshot::Sender<()>)>,
-}
-
-#[cfg(test)]
-pub(super) struct StageGates {
-    pub(super) after_bridge: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
-    pub(super) after_native_close: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
-    pub(super) native_bind: Option<SocketAddr>,
-}
-
-#[cfg(test)]
-#[expect(
-    clippy::type_complexity,
-    reason = "Returns both endpoints of two one-shot stage gates"
-)]
-fn stage_pair() -> (
-    (oneshot::Sender<()>, oneshot::Receiver<()>),
-    (oneshot::Receiver<()>, oneshot::Sender<()>),
-) {
-    let (entered_tx, entered_rx) = oneshot::channel();
-    let (release_tx, release_rx) = oneshot::channel();
-    ((entered_tx, release_rx), (entered_rx, release_tx))
 }
 
 /// Retained construction owner. Waiter cancellation never owns partial resources.
@@ -241,6 +219,7 @@ impl SharedResourcesStart {
             app_peers,
             mode,
             publish: plan.publish_address(),
+            address_key_file: plan.address_key_file().map(std::path::Path::to_path_buf),
             shared_admission,
         };
         let (status_tx, status_rx) = watch::channel(Status::Pending);
@@ -394,6 +373,7 @@ async fn run_startup(
         app_peers,
         mode,
         publish,
+        address_key_file,
         shared_admission,
     } = settings;
     #[cfg(test)]
@@ -420,6 +400,17 @@ async fn run_startup(
             (Some(signaling), Some(mainline), Some(ygg)) => (signaling, mainline, ygg),
             _ => return finish_fatal(shared, StartupError::NetworkRequired, owner_requests).await,
         };
+
+    // The address key is read before anything binds, so a bad key fails the start cleanly.
+    let address_key = match address_key_file {
+        None => None,
+        Some(path) => {
+            match tokio::task::spawn_blocking(move || AddressKey::load_blocking(&path)).await {
+                Ok(Ok(key)) => Some(key),
+                _ => return finish_fatal(shared, StartupError::AddressKey, owner_requests).await,
+            }
+        }
+    };
 
     // One shared admission pool when requested, created BEFORE the signaling
     // endpoint bind; otherwise each endpoint keeps a fresh per-endpoint pool.
@@ -452,7 +443,12 @@ async fn run_startup(
         ygg: None,
     });
 
-    let owner = match RuntimeOwner::start(identity.clone(), mainline_bind, &mainline_bootstrap) {
+    let owner = match RuntimeOwner::start_sealed(
+        identity.clone(),
+        mainline_bind,
+        &mainline_bootstrap,
+        address_key,
+    ) {
         Ok(owner) => owner,
         Err(_) => return finish_fatal(shared, StartupError::MainlineStart, owner_requests).await,
     };

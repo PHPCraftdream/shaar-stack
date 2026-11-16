@@ -125,10 +125,15 @@ fn publication(nonce: &str, item: &mainline_fixture::CapturedPut) -> Result<(), 
         }
         write!(&mut addresses, "\"{address}\"").expect("bounded socket-address formatting");
     }
+    // Encrypted publication: the address list is a sealed `user-data` value behind the reserved
+    // `shaar1.` mark and the record carries no plain address.
+    let sealed = info
+        .user_data()
+        .is_some_and(|data| data.to_string().starts_with("shaar1."));
     let envelope = hex(&item.signed_envelope());
     // Hex and SocketAddr text cannot contain JSON escapes; no arbitrary text is encoded.
     println!(
-        "SHAAR_NAT_PUBLICATION {{\"nonce\":\"{nonce}\",\"sequence\":{},\"signed_envelope_hex\":\"{envelope}\",\"native_addresses\":[{addresses}]}}",
+        "SHAAR_NAT_PUBLICATION {{\"nonce\":\"{nonce}\",\"sequence\":{},\"signed_envelope_hex\":\"{envelope}\",\"native_addresses\":[{addresses}],\"sealed\":{sealed}}}",
         item.sequence
     );
     Ok(())

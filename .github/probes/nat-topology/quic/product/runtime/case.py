@@ -304,8 +304,10 @@ class Run:
         self.identity(self.target)
         self.relay = None if spec.get("norelay") else ready["relay_peer"]
         allow = self.owned_file("allowlist.txt", configs.allowlist_text(client_key))
+        # One shared secret of the encrypted publication: the Server seals the record under it, the Client opens it with it.
+        address_key = self.seed_key("address", 0xA7) if spec.get("publish") == "encrypted" else None
         server_cfg = self.owned_file("server.ktav", configs.server_text(
-            self.case, str(self.work / "keys/server.key"), allow, self.ports, self.relay))
+            self.case, str(self.work / "keys/server.key"), allow, self.ports, self.relay, address_key=address_key))
         for index in range(1, spec.get("fillers", 0) + 1):
             self.fillers.append(self.fill_relay(index, allow))
         if self.fillers:
@@ -317,14 +319,15 @@ class Run:
         if failing:
             return  # the flow observes the Server's own typed startup failure; no record, Client or live-phase hook
         self.publication = self.await_event(self.wan, "SHAAR_NAT_PUBLICATION", self.limit(45), watch=(self.server,))
-        contract.validate_publication(self.publication, self.nonce, self.server_key)
+        contract.validate_publication(self.publication, self.nonce, self.server_key, sealed=address_key is not None)
         server_ip = contract.ip_for(spec["server_ns"])
-        contract.require(any(item.rpartition(":")[0] == server_ip for item in self.publication["native_addresses"]),
-                         "signed Server record lacks its namespace Native address")
+        if address_key is None:
+            contract.require(any(item.rpartition(":")[0] == server_ip for item in self.publication["native_addresses"]),
+                             "signed Server record lacks its namespace Native address")
         ev["publication"] = self.publication
         hint = self.client_hint()
         client_cfg = self.owned_file("client.ktav", configs.client_text(
-            self.case, self.server_key, str(self.work / "keys/client.key"), self.ports, self.relay, hint))
+            self.case, self.server_key, str(self.work / "keys/client.key"), self.ports, self.relay, hint, address_key=address_key))
         punch = (contract.PUNCH_DIRECT.encode("ascii"), contract.ROUTE_LINE.encode("ascii")) if spec.get("direct") else ()
         self.client = self.product("client", self.client_ns, client_cfg, extra=punch)
         contract.require(("server_address=" + (hint or "none")) in ev["markers"]["client"],

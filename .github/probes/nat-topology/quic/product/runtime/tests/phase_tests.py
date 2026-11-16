@@ -51,7 +51,9 @@ def evidence(case):
         if spec.get("direct"):
             result_extra["markers"] = {"client": "composed startup: server_address=none",
                                        "client_lines": {contract.PUNCH_DIRECT: contract.PUNCH_TRACE + "2 outcome=direct elapsed_ms=120",
-                                                        contract.ROUTE_LINE: contract.ROUTE_LINE + " via 203.0.113.10"}}
+                                                        contract.ROUTE_LINE: contract.ROUTE_LINE + (
+                                                            " candidates=record:1,hint:0 resolve=found elapsed_ms=12"
+                                                            if spec.get("publish") == "encrypted" else " via 203.0.113.10")}}
         if spec.get("dht_denied"):
             routers["rtr_a"]["counters"]["dht_drop"]["packets"] = 3
         if spec["direct"]:
@@ -217,6 +219,8 @@ def mutate(case, name):
         del result["markers"]["client_lines"][contract.PUNCH_DIRECT]
     elif name == "no-markers":
         del result["markers"]
+    elif name == "no-record-candidate":
+        result["markers"]["client_lines"][contract.ROUTE_LINE] = contract.ROUTE_LINE + " candidates=record:0,hint:0 resolve=found elapsed_ms=12"
     elif name == "route-relay":
         result["markers"]["client_lines"][contract.ROUTE_LINE] = contract.ROUTE_LINE.replace("native", "relay")
     elif name == "punch-fallback":
@@ -302,6 +306,7 @@ class EvidenceTests(unittest.TestCase):
                 names += ("no-relay-negotiation", "no-dht-drop-seen") if spec.get("relay_first") else ()
                 names += ("no-relay-negotiation",) if spec.get("relay_punch") else ()
                 names += ("no-dht-drop-seen",) if spec.get("dht_denied") else ()
+                names += ("no-record-candidate",) if spec.get("publish") == "encrypted" else ()
             names += MUTATIONS.get("flow:" + spec.get("flow", "single"), ())
             if spec.get("flow") == "denied-key":
                 names += ("denied-reply", "control-exit")
@@ -328,7 +333,7 @@ class PlanTests(unittest.TestCase):
         products = sum(1 for entry in phase.PLAN if entry[1] == "product")
         controls = len(phase.PLAN) - products
         self.assertEqual((products, controls), (12, 3))
-        self.assertEqual(len(contract.CASES), 33)
+        self.assertEqual(len(contract.CASES), 35)
         # The worst case of every case at its ceiling does not fit 20 minutes; admission control refuses a case
         # that cannot finish, and the expected total (about 8 minutes) leaves the margin recorded in the contract.
         self.assertGreater(products * contract.CASE_SECONDS, contract.PHASE_SECONDS)
@@ -355,7 +360,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(len(covered), len(contract.CASES))
         self.assertEqual(phase.allocated(phase.GROUPS["nat"]), 48 * 1024 * 1024)
         self.assertEqual(phase.allocated(phase.GROUPS["faults"]), 32 * 1024 * 1024)
-        self.assertEqual(phase.allocated(phase.GROUPS["punch"]), 28 * 1024 * 1024)
+        self.assertEqual(phase.allocated(phase.GROUPS["punch"]), 36 * 1024 * 1024)
         punch_names = [entry[0] for entry in phase.GROUPS["punch"] if entry[1] == "product"]
         self.assertEqual(punch_names, list(phase.PUNCH_CASES))
         self.assertEqual([entry[2] for entry in phase.GROUPS["nat"] if entry[1] == "product"], list(phase.NAT_CASES))

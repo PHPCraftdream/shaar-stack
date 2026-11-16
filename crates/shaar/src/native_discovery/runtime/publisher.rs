@@ -5,8 +5,9 @@
 use super::super::address::{SnapshotError, validate_transport_addresses};
 use super::clock::ClockSample;
 use crate::identity::Identity;
+use crate::identity::address_key::{AddressKey, SealError, seal_addresses};
 use iroh_base::{EndpointId, TransportAddr};
-use iroh_dns::endpoint_info::{EndpointData, EndpointInfo};
+use iroh_dns::endpoint_info::{EndpointData, EndpointInfo, UserData};
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -33,6 +34,8 @@ pub(crate) enum PublishError {
     TimestampFuture,
     Oversize,
     GenerationOverflow,
+    /// The address list could not be sealed (encrypted publication).
+    Seal(SealError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +116,7 @@ pub(super) struct PublisherState {
     generation: u64,
     last_signed_at: tokio::time::Instant,
     active: Option<Vec<SocketAddr>>,
+    seal: Option<AddressKey>,
 }
 
 impl PublisherState {
@@ -128,7 +132,15 @@ impl PublisherState {
             generation: 0,
             last_signed_at: tokio::time::Instant::now(),
             active: None,
+            seal: None,
         }
+    }
+
+    /// Seals every published address list under `seal` (encrypted publication); `None` keeps
+    /// the plain `addr` records.
+    pub(super) fn with_seal(mut self, seal: Option<AddressKey>) -> Self {
+        self.seal = seal;
+        self
     }
 
     pub(super) fn replace(
@@ -175,10 +187,17 @@ impl PublisherState {
             return Err(PublishError::ClockFault);
         }
         let timestamp = self.next_timestamp(wall_us)?;
-        let info = EndpointInfo::from_parts(
-            self.key,
-            EndpointData::new(addresses.iter().copied().map(TransportAddr::Ip).collect()),
-        );
+        let data = match &self.seal {
+            None => EndpointData::new(addresses.iter().copied().map(TransportAddr::Ip).collect()),
+            // The sealed list rides in `user-data`; the record carries no plain address.
+            Some(seal) => {
+                let sealed = seal_addresses(seal, self.key.as_bytes(), timestamp, addresses)
+                    .map_err(PublishError::Seal)?;
+                EndpointData::new(Vec::new())
+                    .with_user_data(UserData::try_from(sealed).map_err(|_| PublishError::Oversize)?)
+            }
+        };
+        let info = EndpointInfo::from_parts(self.key, data);
         let signed_at = tokio::time::Instant::now();
         let packet = info
             .to_pkarr_signed_packet_at(&identity.transport_key(), TTL_SECONDS, timestamp)

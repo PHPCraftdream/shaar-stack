@@ -12,6 +12,7 @@ use iroh_dns::{
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 mod mutable;
+mod sealed;
 
 // Frozen external pkarr output; provenance is in publication/tests/reference/README.md.
 const INDEPENDENT_NATIVE_RECORD: [u8; 206] = [

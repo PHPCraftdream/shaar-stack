@@ -268,9 +268,9 @@ async fn maintain(
     mut stop: oneshot::Receiver<()>,
 ) {
     let publisher: PublicationHandle = owner.publication_handle();
-    // Opt-in `plain` mode: the DHT-voted public IP joins the endpoint snapshot
-    // in the published list (`compose_published`); `off` never reads the vote.
-    let mut votes = (publish_mode == PublishAddress::Plain).then(|| owner.public_address_watch());
+    // Opt-in `plain` and `encrypted` modes: the DHT-voted public IP joins the endpoint
+    // snapshot in the published list (`compose_published`); `off` never reads the vote.
+    let mut votes = (publish_mode != PublishAddress::Off).then(|| owner.public_address_watch());
     // The exclusive owner access is a MOVED `&mut` lease: while a resolver
     // future is active the lease lives inside that future, the slot below is
     // empty, and a second reborrow cannot even be constructed. Completion,

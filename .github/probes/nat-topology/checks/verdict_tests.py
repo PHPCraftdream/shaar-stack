@@ -21,6 +21,7 @@ import verdicts  # noqa: E402
 NONCE, SOURCE = "d" * 32, "a" * 40
 DIRECT_CONE = ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby")
 RELAY_PUNCH = ("dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby")
+ENCRYPTED = ("dnat-cone-encrypted-signal", "dnat-cone-encrypted-standby")
 PUNCH_MUTATIONS = ("no-route-line", "no-punch-line", "punch-fallback", "punch-zero", "no-markers", "route-relay")
 
 
@@ -112,6 +113,39 @@ class DirectConeVerdictTests(unittest.TestCase):
                 verdicts.dnat(spec, peer_counters(ygg=9), direct_result())
 
 
+class EncryptedVerdictTests(unittest.TestCase):
+    ROUTE = contract.ROUTE_LINE + " candidates={},hint:0 resolve={} elapsed_ms=12"
+
+    def result(self, record="record:1", resolve="found"):
+        result = direct_result()
+        result["markers"]["client_lines"][contract.ROUTE_LINE] = self.ROUTE.format(record, resolve)
+        return result
+
+    def test_encrypted_direct_path_needs_a_candidate_resolved_from_the_sealed_record(self):
+        for name in ENCRYPTED:
+            spec = contract.CASES[name]
+            with self.subTest(case=name):
+                self.assertTrue(spec["direct"] and spec["publish"] == "encrypted" and spec["norelay"], name)
+                verdicts.dnat(spec, peer_counters(ygg=9), self.result())
+                verdicts.dnat(spec, peer_counters(ygg=9), self.result(resolve="cached"))
+                for record, resolve in (("record:0", "found"), ("record:1", "timeout"), ("record:1", "not-found")):
+                    with self.subTest(record=record, resolve=resolve), self.assertRaises(ValueError):
+                        verdicts.dnat(spec, peer_counters(ygg=9), self.result(record, resolve))
+                # The plain-pair route line (no candidate field) is not enough: the key must be shown to have opened the record.
+                with self.assertRaises(ValueError):
+                    verdicts.dnat(spec, peer_counters(ygg=9), direct_result())
+                # It still needs the direct path and the Ygg rendezvous like the plain pair.
+                with self.assertRaises(ValueError):
+                    verdicts.dnat(spec, peer_counters(sent=0, received=0, ygg=9), self.result())
+                with self.assertRaises(ValueError):
+                    verdicts.dnat(spec, peer_counters(ygg=0), self.result())
+                self.assertEqual(phase.verify_product_case(phase_tests.evidence(name), name, SOURCE, NONCE),
+                                 {"forwarded_bytes": 2000, "active_seconds": 12.5})
+                for mutation in PUNCH_MUTATIONS + ("no-record-candidate",):
+                    with self.subTest(mutation=mutation), self.assertRaises((ValueError, KeyError)):
+                        phase.verify_product_case(phase_tests.mutate(name, mutation), name, SOURCE, NONCE)
+
+
 class FailClosedVerdictTests(unittest.TestCase):
     def test_relay_configured_cones_keep_todays_fail_closed_oracle(self):
         # All four A5 relay-configured cones stay unflipped after L4b: none has a reflexive source to exchange.
@@ -159,7 +193,8 @@ class PunchGroupTests(unittest.TestCase):
         punch = [entry[2] for entry in phase.GROUPS["punch"] if entry[1] == "product"]
         self.assertEqual(punch, list(phase.PUNCH_CASES))
         self.assertEqual(set(punch), {"dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal",
-                                      "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby"})
+                                      "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby",
+                                      "dnat-cone-encrypted-signal", "dnat-cone-encrypted-standby"})
         nat = [entry[2] for entry in phase.GROUPS["nat"] if entry[1] == "product"]
         self.assertIn("dnat-cone-signal", nat)
         self.assertIn("dnat-cone-standby", nat)

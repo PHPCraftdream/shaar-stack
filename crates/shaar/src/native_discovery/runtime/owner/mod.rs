@@ -19,10 +19,9 @@ use super::super::address::SnapshotError;
 #[cfg(test)]
 use super::clock::TestClock;
 use super::clock::{Clock, ClockSample};
-#[cfg(test)]
-use super::publisher::PublisherState;
-use super::publisher::{PublicationStatus, PublishError, SignedSnapshot};
+use super::publisher::{PublicationStatus, PublishError, PublisherState, SignedSnapshot};
 use crate::identity::Identity;
+use crate::identity::address_key::AddressKey;
 use iroh_base::{EndpointId, TransportAddr};
 use iroh_dns::pkarr::SignedPacket;
 
@@ -175,7 +174,32 @@ impl RuntimeOwner {
     ) -> std::io::Result<Self> {
         // Test builds keep the windowed reflexive schedule their fixtures pin;
         // the fast start has its own fixtures (`start_controlled_fast`).
-        Self::start_with_clock(identity, bind, bootstrap, Clock::system(), !cfg!(test))
+        Self::start_with_clock(
+            identity,
+            bind,
+            bootstrap,
+            Clock::system(),
+            !cfg!(test),
+            None,
+        )
+    }
+
+    /// `start` with the address key of the encrypted publication: the Server seals its address
+    /// list under it and the Client opens a sealed record with it.
+    pub(crate) fn start_sealed(
+        identity: Identity,
+        bind: SocketAddrV4,
+        bootstrap: &[SocketAddrV4],
+        address_key: Option<AddressKey>,
+    ) -> std::io::Result<Self> {
+        Self::start_with_clock(
+            identity,
+            bind,
+            bootstrap,
+            Clock::system(),
+            !cfg!(test),
+            address_key,
+        )
     }
 
     #[cfg(test)]
@@ -185,7 +209,7 @@ impl RuntimeOwner {
         bootstrap: &[SocketAddrV4],
         clock: TestClock,
     ) -> std::io::Result<Self> {
-        Self::start_with_clock(identity, bind, bootstrap, clock.clock(), false)
+        Self::start_with_clock(identity, bind, bootstrap, clock.clock(), false, None)
     }
 
     #[cfg(test)]
@@ -195,7 +219,7 @@ impl RuntimeOwner {
         bootstrap: &[SocketAddrV4],
         clock: TestClock,
     ) -> std::io::Result<Self> {
-        Self::start_with_clock(identity, bind, bootstrap, clock.clock(), true)
+        Self::start_with_clock(identity, bind, bootstrap, clock.clock(), true, None)
     }
 
     fn start_with_clock(
@@ -204,6 +228,7 @@ impl RuntimeOwner {
         bootstrap: &[SocketAddrV4],
         clock: Clock,
         fast_reflexive: bool,
+        address_key: Option<AddressKey>,
     ) -> std::io::Result<Self> {
         let dht = OwnedDht::new(bind, bootstrap)?;
         let handle = dht.handle();
@@ -230,7 +255,7 @@ impl RuntimeOwner {
         ));
         let publisher = tokio::spawn(loop_state::publisher_loop(
             identity,
-            key,
+            PublisherState::new(key).with_seal(address_key.clone()),
             handle,
             receiver,
             stop_receiver,
@@ -247,7 +272,7 @@ impl RuntimeOwner {
             close_error: None,
             clock: owner_clock.clone(),
             clock_fault: Arc::new(AtomicBool::new(false)),
-            resolver: ResolverState::new(owner_clock),
+            resolver: ResolverState::new(owner_clock, address_key),
             publication,
             public_address,
             punch_hint,

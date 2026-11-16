@@ -10,6 +10,7 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 
 use super::super::clock::{Clock, ClockSample};
+use crate::identity::address_key::AddressKey;
 use crate::native_discovery::codec::{DecodeError, decode_mutable_record};
 use crate::native_discovery::policy::{
     ClockSample as PolicyClock, CompletedQuery, PolicyOwner, PreparedQuery, QuerySource,
@@ -48,14 +49,16 @@ pub(super) struct ResolverState {
     policy: PolicyOwner,
     delivery: Arc<Semaphore>,
     clock: Clock,
+    address_key: Option<AddressKey>,
 }
 
 impl ResolverState {
-    pub(super) fn new(clock: Clock) -> Self {
+    pub(super) fn new(clock: Clock, address_key: Option<AddressKey>) -> Self {
         Self {
             policy: PolicyOwner::new(),
             delivery: Arc::new(Semaphore::new(DELIVERY_RESULTS)),
             clock,
+            address_key,
         }
     }
 
@@ -146,7 +149,7 @@ impl ResolverState {
             .items()
             .iter()
             .map(|item| {
-                decode_mutable_record(item, key)
+                decode_mutable_record(item, key, self.address_key.as_ref())
                     .map(Into::into)
                     .map_err(ResolveError::Decode)
             })
