@@ -29,6 +29,9 @@ mod tests {
     }
 }
 
+/// Most in-flight RPCs one owned operation may hold; a query round must stay within it.
+pub(crate) const OPERATION_RPC_CAP: usize = 16;
+
 #[derive(Debug)]
 struct RpcOwner {
     operation: OperationId,
@@ -138,7 +141,7 @@ impl SocketResources {
             return Err(ResourceError::RpcLimit);
         }
         let operation_count = self.per_operation.get(&operation).copied().unwrap_or(0);
-        if self.rpc.len() >= 128 || operation_count >= 16 {
+        if self.rpc.len() >= 128 || operation_count >= OPERATION_RPC_CAP {
             return Err(ResourceError::RpcLimit);
         }
 
@@ -260,6 +263,11 @@ impl SocketResources {
 
     pub(crate) fn operation_rpc_len(&self, operation: OperationId) -> usize {
         self.per_operation.get(&operation).copied().unwrap_or(0)
+    }
+
+    /// RPCs the operation may still admit before it reaches its own cap.
+    pub(crate) fn operation_rpc_room(&self, operation: OperationId) -> usize {
+        OPERATION_RPC_CAP.saturating_sub(self.operation_rpc_len(operation))
     }
 
     #[cfg(test)]

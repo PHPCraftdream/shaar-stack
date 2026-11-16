@@ -109,7 +109,12 @@ impl Actor {
         }
         let bootstrap_needed =
             query.closest().is_empty() || query.closest().len() < self.core.bootstrap.len();
+        // A full bucket offers more closest candidates than one operation may hold in
+        // flight; visit what the operation has room for and leave the rest to later rounds.
         for address in query.closest_candidates() {
+            if self.socket.owned_rpc_room(operation) == 0 {
+                break;
+            }
             query.visit(&mut self.socket, address);
             if query.owner_error().is_some() {
                 break;
@@ -117,6 +122,9 @@ impl Actor {
         }
         if query.owner_error().is_none() && bootstrap_needed {
             for address in self.core.bootstrap.iter().copied() {
+                if self.socket.owned_rpc_room(operation) == 0 {
+                    break;
+                }
                 query.visit(&mut self.socket, address);
                 if query.owner_error().is_some() {
                     break;
@@ -126,6 +134,9 @@ impl Actor {
         if query.owner_error().is_none() {
             if let Some(extra) = extra_nodes {
                 for address in extra.iter().copied() {
+                    if self.socket.owned_rpc_room(operation) == 0 {
+                        break;
+                    }
                     query.visit(&mut self.socket, address);
                     if query.owner_error().is_some() {
                         break;

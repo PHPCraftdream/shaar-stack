@@ -572,3 +572,22 @@ async fn expired_deadline_starts_no_work() {
     );
     assert_eq!(actor.socket.owned_test_state().unwrap().2, 0);
 }
+
+#[tokio::test]
+async fn a_populated_routing_table_starts_a_get_within_the_operation_rpc_cap() {
+    // The live DHT fills a bucket (20 nodes), more than the 16 RPCs one operation may hold:
+    // the first round visits what fits and the query starts instead of failing with RpcLimit.
+    let (_peer, bootstrap) = captured_peer();
+    let mut actor = actor(bootstrap);
+    for index in 1..=20 {
+        assert!(actor.core.routing_table.add(Node::unique(index)));
+    }
+    let target = target(90);
+    actor
+        .owned_get(get(target), None)
+        .expect("a full bucket must not trip the per-operation cap");
+    let operation = actor.owned_resources.as_ref().unwrap().operations[&target];
+    assert_eq!(actor.socket.operation_rpc_len(operation), 16);
+    assert_eq!(actor.core.iterative_queries[&target].owner_error(), None);
+    assert_eq!(actor.owned_error(), None);
+}
