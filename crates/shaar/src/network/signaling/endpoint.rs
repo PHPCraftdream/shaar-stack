@@ -297,18 +297,57 @@ impl SignaledEndpoint {
         peer: PublicKey,
         relay: RelayAddr,
     ) -> Result<Session, NetworkError> {
+        self.link_via(peer, relay).await?;
+        self.connect_linked(peer).await
+    }
+
+    /// Brings up only the authenticated carrier link to `peer` through the pinned relay.
+    /// cancel-safe: NO — an admitted circuit dial can finish after waiter cancellation.
+    pub(crate) async fn link_via(
+        &self,
+        peer: PublicKey,
+        relay: RelayAddr,
+    ) -> Result<(), NetworkError> {
         let remote = peer_id(&peer).map_err(NetworkError::SignalingOperation)?;
         self.signaling
             .handle
             .connect_via(remote, relay)
             .await
             .map_err(NetworkError::SignalingOperation)?;
+        Ok(())
+    }
+
+    /// Negotiates over the carrier link that [`Self::link_via`] brought up.
+    /// cancel-safe: NO — handshakes may complete after waiter cancellation.
+    pub(crate) async fn connect_linked(&self, peer: PublicKey) -> Result<Session, NetworkError> {
+        let remote = peer_id(&peer).map_err(NetworkError::SignalingOperation)?;
         let address = self
             .signaling
             .factory
             .peer_address(remote)
             .map_err(NetworkError::SignalingOperation)?;
         self.endpoint.connect_custom(peer, address).await
+    }
+
+    /// Brings up the carrier link over direct signaling, without a QUIC session on it.
+    #[cfg(test)]
+    pub(crate) async fn link_direct_for_tests(
+        &self,
+        peer: PublicKey,
+        address: SocketAddr,
+    ) -> Result<(), NetworkError> {
+        let remote = peer_id(&peer).map_err(NetworkError::SignalingOperation)?;
+        self.signaling
+            .handle
+            .connect(remote, address)
+            .await
+            .map_err(NetworkError::SignalingOperation)?;
+        Ok(())
+    }
+
+    /// Takes the punch side channel of the carrier link once (leaf L4b).
+    pub(crate) fn punch_port(&self) -> Option<shaar_p2p::PunchPort> {
+        self.signaling.factory.punch_port()
     }
 
     /// cancel-safe: NO — admitted reservation is reconciled by the carrier.

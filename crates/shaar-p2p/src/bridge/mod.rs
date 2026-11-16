@@ -46,14 +46,21 @@ impl PunchInbound {
     }
 }
 
+/// The send half of the punch side channel: cloneable, so several workers can answer through the
+/// one port whose receive half a single router owns.
+#[derive(Clone)]
+pub struct PunchSender {
+    handle: CarrierHandle,
+}
+
 /// The single owner of the punch side channel of one signaling transport. Sending and receiving
 /// need no pump task of their own: the pump classifies packets, the carrier handle sends.
 pub struct PunchPort {
-    handle: CarrierHandle,
+    sender: PunchSender,
     receiver: mpsc::Receiver<PunchInbound>,
 }
 
-impl PunchPort {
+impl PunchSender {
     /// Admits one message on the peer's current authenticated link; nothing is replayed on a
     /// successor link. Delivery is unreliable like any datagram.
     /// cancel-safe: NO — an admitted message may be delivered after waiter cancellation.
@@ -77,6 +84,19 @@ impl PunchPort {
         self.handle
             .send_on(link, Datagram::new(&bytes[..length])?)
             .await
+    }
+}
+
+impl PunchPort {
+    /// The cloneable send half.
+    pub fn sender(&self) -> PunchSender {
+        self.sender.clone()
+    }
+
+    /// Same as [`PunchSender::send`].
+    /// cancel-safe: NO — an admitted message may be delivered after waiter cancellation.
+    pub async fn send(&self, peer: PeerId, payload: &[u8]) -> io::Result<()> {
+        self.sender.send(peer, payload).await
     }
 
     /// The next inbound punch message; `None` once the transport is gone.
@@ -137,7 +157,9 @@ impl SignalingTransport {
     pub fn punch_port(&self) -> Option<PunchPort> {
         let receiver = self.punch.lock().ok()?.take()?;
         Some(PunchPort {
-            handle: self.handle.clone(),
+            sender: PunchSender {
+                handle: self.handle.clone(),
+            },
             receiver,
         })
     }

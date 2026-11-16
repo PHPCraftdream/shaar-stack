@@ -202,7 +202,9 @@ async fn punch_messages_ride_the_authenticated_link_and_never_reach_the_iroh_tra
             .expect("port open");
         assert_eq!(offer.peer, pair.ah.peer_id(), "the peer is the link's");
         assert_eq!(offer.payload(), b"offer");
-        b_port.send(pair.ah.peer_id(), b"answer").await.unwrap();
+        // The cloneable send half answers like the port itself.
+        let answerer = b_port.sender();
+        answerer.send(pair.ah.peer_id(), b"answer").await.unwrap();
         let answer = tokio::time::timeout(Duration::from_secs(5), a_port.recv())
             .await
             .expect("answer delivered")

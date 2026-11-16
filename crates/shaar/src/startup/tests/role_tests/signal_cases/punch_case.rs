@@ -156,10 +156,13 @@ async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero()
         let server_native = server_role
             .native_addr()
             .expect("started server reports its native bound address");
-        set_punch_candidates_for_tests(vec![SocketAddr::from((
-            Ipv4Addr::LOCALHOST,
+        set_punch_candidates_for_tests(
             server_native.port(),
-        ))]);
+            vec![SocketAddr::from((
+                Ipv4Addr::LOCALHOST,
+                server_native.port(),
+            ))],
+        );
 
         let mut client_role = ClientRole::with_events(
             client_config,
@@ -393,9 +396,8 @@ async fn punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero()
         probe_claim_free(PUNCH_CLIENT, "client identity claim released").await;
         probe_claim_free(PUNCH_TRANSIT, "transit identity claim released").await;
 
-        // Reset the fake-NAT seam so no other test in this binary inherits
-        // the injected candidates.
-        set_punch_candidates_for_tests(Vec::new());
+        // Reset the fake-NAT seam of this server.
+        set_punch_candidates_for_tests(server_native.port(), Vec::new());
     })
     .await
     .expect("punch role acceptance completes within its budget");

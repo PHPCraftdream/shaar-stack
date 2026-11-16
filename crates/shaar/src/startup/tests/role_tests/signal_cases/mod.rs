@@ -22,6 +22,7 @@ use super::fixtures::{
 };
 
 mod punch_case;
+mod relay_punch_case;
 
 // Unique seeds (see the fixtures.rs discipline comment): server 0x5E, client
 // 0x5F, transit 0x60.

@@ -44,10 +44,9 @@ const MAX_CANDIDATES: usize = crate::startup::resources::MAX_SNAPSHOT_ADDRESSES;
 /// Hard ceiling for one Mainline resolve inside a dial attempt.
 const RESOLVE_BUDGET: Duration = Duration::from_secs(5);
 
-/// Longest an attempt waits for the record lookup while a punch channel exists. A live
-/// lookup takes 6 to 10 s against a 3 s attempt, so waiting out the attempt for it only
-/// ended every attempt before its punch phase began (live smoke 43784413811: nine
-/// attempts, `reason=deadline` after 0 ms, two thirds of them with a candidate).
+/// Longest an attempt waits for the record lookup while a punch channel exists. A live lookup
+/// takes 6 to 10 s against a 3 s attempt, so waiting it out ended every attempt before its
+/// punch phase began (live smoke 43784413811: nine attempts, `reason=deadline` after 0 ms).
 const RESOLVE_BUDGET_WITH_PUNCH: Duration = Duration::from_secs(1);
 
 /// One lookup at a time on a task of its own. An attempt that gives up waiting leaves the
@@ -115,6 +114,8 @@ pub(crate) struct NativeDialer {
     /// NAT hole-punch channel (leaf L4); present only for the relay-less
     /// composition over a retained Yggdrasil bridge.
     punch: Option<punch::PunchChannel>,
+    /// Punch over the carrier link's side channel (leaf L4b); present only when a relay is pinned.
+    carrier_punch: Option<punch::CarrierPunch>,
     /// Wrapping epoch distinguishing successive punch attempts.
     punch_epoch: u32,
     lease: Option<RelayLease>,
@@ -149,6 +150,7 @@ impl NativeDialer {
             pending_resolve: None,
             relay,
             punch,
+            carrier_punch: None,
             punch_epoch: 0,
             lease: None,
             note,
@@ -156,6 +158,12 @@ impl NativeDialer {
             #[cfg(test)]
             events,
         }
+    }
+
+    /// Enables the punch exchange over the carrier link (leaf L4b).
+    pub(crate) fn with_carrier_punch(mut self, link: Option<punch::CarrierPunch>) -> Self {
+        self.carrier_punch = link;
+        self
     }
 
     /// One Mainline resolve (or none) for the route decision. Classifies the
@@ -177,7 +185,8 @@ impl NativeDialer {
             ResolveObservation::cached(record, hint)
         } else {
             let key = EndpointId::from_bytes(self.peer.as_bytes()).map_err(|_| DialError)?;
-            let budget = resolve_budget(Instant::now(), deadline, self.punch.is_some());
+            let punching = self.punch.is_some() || self.carrier_punch.is_some();
+            let budget = resolve_budget(Instant::now(), deadline, punching);
             let answer = await_held(&mut self.pending_resolve, budget, || {
                 let resources = self.resources.clone();
                 let fresh = self.refresh_after_loss;
@@ -339,10 +348,10 @@ impl Dialer for NativeDialer {
     /// candidates ahead of private/local-scope ones, every private/local
     /// connect bounded by a fixed slice and a timed-out candidate dropped
     /// from the list (R1) — then relay negotiation only when a relay is
-    /// configured, all direct candidates failed and time remains. When the
-    /// relay-less composition carries a punch channel, punch coordination runs
-    /// between the candidate phase and relay negotiation, bounded by the
-    /// remaining attempt deadline. A failed cold Mainline lookup does
+    /// configured, all direct candidates failed and time remains. A relay-less
+    /// composition with a punch channel punches between the candidate phase
+    /// and the end of the attempt; a pinned relay punches over the carrier link
+    /// (L4b) between the link and the negotiation. A failed cold Mainline lookup does
     /// NOT end the attempt: the pinned relay is addressed by key alone, so
     /// the dial still reaches relay negotiation. Native priority is
     /// unchanged (direct candidates first, relay negotiation second).
@@ -434,7 +443,17 @@ impl Dialer for NativeDialer {
             return Err(DialError);
         };
         self.ensure_relay(relay).await?;
-        match timeout_at(deadline, self.endpoint.connect_via(self.peer, relay)).await {
+        self.punch_epoch = self.punch_epoch.wrapping_add(1);
+        let dial = punch::connect_via_punched(
+            &self.endpoint,
+            self.carrier_punch.as_mut(),
+            self.peer,
+            relay,
+            self.punch_epoch,
+            self.resources.punch_address(),
+            deadline,
+        );
+        match timeout_at(deadline, dial).await {
             Ok(Ok(session)) => {
                 // A Custom negotiation connection is not yet a Native payload route.
                 match timeout_at(deadline, session.native_ready()).await {
