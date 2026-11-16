@@ -515,3 +515,27 @@ Every value is far inside its provisional ceiling, so the ceilings can be tighte
 large factor once more runs exist; this section does not tighten them. The first two
 dispatches also show that composed values are stable between runs (steady RSS 22.8 to 25.4 MiB,
 p95 0.41 to 0.60 ms). The raw reports are the `resource-budget` artifact of the dispatch.
+
+### 11.6 Re-measurement on the final code (dispatch 43795953404, source `70ae253`, both cases passed)
+
+Task EFF-RE re-ran the same harness after the NAT leaves, DHT-L1 and DHT-L2 (loopback only,
+release products, no public network, the same ceilings). Both cases passed with 19 rows each, all 38 rows
+inside their ceilings. The later commits up to `361e169` change only documents, CI probes and the CI
+selection map, so this measurement stays valid for that product code. One run per mode.
+
+| Measure | Direct | Composed standby | Section 11.5 (direct / composed) |
+|---|---|---|---|
+| Steady RSS, server / client (MiB) | 16.3 / 16.1 | 23.5 / 23.0 | 15.8 / 16.1 and 22.8 / 22.5 |
+| Peak RSS after 64 MiB echo, server / client (MiB) | 18.6 / 18.5 | 25.2 / 24.5 | 18.2 / 18.8 and 24.5 / 24.1 |
+| Server RSS added by the first session (MiB) | 1.64 | 0.98 | 1.46 and 1.04 |
+| Idle CPU, server / client (%) | 0.03 / 0.00 | 0.06 / 0.12 | 0.07 / 0.03 and 0.06 / 0.14 |
+| New-connection round trip p50 / p95 (ms) | 0.53 / 0.59 | 0.55 / 0.59 | 0.53 / 0.58 and 0.54 / 0.60 |
+| Bulk echo throughput (MiB/s) | 137.2 | 78.4 | 135.8 and 73.9 |
+| RSS per held stream, server / client (KiB) | 0 / 0.75 | 0 / 0.50 | 0 / 0.75 and 0 / 0 |
+| Bytes accepted by a never-reading target (MiB) | 8.06 | 6.19 | 8.25 and 8.38 |
+| RSS growth during that stall (MiB) | 0 / 0 | 0 / 0 | 0 / 0 and 0.004 / 0 |
+| Server growth after client restarts: fds / threads / RSS (MiB) | 0 / 0 / 0.70 | 0 / 0 / 0.11 | 0 / 0 / 0.85 and 0 / 0 / 0.22 |
+| Server stop to exit (ms) | 3.2 | 3.8 | 2.8 and 4.0 |
+
+The largest change against 11.5 is the composed steady RSS, +0.7 MiB, far inside its ceiling of 96 MiB. The
+ceilings are not tightened here. The raw reports are the `resource-budget` artifact of the dispatch.
