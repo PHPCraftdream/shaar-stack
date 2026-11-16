@@ -1932,6 +1932,25 @@ coordinated punch; the limits are the 20 to 35 s each side needs to learn its ad
 attempt budget the punch phase shares with the record lookup, and the 30 s observation window.
 The next step shortens the fast-start pauses and widens the observation window (see Timeline).
 
+**Ninth dispatch, shorter fast start and a 45 s window (2026-11-16, upstream run 43784413811,
+source `6a3c75b`, contract digest `6ee285ea…`):** passed over Yggdrasil standby (one exact
+exchange, 43 bytes each way, zero violations). The fast start worked: the Server exposed its
+public address at 9.3 s (was 35.3 s) and the Client at 19.0 s (was 24.0 s), with the window tokens
+`lookup=ok info=some` and no `RpcLimit`. **The punch phase never ran:** all nine Client attempts
+ended `reason=deadline` after 0 ms, five of them already carrying a candidate, and the Server
+received no Offer at all. Cause, from the code and the traces together: `NativeDialer::dial`
+waits for the record lookup before the punch phase, the lookup of a cold live DHT takes 6 to 10 s,
+and the attempt deadline is 3 s, so every attempt ended inside the lookup (`resolve=timeout`).
+The lookup of a record that is not cached is also cancelled when its waiter gives up, so the wait
+cannot be lengthened to let it finish. **Established:** with the DHT working, the attempt
+deadline shared with the record lookup is what keeps the cloud NAT from ever being tried. The
+leaf caps the lookup wait at one second while a punch channel exists (two seconds of the attempt
+stay for the Offer, the Answer and the probe burst). **Separate finding, not fixed here:** the
+same cancel-on-give-up rule means the record of a Server is practically never resolved on the
+live network within a 3 s attempt; the Yggdrasil standby carried every smoke, and the first byte
+criterion for a cold DHT lookup holds only in the fixtures. That needs its own leaf (the lookup
+must outlive its waiter and cache its answer).
+
 ### Native is not blocked (third run onward): the direct attempt
 
 The first two runs ended on Yggdrasil standby because no punch existed; the route was then
