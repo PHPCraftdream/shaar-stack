@@ -16,6 +16,8 @@ _DNAT = {"udp": "open", "peer": True}
 # Punch cases: a stateful gateway. A UDP packet addressed to the router is unsolicited (replies are de-translated and forwarded),
 # and one that is accepted leaves a conntrack entry that moves the port a later outbound mapping would keep (dispatch 43742025339).
 _PUNCH = {**_DNAT, "tcp_a": ("transit",), "nat": "cone", "stateful": True}
+# L4b punch cases: the same stateful cone gateways, but the Client reaches only the relay (no Ygg transit).
+_PUNCH_RELAY = {**_PUNCH, "tcp_a": ("relay",)}
 PROFILES = {
     "native-signal": _NATIVE, "native-standby": _NATIVE,
     "blocked-standby": _BLOCKED, "blocked-signal": _BLOCKED,
@@ -30,6 +32,7 @@ PROFILES = {
     "dnat-cone-relay-signal": {**_DNAT, "tcp_a": ("relay",), "nat": "cone", "dht_drop": True},
     "dnat-cone-relay-standby": {**_DNAT, "tcp_a": ("relay",), "nat": "cone", "dht_drop": True},
     "dnat-cone-norelay-signal": _PUNCH, "dnat-cone-norelay-standby": _PUNCH,
+    "dnat-cone-relaypunch-signal": _PUNCH_RELAY, "dnat-cone-relaypunch-standby": _PUNCH_RELAY,
     "dnat-cone-dhtdrop-signal": {**_PUNCH, "dht_drop": True},
     "dnat-sym-signal": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},
     "dnat-sym-standby": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},

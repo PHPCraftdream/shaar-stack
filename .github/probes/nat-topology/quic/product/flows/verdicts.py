@@ -120,6 +120,8 @@ def dnat(spec, counters, result):
             contract.require(packets(counters, "rtr_a", "ygg_tcp") > 0, "no Ygg TCP rendezvous traffic although the case has no relay")
         else:
             contract.require(packets(counters, "rtr_a", "ygg_tcp") == 0, "Ygg TCP carried traffic although it was denied")
+        if spec.get("relay_punch"):
+            contract.require(packets(counters, "rtr_a", "relay_tcp") > 0, "the relay carried no signaling although the rendezvous rides its circuit")
         lines = (result.get("markers") or {}).get("client_lines") or {}
         contract.require(contract.ROUTE_LINE in lines, "Client log lacks the native route line")
         contract.require("path=native" in lines[contract.ROUTE_LINE], "Client log lacks the native route line")
@@ -128,8 +130,8 @@ def dnat(spec, counters, result):
         found = re.search(r"candidates=(\d+)", lines[contract.PUNCH_DIRECT])
         contract.require(found is not None and int(found.group(1)) >= 1, "Client punch had no candidates to dial")
         return
-    # The relay variants keep today's fail-closed oracle on purpose: they are the regression control that a Server
-    # config still naming a relay produces today's behaviour (fail-closed expectation belongs to the later leaf L4b).
+    # The relay variants keep today's fail-closed oracle on purpose, also after leaf L4b: without a reflexive source on either
+    # side there is no candidate to exchange, so a Server config naming a relay still produces today's behaviour.
     for router in counters:
         contract.require(packets(counters, router, "peer_recv") == 0, f"{router} received Native UDP from the other router: a direct path formed")
     ygg = packets(counters, "rtr_a", "ygg_tcp")

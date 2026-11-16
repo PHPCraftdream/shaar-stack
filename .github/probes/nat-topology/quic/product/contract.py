@@ -12,7 +12,8 @@ import stat
 # Optional keys: "client_bind" (Client DHT/signaling bind address), "fillers" (extra Servers that hold relay reservations),
 # "server_exit" (expected Server exit status, default 0), "client2_exit" (exit status of a replacement Client), "norelay"
 # (no network.signaling relay fields at all), "publish" ("plain": the Server publishes the voted reflexive endpoint),
-# "dht_denied" (Client-side DHT responses are dropped by the profile).
+# "dht_denied" (Client-side DHT responses are dropped by the profile), "relay_punch" (the relay is pinned AND the punch must
+# rendezvous over the carrier link of the relay circuit: the Client reaches only the relay, so Ygg carries nothing).
 NETS = ("nat", "blocked", "lan", "dht-drop", "failover", "dnat", "ipv6", "relay", "recover")
 SEGMENT_NETS = ("lan", "ipv6")
 # Documentation-prefix IPv6 addresses of the two segment hosts (same plan as network.V6).
@@ -38,10 +39,11 @@ CASES = {
     # Double NAT with Native UDP allowed (A5 endpoint-independent port-preserving mapping, A6 fully random ports).
     # "nat" is the mapping flavor, "direct" whether a direct Native path between the routers is expected (dispatch 43255837358 showed
     # it is not: the cone cases first expected a punch and failed; "relay_first" drops the Client's DHT queries so relay negotiation is reached).
-    # The four relay-configured cone cases (A5) stay UNCHANGED on purpose: the merged L4 punch runs only without relay
-    # fields (the relay-carrier exchange is the later leaf L4b) and these cases also block Ygg, so no rendezvous exists.
-    # Their fail-closed expectation is the regression control that a config naming a relay behaves as before; they flip
-    # together with L4b, and only after a preserved FAILED privileged run, never to force green.
+    # The four relay-configured cone cases (A5) stay UNCHANGED on purpose, also after leaf L4b: they drop the Client's DHT
+    # answers (or never publish a reflexive address), so neither side has a reflexive candidate to exchange over the
+    # relay carrier, and they block Ygg, so no other rendezvous exists. Their fail-closed expectation is the regression
+    # control that a config naming a relay without any reflexive source behaves as before; the L4b proof is the
+    # "relaypunch" pair below. Oracles change only after a preserved FAILED privileged run, never to force green.
     "dnat-cone-signal": {**DNAT, "mode": "signal", "nat": "cone", "direct": False, "ygg_client_blocked": True, "target_accepts": 0, "client_exit": 1},
     "dnat-cone-standby": {**DNAT, "mode": "standby", "nat": "cone", "direct": False, "ygg_client_blocked": True, "target_accepts": 0, "client_exit": 1},
     "dnat-cone-relay-signal": {**DNAT, "mode": "signal", "nat": "cone", "direct": False, "relay_first": True, "ygg_client_blocked": True,
@@ -56,6 +58,12 @@ CASES = {
                                  "publish": "plain", "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
     "dnat-cone-norelay-standby": {**DNAT, "mode": "standby", "nat": "cone", "direct": True, "norelay": True, "dht_observed": True,
                                   "publish": "plain", "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
+    # The L4b punch cases: the relay is pinned in both configs, Ygg is closed to the Client, and the voted reflexive endpoint
+    # is published, so the only rendezvous is the carrier link of the relay circuit (signaling only). Expected: direct path.
+    "dnat-cone-relaypunch-signal": {**DNAT, "mode": "signal", "nat": "cone", "direct": True, "relay_punch": True, "dht_observed": True,
+                                    "publish": "plain", "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
+    "dnat-cone-relaypunch-standby": {**DNAT, "mode": "standby", "nat": "cone", "direct": True, "relay_punch": True, "dht_observed": True,
+                                     "publish": "plain", "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
     # Fail-closed guard: cone NAT with DHT responses denied on the Client side must fail closed again, proving the
     # flip depends on the reflexive source, not a harness accident.
     # It is the norelay-signal case with ONLY the Client's DHT answers dropped: no record, no reflexive vote, nothing to offer.

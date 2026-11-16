@@ -29,8 +29,8 @@ class ProductContractTests(unittest.TestCase):
             "native-signal", "native-standby", "blocked-standby", "blocked-signal", "lan-signal", "lan-standby",
             "relay-denied-signal", "failover-standby", "failover-signal", "denied-blocked-standby", "dht-drop-signal",
             "outage-standby", "dnat-cone-signal", "dnat-cone-standby", "dnat-cone-relay-signal", "dnat-cone-relay-standby",
-            "dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal",
-            "dnat-sym-signal", "dnat-sym-standby",
+            "dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby",
+            "dnat-cone-dhtdrop-signal", "dnat-sym-signal", "dnat-sym-standby",
             "hole-signal", "hole-standby", "switch-signal", "switch-standby", "relay-full-signal", "relay-full-standby",
             "ipv6-signal", "ipv6-standby", "denied-native-signal", "recover-standby"])
         self.assertEqual(contract.PHASE_SECONDS, 1200)
@@ -59,23 +59,24 @@ class ProductContractTests(unittest.TestCase):
         self.assertEqual(contract.DHT_OBSERVED_KEY, "dht_observed")
         self.assertEqual(contract.DHT_OBSERVED_ENV, "SHAAR_NAT_DHT_OBSERVED")
         opted = {name for name, spec in contract.CASES.items() if contract.DHT_OBSERVED_KEY in spec}
-        self.assertEqual(opted, {"dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal"})
+        self.assertEqual(opted, {"dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal",
+                                 "dnat-cone-relaypunch-standby", "dnat-cone-dhtdrop-signal"})
 
     def test_new_row_cases_declare_their_flows_exits_and_identities(self):
         cases = contract.CASES
-        # Relay-configured cones (A5) stay unflipped until L4b: the merged L4 punch needs a relay-less config and open Ygg.
+        # Relay-configured cones (A5) stay unflipped after L4b: they have no reflexive source (the L4b proof is the relaypunch pair).
         for name in ("dnat-cone-signal", "dnat-cone-standby"):
             self.assertEqual((cases[name]["nat"], cases[name]["direct"], cases[name]["target_accepts"], cases[name]["client_exit"]),
                              ("cone", False, 0, 1), name)
             self.assertTrue(cases[name]["ygg_client_blocked"], name)
-            for absent in ("relay_first", "norelay", "dht_observed", "publish", "dht_denied"):
+            for absent in ("relay_first", "norelay", "relay_punch", "dht_observed", "publish", "dht_denied"):
                 self.assertNotIn(absent, cases[name], name)
         for name in ("dnat-cone-relay-signal", "dnat-cone-relay-standby"):
             self.assertEqual((cases[name]["nat"], cases[name]["direct"], cases[name]["target_accepts"], cases[name]["client_exit"]),
                              ("cone", False, 0, 1), name)
             self.assertTrue(cases[name]["ygg_client_blocked"], name)
             self.assertTrue(cases[name]["relay_first"], name)
-            for absent in ("norelay", "dht_observed", "publish", "dht_denied"):
+            for absent in ("norelay", "relay_punch", "dht_observed", "publish", "dht_denied"):
                 self.assertNotIn(absent, cases[name], name)
         for name, blocked in (("dnat-cone-norelay-signal", False), ("dnat-cone-norelay-standby", False)):
             self.assertEqual((cases[name]["nat"], cases[name]["direct"], cases[name]["target_accepts"], cases[name]["client_exit"]),
@@ -84,6 +85,16 @@ class ProductContractTests(unittest.TestCase):
             self.assertTrue(cases[name]["dht_observed"], name)
             self.assertEqual(cases[name]["publish"], "plain", name)
             self.assertEqual(cases[name]["ygg_client_blocked"], blocked, name)
+        # The L4b pair: relay pinned in both configs, Ygg closed to the Client, reflexive endpoint published, direct expected.
+        for name in ("dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby"):
+            self.assertEqual((cases[name]["nat"], cases[name]["direct"], cases[name]["target_accepts"], cases[name]["client_exit"]),
+                             ("cone", True, 1, 0), name)
+            self.assertTrue(cases[name]["relay_punch"], name)
+            self.assertTrue(cases[name]["dht_observed"], name)
+            self.assertEqual(cases[name]["publish"], "plain", name)
+            self.assertTrue(cases[name]["ygg_client_blocked"], name)
+            for absent in ("norelay", "relay_first", "dht_denied"):
+                self.assertNotIn(absent, cases[name], name)
         guard = cases["dnat-cone-dhtdrop-signal"]
         self.assertEqual((guard["nat"], guard["direct"], guard["target_accepts"], guard["client_exit"]),
                          ("cone", False, 0, 1), "dnat-cone-dhtdrop-signal")
@@ -335,7 +346,8 @@ class NetworkContractTests(unittest.TestCase):
         self.assertIn("natout ip saddr 10.0.1.0/24 meta l4proto tcp counter name tcp_nat masquerade comment", switch)
         self.assertNotIn("counter name hole_in", switch)
         stateful = 'lanin ip daddr %s meta l4proto udp counter name hole_in drop comment "p13-stateful-in"'
-        for case in ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal"):
+        for case in ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby",
+                     "dnat-cone-dhtdrop-signal"):
             self.assertIn(stateful % "203.0.113.1", rules("rtr_a", case), case)
             self.assertIn(stateful % "203.0.113.2", rules("rtr_b", case), case)
             self.assertNotIn("ct state", rules("rtr_a", case), case)
