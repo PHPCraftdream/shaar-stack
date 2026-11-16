@@ -504,12 +504,12 @@ class ObservabilityTests(unittest.TestCase):
             "shaar: client punch ports own=99999999 peer=1",
         ])
         self.assertEqual(
-            contract.scan_ports(text, "client"),
+            CONTRACT.scan_ports(text, "client"),
             [{"own": [40001, 40002], "peer": [51234]}, {"own": [], "peer": []}])
-        self.assertEqual(contract.scan_ports(text, "server"), [{"own": [51234], "peer": [40001, 40002]}])
-        self.assertEqual(contract.scan_ports("", "client"), [])
+        self.assertEqual(CONTRACT.scan_ports(text, "server"), [{"own": [51234], "peer": [40001, 40002]}])
+        self.assertEqual(CONTRACT.scan_ports("", "client"), [])
         many = "\n".join("shaar: client punch ports own=1 peer=2" for _ in range(20))
-        self.assertEqual(len(contract.scan_ports(many, "client")), 8)
+        self.assertEqual(len(CONTRACT.scan_ports(many, "client")), 8)
 
     def test_reflexive_windows_and_server_offers_are_counted_without_addresses(self):
         text = "\n".join([
