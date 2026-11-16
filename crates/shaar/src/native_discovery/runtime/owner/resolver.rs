@@ -226,13 +226,29 @@ fn policy_clock(sample: ClockSample) -> PolicyClock {
 /// Hard bound on one reflexive self-lookup, matching the adapter's internal
 /// 10 s cap on `resolve_mutable` (`resolve_mutable` uses the same default).
 pub(super) const REFLEXIVE_LOOKUP_BOUND: Duration = Duration::from_secs(10);
-/// Fast start (production builds): the first lookups run at once and then every
-/// `FAST_START_INTERVAL` until a vote is exposed or `FAST_START_WINDOW` has
-/// passed, so the public address is known within seconds instead of two refresh
-/// windows. At most seven extra lookups once per owner lifetime; afterwards the
-/// regular `REFRESH` windows apply.
+/// Fast start (production builds): the first lookups run at once and then follow
+/// each other (`fast_start_pause`) until a vote is exposed or `FAST_START_WINDOW`
+/// has passed, so the public address is known within seconds instead of two
+/// refresh windows. Once per owner lifetime; afterwards the regular `REFRESH`
+/// windows apply. Live lookups take 6 to 10 s each, so the pause matters.
 pub(super) const FAST_START_INTERVAL: Duration = Duration::from_secs(5);
 pub(super) const FAST_START_WINDOW: Duration = Duration::from_secs(30);
+/// Pause after a window without any observation (lookup failed, bounded out or no vote
+/// learned): the cold DHT is usually ready within seconds, so retry sooner.
+pub(super) const FAST_START_RETRY: Duration = Duration::from_secs(2);
+/// Floor between two lookups when the last window held an address: confirm it at once.
+pub(super) const FAST_START_CONFIRM: Duration = Duration::from_millis(250);
+
+/// Pause before the next fast-start lookup, by what the last window observed: an address
+/// is confirmed right away, a window without observation is retried after a short pause,
+/// and a completed lookup that found no vote waits the full interval.
+pub(super) const fn fast_start_pause(observation: Option<Option<IpAddr>>) -> Duration {
+    match observation {
+        Some(Some(_)) => FAST_START_CONFIRM,
+        Some(None) => FAST_START_INTERVAL,
+        None => FAST_START_RETRY,
+    }
+}
 
 /// Bound on the `info()` read that follows the window's own lookup.
 const INFO_READ_BOUND: Duration = Duration::from_secs(2);
@@ -439,7 +455,8 @@ pub(super) async fn reflexive_loop(
                 return;
             };
             probe.note(start);
-            if let Some(observed) = probe.observation() {
+            let observation = probe.observation();
+            if let Some(observed) = observation {
                 let value = tally.observe(observed);
                 if value != sent {
                     sender.send_replace(value);
@@ -453,7 +470,7 @@ pub(super) async fn reflexive_loop(
             tokio::select! {
                 biased;
                 _ = &mut stop => return,
-                _ = tokio::time::sleep(FAST_START_INTERVAL) => {}
+                _ = tokio::time::sleep(fast_start_pause(observation)) => {}
             }
         }
     }
@@ -488,7 +505,10 @@ pub(super) async fn reflexive_loop(
 
 #[cfg(test)]
 mod window_line_tests {
-    use super::{Lookup, ReflexiveTally, Window, probe_line, window_line};
+    use super::{
+        FAST_START_CONFIRM, FAST_START_INTERVAL, FAST_START_RETRY, Lookup, ReflexiveTally, Window,
+        fast_start_pause, probe_line, window_line,
+    };
     use n0_mainline::ResourceError;
     use std::net::{IpAddr, Ipv4Addr};
 
@@ -555,6 +575,18 @@ mod window_line_tests {
             assert_eq!(window(lookup, Some(None)).observation(), None, "{lookup:?}");
             assert_eq!(window(lookup, None).observation(), None, "{lookup:?}");
         }
+    }
+
+    #[test]
+    fn the_fast_start_pause_follows_what_the_window_observed() {
+        assert_eq!(fast_start_pause(Some(Some(ADDRESS))), FAST_START_CONFIRM);
+        assert_eq!(fast_start_pause(Some(None)), FAST_START_INTERVAL);
+        assert_eq!(fast_start_pause(None), FAST_START_RETRY);
+        // An address is confirmed first, a failed window retried before a completed empty one,
+        // and no pause is zero, so a fast start can never spin.
+        assert!(FAST_START_CONFIRM < FAST_START_RETRY);
+        assert!(FAST_START_RETRY < FAST_START_INTERVAL);
+        assert!(!FAST_START_CONFIRM.is_zero());
     }
 
     #[test]
