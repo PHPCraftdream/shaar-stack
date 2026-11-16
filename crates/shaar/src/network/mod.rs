@@ -13,6 +13,8 @@ pub use admission::{Allowlist, Endpoint, Limits};
 // Narrow crate-private re-export: the composed startup builds the custom-only
 // payload endpoint from the admitted bridge (a production consumer exists).
 pub(crate) use admission::ygg::YggEndpoint;
+// The slotless punch probe capability the server-side responders drive.
+pub(crate) use admission::ProbeHandle;
 pub use error::NetworkError;
 pub use forwarding::{ForwardError, ForwardStats, ServeReport, observe};
 pub use session::Session;

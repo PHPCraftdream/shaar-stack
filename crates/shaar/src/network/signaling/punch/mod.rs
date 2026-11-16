@@ -27,6 +27,11 @@ use tokio::time::{Instant, timeout_at};
 use crate::network::{NetworkError, Session};
 use shaar_ygg::DatagramError;
 
+mod carrier;
+#[cfg(test)]
+pub(crate) use carrier::carrier_punched_for_tests;
+pub(crate) use carrier::{CarrierPunch, connect_via_punched, route};
+
 /// Maximum candidates carried per punch message and probe burst.
 pub(crate) const MAX_CANDIDATES: usize = 4;
 /// Hard wire-size cap for one encoded punch datagram.

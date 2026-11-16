@@ -351,6 +351,10 @@ impl ClientRole {
         let mut owner: Option<Box<dyn ErasedClientOwner>> = None;
         let mut native_arc: Option<Arc<SignaledEndpoint>> = None;
         if let Some(endpoint) = native {
+            // Leaf L4b: with a pinned relay the punch rides the carrier link's side channel.
+            let carrier_punch = relay_addr
+                .and_then(|_| endpoint.punch_port())
+                .and_then(|port| punch::CarrierPunch::new(port, &service_key));
             let arc = Arc::new(endpoint);
             // Relay-optional dialer (L0): the negotiation pair exists only
             // when the signaling settings pin a relay; the live transfer
@@ -375,7 +379,8 @@ impl ClientRole {
                 punch,
                 #[cfg(test)]
                 self.events.clone(),
-            );
+            )
+            .with_carrier_punch(carrier_punch);
             let built = match ygg_arc {
                 // Never dialed when absent: the standby gate blocks the fallback in `Mode::Signal`.
                 Some(ygg) => {

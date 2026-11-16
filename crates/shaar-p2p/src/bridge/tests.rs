@@ -186,6 +186,61 @@ async fn actual_carrier_pump_delivers_exact_datagrams_and_batches_with_owned_shu
     .expect("owned signaling pump/datagram deadline");
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn punch_messages_ride_the_authenticated_link_and_never_reach_the_iroh_transport() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let pair = Pair::start().await;
+        let mut a_port = pair.a.punch_port().expect("punch port of a");
+        let mut b_port = pair.b.punch_port().expect("punch port of b");
+        assert!(pair.a.punch_port().is_none(), "the port has one owner");
+        let mut b_iroh = pair.b.bind().unwrap();
+
+        a_port.send(pair.bh.peer_id(), b"offer").await.unwrap();
+        let offer = tokio::time::timeout(Duration::from_secs(5), b_port.recv())
+            .await
+            .expect("offer delivered")
+            .expect("port open");
+        assert_eq!(offer.peer, pair.ah.peer_id(), "the peer is the link's");
+        assert_eq!(offer.payload(), b"offer");
+        // The cloneable send half answers like the port itself.
+        let answerer = b_port.sender();
+        answerer.send(pair.ah.peer_id(), b"answer").await.unwrap();
+        let answer = tokio::time::timeout(Duration::from_secs(5), a_port.recv())
+            .await
+            .expect("answer delivered")
+            .expect("port open");
+        assert_eq!(answer.peer, pair.bh.peer_id());
+        assert_eq!(answer.payload(), b"answer");
+
+        // The punch message never reached iroh: the next QUIC-side datagram is the first one it reads.
+        let destination = pair.a.peer_address(pair.bh.peer_id()).unwrap();
+        poll_fn(|cx| pair.a.shared.poll_send(cx, &destination, &[9]))
+            .await
+            .unwrap();
+        assert_eq!(read(b_iroh.as_mut()).await, [9]);
+
+        assert!(
+            a_port.send(PeerId::random(), b"x").await.is_err(),
+            "no link to a stranger"
+        );
+        assert!(
+            a_port.send(pair.bh.peer_id(), b"").await.is_err(),
+            "empty message"
+        );
+        assert!(
+            a_port
+                .send(pair.bh.peer_id(), &[0; crate::MAX_DATAGRAM])
+                .await
+                .is_err(),
+            "the magic prefix counts against the datagram budget"
+        );
+        drop((a_port, b_port, b_iroh));
+        pair.close().await;
+    })
+    .await
+    .expect("punch side channel deadline");
+}
+
 /// cancel-safe: NO — a cancelled bind is not successful endpoint startup.
 async fn endpoint(key: SecretKey, factory: Arc<SignalingTransport>) -> Endpoint {
     let transport = QuicTransportConfig::builder()

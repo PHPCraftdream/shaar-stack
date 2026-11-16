@@ -474,12 +474,16 @@ impl ServerRole {
             parts.stop = Some(tokio::sync::watch::channel(false));
         }
         // Relay-less compositions answer authenticated punch offers over the
-        // retained Yggdrasil bridge (leaf L4); the responder owns burst
-        // execution END TO END, off the accept loop and capped (Finding 1):
-        // the accept loop never runs a probe burst. With relay fields present
-        // no responder exists and behavior is unchanged.
-        if parts.punch_task.is_none() && parts.relay_addr.is_none() {
-            server_close::spawn_responder(parts, &self.allowlist);
+        // retained Yggdrasil bridge (leaf L4), a pinned relay over the carrier
+        // side channel (leaf L4b); the responder owns burst execution END TO
+        // END, off the accept loop and capped (Finding 1): the accept loop
+        // never runs a probe burst.
+        if parts.punch_task.is_none() {
+            if parts.relay_addr.is_none() {
+                server_close::spawn_responder(parts, &self.allowlist);
+            } else {
+                server_close::spawn_carrier_responder(parts, &self.allowlist);
+            }
         }
         let outcome = drive_loop(parts, self.limits, &self.config, shutdown).await;
         let parts = match std::mem::replace(&mut self.phase, ServerPhase::Done(Ok(()))) {

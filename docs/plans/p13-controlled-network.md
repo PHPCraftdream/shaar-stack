@@ -404,7 +404,7 @@ Status: **partly implemented** (design rewritten 2026-11-14; status updated 2026
 Leaves L1, L0, L2 and the L5 fixture part are merged; L4 is in progress; L3, the L5 cases and
 L6 are not started; no namespace dispatch has yet run against the new behavior, so row A5
 stays a negative finding until L6 produces receipts. A second rendezvous channel of R5 (the
-libp2p relay carrier when a relay is configured) is tracked as leaf L4b, after L4. The
+libp2p relay carrier when a relay is configured) is leaf L4b, after L4 (implemented 2026-11-16: the punch messages ride the authenticated carrier link as side-channel datagrams, see the L4b entry below). The
 design text below is kept as written. It answers the A5 finding
 (scenarios.md §10.2, row A5): with a port-preserving cone NAT on each router and Yggdrasil
 denied, neither product direction punches; the signed record lists only the Server's private
@@ -770,6 +770,27 @@ un-dispatched.
   zero Ygg payload in signal mode. Units in ordinary CI; the namespace proof needs a
   privileged dispatch. Depends on L0 (no-relay path); independent of L3. Effort L.
   - Status: implemented 2026-11-15 for ordinary CI — bounded candidate exchange over the Yggdrasil bridge control channel plus simultaneous QUIC probes, covered by wire codec, candidate builder, client state machine, server responder, and one in-process loopback role test proving the exchange and direct-path selection. The privileged double-cone-NAT namespace proof remains a later leaf. The recorded A5/A6 namespace verdicts are unchanged until a new dispatch re-runs them.
+- **L4b — punch coordination over the libp2p relay carrier** (R5, second rendezvous channel;
+  a v1 leaf by the 2026-11-16 owner decision). Files: `crates/shaar-p2p/src/bridge/` (the
+  punch side channel), `crates/shaar/src/network/signaling/punch/carrier.rs`,
+  `crates/shaar/src/startup/role/` wiring and `server_close/carrier_punch.rs`. Acceptance:
+  with a pinned relay the Client and the Server exchange the same Offer/Answer messages over
+  the authenticated carrier link and complete the probes over direct QUIC; the relay carries
+  signaling only, and a failed or unanswered exchange falls through to the unchanged relay
+  negotiation. Depends on L4 (message codec, state machine, responder workers).
+  - Mechanism: a punch message is a carrier datagram with the 8-byte prefix `shaar-pn` beside
+    the QUIC packets of the custom transport. The pump routes prefixed datagrams, after the
+    same authentication guards, into a bounded queue (16, dropped when full) and never to
+    iroh; the peer of a message is the authenticated link's peer. The Client brings the
+    carrier link up, punches for at most half of the remaining attempt, then negotiates as
+    before; the Server routes inbound messages per allowlisted peer (queue of 8) into the
+    existing rate-limited responder workers and probe bursts.
+  - Status: implemented 2026-11-16 for ordinary CI: pump classification test on two real
+    carriers, an exchange over real carrier links ending in a direct session, router and
+    overflow cases, and one in-process role test with a pinned relay whose punch counter
+    proves the direct session came from the punch and not from the negotiation. The relay
+    rows of the namespace matrix (`dnat-cone-relay-*`) are re-evaluated only by the L6
+    dispatches; no namespace dispatch has run against L4b yet.
 - **L5 — harness**: DHT fixture `ip` votes plus observed-address reporting, the new cases and
   oracle flips (`flows/scenarios.py`, one new `flows/` module, `processes.py`,
   `runtime/phase.py`, `contract.py`, impact map). The fixture vote support is independent of
