@@ -918,7 +918,7 @@ a reviewed patch of the prepared `iroh-dns`, which was not made and is a decisio
 - **Rotation and revocation.** Rotating the key means writing a new file on the Server and giving
   it to the clients; records already published stay readable by their former holders until they
   expire (300 s, the signed-age limit).
-- **Acceptance (ordinary CI), written and awaiting a run.** A holder of the key opens the exact
+- **Acceptance (ordinary CI), executed: fork run 43914611115 and upstream run 43917519888 on `a2dbe17`, green on both OS.** A holder of the key opens the exact
   addresses; a wrong key, a flipped value, a different signed timestamp and a missing key are
   distinguished and none yields an address; the signed record contains neither the address text
   nor its octets; plain and sealed entries together are rejected; a sealed value with an invalid
@@ -926,5 +926,7 @@ a reviewed patch of the prepared `iroh-dns`, which was not made and is a decisio
   refresh; `plain` is unchanged and `off` stays the default; the configuration rejects every
   invalid combination naming the field; an unreadable key file stops the composed start before any
   bind with a redacted message. The namespace check (two privileged dispatches are authorized)
-  shows that a Client holding the key still reaches a direct path through the cone NATs.
+  showed that a Client holding the key still reaches a direct path through the cone NATs: dispatch
+  43920291161 on `a2dbe17`, 7 of 7 `punch` cases passed, including `dnat-cone-encrypted-signal` and
+  `-standby` (sealed record stored, `record:1 resolve=found` in the Client route line, direct after 72 ms and 18 ms).
 
