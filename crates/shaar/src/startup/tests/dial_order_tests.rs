@@ -344,3 +344,36 @@ async fn no_configured_relay_ends_the_attempt_typed_after_the_direct_phase() {
         "no configured relay: the negotiation phase does not exist"
     );
 }
+
+/// NAT-L4e: with a punch channel the record lookup may hold the attempt for one second at
+/// most, so the punch phase keeps the rest of the 3 s attempt; without one the lookup keeps
+/// its five seconds and the attempt deadline still wins.
+#[tokio::test(start_paused = true)]
+async fn the_record_lookup_leaves_the_punch_phase_its_share_of_the_attempt() {
+    let now = Instant::now();
+    let attempt = now + Duration::from_secs(3);
+    assert_eq!(
+        resolve_budget(now, attempt, true),
+        now + Duration::from_secs(1)
+    );
+    assert!(
+        attempt - resolve_budget(now, attempt, true) >= Duration::from_secs(2),
+        "the punch phase keeps at least two seconds of a three second attempt"
+    );
+    assert_eq!(resolve_budget(now, attempt, false), attempt);
+    let long = now + Duration::from_secs(30);
+    assert_eq!(
+        resolve_budget(now, long, false),
+        now + Duration::from_secs(5)
+    );
+    assert_eq!(
+        resolve_budget(now, long, true),
+        now + Duration::from_secs(1)
+    );
+    let short = now + Duration::from_millis(400);
+    assert_eq!(
+        resolve_budget(now, short, true),
+        short,
+        "a shorter attempt deadline always wins"
+    );
+}

@@ -43,6 +43,22 @@ const MAX_CANDIDATES: usize = crate::startup::resources::MAX_SNAPSHOT_ADDRESSES;
 /// Hard ceiling for one Mainline resolve inside a dial attempt.
 const RESOLVE_BUDGET: Duration = Duration::from_secs(5);
 
+/// Longest an attempt waits for the record lookup while a punch channel exists. A live
+/// lookup takes 6 to 10 s against a 3 s attempt, so waiting out the attempt for it only
+/// ended every attempt before its punch phase began (live smoke 43784413811: nine
+/// attempts, `reason=deadline` after 0 ms, two thirds of them with a candidate).
+const RESOLVE_BUDGET_WITH_PUNCH: Duration = Duration::from_secs(1);
+
+/// The instant by which the record lookup of this attempt must have answered.
+fn resolve_budget(now: Instant, deadline: Instant, punch_present: bool) -> Instant {
+    let ceiling = if punch_present {
+        RESOLVE_BUDGET_WITH_PUNCH
+    } else {
+        RESOLVE_BUDGET
+    };
+    deadline.min(now + ceiling)
+}
+
 /// Fixed connect slice for one private/local-scope candidate (R1): a silent
 /// candidate must not consume the whole attempt deadline. Public-scope
 /// candidates keep the full remaining deadline.
@@ -138,7 +154,7 @@ impl NativeDialer {
             ResolveObservation::cached(record, hint)
         } else {
             let key = EndpointId::from_bytes(self.peer.as_bytes()).map_err(|_| DialError)?;
-            let budget = deadline.min(Instant::now() + RESOLVE_BUDGET);
+            let budget = resolve_budget(Instant::now(), deadline, self.punch.is_some());
             let answer = timeout_at(budget, async {
                 if self.refresh_after_loss {
                     self.resources.resolve_fresh(key).await
