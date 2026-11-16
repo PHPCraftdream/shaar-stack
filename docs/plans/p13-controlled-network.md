@@ -802,3 +802,57 @@ lookup per refresh window, ≤4 candidates per attempt); (4) the exact ktav fiel
 R4 flag, reviewed together with the L0 schema change that makes the signaling relay pair
 optional; (5) confirm that a punched direct path always outranks standby Yggdrasil payload
 (north-star step 4) once a punch exists.
+
+### 7. L3b design note: encrypted published address (proposal, awaiting owner approval)
+
+Requested on 2026-11-15, scope confirmed on 2026-11-16: an opt-in mode in which only holders of
+the decryption keys learn the Server's real IP address from the DHT record. This note is the
+first of two steps; the second (code and tests) starts only after the owner approves the threat
+model and the scheme below. Setting: `publish_address = encrypted` (reserved today; `off` stays
+the default and `plain` keeps its present behavior).
+
+**Who the mode hides the address from.** A party that knows the Server's public key (or finds it
+in the DHT) and reads its mutable record: a passive DHT observer, a storage node, a crawler
+enumerating keys. These parties read every published address today.
+
+**What it does not hide.** The existence, size and sequence number of the record; the Yggdrasil
+address derived from the key; the IP from the Server's configured Yggdrasil peers; the IP from
+any peer that connects directly (QUIC reveals it by design); anything from a client that
+holds a decryption right and leaks it. Forged DHT votes (a separate risk of the reflexive
+source) are not addressed here.
+
+**Candidate schemes.**
+
+- (a) *Sealed envelopes to the allowlisted client keys.* Each publication draws a random content
+  key K and encrypts the address list with an AEAD, binding the record key and sequence number
+  as associated data. K is wrapped once per allowlisted client with an X25519 agreement derived
+  from the client's Ed25519 key (birational map) through an ephemeral key shared by the
+  record. No new secret exists: the model stays "one key per device". Size grows linearly with
+  the allowlist: the record value is capped at 1000 bytes (`MAX_DNS_BYTES`); with the ephemeral
+  key, nonce, a four-byte recipient hint, a 48-byte wrap per recipient and about 90 bytes of
+  ciphertext, roughly a dozen recipients fit. A longer allowlist must fail configuration
+  validation (fail closed), never silently drop recipients.
+- (b) *One shared secret in the configuration.* Compact and independent of the allowlist
+  size, but it adds a second secret outside the one-key model, needs out-of-band distribution
+  and makes revocation a re-keying of every client.
+- (c) *Derivation from the public key alone.* Rejected: the key is public, so nothing is hidden.
+
+**Recommendation.** (a). Rotation is natural (a fresh K per publication); removing a client from
+the allowlist excludes it from the next publication, while records already published stay
+readable by their former holders until they expire. A client without a decryption right gets no
+address from the record and keeps the rendezvous (L4) and Yggdrasil paths, exactly as with `off`.
+
+**Primitives and dependencies.** The lock already contains `chacha20poly1305`, `hkdf`,
+`x25519-dalek`, `curve25519-dalek`, `ed25519-dalek` and `crypto_box`. Using them directly needs a
+dependency edge from the `shaar` package to packages that are already locked (no new package and
+no version change, but `Cargo.lock` records the edge), so it needs the owner's agreement. No
+home-made construction: only these reviewed primitives in their standard compositions.
+
+**Acceptance for the second step (ordinary CI).** An allowlisted client decrypts and gets the
+exact addresses; a key outside the allowlist does not; a flipped ciphertext, a swapped record
+key or sequence number is rejected; the record stays within 1000 bytes at the recipient
+limit and configuration validation rejects an allowlist beyond it with the offending field named;
+`encrypted` leaves `off` the default and changes nothing for `plain`.
+
+**Decisions requested.** Scheme (a) or (b); permission for the dependency edge on the locked
+primitives; acceptance of the recipient limit; permission to start the leaf.
