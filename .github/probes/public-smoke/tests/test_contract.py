@@ -495,6 +495,22 @@ class ObservabilityTests(unittest.TestCase):
                                                         "reasons": {"deadline": 2, "closed": 1}})
         self.assertIn("end reasons: closed=1, deadline=2", claim)
 
+    def test_punch_ports_are_scanned_per_role_without_addresses(self):
+        text = "\n".join([
+            "shaar: client punch ports own=40001,40002 peer=51234",
+            "shaar: server punch ports own=51234 peer=40001,40002",
+            "shaar: client punch ports own=- peer=-",
+            "shaar: client punch ports own=40001 peer=203.0.113.5:51234",
+            "shaar: client punch ports own=99999999 peer=1",
+        ])
+        self.assertEqual(
+            CONTRACT.scan_ports(text, "client"),
+            [{"own": [40001, 40002], "peer": [51234]}, {"own": [], "peer": []}])
+        self.assertEqual(CONTRACT.scan_ports(text, "server"), [{"own": [51234], "peer": [40001, 40002]}])
+        self.assertEqual(CONTRACT.scan_ports("", "client"), [])
+        many = "\n".join("shaar: client punch ports own=1 peer=2" for _ in range(20))
+        self.assertEqual(len(CONTRACT.scan_ports(many, "client")), 8)
+
     def test_reflexive_windows_and_server_offers_are_counted_without_addresses(self):
         text = "\n".join([
             "shaar: reflexive window outcome=skipped elapsed_ms=10001",

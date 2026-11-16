@@ -384,6 +384,24 @@ def scan_reflexive(text):
     return found
 
 
+# Candidate PORTS of the punch exchange (leaf PORT-DIAG): never addresses. A peer port that differs from the
+# port the peer bound shows a NAT that rewrites the source port.
+PORTS_LINE = re.compile(
+    r"^shaar: (client|server) punch ports own=(-|[0-9]{1,5}(?:,[0-9]{1,5}){0,3}) "
+    r"peer=(-|[0-9]{1,5}(?:,[0-9]{1,5}){0,3})$")
+
+
+def scan_ports(text, role):
+    """The first 8 own and peer candidate port lists this role traced, in order (empty lists for '-')."""
+    found = []
+    for line in text.splitlines():
+        match = PORTS_LINE.fullmatch(line.strip())
+        if match and match[1] == role and len(found) < 8:
+            found.append({side: [] if match[index] == "-" else [int(port) for port in match[index].split(",")]
+                          for side, index in (("own", 2), ("peer", 3))})
+    return found
+
+
 def scan_offers(text):
     """Offers the Server received: how many, how many carried candidates, and what became of the Answer."""
     found = {"received": 0, "with_candidates": 0, "answers": {}}

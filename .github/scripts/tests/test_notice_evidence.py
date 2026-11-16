@@ -5,10 +5,21 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+
+
+class ResolvedTemporaryDirectory(tempfile.TemporaryDirectory):
+    """A temporary directory whose path has no symlink component: macOS keeps temp dirs under /var,
+    a link to /private/var, which the evidence tool refuses by design."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.name = os.path.realpath(self.name)
+
 
 SCRIPT = Path(__file__).resolve().parents[2] / "actions" / "dependency-license" / "notice_evidence.py"
 spec = importlib.util.spec_from_file_location("notice_evidence", SCRIPT)
@@ -33,7 +44,7 @@ class NoticeEvidenceTests(unittest.TestCase):
         return pkg_id, m, s, source
 
     def test_preserves_exact_bytes_identity_and_limits(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             pkg_id, metadata, sources, _ = self.fixture(root)
             result, _ = collector.collect(metadata, sources)
@@ -47,7 +58,7 @@ class NoticeEvidenceTests(unittest.TestCase):
 
     def test_empty_discovered_and_explicit_license_rejected(self):
         for explicit in (False, True):
-            with self.subTest(explicit=explicit), tempfile.TemporaryDirectory() as temp:
+            with self.subTest(explicit=explicit), ResolvedTemporaryDirectory() as temp:
                 root = Path(temp)
                 _, metadata, sources, source = self.fixture(root, not explicit)
                 license_path = source / ("TERMS.txt" if explicit else "LICENSE-empty")
@@ -60,7 +71,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                     collector.collect(metadata, sources)
 
     def test_duplicate_nested_metadata_and_source_map_keys_rejected(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, _ = self.fixture(root)
             metadata.write_text('{"outer":{"same":1,"same":2}}', encoding="utf-8")
@@ -72,7 +83,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 collector.collect(metadata, sources)
 
     def test_reparse_attributes_rejected_by_helper_and_walk(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             directory = source / "junction-simulated"
@@ -94,7 +105,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                     collector.collect(metadata, sources)
 
     def test_multi_package_permutation_deterministic(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, _ = self.fixture(root)
             second = root / "prepared-second"
@@ -117,7 +128,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertEqual(first, collector.collect(metadata, sources)[0])
 
     def test_output_alias_symlink_and_existing_destination_rejected(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             with self.assertRaisesRegex(collector.EvidenceError, "already exists"):
@@ -131,7 +142,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 collector._write_output(link, b"bad", [metadata, sources], [source])
 
     def test_atomic_output_success_no_clobber_and_source_descendant(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             output = root / "evidence.json"
@@ -144,7 +155,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertFalse((source / "LICENSE-overwrite").exists())
 
     def test_output_hardlink_alias_and_cleanup_on_error(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             hardlink = root / "metadata-hardlink"
@@ -163,7 +174,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertEqual(list(root.glob(".notice-evidence-*")), [])
 
     def test_missing_license_or_source_map_fails_closed(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, _ = self.fixture(root, False)
             with self.assertRaisesRegex(collector.EvidenceError, "no license evidence"):
@@ -173,7 +184,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 collector.collect(metadata, sources)
 
     def test_source_substitution_and_bad_edges_fail_closed(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, _ = self.fixture(root)
             other = root / "substitute"
@@ -191,7 +202,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 collector.collect(metadata, sources)
 
     def test_linked_root_fails_closed(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             alias = root / "linked-root"
@@ -206,7 +217,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 collector.collect(metadata, sources)
 
     def test_hardlinked_material_fails_closed(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             try:
@@ -217,7 +228,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 collector.collect(metadata, sources)
 
     def test_workspace_packages_are_recorded_as_excluded(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             pkg_id, metadata, sources, _ = self.fixture(root, False)
             data = json.loads(metadata.read_text(encoding="utf-8"))
@@ -230,7 +241,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertEqual(result["excluded_workspace_package_ids"], [pkg_id])
 
     def test_explicit_relative_license_file_preserves_exact_bytes(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root, False)
             explicit = source / "legal" / "TERMS.txt"
@@ -244,7 +255,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertEqual(bytes.fromhex(item["bytes_hex"]), b"terms\r\n\x00")
 
     def test_explicit_license_file_outside_workspace_is_collected(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             pkg_id, metadata, sources, source = self.fixture(root, False)
             explicit = source / "legal" / "TERMS-THIRD-PARTY.txt"
@@ -266,7 +277,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertEqual(result["excluded_workspace_package_ids"], [])
 
     def test_explicit_license_file_for_workspace_without_license_expression(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root, False)
             explicit = source / "legal" / "COPYING-THIRD-PARTY"
@@ -282,7 +293,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertEqual(result["entries"], [])
 
     def test_deterministic_material_order(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             (source / "LICENSE-Z").write_bytes(b"z")
@@ -292,7 +303,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertEqual(names, sorted(names, key=lambda name: name.encode("utf-8")))
 
     def test_symlink_material_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             link = source / "NOTICE-link"
@@ -304,7 +315,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 collector.collect(metadata, sources)
 
     def test_rejects_incomplete_resolved_graph(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, _ = self.fixture(root)
             data = json.loads(metadata.read_text(encoding="utf-8"))
@@ -314,7 +325,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 collector.collect(metadata, sources)
 
     def test_material_size_limit_inclusive_and_exceeded(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root, False)
             (source / "NOTICE.txt").unlink()
@@ -328,7 +339,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                     collector.collect(metadata, sources)
 
     def test_total_material_limit_inclusive_and_exceeded(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root, False)
             (source / "NOTICE.txt").unlink()
@@ -341,7 +352,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                     collector.collect(metadata, sources)
 
     def test_input_byte_limits_with_mocked_small_bounds(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, _ = self.fixture(root)
             metadata_limit = len(metadata.read_bytes())
@@ -358,7 +369,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                     path.write_bytes(original)
 
     def test_source_tree_count_and_depth_limits_are_fail_closed(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             with mock.patch.object(collector, "MAX_SOURCE_FILES", 3):
@@ -366,7 +377,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 (source / "ordinary-one").touch()
                 with self.assertRaisesRegex(collector.EvidenceError, "file count exceeds"):
                     collector.collect(metadata, sources)
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             with mock.patch.object(collector, "MAX_SOURCE_DEPTH", 2):
@@ -378,7 +389,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                     collector.collect(metadata, sources)
 
     def test_global_material_limit_across_packages(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             pkg_id, metadata, sources, source = self.fixture(root, False)
             (source / "NOTICE.txt").unlink()
@@ -400,7 +411,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                     collector.collect(metadata, sources)
 
     def test_incremental_directory_limit_and_manifest_limit(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, source = self.fixture(root)
             (source / "dir-a").mkdir()
@@ -409,7 +420,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                 (source / "dir-b").mkdir()
                 with self.assertRaisesRegex(collector.EvidenceError, "directory count exceeds"):
                     collector.collect(metadata, sources)
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, _ = self.fixture(root)
             args = mock.Mock(metadata=metadata, source_map=sources, output=root / "out.json")
@@ -420,7 +431,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                     collector.main()
                 output.assert_not_called()
     def test_global_source_file_and_directory_limits_across_packages(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             pkg_id, metadata, sources, source = self.fixture(root)
             second = root / "prepared-second"
@@ -449,7 +460,7 @@ class NoticeEvidenceTests(unittest.TestCase):
                     collector.collect(metadata, sources)
 
     def test_manifest_serialized_byte_limit_inclusive_and_exceeded(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, _ = self.fixture(root)
             manifest, _ = collector.collect(metadata, sources)
@@ -466,7 +477,7 @@ class NoticeEvidenceTests(unittest.TestCase):
             self.assertFalse(args.output.exists())
 
     def test_json_main_writes_deterministic_serialized_manifest(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with ResolvedTemporaryDirectory() as temp:
             root = Path(temp)
             _, metadata, sources, _ = self.fixture(root)
             output_path = root / "evidence.json"
