@@ -252,7 +252,7 @@ mod tests {
             }
         ));
         assert!(error.to_string().contains("address_key_file"));
-        let empty = parse("publish_address: encrypted\naddress_key_file:: \n").unwrap_err();
+        let empty = parse("publish_address: encrypted\naddress_key_file: \n").unwrap_err();
         assert!(matches!(
             empty,
             ConfigError::Validation {

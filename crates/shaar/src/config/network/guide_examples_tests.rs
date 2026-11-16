@@ -224,7 +224,7 @@ fn documented_server_validation_messages() {
         ),
         (
             "fallback: signal",
-            "fallback: signal\npublish_address: encrypted\naddress_key_file:: ",
+            "fallback: signal\npublish_address: encrypted\naddress_key_file: ",
             invalid("address_key_file", "EmptyPath"),
         ),
     ];

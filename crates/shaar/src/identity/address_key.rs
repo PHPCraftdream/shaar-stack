@@ -481,7 +481,7 @@ mod tests {
         }
         // Non-canonical trailing bits and lengths that no encoder produces are refused.
         assert_eq!(base64url_decode("Zh"), None);
-        assert_eq!(base64url_decode("Zm9"), Some(b"fo".to_vec()));
+        assert_eq!(base64url_decode("Zm9"), None, "\"fo\" encodes to Zm8");
         assert_eq!(base64url_decode("Zm_"), None);
         assert_eq!(base64url_decode("A"), None);
         assert_eq!(base64url_decode("Zg=="), None);

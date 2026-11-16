@@ -670,7 +670,7 @@ fn a_client_address_key_is_optional_and_needs_the_shared_network() {
         Some(Path::new("keys/address.key"))
     );
 
-    let empty = parse(&format!("address_key_file:: \n{base}")).unwrap_err();
+    let empty = parse(&format!("address_key_file: \n{base}")).unwrap_err();
     assert!(matches!(
         empty,
         ConfigError::Validation {
