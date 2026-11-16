@@ -123,6 +123,14 @@ impl super::KrpcSocket {
             .map_or(0, |owned| owned.resources.owned_get_rounds(operation))
     }
 
+    /// RPCs the owned operation may still admit; a query round visits at most this many
+    /// candidates and leaves the rest for its next round instead of tripping the cap.
+    pub(crate) fn owned_rpc_room(&self, operation: OperationId) -> usize {
+        self.owned
+            .as_ref()
+            .map_or(0, |owned| owned.resources.operation_rpc_room(operation))
+    }
+
     pub(crate) fn admit_owned_get_round(
         &mut self,
         operation: OperationId,

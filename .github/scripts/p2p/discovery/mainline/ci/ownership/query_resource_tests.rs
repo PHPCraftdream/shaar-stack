@@ -552,3 +552,24 @@ async fn closest_and_responders_share_candidate_budget() {
     assert_eq!(query.owner_error(), Some(ResourceError::CandidateLimit));
     assert!(query.is_done(&socket));
 }
+
+#[tokio::test]
+async fn a_full_bucket_round_visits_only_what_the_operation_rpc_cap_allows() {
+    // A live routing table offers a whole bucket (20) of closest candidates, more than the 16
+    // in-flight RPCs one operation may hold: the round must stop at the cap, not fail with it.
+    let budget = Arc::new(StoreBudget::default());
+    let mut socket = owned_socket();
+    let mut query = query(&mut socket, &budget);
+    let operation = query.operation().expect("owned operation");
+    for index in 0..20 {
+        query.add_candidate(candidate(index));
+    }
+    query.visit_closest_at(&mut socket, tokio::time::Instant::now());
+    assert_eq!(query.owner_error(), None);
+    assert_eq!(socket.operation_rpc_len(operation), 16);
+    assert_eq!(socket.owned_rpc_room(operation), 0);
+    assert!(
+        !query.is_done(&socket),
+        "the four unvisited candidates keep the query alive"
+    );
+}

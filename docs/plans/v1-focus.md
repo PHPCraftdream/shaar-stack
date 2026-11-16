@@ -1895,6 +1895,25 @@ no network answer or the 10 s bound; the line did not say). The next leaf step r
 crate sets that address on any finished query that collected a vote, and adds the lookup and info
 tokens to the window line so the following smoke can tell the causes apart.
 
+**Seventh dispatch, window tokens (2026-11-16, upstream run 43776379518, source `6cd0bcf`, same
+contract digest):** passed over Yggdrasil standby again (one exact exchange, 43 bytes each way in
+6.75 s, zero violations, no direct path, no punch exchange). The window tokens named the cause of
+the empty windows. Client: the first window `lookup=incomplete`, the five after it
+`lookup=failed:RpcLimit`; Server: `incomplete`, one `failed:DeadlineExceeded`, then
+`failed:RpcLimit` four times; `info=none` in every window of both roles, so no public address was
+ever held and the read added nothing. The Client printed seven punch attempts and the Server
+received twelve Offers, none with candidates. **Observed:** the owned DHT actor refuses the
+reflexive lookup with `RpcLimit` on the live network. **Hypothesis, from the pinned source and not
+yet proven on the network:** the owned profile caps in-flight RPCs at 16 per operation (128
+aggregate) while an iterative query round visits up to `MAX_BUCKET_SIZE_K` = 20 closest candidates
+at once, so once the routing table holds a full bucket the 17th visit fails the whole operation;
+the namespace and loopback fixtures hold only a handful of DHT nodes and never reached it. If it
+holds, every owned operation (record publication, record resolution, the reflexive lookup) fails
+on the live Mainline DHT, which fits `resolve=timeout` in every live smoke so far, and the smokes
+passed on the Yggdrasil fallback alone. Leaf DHT-L1 caps a round at the operation's remaining
+room (the caps themselves unchanged) in the two visit loops of the owned patch, with a query-level
+and an actor-level regression test; the next live smoke is the check.
+
 ### Native is not blocked (third run onward): the direct attempt
 
 The first two runs ended on Yggdrasil standby because no punch existed; the route was then
