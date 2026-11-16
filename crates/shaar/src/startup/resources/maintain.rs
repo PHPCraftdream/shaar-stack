@@ -18,7 +18,7 @@ use crate::native_discovery::runtime::publisher::PublicationStatus;
 
 use super::MAX_SNAPSHOT_ADDRESSES;
 
-const COMMANDS: usize = 8;
+pub(super) const COMMANDS: usize = 8;
 const RETRIES: [Duration; 4] = [
     Duration::from_secs(1),
     Duration::from_secs(2),
@@ -67,10 +67,12 @@ pub(crate) struct Maintenance {
     pub(crate) commands: mpsc::Sender<MaintenanceCommand>,
     /// DHT-voted public IP; the owner itself lives in the task below.
     pub(crate) votes: watch::Receiver<Option<std::net::IpAddr>>,
-    stop: Option<oneshot::Sender<()>>,
-    task: Option<JoinHandle<MaintenanceExit>>,
-    watcher_stopped: Option<oneshot::Receiver<()>>,
-    terminal_failure: Option<MaintenanceJoinFailure>,
+    /// Single-source reflexive hint for punch candidates only; never published.
+    pub(crate) hint: watch::Receiver<Option<std::net::IpAddr>>,
+    pub(super) stop: Option<oneshot::Sender<()>>,
+    pub(super) task: Option<JoinHandle<MaintenanceExit>>,
+    pub(super) watcher_stopped: Option<oneshot::Receiver<()>>,
+    pub(super) terminal_failure: Option<MaintenanceJoinFailure>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,6 +106,7 @@ impl Maintenance {
         let (stop, stopped) = oneshot::channel();
         let (watcher_stopped_tx, watcher_stopped) = oneshot::channel();
         let votes = owner.public_address_watch();
+        let hint = owner.punch_hint_watch();
         let task = tokio::spawn(async move {
             // A fault unwinds only to the poll-boundary containment below, so
             // the owner is always handed back for the joined close.
@@ -134,6 +137,7 @@ impl Maintenance {
         Self {
             commands,
             votes,
+            hint,
             stop: Some(stop),
             task: Some(task),
             watcher_stopped: Some(watcher_stopped),
@@ -655,29 +659,6 @@ fn snapshot(address: EndpointAddr) -> Vec<TransportAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(test)]
-    impl Maintenance {
-        /// Spawns a task that acknowledges the watcher stop and then panics,
-        /// producing a deterministic terminal join failure.
-        pub(crate) fn spawn_failing_for_tests() -> Self {
-            let (commands, _receiver) = mpsc::channel(COMMANDS);
-            let (stop, _stopped) = oneshot::channel();
-            let (watcher_stopped_tx, watcher_stopped) = oneshot::channel();
-            let task = tokio::spawn(async move {
-                let _ = watcher_stopped_tx.send(());
-                panic!("injected maintenance task failure");
-            });
-            Self {
-                commands,
-                votes: watch::channel(None).1,
-                stop: Some(stop),
-                task: Some(task),
-                watcher_stopped: Some(watcher_stopped),
-                terminal_failure: None,
-            }
-        }
-    }
 
     #[tokio::test]
     async fn terminal_join_failure_is_cached_and_never_repolled() {

@@ -215,9 +215,14 @@ async fn fixture_majority_exposes_after_two_agreeing_windows() {
     let (mut owner, mut watch) = start_owner(0x52, &peers).await;
     assert_eq!(owner.public_address(), None);
 
-    // Window 1: single observation, no majority yet.
+    // Window 1: single observation, no majority yet; the punch-only hint already holds it.
     drive_window_settled(&counters, 1).await;
     assert_eq!(owner.public_address(), None);
+    assert_eq!(
+        owner.punch_hint(),
+        Some("203.0.113.5".parse::<IpAddr>().expect("ip A")),
+        "the hint is known one window before the majority"
+    );
 
     // Window 2: [A,A,empty] majority -> exposed.
     drive_window_settled(&counters, 2).await;
@@ -226,6 +231,7 @@ async fn fixture_majority_exposes_after_two_agreeing_windows() {
         owner.public_address(),
         Some("203.0.113.5".parse::<IpAddr>().expect("ip A"))
     );
+    assert_eq!(owner.punch_hint(), owner.public_address());
 
     // Exactly one bounded self-lookup per window: 2 target GETs per peer.
     for gets in &counters {

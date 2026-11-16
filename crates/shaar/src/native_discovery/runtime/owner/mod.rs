@@ -164,6 +164,7 @@ pub(crate) struct RuntimeOwner {
     resolver: ResolverState,
     publication: watch::Receiver<PublicationStatus>,
     public_address: watch::Receiver<Option<IpAddr>>,
+    punch_hint: watch::Receiver<Option<IpAddr>>,
 }
 
 impl RuntimeOwner {
@@ -217,11 +218,13 @@ impl RuntimeOwner {
         let (publication_tx, publication) =
             watch::channel(PublicationStatus::Pending { generation: 0 });
         let (reflexive_tx, public_address) = watch::channel(None);
+        let (hint_tx, punch_hint) = watch::channel(None);
         let reflexive = tokio::spawn(resolver::reflexive_loop(
             reflexive_handle,
             reflexive_target,
             ReflexiveTally::new(),
             reflexive_tx,
+            hint_tx,
             reflexive_stop_receiver,
             fast_reflexive,
         ));
@@ -247,6 +250,7 @@ impl RuntimeOwner {
             resolver: ResolverState::new(owner_clock),
             publication,
             public_address,
+            punch_hint,
         })
     }
 
@@ -482,6 +486,17 @@ impl RuntimeOwner {
     /// cancel-safe.
     pub(crate) fn public_address_watch(&self) -> watch::Receiver<Option<IpAddr>> {
         self.public_address.clone()
+    }
+
+    /// The single-source reflexive hint (leaf HINT-1): known after the first window that observed an
+    /// address, before the majority. For punch candidates only; never published.
+    pub(crate) fn punch_hint(&self) -> Option<IpAddr> {
+        *self.punch_hint.borrow()
+    }
+
+    /// Watch clone of the punch hint; `changed()` on tokio watch is cancel-safe.
+    pub(crate) fn punch_hint_watch(&self) -> watch::Receiver<Option<IpAddr>> {
+        self.punch_hint.clone()
     }
 
     pub(crate) async fn withdraw(&self) -> Result<(), RuntimeError> {

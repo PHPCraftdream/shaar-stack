@@ -406,6 +406,23 @@ impl ReflexiveTally {
     }
 }
 
+/// Punch-only hint (leaf HINT-1): the address a window just observed, available before two
+/// windows agree. Once a majority is exposed the hint follows it; an empty window never clears
+/// it. It is never published and never counts toward the majority.
+fn note_hint(
+    hint: &watch::Sender<Option<IpAddr>>,
+    observed: Option<IpAddr>,
+    exposed: Option<IpAddr>,
+) {
+    if let Some(address) = exposed.or(observed) {
+        hint.send_if_modified(|current| {
+            let changed = *current != Some(address);
+            *current = Some(address);
+            changed
+        });
+    }
+}
+
 /// Advisory reflexive-address watcher. Never published anywhere (record,
 /// publisher and dial behavior are untouched): publication is leaf L3.
 ///
@@ -443,6 +460,7 @@ pub(super) async fn reflexive_loop(
     target: n0_mainline::Id,
     mut tally: ReflexiveTally,
     sender: watch::Sender<Option<IpAddr>>,
+    hint: watch::Sender<Option<IpAddr>>,
     mut stop: oneshot::Receiver<()>,
     fast_start: bool,
 ) {
@@ -458,6 +476,7 @@ pub(super) async fn reflexive_loop(
             let observation = probe.observation();
             if let Some(observed) = observation {
                 let value = tally.observe(observed);
+                note_hint(&hint, observed, value);
                 if value != sent {
                     sender.send_replace(value);
                     sent = value;
@@ -493,6 +512,7 @@ pub(super) async fn reflexive_loop(
                     continue;
                 };
                 let value = tally.observe(observed);
+                note_hint(&hint, observed, value);
                 if value != sent {
                     sender.send_replace(value);
                     sent = value;
@@ -587,6 +607,39 @@ mod window_line_tests {
         assert!(FAST_START_CONFIRM < FAST_START_RETRY);
         assert!(FAST_START_RETRY < FAST_START_INTERVAL);
         assert!(!FAST_START_CONFIRM.is_zero());
+    }
+
+    #[test]
+    fn the_punch_hint_follows_the_latest_observation_until_a_majority_is_exposed() {
+        use super::note_hint;
+        let other = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 8));
+        let (hint, view) = tokio::sync::watch::channel(None);
+        note_hint(&hint, None, None);
+        assert_eq!(*view.borrow(), None, "an empty window sets nothing");
+        note_hint(&hint, Some(ADDRESS), None);
+        assert_eq!(
+            *view.borrow(),
+            Some(ADDRESS),
+            "one observation is enough for the hint"
+        );
+        note_hint(&hint, Some(other), None);
+        assert_eq!(
+            *view.borrow(),
+            Some(other),
+            "the latest single observation wins"
+        );
+        note_hint(&hint, None, None);
+        assert_eq!(
+            *view.borrow(),
+            Some(other),
+            "an empty window never clears it"
+        );
+        note_hint(&hint, Some(other), Some(ADDRESS));
+        assert_eq!(
+            *view.borrow(),
+            Some(ADDRESS),
+            "an exposed majority wins over a single observation"
+        );
     }
 
     #[test]

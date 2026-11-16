@@ -369,3 +369,48 @@ async fn public_address_follows_the_vote_watch_once_the_owner_moved_into_mainten
     votes_tx.send_replace(None);
     assert_eq!(resources.public_address(), None, "a withdrawn vote is gone");
 }
+
+/// HINT-1: punch candidates fall back to the single-source hint while publication keeps reading
+/// the confirmed vote only; a confirmed vote wins over the hint.
+#[tokio::test]
+async fn punch_address_prefers_the_confirmed_vote_and_falls_back_to_the_hint() {
+    let mut maintenance = Maintenance::spawn_failing_for_tests();
+    let (votes_tx, votes) = watch::channel::<Option<std::net::IpAddr>>(None);
+    let (hint_tx, hint) = watch::channel::<Option<std::net::IpAddr>>(None);
+    maintenance.votes = votes;
+    maintenance.hint = hint;
+    let (owner_commands, _requests) = tokio::sync::mpsc::channel(1);
+    let resources = super::super::SharedResources {
+        shared: shared_with(StartupResources {
+            endpoint: None,
+            native_transferred: false,
+            native_quiesced: false,
+            maintenance: Some(maintenance),
+            owner: None,
+            withdrawal_done: false,
+            ygg: None,
+        }),
+        owner_commands,
+    };
+    assert_eq!(resources.punch_address(), None, "nothing observed yet");
+    let hinted: std::net::IpAddr = "203.0.113.2".parse().expect("documentation address");
+    hint_tx.send_replace(Some(hinted));
+    assert_eq!(
+        resources.punch_address(),
+        Some(hinted),
+        "the hint feeds punch"
+    );
+    assert_eq!(
+        resources.public_address(),
+        None,
+        "the hint is never the published vote"
+    );
+    let confirmed: std::net::IpAddr = "203.0.113.3".parse().expect("documentation address");
+    votes_tx.send_replace(Some(confirmed));
+    assert_eq!(
+        resources.punch_address(),
+        Some(confirmed),
+        "a confirmed vote wins"
+    );
+    assert_eq!(resources.public_address(), Some(confirmed));
+}

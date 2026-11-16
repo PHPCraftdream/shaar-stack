@@ -455,6 +455,26 @@ impl SharedResources {
             })
     }
 
+    /// The address punch candidates are built from (leaf HINT-1): the confirmed vote, else the
+    /// single-source hint of the first window. Never published; publication reads
+    /// `public_address` only. Cancel-safe.
+    pub(crate) fn punch_address(&self) -> Option<std::net::IpAddr> {
+        self.public_address().or_else(|| {
+            let slot = slot_lock(&self.shared.slot);
+            let resources = slot.resources.as_ref()?;
+            resources
+                .owner
+                .as_ref()
+                .and_then(RuntimeOwner::punch_hint)
+                .or_else(|| {
+                    resources
+                        .maintenance
+                        .as_ref()
+                        .and_then(|maintenance| *maintenance.hint.borrow())
+                })
+        })
+    }
+
     /// Transfers paired payload endpoint/pump. Caller closes them before the remaining bridge.
     pub(crate) fn take_ygg_payload(&self) -> Option<(YggEndpoint, YggPump)> {
         let mut slot = slot_lock(&self.shared.slot);

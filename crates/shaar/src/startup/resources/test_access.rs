@@ -5,7 +5,7 @@ use super::{
 };
 use iroh::EndpointAddr;
 use std::sync::PoisonError;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, oneshot, watch};
 
 impl SharedResources {
     #[cfg(test)]
@@ -150,5 +150,29 @@ impl SharedResources {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+}
+
+impl Maintenance {
+    /// Spawns a task that acknowledges the watcher stop and then panics,
+    /// producing a deterministic terminal join failure.
+    #[cfg(test)]
+    pub(crate) fn spawn_failing_for_tests() -> Self {
+        let (commands, _receiver) = mpsc::channel(super::maintain::COMMANDS);
+        let (stop, _stopped) = oneshot::channel();
+        let (watcher_stopped_tx, watcher_stopped) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = watcher_stopped_tx.send(());
+            panic!("injected maintenance task failure");
+        });
+        Self {
+            commands,
+            votes: watch::channel(None).1,
+            hint: watch::channel(None).1,
+            stop: Some(stop),
+            task: Some(task),
+            watcher_stopped: Some(watcher_stopped),
+            terminal_failure: None,
+        }
     }
 }
