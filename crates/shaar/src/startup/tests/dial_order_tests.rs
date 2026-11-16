@@ -377,3 +377,56 @@ async fn the_record_lookup_leaves_the_punch_phase_its_share_of_the_attempt() {
         "a shorter attempt deadline always wins"
     );
 }
+
+/// DHT-L2: an attempt that stops waiting for the record lookup must not cancel it. The next
+/// attempt collects the same task, nothing is started twice, and a finished, aborted or
+/// failed lookup never lingers in the slot.
+#[tokio::test(start_paused = true)]
+async fn an_attempt_that_stops_waiting_leaves_the_lookup_for_the_next_attempt() {
+    let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let start = |starts: &Arc<std::sync::atomic::AtomicUsize>| {
+        let starts = Arc::clone(starts);
+        move || {
+            starts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::spawn(async {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                7_u32
+            })
+        }
+    };
+    let begin = Instant::now();
+    let mut slot = None;
+    // The first attempt waits one second and leaves empty-handed; the lookup keeps running.
+    assert_eq!(
+        await_held(&mut slot, begin + Duration::from_secs(1), start(&starts)).await,
+        None
+    );
+    assert!(slot.is_some(), "the unfinished lookup is kept");
+    // The next attempt collects that very lookup once it finishes, without a second start.
+    let answer = await_held(
+        &mut slot,
+        begin + Duration::from_millis(2500),
+        start(&starts),
+    )
+    .await;
+    assert_eq!(answer, Some(7));
+    assert!(slot.is_none(), "a finished lookup is consumed");
+    assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    // With nothing held the next attempt starts a fresh lookup.
+    let later = Instant::now();
+    assert_eq!(
+        await_held(&mut slot, later + Duration::from_secs(1), start(&starts)).await,
+        None
+    );
+    assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    // An aborted lookup answers nothing and is not kept.
+    let aborted = tokio::spawn(std::future::pending::<u32>());
+    aborted.abort();
+    let mut slot = Some(aborted);
+    let answer = await_held(&mut slot, Instant::now() + Duration::from_secs(1), || {
+        unreachable!("a held lookup is never restarted")
+    })
+    .await;
+    assert_eq!(answer, None);
+    assert!(slot.is_none());
+}
