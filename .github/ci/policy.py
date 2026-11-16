@@ -20,6 +20,12 @@ GRAPH_RECIPES = (
     ".github/scripts/p2p/discovery/simple_dns/prepare.py", ".github/scripts/p2p/discovery/dns/",
     ".github/scripts/p2p/discovery/resolver/", ".github/scripts/p2p/discovery/kad/",
 )
+# Product files the real-carrier frame proof rewrites in a disposable copy (instrument.PRODUCT_FILES); moving or
+# editing one breaks that proof, so it must run even though the file belongs to an ordinary suite.
+CARRIER_FRAME_INPUTS = frozenset({
+    "crates/shaar-p2p/src/bridge/driver.rs", "crates/shaar/src/network/admission/mod.rs",
+    "crates/shaar/src/network/signaling/tests/owned_tests.rs",
+})
 SUITES = {
     "protocols": ("shaar-p2p", ("carrier::driver::protocols::", "infrastructure::tests::identification::")),
     "carrier-core": ("shaar-p2p", ("carrier::driver::tests::", "carrier::driver::fault_tests::", "carrier::driver::boundary::tests::", "carrier::driver::events::request_owner::tests::")),
@@ -257,6 +263,8 @@ def select(paths, *, full=False):
     if (GRAPH_INPUTS & set(paths) or any(path.startswith(GRAPH_RECIPES) for path in paths)) and not full:
         flags["native_graph"] = True
         add(target("shaar", kind="test", name="native_graph_witness"))
+    if CARRIER_FRAME_INPUTS & set(paths) and not full:
+        flags["carrier_frames"] = True
     flags.update(full=full, rust=full or bool(targets), product=bool(targets))
     flags["prepare"] = full or bool(targets) or any(flags[name] for name in DOMAINS)
     return {"selection": flags, "targets": [targets[key] for key in sorted(targets)],

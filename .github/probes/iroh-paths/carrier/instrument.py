@@ -10,6 +10,17 @@ PACKET_HELPER = ".github/probes/iroh-paths/gate/bridge/support/packet_identity.p
 PACKET_HELPER_SHA = "55ec2863c031fde609e2258b8c0e9d095288462a1bd52a47f28ff35aa81c335e"
 ORACLE = ".github/probes/iroh-paths/gate/bridge/support/wire_oracle.rs"
 ORACLE_SHA = "40a3945e9e6cd3ec4a45cab61fe167f7f9be27292b602acf11c1f651f1abe080"
+# Product files rewritten in the disposable copy; .github/ci/policy.py must select this proof when one changes.
+DRIVER = "crates/shaar-p2p/src/bridge/driver.rs"
+ADMISSION = "crates/shaar/src/network/admission/mod.rs"
+TESTS = "crates/shaar/src/network/signaling/tests/owned_tests.rs"
+PRODUCT_FILES = (DRIVER, ADMISSION, TESTS)
+SCENARIO = "target/carrier-frame-support/scenario.rs"
+
+
+def scenario_module_path():
+    """The `#[path]` value that reaches SCENARIO from the directory of TESTS."""
+    return "../" * len(Path(TESTS).parent.parts) + SCENARIO
 
 
 def digest(data):
@@ -128,7 +139,7 @@ def observer(repo, root):
     records.append({"path": root_lib, "before": digest(original), "after": digest(original + extra.encode()),
                     "reverse_verified": (original + extra.encode())[:-len(extra.encode())] == original})
     receive = "                permit.send(Inbound { received, source });"
-    driver_path = root / "crates/shaar-p2p/src/bridge/driver.rs"
+    driver_path = root / DRIVER
     driver = driver_path.read_text(encoding="utf-8")
     guards = ("                if !handle.is_current(&received) { continue; }",
               "                let Ok(source) = source else { continue; };",
@@ -136,7 +147,7 @@ def observer(repo, root):
     if any(driver.count(guard) != 1 for guard in guards) or [driver.index(guard) for guard in guards] != sorted(driver.index(guard) for guard in guards):
         raise ValueError("authenticated/current carrier receive boundary changed")
     send = "        let _ = handle.send_on(frame.link, frame.packet).await;"
-    edit(root, "crates/shaar-p2p/src/bridge/driver.rs", send,
+    edit(root, DRIVER, send,
          "        let packet_hex = crate::carrier_frame_probe::packet_hex(&frame.packet);\n        let result = handle.send_on(frame.link, frame.packet).await;\n        crate::carrier_frame_probe::send_result(handle.peer_id(), &frame.link, packet_hex.as_deref(), &result);", records)
     rejects = (
         (guards[0], "                if !handle.is_current(&received) { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"stale\", &received); continue; }"),
@@ -144,8 +155,8 @@ def observer(repo, root):
         (guards[2], "                if !shared.matches(&source, link) { crate::carrier_frame_probe::receive_rejected(handle.peer_id(), \"route-mismatch\", &received); continue; }"),
     )
     for before, after in rejects:
-        edit(root, "crates/shaar-p2p/src/bridge/driver.rs", before, after, records)
-    edit(root, "crates/shaar-p2p/src/bridge/driver.rs", receive,
+        edit(root, DRIVER, before, after, records)
+    edit(root, DRIVER, receive,
          "                crate::carrier_frame_probe::received(handle.peer_id(), &received, &source);\n" + receive,
          records)
     return {"files": records, "support": copied}
@@ -166,7 +177,7 @@ def workspace(repo, root, scenario, allow_all):
         data = source.read_bytes()
         (root / "target/carrier-frame-support" / name).write_bytes(data)
         copied.append({"name": name, "sha256": digest(data)})
-    admission = "crates/shaar/src/network/admission/mod.rs"
+    admission = ADMISSION
     edit(root, admission, "impl Endpoint {", """fn carrier_frame_prefix(identity: &Identity) -> String {
     use std::fmt::Write as _;
     let mut result = String::with_capacity(64);
@@ -196,11 +207,11 @@ impl Endpoint {
                 &std::path::PathBuf::from(std::env::var_os("SHAAR_CARRIER_FRAME_TRACE").expect("fixture trace directory")),
                 &carrier_frame_prefix(identity),
             )""", records)
-    tests = "crates/shaar/src/network/signaling/owned_tests.rs"
+    tests = TESTS
     original = (root / tests).read_bytes()
     if b"carrier_frame_fixture" in original:
         raise ValueError("SDK carrier fixture is already installed")
-    extra = '\n#[path = "../../../../../target/carrier-frame-support/scenario.rs"]\nmod carrier_frame_fixture;\n'
+    extra = f'\n#[path = "{scenario_module_path()}"]\nmod carrier_frame_fixture;\n'
     (root / tests).write_bytes(original + extra.encode())
     records.append({"path": tests, "before": digest(original), "after": digest(original + extra.encode()),
                     "reverse_verified": (original + extra.encode())[:-len(extra.encode())] == original})

@@ -2,6 +2,7 @@
 
 import ast
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import tomllib
@@ -303,6 +304,21 @@ class FrameContracts(unittest.TestCase):
             self.assertIn("received(handle.peer_id(), &received, &source)", source)
             self.assertLess(source.index("is_current"), source.index("receive_rejected(handle.peer_id(), \"stale\""))
             self.assertLess(source.index("route-mismatch"), source.index("permit.send(Inbound"))
+
+    def test_rewritten_product_files_exist_and_select_the_frame_proof(self):
+        spec = importlib.util.spec_from_file_location("carrier_frame_policy", REPO / ".github/ci/policy.py")
+        policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(policy)
+        self.assertEqual(set(instrument.PRODUCT_FILES), policy.CARRIER_FRAME_INPUTS)
+        for path in instrument.PRODUCT_FILES:
+            with self.subTest(path=path):
+                self.assertTrue((REPO / path).is_file())
+                self.assertTrue(policy.select([path])["selection"]["carrier_frames"])
+        self.assertFalse(policy.select(["crates/shaar/src/network/signaling/endpoint.rs"])["selection"]["carrier_frames"])
+
+    def test_scenario_module_path_reaches_the_support_file_from_the_test_file_directory(self):
+        reached = os.path.normpath(REPO / Path(instrument.TESTS).parent / instrument.scenario_module_path())
+        self.assertEqual(Path(reached), Path(os.path.normpath(REPO / "target/carrier-frame-support/scenario.rs")))
 
     def test_fixture_destination_cannot_escape_repository_target(self):
         with self.assertRaises(ValueError):
