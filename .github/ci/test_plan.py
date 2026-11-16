@@ -337,6 +337,8 @@ class PolicyTests(unittest.TestCase):
                 self.assertTrue(result["selection"]["prepare"])
                 self.assertFalse(result["selection"]["full"])
                 self.assertFalse(result["selection"]["product"])
+        for path in sorted(POLICY.CARRIER_FRAME_INPUTS):
+            self.assertTrue(POLICY.select([path])["selection"]["carrier_frames"], path)
 
     def test_mainline_proofs_select_only_their_owned_domain(self):
         result = POLICY.select([".github/scripts/p2p/discovery/mainline/checks.py"])
