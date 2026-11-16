@@ -735,10 +735,11 @@ un-dispatched amendment still needs its own dispatch).
 Each leaf has authored tests and ordinary CI; no local build/test per project rules.
 Privileged = needs a namespace dispatch grant. The six-dispatch remaining-row budget is fully
 used; the owner authorized up to six further dispatches for this toolkit on 2026-11-14 (see
-the north-star decision log). They are spent in one L6 pass after L4, L3, L4b and L5 are
-merged: the `nat` group for the new and flipped cases, `base` and `faults` as a regression
-of the changed dial sequence, three in reserve. The punch-control amendment is still
-un-dispatched.
+the north-star decision log). They were spent as follows (all six are used): four before L4b (see
+scenarios.md §10), the `punch` group with the L4b cases (43867617110, PASS) and the `base`
+group as the regression of the changed relay dial sequence (43870509412, PASS). The `nat`
+controls `dnat-cone-relay-*` and the `faults` group were not re-run. The punch-control
+amendment is still un-dispatched.
 
 - **L1 (first) — dial ordering** (R1). Files: `crates/shaar/src/startup/role/dialers.rs` and
   its tests. Acceptance: with a record whose first candidate is silent and a second dialable,
@@ -792,7 +793,7 @@ un-dispatched.
     overflow cases, and one in-process role test with a pinned relay whose punch counter
     proves the direct session came from the punch and not from the negotiation. The relay
     rows of the namespace matrix (`dnat-cone-relay-*`) are re-evaluated only by the L6
-    dispatches. Dispatch 43867617110 (`b95f1a5`, group `punch`) ran the two `relaypunch` cases against L4b: both PASS (direct path, exact APP, no Ygg TCP, relay signaling seen). The `dnat-cone-relay-*` controls were not re-run; the other relay-configured rows (`dht-drop`, `relay-denied`, `relay-full`, failover) have not been re-run against the changed relay dial sequence.
+    dispatches. Dispatch 43867617110 (`b95f1a5`, group `punch`) ran the two `relaypunch` cases against L4b: both PASS (direct path, exact APP, no Ygg TCP, relay signaling seen). The `dnat-cone-relay-*` controls were not re-run. Dispatch 43870509412 (`8be550f`, group `base`) re-ran the relay-involving rows of the base group against the changed relay dial sequence (`dht-drop-signal`, `relay-denied-signal`, `failover-*`): all 12 product cases PASS, failover to Yggdrasil in 7.0 s. `relay-full-*` (the `faults` group) has not been re-run.
 - **L5 — harness**: DHT fixture `ip` votes plus observed-address reporting, the new cases and
   oracle flips (`flows/scenarios.py`, one new `flows/` module, `processes.py`,
   `runtime/phase.py`, `contract.py`, impact map). The fixture vote support is independent of
