@@ -15,7 +15,7 @@ pub(in crate::startup) mod server_close;
 use crate::path::{ConfigError, Dialer, PolicyConfig, StandbyOwner};
 #[cfg(test)]
 use crate::path::{NativeObservation, PathKind};
-use crate::startup::error::StartupError;
+use crate::startup::StartupError;
 use dialers::ErasedClientOwner;
 use dialers::RouteLink;
 
@@ -41,6 +41,17 @@ impl RoleOptions {
         StartupError::InvalidPolicy
     }
 }
+
+/// Application code that serves admitted streams instead of the fixed TCP target; it gets
+/// the authenticated client key and one stream per request.
+pub type StreamHandler = std::sync::Arc<
+    dyn Fn(
+            iroh_base::PublicKey,
+            crate::network::ServiceStream,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Waits for terminal composition cleanup; incomplete attempts retain the owner.
 /// cancel-safe: YES — only the waiter borrows the retained startup handle.

@@ -61,4 +61,56 @@ impl ServerRole {
         role.phase = ServerPhase::Starting(start);
         Ok(role)
     }
+
+    /// Test-only constructor attaching the event observer; otherwise identical
+    /// to [`ServerRole::new`].
+    #[cfg(test)]
+    pub(crate) fn with_events(
+        config: ServerConfig,
+        identity: &Identity,
+        allowlist: Allowlist,
+        limits: Limits,
+        options: RoleOptions,
+        events: RoleEventLog,
+    ) -> Result<Self, StartupError> {
+        let mut role = Self::new(config, identity, allowlist, limits, options)?;
+        role.events = Some(events);
+        Ok(role)
+    }
+
+    /// Test-only handle to THIS role's retained Yggdrasil bridge (a real
+    /// `Arc<YggBridge>` clone; its dropped-datagram counter is the carrier
+    /// peer filter observation). `Err(())` when no live composition.
+    #[cfg(test)]
+    pub(crate) fn ygg_bridge_for_tests(&self) -> Result<std::sync::Arc<shaar_ygg::YggBridge>, ()> {
+        match &self.phase {
+            ServerPhase::Admitted(parts) | ServerPhase::Live(parts) => {
+                parts.resources.ygg_bridge_for_tests()
+            }
+            _ => Err(()),
+        }
+    }
+
+    /// Test-only observer of the armed Mainline cleanup hold; `None` before
+    /// the composition's owner stage stored it.
+    #[cfg(test)]
+    pub(crate) fn mainline_cleanup_observer_for_tests(&self) -> Option<n0_mainline::Observer> {
+        match &self.phase {
+            ServerPhase::Admitted(parts) | ServerPhase::Live(parts) => {
+                parts.resources.mainline_cleanup_observer_for_tests()
+            }
+            _ => None,
+        }
+    }
+
+    /// Test-only Mainline cleanup hold over the retained composition.
+    #[cfg(test)]
+    pub(crate) fn mainline_cleanup_hold_for_tests(&self) -> Result<n0_mainline::CleanupHold, ()> {
+        match &self.phase {
+            ServerPhase::Admitted(parts) | ServerPhase::Live(parts) => {
+                parts.resources.mainline_cleanup_hold_for_tests()
+            }
+            _ => Err(()),
+        }
+    }
 }

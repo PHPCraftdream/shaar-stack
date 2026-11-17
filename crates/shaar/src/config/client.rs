@@ -111,6 +111,12 @@ impl ClientConfig {
         self.network.as_ref()
     }
 
+    /// Swaps in network settings derived from the validated ones (resolved
+    /// bootstrap host names); never called with unvalidated settings.
+    pub(crate) fn set_network(&mut self, network: NetworkSettings) {
+        self.network = Some(network);
+    }
+
     /// Merge file values with legacy and endpoint overrides before validation.
     /// Syntax and schema errors are rejected before merging.
     pub fn from_text(text: &str, over: &ClientOverrides) -> Result<ClientConfig, ConfigError> {

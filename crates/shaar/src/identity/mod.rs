@@ -25,9 +25,10 @@ mod ygg;
 
 pub use error::IdentityError;
 pub use provision::{
-    FileState, ProvisionError, ProvisionPaths, ProvisionReport, Provisioned, Role,
+    FileState, NetworkChoice, ProvisionError, ProvisionPaths, ProvisionReport, Provisioned, Role,
     allowlist_template_text, client_config_text, default_data_dir, first_run_summary_lines,
-    path_as_config_value, provision, resolve_data_dir, role_dir,
+    path_as_config_value, provision, provision_with, public_network_text, resolve_data_dir,
+    role_dir,
 };
 
 use std::net::Ipv6Addr;
@@ -102,7 +103,7 @@ impl Identity {
     /// The Yggdrasil node address (`address.AddrForKey`, one-way bit
     /// truncation — NOT invertible to the key; see [`ygg`]).
     pub fn ygg_address(&self) -> Ipv6Addr {
-        ygg::addr_for_key(&self.public_key_bytes())
+        ygg_address_of(&self.public_key_bytes())
     }
 
     /// Creates a NEW key file at `path`; never overwrites an existing one.
@@ -161,6 +162,11 @@ impl Identity {
             None => Self::create_new(path).await,
         }
     }
+}
+
+/// The Yggdrasil address derived from any public key (one-way).
+pub(crate) fn ygg_address_of(key: &[u8; 32]) -> Ipv6Addr {
+    ygg::addr_for_key(key)
 }
 
 impl std::fmt::Debug for Identity {

@@ -18,6 +18,8 @@ use crate::identity::Identity;
 
 use super::StartupError;
 
+pub(crate) mod resolve;
+
 /// Matches the signaling admission bound (`crate::network::signaling::check_peers`).
 pub const MAX_STARTUP_APP_PEERS: usize = 16;
 

@@ -20,8 +20,13 @@
 //! Key material lives only in [`Identity`]; error messages and reports
 //! never contain seed or key bytes.
 
+mod network;
+#[cfg(test)]
+mod network_tests;
 #[cfg(test)]
 mod tests;
+
+pub use network::{NetworkChoice, public_network_text};
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -321,17 +326,37 @@ async fn create_role_dir(dir: &Path) -> Result<FileState, ProvisionError> {
     Ok(FileState::Created)
 }
 
-/// Provisions one role's first-run layout under `base`.
-///
-/// Validates the embedded paths BEFORE any filesystem write, creates the
-/// role directory (0o700 on Unix), loads-or-creates the identity key, and
-/// writes the config (and, for the server, the allowlist) only when missing.
-/// Existing files are never overwritten.
+/// Provisions one role's first-run layout under `base` with a direct-only
+/// configuration: [`provision_with`] and [`NetworkChoice::Private`].
 pub async fn provision(
     role: Role,
     base: &Path,
     server_key: Option<&str>,
     server_address: Option<&str>,
+) -> Result<Provisioned, ProvisionError> {
+    provision_with(
+        role,
+        base,
+        server_key,
+        server_address,
+        NetworkChoice::Private,
+    )
+    .await
+}
+
+/// Provisions one role's layout under `base`.
+///
+/// Validates the embedded paths BEFORE any filesystem write, creates the
+/// role directory (0o700 on Unix), loads-or-creates the identity key, and
+/// writes the config (and, for the server, the allowlist) only when missing.
+/// `network` decides whether a new config carries the public `network`
+/// object. Existing files are never overwritten.
+pub async fn provision_with(
+    role: Role,
+    base: &Path,
+    server_key: Option<&str>,
+    server_address: Option<&str>,
+    network: NetworkChoice,
 ) -> Result<Provisioned, ProvisionError> {
     let dir = role_dir(base, role);
     let config = dir.join(match role {
@@ -366,10 +391,11 @@ pub async fn provision(
     } else {
         FileState::Created
     };
-    let config_text = match role {
+    let mut config_text = match role {
         Role::Server => server_config_text(&paths),
         Role::Client => client_config_text(&paths, server_key, server_address),
     };
+    network::append(&mut config_text, network);
     let config_state = write_if_missing(config, &config_text).await?;
     let allowlist_state = match &allowlist {
         Some(a) => Some(write_if_missing(a.clone(), allowlist_template_text()).await?),

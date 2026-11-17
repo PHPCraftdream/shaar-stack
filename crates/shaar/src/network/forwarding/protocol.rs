@@ -47,6 +47,20 @@ pub(super) async fn open(connection: &Connection) -> Result<Stream, ForwardError
     .map_err(|_| ForwardError::Deadline)?
 }
 
+/// Reads the one request byte; anything but OPEN is answered with BAD_REQUEST.
+/// cancel-safe: NO — consumed request bytes are not replayed.
+async fn request(stream: &mut Stream) -> Result<(), ForwardError> {
+    let mut request = [0];
+    AsyncReadExt::read_exact(&mut stream.recv, &mut request)
+        .await
+        .map_err(frame_error)?;
+    if request != [OPEN] {
+        reject(stream, BAD_REQUEST).await?;
+        return Err(ForwardError::Protocol);
+    }
+    Ok(())
+}
+
 /// cancel-safe: NO — consumed request bytes are not replayed; the caller owns
 /// and resets this stream on timeout/cancellation. The target is never peer supplied.
 pub(super) async fn target(
@@ -54,14 +68,7 @@ pub(super) async fn target(
     target: SocketAddr,
 ) -> Result<TcpStream, ForwardError> {
     tokio::time::timeout(SETUP_TIMEOUT, async {
-        let mut request = [0];
-        AsyncReadExt::read_exact(&mut stream.recv, &mut request)
-            .await
-            .map_err(frame_error)?;
-        if request != [OPEN] {
-            reject(stream, BAD_REQUEST).await?;
-            return Err(ForwardError::Protocol);
-        }
+        request(stream).await?;
         let tcp = match TcpStream::connect(target).await {
             Ok(tcp) => tcp,
             Err(_) => {
@@ -73,6 +80,20 @@ pub(super) async fn target(
             .await
             .map_err(ForwardError::from_io)?;
         Ok(tcp)
+    })
+    .await
+    .map_err(|_| ForwardError::Deadline)?
+}
+
+/// In-process serving: answers a valid request with READY and opens no TCP
+/// connection; the stream then belongs to the application handler.
+/// cancel-safe: NO — same as [`target`].
+pub(super) async fn admit(stream: &mut Stream) -> Result<(), ForwardError> {
+    tokio::time::timeout(SETUP_TIMEOUT, async {
+        request(stream).await?;
+        AsyncWriteExt::write_all(&mut stream.send, &[READY])
+            .await
+            .map_err(ForwardError::from_io)
     })
     .await
     .map_err(|_| ForwardError::Deadline)?
