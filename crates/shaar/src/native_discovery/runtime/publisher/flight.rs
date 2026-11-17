@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
-use n0_mainline::{OwnedDhtHandle, OwnedPutAdmission, OwnedPutCleanup, OwnedPutOperation};
+use n0_mainline::errors::{ConcurrencyError, PutError, PutQueryError};
+use n0_mainline::{
+    OwnedDhtHandle, OwnedPutAdmission, OwnedPutCleanup, OwnedPutError, OwnedPutOperation,
+};
 use tokio::sync::{oneshot, watch};
 
 use super::super::super::address::SnapshotError;
 use super::super::clock::Clock;
 use super::super::owner::{RuntimeError, to_mutable};
 use super::super::publisher::{PublicationStatus, PublishError, PublisherState, SignedSnapshot};
+use super::ResolveError;
 use crate::identity::Identity;
 use iroh_base::TransportAddr;
 
@@ -50,6 +54,55 @@ pub(super) struct FlightDraft {
     pub(super) initial: bool,
     pub(super) deadline: tokio::time::Instant,
     pub(super) signed_at: tokio::time::Instant,
+}
+
+/// A payload-free token for a failed record lookup or publication, for the operator trace: the
+/// variant of the cause (for example `resource:CandidateLimit`, `put:timeout`,
+/// `put:error-response:201`, `policy:TooOld`), never an address, a key or remote text.
+pub(super) fn trace_token(error: &RuntimeError) -> String {
+    match error {
+        RuntimeError::Resource(error) => format!("resource:{error:?}"),
+        RuntimeError::PutAdmission(error) => format!("admission:{:?}", error.error),
+        RuntimeError::Put(OwnedPutError::Put(error)) => put_token(error),
+        RuntimeError::Put(_) | RuntimeError::PutFailed => "put".to_owned(),
+        RuntimeError::Resolve(ResolveError::Policy(error)) => format!("policy:{error:?}"),
+        RuntimeError::Resolve(ResolveError::Decode(_)) => "undecodable".to_owned(),
+        RuntimeError::Resolve(ResolveError::NoNetworkCompletion) => "incomplete".to_owned(),
+        RuntimeError::Resolve(ResolveError::DeadlineExceeded) | RuntimeError::DeadlineExceeded => {
+            "deadline".to_owned()
+        }
+        RuntimeError::Resolve(ResolveError::DeliveryLimit) | RuntimeError::ResolveBusy => {
+            "busy".to_owned()
+        }
+        RuntimeError::Closed | RuntimeError::CloseTimeout => "closed".to_owned(),
+        _ => "other".to_owned(),
+    }
+}
+
+fn put_token(error: &PutError) -> String {
+    if let PutError::Query(PutQueryError::ErrorResponse(response)) = error {
+        return format!("put:error-response:{}", response.code);
+    }
+    if let PutError::Query(PutQueryError::Resource(resource)) = error {
+        return format!("put:resource:{resource:?}");
+    }
+    let name = if matches!(error, PutError::Query(PutQueryError::NoClosestNodes)) {
+        "no-closest-nodes"
+    } else if matches!(error, PutError::Query(PutQueryError::Timeout)) {
+        "timeout"
+    } else if matches!(error, PutError::Query(PutQueryError::Shutdown)) {
+        "shutdown"
+    } else if matches!(
+        error,
+        PutError::Concurrency(ConcurrencyError::NotMostRecent)
+    ) {
+        "not-most-recent"
+    } else if matches!(error, PutError::Concurrency(ConcurrencyError::CasFailed)) {
+        "cas-failed"
+    } else {
+        "other"
+    };
+    format!("put:{name}")
 }
 
 #[cfg(test)]
@@ -372,4 +425,47 @@ fn make_flight(
         deadline,
         signed_at,
     })
+}
+
+#[cfg(test)]
+mod token_tests {
+    use super::super::RuntimeError;
+    use super::trace_token;
+    use crate::native_discovery::policy::RecordError;
+    use n0_mainline::OwnedPutError;
+    use n0_mainline::errors::{ConcurrencyError, PutError, PutQueryError};
+
+    fn put(error: PutError) -> String {
+        trace_token(&RuntimeError::Put(OwnedPutError::Put(error)))
+    }
+
+    #[test]
+    fn a_failed_put_names_its_cause_without_remote_text() {
+        assert_eq!(put(PutError::Query(PutQueryError::Timeout)), "put:timeout");
+        assert_eq!(
+            put(PutError::Query(PutQueryError::NoClosestNodes)),
+            "put:no-closest-nodes"
+        );
+        assert_eq!(
+            put(PutError::Query(PutQueryError::Resource(
+                n0_mainline::ResourceError::RpcLimit
+            ))),
+            "put:resource:RpcLimit"
+        );
+        assert_eq!(
+            put(PutError::Concurrency(ConcurrencyError::CasFailed)),
+            "put:cas-failed"
+        );
+        assert_eq!(
+            put(PutError::Concurrency(ConcurrencyError::NotMostRecent)),
+            "put:not-most-recent"
+        );
+    }
+
+    #[test]
+    fn a_policy_failure_names_the_record_error() {
+        let policy = RuntimeError::Resolve(super::ResolveError::Policy(RecordError::TooOld));
+        assert_eq!(trace_token(&policy), "policy:TooOld");
+        assert_eq!(trace_token(&RuntimeError::PutFailed), "put");
+    }
 }
