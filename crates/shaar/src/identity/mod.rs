@@ -103,7 +103,7 @@ impl Identity {
     /// The Yggdrasil node address (`address.AddrForKey`, one-way bit
     /// truncation — NOT invertible to the key; see [`ygg`]).
     pub fn ygg_address(&self) -> Ipv6Addr {
-        ygg::addr_for_key(&self.public_key_bytes())
+        ygg_address_of(&self.public_key_bytes())
     }
 
     /// Creates a NEW key file at `path`; never overwrites an existing one.
@@ -162,6 +162,11 @@ impl Identity {
             None => Self::create_new(path).await,
         }
     }
+}
+
+/// The Yggdrasil address derived from any public key (one-way).
+pub(crate) fn ygg_address_of(key: &[u8; 32]) -> Ipv6Addr {
+    ygg::addr_for_key(key)
 }
 
 impl std::fmt::Debug for Identity {

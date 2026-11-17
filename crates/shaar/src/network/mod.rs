@@ -16,7 +16,7 @@ pub(crate) use admission::ygg::YggEndpoint;
 // The slotless punch probe capability the server-side responders drive.
 pub(crate) use admission::ProbeHandle;
 pub use error::NetworkError;
-pub use forwarding::{ForwardError, ForwardStats, ServeReport, observe};
+pub use forwarding::{ForwardError, ForwardStats, ServeReport, ServiceStream, observe};
 pub use session::Session;
 pub use signaling::{
     DiscoveredRelay, DiscoveryConfig, SignaledEndpoint, bind_signaling,

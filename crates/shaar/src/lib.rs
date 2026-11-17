@@ -7,3 +7,8 @@ mod native_discovery;
 pub mod network;
 mod path;
 pub mod startup;
+
+pub use startup::facade::{
+    AllowList, AllowListError, Client, ClientBuilder, Handler, KeyError, Network, NetworkSpec,
+    PeerKey, RunningClient, RunningServer, SdkError, Server, ServerBuilder, Service,
+};

@@ -8,6 +8,7 @@ use crate::network::observe;
 use crate::network::{ForwardError, ServeReport, Session};
 use crate::path::PathKind;
 use crate::startup::StartupError;
+use crate::startup::StreamHandler;
 use crate::startup::role::server::ServerParts;
 
 impl Drop for ServerParts {
@@ -146,19 +147,28 @@ pub(in crate::startup::role) fn spawn_session(
     mut session: Session,
     config: &ServerConfig,
     stop_rx: &watch::Receiver<bool>,
+    handler: Option<&StreamHandler>,
 ) {
     let target = config.target();
+    let handler = handler.cloned();
     let mut stop = stop_rx.clone();
     sessions.spawn(async move {
-        // `serve` enforces the fixed loopback target and pre-admitted peer.
-        let result = session
-            .serve(target, async move {
-                if *stop.borrow() {
-                    return;
-                }
-                let _ = stop.changed().await;
-            })
-            .await;
+        let stop = async move {
+            if *stop.borrow() {
+                return;
+            }
+            let _ = stop.changed().await;
+        };
+        // `serve` enforces the fixed loopback target and pre-admitted peer; a handler
+        // replaces the target and sees only admitted peers.
+        let result = match handler {
+            Some(handler) => {
+                session
+                    .serve_streams(move |peer, stream| handler(peer, stream), stop)
+                    .await
+            }
+            None => session.serve(target, stop).await,
+        };
         (kind, result)
     });
 }

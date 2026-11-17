@@ -28,7 +28,7 @@ use crate::network::Limits;
 use super::maintain::{MaintenanceExit, MaintenanceJoin};
 use super::{ClosingClaims, SharedState, StartupResources, readiness_view, slot_lock};
 use crate::native_discovery::runtime::owner::RuntimeError;
-use crate::startup::error::StartupError;
+use crate::startup::StartupError;
 
 const MAINTENANCE_BOUND: Duration = Duration::from_secs(5);
 

@@ -16,7 +16,7 @@ use crate::identity::Identity;
 use crate::identity::address_key::AddressKey;
 use crate::native_discovery::runtime::owner::RuntimeOwner;
 use crate::network::{Allowlist, Limits, SignaledEndpoint, YggEndpoint};
-use crate::startup::error::StartupError;
+use crate::startup::StartupError;
 use crate::startup::preflight::ComposedStartupPlan;
 use crate::startup::ygg_start::start_ygg_same_identity;
 

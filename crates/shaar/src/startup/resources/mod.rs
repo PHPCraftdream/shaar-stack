@@ -19,7 +19,7 @@ use crate::native_discovery::runtime::publisher::PublicationStatus;
 use crate::network::signaling::RelayOperations;
 use crate::network::{NetworkError, SignaledEndpoint, YggEndpoint};
 
-use super::error::StartupError;
+use super::StartupError;
 use super::ygg_start::RetainedYggStart;
 
 mod close;

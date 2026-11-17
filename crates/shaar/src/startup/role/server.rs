@@ -51,7 +51,7 @@ use crate::startup::preflight::resolve::resolve_network;
 use crate::startup::resources::{SharedResources, SharedResourcesStart};
 #[cfg(test)]
 use crate::startup::role::{RoleEvent, RoleEventLog, emit, emit_payload_acquired};
-use crate::startup::role::{RoleOptions, server_close};
+use crate::startup::role::{RoleOptions, StreamHandler, server_close};
 
 #[cfg(test)]
 #[path = "server_seams.rs"]
@@ -170,6 +170,8 @@ pub struct ServerRole {
     allowlist: Allowlist,
     limits: Limits,
     options: RoleOptions,
+    /// Serves admitted streams in-process instead of the configured TCP target.
+    handler: Option<StreamHandler>,
     #[cfg(test)]
     events: Option<RoleEventLog>,
     phase: ServerPhase,
@@ -192,62 +194,17 @@ impl ServerRole {
             allowlist,
             limits,
             options,
+            handler: None,
             #[cfg(test)]
             events: None,
             phase: ServerPhase::New,
         })
     }
 
-    /// Test-only constructor attaching the event observer; otherwise identical
-    /// to [`ServerRole::new`].
-    #[cfg(test)]
-    pub(crate) fn with_events(
-        config: ServerConfig,
-        identity: &Identity,
-        allowlist: Allowlist,
-        limits: Limits,
-        options: RoleOptions,
-        events: RoleEventLog,
-    ) -> Result<Self, StartupError> {
-        let mut role = Self::new(config, identity, allowlist, limits, options)?;
-        role.events = Some(events);
-        Ok(role)
-    }
-
-    /// Test-only handle to THIS role's retained Yggdrasil bridge (a real
-    /// `Arc<YggBridge>` clone; its dropped-datagram counter is the carrier
-    /// peer filter observation). `Err(())` when no live composition.
-    #[cfg(test)]
-    pub(crate) fn ygg_bridge_for_tests(&self) -> Result<std::sync::Arc<shaar_ygg::YggBridge>, ()> {
-        match &self.phase {
-            ServerPhase::Admitted(parts) | ServerPhase::Live(parts) => {
-                parts.resources.ygg_bridge_for_tests()
-            }
-            _ => Err(()),
-        }
-    }
-
-    /// Test-only observer of the armed Mainline cleanup hold; `None` before
-    /// the composition's owner stage stored it.
-    #[cfg(test)]
-    pub(crate) fn mainline_cleanup_observer_for_tests(&self) -> Option<n0_mainline::Observer> {
-        match &self.phase {
-            ServerPhase::Admitted(parts) | ServerPhase::Live(parts) => {
-                parts.resources.mainline_cleanup_observer_for_tests()
-            }
-            _ => None,
-        }
-    }
-
-    /// Test-only Mainline cleanup hold over the retained composition.
-    #[cfg(test)]
-    pub(crate) fn mainline_cleanup_hold_for_tests(&self) -> Result<n0_mainline::CleanupHold, ()> {
-        match &self.phase {
-            ServerPhase::Admitted(parts) | ServerPhase::Live(parts) => {
-                parts.resources.mainline_cleanup_hold_for_tests()
-            }
-            _ => Err(()),
-        }
+    /// Serves admitted streams with `handler` instead of the configured TCP target.
+    pub fn with_handler(mut self, handler: StreamHandler) -> Self {
+        self.handler = Some(handler);
+        self
     }
 
     /// Native (IPv4) endpoint address once started; `None` before start and
@@ -490,7 +447,14 @@ impl ServerRole {
                 server_close::spawn_carrier_responder(parts, &self.allowlist);
             }
         }
-        let outcome = drive_loop(parts, self.limits, &self.config, shutdown).await;
+        let outcome = drive_loop(
+            parts,
+            self.limits,
+            &self.config,
+            self.handler.as_ref(),
+            shutdown,
+        )
+        .await;
         let parts = match std::mem::replace(&mut self.phase, ServerPhase::Done(Ok(()))) {
             ServerPhase::Live(parts) => parts,
             _ => unreachable!("re-seated live phase"),
@@ -551,6 +515,7 @@ async fn drive_loop(
     parts: &mut ServerParts,
     limits: Limits,
     config: &ServerConfig,
+    handler: Option<&StreamHandler>,
     shutdown: &mut std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
 ) -> Option<StartupError> {
     if let Some(error) = parts.outcome.clone() {
@@ -624,6 +589,7 @@ async fn drive_loop(
                         session,
                         config,
                         &parts.stop.as_ref().expect("server holds the stop watch").1,
+                        handler,
                     );
                 }
                 // Endpoint closed: serving cannot continue truthfully.
@@ -666,6 +632,7 @@ async fn drive_loop(
                         session,
                         config,
                         &parts.stop.as_ref().expect("server holds the stop watch").1,
+                        handler,
                     );
                 }
                 Err(NetworkError::Closed) => parts.ygg_down = true,
