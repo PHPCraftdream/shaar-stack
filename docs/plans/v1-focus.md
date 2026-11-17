@@ -2195,6 +2195,16 @@ Owner words and the recorded decisions are in the decision log of [north-star](n
 
 Local execution for the Android work follows the 2026-11-17 row (local build and emulator, `wnice -c 10 -m 10g`); CI keeps executing everything else, and local results are reported as local evidence.
 
+## Two-device live test (decision of 2026-11-17)
+
+Owner words and bounds: the first row of the 2026-11-17 decisions in [north-star](north-star.md). Scenario steps advanced: 1 to 4 of the public scenario (the signed, sealed record; key-only resolution; direct QUIC; coordinated punch), with step 5 observed only if the first two fail.
+
+| Leaf | Observable acceptance | Non-goals | State |
+|---|---|---|---|
+| PAIR-2 live attempt | The Server runs in the harness app on the phone (mobile network) with `publish_address: encrypted` and a composed public configuration; the Client on the computer holds the Server key and the address key file and no address hint; the Client log shows `candidates=record:<n>` with `n > 0` (the sealed record opened), then the punch line and the route (`route path=native` or `ygg`), and one exact payload returns from the phone's echo target. A control attempt without `address_key_file` must show `record:0`. Any outcome is recorded as observed | Load, more than three attempts, other phones or networks, changing phone settings, long runs, any claim about carrier NAT beyond the one observation, release | Prepared; waits for the CI-built Windows executables |
+
+Procedure, in the order of the bounds: the phone's network and the app's routing (not through the phone's own VPN) are read before each attempt; the NIC counters of the phone interface and of the computer are read before and after and compared with the budgets; each process stops by its own 120 s limit; the app is uninstalled and the temporary keys are deleted afterwards. Secrets (identity seeds, the address key) are created for this test only, never written into the repository, and the public addresses seen in logs stay out of it too.
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.
