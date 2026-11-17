@@ -267,11 +267,12 @@ async fn the_allow_command_lists_adds_and_removes_through_the_file() {
         std::fs::read_to_string(dir.0.join("allowed.txt.bak")).unwrap(),
         "# clients\n"
     );
+    // The list is the distinct keys in ascending order, whatever order the file has.
     let listed = allowlist_command(&path, AllowAction::List).await.unwrap();
-    assert_eq!(
-        listed,
-        [a.to_string(), b.to_string(), "clients=2".to_owned()]
-    );
+    let mut expected = vec![a.to_string(), b.to_string()];
+    expected.sort();
+    expected.push("clients=2".to_owned());
+    assert_eq!(listed, expected);
 
     let removed = allowlist_command(&path, AllowAction::Remove(vec![a, key(3)]))
         .await

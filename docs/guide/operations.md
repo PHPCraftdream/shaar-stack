@@ -69,7 +69,40 @@ The allowlist is read once at startup. Append each client's public key as one li
 
 ### What the first run does not do today
 
-The generated configs are direct-only (no `network` object), and that is deliberate: **no default relay, bootstrap or Yggdrasil peers are invented** — none exist and none will be added. A first run therefore **does not publish a DHT record** and the client still needs the server's numeric address; `fallback` stays inactive. To find the server by key alone, write a `network` object yourself (Mainline bootstrap node(s) and Yggdrasil peers; the libp2p relay pair is optional since leaf L0 and is not needed for the DHT and Yggdrasil paths, see [configuration.md](configuration.md)). Hole punching is **not** part of this build: a composed client dials the published candidates directly and falls back to Yggdrasil, and no direct path through a NAT between two private networks has been observed on a public network.
+The generated configs of the first-run forms are direct-only (no `network` object), and that is deliberate: **no default relay, bootstrap or Yggdrasil peers are invented** by the first run. The `init` subcommand ([Subcommands](#subcommands)) is the explicit way to get public defaults (never a relay), or `config network public` on an existing file. A first run therefore **does not publish a DHT record** and the client still needs the server's numeric address; `fallback` stays inactive. To find the server by key alone, write a `network` object yourself (Mainline bootstrap node(s) and Yggdrasil peers; the libp2p relay pair is optional since leaf L0 and is not needed for the DHT and Yggdrasil paths, see [configuration.md](configuration.md)). Hole punching is **not** part of this build: a composed client dials the published candidates directly and falls back to Yggdrasil, and no direct path through a NAT between two private networks has been observed on a public network.
+
+## Subcommands
+
+Both binaries have subcommands next to the first-run forms above. Clap answers only when the first argument is a subcommand name, `help`, `--help`, `-h`, `--version` or `-V`; every other invocation goes to the first-run parser, with its usage text and exit code unchanged. A subcommand that clap refuses prints clap's usage and exits with status 2; a failing operation prints `shaar-server: <message>` or `shaar-client: <message>` on stderr and exits with 1. Messages name fields and stages, never key material or rejected values.
+
+Where the files are: `--config <path.ktav>` names the configuration file (the key and allowlist paths come from it); `--dir <base>` names the data directory instead (default: the per-user directory of [First run](#data-directory); the files are `<base>/server/` or `<base>/client/`). The two options exclude each other.
+
+**shaar-server**
+
+| Command | What it does |
+|---|---|
+| `init [--dir D] [--private]` | Creates the role directory, `shaar.key`, `server.ktav` and `allowed.txt` (existing files are kept), then prints the summary, `peer_id=`, `ygg_ip=`, the network note, the next step and `clients connect with this address: <public key>`. The generated file carries the public `network` object (Mainline bootstrap hosts `dht.libtorrent.org:25401` and `router.bittorrent.com:6881`, Yggdrasil peers `tcp://ygg-pa.incognet.io:8883` and `tcp://mo.us.ygg.triplebit.org:9000`, never a relay) unless `--private` is given. The file has no `target` yet. |
+| `address` | Prints `public_key=`, `peer_id=` and `ygg_ip=` of the Server's key: the key is the address a Client needs. |
+| `address-key new <path>` | Creates a 32-byte key file (owner-only, never overwrites) for `publish_address: encrypted`; give the same file to every Client that may learn the address. |
+| `allow add <key>...`, `allow remove <key>...`, `allow list` | Edits or lists `allowed.txt`: comments stay, the old content is kept as `allowed.txt.bak`, the entry bounds of [Allowlist](#allowlist-server) apply. A running Server reads the file only at startup: restart it. `list` prints one key per line and `clients=<n>`. |
+| `config show`, `config check` | `show` prints the file. `check` validates it with the rules of a file load (every required value present), the identity key and the allowlist file it names, and prints `ok: <path>` and the Server's `public_key=`. |
+| `config set <key> <value>`, `config unset <key>`, `config network public\|private` | Edits one top-level setting (`target`, `bind`, `key_file`, `allowlist_path`, `fallback`, `publish_address`, `address_key_file`) or switches the `network` object. See *Editing a configuration* below. |
+| `run [--config P \| --dir D] [TARGET]` | Serves exactly like `shaar-server --config P`, or like the first run of `D`; `TARGET` overrides `target` for this run. |
+
+**shaar-client**
+
+| Command | What it does |
+|---|---|
+| `init <server-key> [--address ip:port] [--dir D] [--private]` | Creates `shaar.key` and `client.ktav` pinned to the Server key (public `network` object unless `--private`; `--private` needs `--address`), then prints the summary, `your public key for the server allowlist: public_key=<own>`, `pinned server: ...` and the command to run on the Server: `shaar-server allow add <own>`. |
+| `address` | Prints this Client's `public_key=`, `peer_id=` and `ygg_ip=`. |
+| `connect [--config P \| --dir D]` | Runs the Client of that configuration (`listening=<ip:port>` first). Without the file it says to run `init` first. |
+| `config show\|check\|set\|unset\|network` | As for the Server; the editable keys are `server`, `server_address`, `listen`, `key_file`, `fallback`, `address_key_file`. |
+
+### Editing a configuration
+
+`config set`, `config unset` and `config network` read the file, normalise it with `ktav::format_str` (every comment and grouping blank survives, compounds take their block form), change one top-level entry (values are written as literal strings, `key:: value`), and validate the result with the rules of the role. A result that would be invalid is refused with the field and kind of the file's own message and nothing is written, with one allowance: a file that still lacks its required `target` (Server) or `server` (Client) can be edited step by step; `config check` is the strict gate. The previous content is kept as `<file>.bak`; the new content is written through a temporary file and a rename. `config network public` replaces the `network` object by the public defaults and drops the comment header `init` wrote above it; `config network private` removes it.
+
+Evidence for this section is stated in [limits-and-evidence.md](limits-and-evidence.md#sdk-and-command-line).
 
 ## Startup
 
