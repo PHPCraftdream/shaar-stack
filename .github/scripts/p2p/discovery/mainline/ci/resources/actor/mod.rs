@@ -252,12 +252,15 @@ impl Actor {
         for _ in self.core.bootstrap.iter() {
             bootstrap_leases.push(budget.reserve_holder()?);
         }
+        // The routing tables are caches with their own holder budget: a full table skips new
+        // nodes and never starves the candidate budget of the operations.
+        let routing_budget = Arc::new(StoreBudget::default());
         self.core
             .routing_table
-            .enable_owner_budget(Arc::clone(&budget));
+            .enable_owner_budget(Arc::clone(&routing_budget));
         self.core
             .signed_peers_routing_table
-            .enable_owner_budget(Arc::clone(&budget));
+            .enable_owner_budget(routing_budget);
         self.core.cached_iterative_queries.clear();
         self.socket.enable_owned_resources();
         self.owned_resources = Some(OwnedActor::new(budget, bootstrap_leases));

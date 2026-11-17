@@ -194,14 +194,16 @@ async fn coalesced_owned_mutable_waiter_observes_existing_candidate_fault() {
     actor
         .owned_mutable(target, first_sender)
         .expect("first typed waiter admitted");
+    let budget = Arc::clone(&actor.owned_resources.as_ref().unwrap().budget);
+    let mut external = Vec::new();
+    while budget.holder_count() < 256 {
+        external.push(budget.reserve_holder().expect("external holder"));
+    }
     let query = actor
         .core
         .iterative_queries
         .get_mut(&target)
         .expect("active owned query");
-    for index in 0..255 {
-        query.add_candidate(Node::unique(index));
-    }
     query.add_candidate(Node::unique(10_000));
     assert_eq!(
         actor.core.iterative_queries[&target].owner_error(),
@@ -268,20 +270,17 @@ async fn candidate_limit_is_typed_and_bootstrap_lease_lives_until_actor_drop() {
     actor
         .owned_mutable(target, sender)
         .expect("typed actual query");
-    let query = actor
-        .core
-        .iterative_queries
-        .get_mut(&target)
-        .expect("actual query map");
-    for index in 0..255 {
-        query.add_candidate(Node::unique(index));
+    // Other holders use up the budget; a query that finds no holder left fails alone and typed.
+    let mut external = Vec::new();
+    while budget.holder_count() < 256 {
+        external.push(budget.reserve_holder().expect("external holder"));
     }
     assert_eq!(budget.holder_count(), 256);
     actor
         .core
         .iterative_queries
         .get_mut(&target)
-        .unwrap()
+        .expect("actual query map")
         .add_candidate(Node::unique(10_000));
     actor.tick_owned();
     assert!(matches!(
@@ -290,6 +289,7 @@ async fn candidate_limit_is_typed_and_bootstrap_lease_lives_until_actor_drop() {
     ));
     assert_eq!(actor.owned_error(), None);
     assert_eq!(actor.socket.owned_test_state().unwrap().2, 0);
+    drop(external);
     assert_eq!(budget.holder_count(), 1);
     drop(actor);
     assert_eq!(budget.holder_count(), 0);
@@ -590,4 +590,33 @@ async fn a_populated_routing_table_starts_a_get_within_the_operation_rpc_cap() {
     assert_eq!(actor.socket.operation_rpc_len(operation), 16);
     assert_eq!(actor.core.iterative_queries[&target].owner_error(), None);
     assert_eq!(actor.owned_error(), None);
+}
+
+#[tokio::test]
+async fn a_large_routing_table_leaves_the_candidate_budget_to_the_operations() {
+    // Live finding (2026-11-17): the tables of a warmed-up node and the copies of them that each
+    // lookup seeds held the whole budget of 256, so lookups failed with CandidateLimit before
+    // sending anything. The tables have a budget of their own and a lookup keeps 20 candidates.
+    let (_peer, bootstrap) = captured_peer();
+    let mut actor = actor(bootstrap);
+    let budget = Arc::clone(&actor.owned_resources.as_ref().unwrap().budget);
+    for index in 1..=600 {
+        actor.core.routing_table.add(Node::unique(index));
+    }
+    assert!(
+        actor.core.routing_table.size() >= 80,
+        "four full buckets at least"
+    );
+    for seed in 0..4_u8 {
+        let target = target(100 + seed);
+        actor
+            .owned_get(get(target), None)
+            .expect("a lookup starts beside a large routing table");
+        assert_eq!(actor.core.iterative_queries[&target].owner_error(), None);
+    }
+    assert_eq!(actor.owned_error(), None);
+    assert!(
+        budget.holder_count() <= 1 + 4 * 20,
+        "bootstrap plus 20 candidates per lookup, the tables not counted"
+    );
 }

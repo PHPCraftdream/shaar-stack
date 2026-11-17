@@ -135,3 +135,53 @@ fn simultaneous_closest_stores_share_the_owner_budget_and_coalesce_duplicates() 
         Err(ResourceError::CandidateLimit)
     );
 }
+
+#[test]
+fn capped_closest_store_keeps_the_nearest_nodes_and_never_fails_past_capacity() {
+    let budget = Arc::new(StoreBudget::default());
+    let mut closest = ClosestNodes::new(Id::from([0_u8; 20]));
+    closest.enable_owner_budget(Arc::clone(&budget));
+    closest.cap_owned(20);
+
+    // 20 far nodes (top bit set) fill the store; 100 nearer ones then displace them one by one.
+    for index in 1..=20 {
+        closest.add_owned(node(index, 160)).expect("far node admitted");
+    }
+    for index in 100..200 {
+        closest.add_owned(node(index, 100)).expect("nearer node displaces a far one");
+    }
+    assert_eq!(closest.len(), 20);
+    assert_eq!(budget.holder_count(), 20, "displacing hands the holder over");
+    assert!(
+        closest.nodes().iter().all(|node| node.id().as_bytes()[0] == 0),
+        "every far node was displaced"
+    );
+
+    // A node farther than all 20 is dropped without an error or a holder.
+    closest.add_owned(node(300, 160)).expect("farther node is dropped quietly");
+    assert_eq!(closest.len(), 20);
+    assert_eq!(budget.holder_count(), 20);
+    assert!(closest.nodes().iter().all(|node| node.id().as_bytes()[0] == 0));
+
+    drop(closest);
+    assert_eq!(budget.holder_count(), 0);
+}
+
+#[test]
+fn routing_table_skips_nodes_without_failing_when_its_budget_is_full() {
+    let budget = Arc::new(StoreBudget::default());
+    let mut table = RoutingTable::new(Id::from([0_u8; 20]));
+    table.enable_owner_budget(Arc::clone(&budget));
+    let mut external = Vec::new();
+    while budget.holder_count() < 256 {
+        external.push(budget.reserve_holder().expect("external holder"));
+    }
+
+    assert!(!table.add(node(1, 160)), "a full budget skips the node");
+    assert_eq!(table.size(), 0);
+    assert_eq!(table.owner_error(), None, "the table never fails an operation");
+
+    drop(external.pop());
+    assert!(table.add(node(2, 160)), "a released holder is usable again");
+    assert_eq!(table.size(), 1);
+}
