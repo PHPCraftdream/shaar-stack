@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Test harness only: a debuggable app that starts the two product executables inside its sandbox. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.shaar.harness">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application
+        android:label="Shaar harness"
+        android:debuggable="true"
+        android:extractNativeLibs="true"
+        android:allowBackup="false">
+        <activity
+            android:name=".Runner"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
