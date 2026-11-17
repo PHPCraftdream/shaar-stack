@@ -146,10 +146,8 @@ fn an_invalid_result_is_refused_with_the_field_and_kind() {
         ("fallback", ValidationKind::InvalidEnum)
     );
     assert_eq!(
-        invalid(
-            set_config_value(Role::Server, SERVER, "publish_address", "encrypted").unwrap_err()
-        ),
-        ("address_key_file", ValidationKind::MissingRequired)
+        invalid(set_config_value(Role::Server, SERVER, "publish_address", "sealed").unwrap_err()),
+        ("publish_address", ValidationKind::InvalidEnum)
     );
     assert_eq!(
         invalid(set_config_value(Role::Client, CLIENT, "listen", "192.0.2.1:2222").unwrap_err()),
