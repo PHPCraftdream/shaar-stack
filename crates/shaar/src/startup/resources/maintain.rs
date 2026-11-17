@@ -12,7 +12,8 @@ use tokio::task::JoinHandle;
 use crate::config::PublishAddress;
 use crate::native_discovery::compose_published;
 use crate::native_discovery::runtime::owner::{
-    PublicationHandle, ResolvedAddresses, RuntimeError, RuntimeOwner, current_vote, vote_changed,
+    LOOKUP_BOUND, PublicationHandle, ResolvedAddresses, RuntimeError, RuntimeOwner, current_vote,
+    vote_changed,
 };
 use crate::native_discovery::runtime::publisher::PublicationStatus;
 use crate::network::observe::{emit, server_publication};
@@ -20,11 +21,13 @@ use crate::network::observe::{emit, server_publication};
 use super::MAX_SNAPSHOT_ADDRESSES;
 
 pub(super) const COMMANDS: usize = 8;
+/// Pauses after a failed publication. A failing live put holds most of the DHT budget for its whole
+/// run, so the pauses grow to a minute: the lookups of the same node need that budget too.
 const RETRIES: [Duration; 4] = [
-    Duration::from_secs(1),
     Duration::from_secs(2),
-    Duration::from_secs(4),
-    Duration::from_secs(8),
+    Duration::from_secs(10),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
 ];
 
 type ResolveReply = oneshot::Sender<Result<ResolvedAddresses, RuntimeError>>;
@@ -378,7 +381,7 @@ async fn maintain(
                 if resolve.is_some() || owner_lease.is_none() {
                     let _ = reply.send(Err(RuntimeError::ResolveBusy));
                 } else {
-                    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+                    let deadline = tokio::time::Instant::now() + LOOKUP_BOUND;
                     let (cancel, canceled) = oneshot::channel();
                     let leased = owner_lease
                         .take()
@@ -681,5 +684,11 @@ mod tests {
             maintenance.join_task().await,
             Some(MaintenanceJoin::Failed(MaintenanceJoinFailure::Panicked))
         ));
+    }
+
+    #[test]
+    fn publication_retry_pauses_grow_and_end_at_a_minute() {
+        assert!(RETRIES.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(RETRIES[RETRIES.len() - 1], Duration::from_secs(60));
     }
 }

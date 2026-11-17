@@ -7,10 +7,18 @@
 
 use std::fmt;
 use std::net::SocketAddrV4;
+use std::time::Duration;
 
 use crate::identity::Identity;
 
 const MAX_BOOTSTRAP: usize = 4;
+
+/// Longest one record lookup may run. A live lookup needs 6 to 10 s: with a 10 s bound it failed
+/// with `deadline` every time (live attempt of 2026-11-17).
+pub(crate) const LOOKUP_BOUND: Duration = Duration::from_secs(30);
+/// Longest one publication may run: the closest-nodes phase of a put takes as long as a lookup and
+/// the put round follows it; with a 10 s bound five publications in a row failed with `deadline`.
+pub(crate) const PUBLISH_BOUND: Duration = Duration::from_secs(45);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::native_discovery) enum NativeOptionField {
@@ -100,5 +108,17 @@ impl NativeDiscoveryOptions {
 
     pub(super) fn bootstrap(&self) -> &[SocketAddrV4] {
         &self.bootstrap
+    }
+}
+
+#[cfg(test)]
+mod bound_tests {
+    use super::*;
+
+    #[test]
+    fn the_live_dht_bounds_outlast_a_live_lookup_and_a_publication_outlasts_a_lookup() {
+        // A live lookup needs 6 to 10 s; the old 10 s bound failed every live attempt.
+        assert!(LOOKUP_BOUND >= Duration::from_secs(20));
+        assert!(PUBLISH_BOUND > LOOKUP_BOUND);
     }
 }

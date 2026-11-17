@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
-use std::time::Duration;
 
 use n0_mainline::{OwnedDhtHandle, OwnedPutAdmission, OwnedPutCleanup, OwnedPutOperation};
 use tokio::sync::{oneshot, watch};
@@ -307,7 +306,7 @@ pub(super) fn make_refresh(
             generation,
             reply: None,
             initial: false,
-            deadline: tokio::time::Instant::now() + Duration::from_secs(10),
+            deadline: tokio::time::Instant::now() + super::super::owner::PUBLISH_BOUND,
             signed_at: state.signed_at(),
         },
         terminal,
