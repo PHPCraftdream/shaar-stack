@@ -106,6 +106,11 @@ impl FromStr for PeerKey {
     type Err = KeyError;
 
     fn from_str(text: &str) -> Result<Self, KeyError> {
+        // 64 hex digits in either case; any other length goes to the key type's own
+        // text forms.
+        if text.len() == 64 {
+            return parse_hex_key(text).ok_or(KeyError::InvalidEncoding);
+        }
         text.parse::<PublicKey>()
             .map(Self::from_iroh)
             .map_err(|_| KeyError::InvalidEncoding)
