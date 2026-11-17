@@ -121,9 +121,16 @@ where
             Err(error) => {
                 diagnostic("TCP", address, &error);
                 // A UDP-selected ephemeral port may be unavailable for TCP on Windows.
-                if error.kind() == io::ErrorKind::AddrInUse
-                    || (cfg!(windows) && local.port() == 0 && error.raw_os_error() == Some(10013))
-                {
+                let excluded =
+                    cfg!(windows) && local.port() == 0 && error.raw_os_error() == Some(10013);
+                if error.kind() == io::ErrorKind::AddrInUse || excluded {
+                    // Sequential UDP ports can stay inside a TCP-excluded block for longer than the
+                    // retry bound; the TCP allocator skips such blocks, so let it choose the port.
+                    if excluded
+                        && let Some(server) = tcp_first(local, &mut bind_tcp, &mut bind_udp).await
+                    {
+                        return Ok(server);
+                    }
                     last_retry_error = Some(error);
                     continue;
                 }
@@ -138,6 +145,22 @@ where
             "owned DNS socket pair allocation exhausted",
         )),
     }
+}
+
+/// cancel-safe: yes — the pair is returned only when both sockets are bound.
+async fn tcp_first<FT, FU>(
+    local: SocketAddr,
+    mut bind_tcp: impl FnMut(SocketAddr) -> FT,
+    mut bind_udp: impl FnMut(SocketAddr) -> FU,
+) -> Option<Server>
+where
+    FT: Future<Output = io::Result<TcpListener>>,
+    FU: Future<Output = io::Result<UdpSocket>>,
+{
+    let tcp = bind_tcp(local).await.ok()?;
+    let address = tcp.local_addr().ok()?;
+    let udp = bind_udp(address).await.ok()?;
+    Some(Server { udp, tcp, address })
 }
 
 #[tokio::test]
@@ -399,10 +422,46 @@ async fn owned_dns_pair_bounds_tcp_access_denied_retries_and_preserves_os_error(
         |_, _, _| {},
     )
     .await;
-    assert_eq!(attempts.get(), PAIR_ATTEMPTS);
+    // Every attempt tries the UDP-chosen port and then the TCP-chosen fallback.
+    assert_eq!(attempts.get(), 2 * PAIR_ATTEMPTS);
     let error = result.err().unwrap();
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     assert_eq!(error.raw_os_error(), Some(10013));
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn owned_dns_pair_escapes_a_tcp_excluded_port_block_by_letting_tcp_choose() {
+    // Regression: upstream CI refused 16 sequential UDP-chosen ports (49720..=49735) with 10013 for TCP.
+    let refusals = std::cell::Cell::new(0);
+    let server = socket_pair_with_diagnostic(
+        loopback(),
+        |address| {
+            let refused = address.port() != 0;
+            if refused {
+                refusals.set(refusals.get() + 1);
+            }
+            async move {
+                if refused {
+                    Err(io::Error::from_raw_os_error(10013))
+                } else {
+                    TcpListener::bind(address).await
+                }
+            }
+        },
+        UdpSocket::bind,
+        |_, _, _| {},
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        refusals.get(),
+        1,
+        "TCP_FALLBACK_NOT_USED_AFTER_EXCLUDED_PORT"
+    );
+    assert_ne!(server.address.port(), 0);
+    assert_eq!(server.address, server.tcp.local_addr().unwrap());
+    assert_eq!(server.address, server.udp.local_addr().unwrap());
 }
 
 #[tokio::test]
