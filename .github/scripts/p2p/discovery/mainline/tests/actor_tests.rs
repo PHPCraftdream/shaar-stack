@@ -119,14 +119,19 @@ async fn owned_query_failure_is_local_and_shutdown_cancels_retained_handle() {
     actor
         .owned_mutable(target, sender)
         .expect("admit owned mutable query");
+    // Other holders use up the aggregate budget; a candidate a query cannot be given a holder for
+    // fails that query alone (a query keeps its closest 20, so flooding it never gets here).
+    let budget =
+        std::sync::Arc::clone(&actor.owned_resources.as_ref().expect("owned actor").budget);
+    let mut external = Vec::new();
+    while budget.holder_count() < 256 {
+        external.push(budget.reserve_holder().expect("external holder"));
+    }
     let query = actor
         .core
         .iterative_queries
         .get_mut(&target)
         .expect("active query");
-    for index in 0..255 {
-        query.add_candidate(Node::unique(index));
-    }
     query.add_candidate(Node::unique(10_000));
     assert_eq!(
         actor.core.iterative_queries[&target].owner_error(),

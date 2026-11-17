@@ -438,15 +438,20 @@ async fn real_queries_share_candidate_budget_and_drop_releases_leases() {
     let mut socket = owned_socket();
     let mut first = query(&mut socket, &budget);
     let mut second = query(&mut socket, &budget);
+    // Other holders leave room for 30 candidates: 20 for the first query, 10 for the second.
+    let mut external = Vec::new();
+    while budget.holder_count() < 226 {
+        external.push(budget.reserve_holder().expect("external holder"));
+    }
     for index in 0..128 {
         first.add_candidate(candidate(index));
     }
+    assert_eq!(first.closest().len(), 20, "a query keeps its closest 20");
+    assert_eq!(first.owner_error(), None);
     for index in 128..256 {
         second.add_candidate(candidate(index));
     }
-    assert_eq!(first.closest().len(), 128);
-    assert_eq!(second.closest().len(), 128);
-    second.add_candidate(candidate(256));
+    assert_eq!(second.closest().len(), 10);
     assert_eq!(second.owner_error(), Some(ResourceError::CandidateLimit));
     assert!(second.is_done(&socket));
     drop(first);
@@ -545,10 +550,13 @@ async fn closest_and_responders_share_candidate_budget() {
     for index in 0..128 {
         query.add_candidate(candidate(index));
     }
-    for index in 128..256 {
+    assert_eq!(query.closest().len(), 20, "the closest set is capped at 20");
+    for index in 128..364 {
         query.add_responding_node(candidate(index));
     }
-    query.add_candidate(candidate(256));
+    assert_eq!(query.owner_error(), None);
+    assert_eq!(budget.holder_count(), 256, "closest and responders hold one budget");
+    query.add_responding_node(candidate(364));
     assert_eq!(query.owner_error(), Some(ResourceError::CandidateLimit));
     assert!(query.is_done(&socket));
 }

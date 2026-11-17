@@ -37,7 +37,8 @@ impl OperationId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResourceError {
-    /// The aggregate retained-candidate holder limit of 256 was reached.
+    /// The aggregate retained-candidate holder limit of 256 for operations was reached
+    /// (the routing tables have their own budget and a lookup keeps its closest 20).
     CandidateLimit,
     /// The actor operation or bounded waiting queue is full.
     OperationLimit,

@@ -25,6 +25,11 @@ def edits() -> dict[str, list[tuple[str, str]]]:
         self.owner_budget = Some(budget);
     }
 
+    /// Keep only the `capacity` closest candidates: a farther one yields its holder to a closer one.
+    pub(crate) fn cap_owned(&mut self, capacity: usize) {
+        self.owner_capacity = capacity;
+    }
+
     pub(crate) fn owner_error(&mut self) -> Option<crate::resource::ResourceError> {
         self.owner_error.take()
     }
@@ -34,6 +39,7 @@ def edits() -> dict[str, list[tuple[str, str]]]:
             target: self.target,
             nodes: Vec::new(),
             owner_budget: self.owner_budget.clone(),
+            owner_capacity: self.owner_capacity,
             holder_leases: Vec::new(),
             owner_error: None,
         };
@@ -50,6 +56,12 @@ def edits() -> dict[str, list[tuple[str, str]]]:
         }
     }'''
     closest_add_end_new = '''        }) {
+            if self.nodes.len() >= self.owner_capacity {
+                if pos >= self.owner_capacity { return Ok(()); }
+                self.nodes.insert(pos, node);
+                self.nodes.pop();
+                return Ok(());
+            }
             let lease = match &self.owner_budget {
                 Some(budget) => Some(budget.reserve_holder()?),
                 None => None,
@@ -62,13 +74,8 @@ def edits() -> dict[str, list[tuple[str, str]]]:
     routing_add_old = '''    pub fn add(&mut self, node: Node) -> bool {
         let distance = self.id.distance(node.id());'''
     routing_add_new = '''    pub fn add(&mut self, node: Node) -> bool {
-        match self.add_owned(node) {
-            Ok(added) => added,
-            Err(error) => {
-                self.owner_error = Some(error);
-                false
-            }
-        }
+        // A full routing budget only skips the node: the table is a cache, never a failure of an operation.
+        self.add_owned(node).unwrap_or(false)
     }
 
     pub(crate) fn enable_owner_budget(&mut self, budget: std::sync::Arc<crate::resource::StoreBudget>) {
@@ -185,8 +192,8 @@ impl RoutingTable {'''
     return {
         "src/common/closest_nodes.rs": [
             ("#[derive(Debug, Clone)]\n/// Manage closest nodes", "#[derive(Debug)]\n/// Manage closest nodes"),
-            ("    nodes: Vec<Node>,\n", "    nodes: Vec<Node>,\n    owner_budget: Option<std::sync::Arc<crate::resource::StoreBudget>>,\n    holder_leases: Vec<crate::resource::HolderLease>,\n    owner_error: Option<crate::resource::ResourceError>,\n"),
-            ("        Self {\n            target,\n            nodes: Vec::with_capacity(200),\n        }", "        Self {\n            target,\n            nodes: Vec::with_capacity(200),\n            owner_budget: None,\n            holder_leases: Vec::new(),\n            owner_error: None,\n        }"),
+            ("    nodes: Vec<Node>,\n", "    nodes: Vec<Node>,\n    owner_budget: Option<std::sync::Arc<crate::resource::StoreBudget>>,\n    owner_capacity: usize,\n    holder_leases: Vec<crate::resource::HolderLease>,\n    owner_error: Option<crate::resource::ResourceError>,\n"),
+            ("        Self {\n            target,\n            nodes: Vec::with_capacity(200),\n        }", "        Self {\n            target,\n            nodes: Vec::with_capacity(200),\n            owner_budget: None,\n            owner_capacity: usize::MAX,\n            holder_leases: Vec::new(),\n            owner_error: None,\n        }"),
             (closest_add_old, closest_add_new),
             (closest_add_end_old, closest_add_end_new),
             ('''impl ClosestNodes {''', '''impl Clone for ClosestNodes {
@@ -197,6 +204,7 @@ impl RoutingTable {'''
                 target: self.target,
                 nodes: Vec::new(),
                 owner_budget: self.owner_budget.clone(),
+                owner_capacity: self.owner_capacity,
                 holder_leases: Vec::new(),
                 owner_error: Some(error),
             },

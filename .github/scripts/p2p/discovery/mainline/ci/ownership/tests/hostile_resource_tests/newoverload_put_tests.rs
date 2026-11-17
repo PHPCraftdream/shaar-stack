@@ -142,32 +142,24 @@ async fn candidate_overflow_completes_only_its_typed_owner() {
     );
     actor.owned_put(put, None).expect("independent actual PUT");
     let budget = std::sync::Arc::clone(&actor.owned_resources.as_ref().unwrap().budget);
-    let mut holder_count = budget.holder_count();
-    let mut candidate_index = 0;
-
-    while holder_count < 256 {
-        actor
-            .core
-            .iterative_queries
-            .get_mut(&victim)
-            .unwrap()
-            .add_candidate(hostile_node(candidate_index));
-        candidate_index += 1;
-        holder_count = budget.holder_count();
+    // Other holders use up the budget; the victim, holding no candidates of its own, finds none left.
+    let mut external = Vec::new();
+    while budget.holder_count() < 256 {
+        external.push(budget.reserve_holder().expect("external holder"));
     }
-
-    assert_eq!(holder_count, 256);
+    assert_eq!(budget.holder_count(), 256);
     actor
         .core
         .iterative_queries
         .get_mut(&victim)
         .unwrap()
-        .add_candidate(hostile_node(candidate_index));
+        .add_candidate(hostile_node(0));
     actor.retire_owned_operation_errors();
     assert!(matches!(
         victim_receiver.await.expect("typed victim completion"),
         Err(ResourceError::CandidateLimit)
     ));
+    drop(external);
     assert!(actor.core.iterative_queries.contains_key(&independent_get));
     assert!(matches!(
         get_receiver.try_recv(),

@@ -119,22 +119,16 @@ async fn socket_validated_hostile_referrals_hit_actual_candidate_limit() {
     let (request, source) = receive_request(&peer).await;
     assert_eq!(source, actor.socket.local_addr());
 
-    let query = actor
-        .core
-        .iterative_queries
-        .get_mut(&target)
-        .expect("real Core query");
-    for index in 0..255 {
-        query.add_candidate(hostile_node(index));
-        assert!(
-            query.owner_error().is_none(),
-            "unique candidate admitted at index {index}"
-        );
+    // A query keeps only its 20 closest candidates, so referrals alone cannot exhaust the budget:
+    // other holders use it up, and the referral that finds no holder left fails this query.
+    let mut external = Vec::new();
+    while budget.holder_count() < 256 {
+        external.push(budget.reserve_holder().expect("external holder"));
     }
     assert_eq!(
         budget.holder_count(),
         256,
-        "bootstrap plus real query candidates"
+        "bootstrap plus external holders"
     );
 
     let response = Message {
