@@ -26,7 +26,7 @@ mod tests;
 use std::fmt;
 
 pub use client::{Client, ClientBuilder, RunningClient};
-pub use peers::{AllowList, AllowListError, KeyError, PeerKey};
+pub use peers::{AllowAction, AllowList, AllowListError, KeyError, PeerKey, allowlist_command};
 pub use server::{Handler, RunningServer, Server, ServerBuilder, Service};
 pub use text::{Network, NetworkSpec};
 
@@ -57,6 +57,26 @@ pub enum SdkError {
     Setup(&'static str),
     /// The Server or Client has already ended.
     Closed,
+}
+
+macro_rules! sdk_error_from {
+    ($($source:ty => $variant:ident),+ $(,)?) => {$(
+        impl From<$source> for SdkError {
+            fn from(error: $source) -> Self {
+                Self::$variant(error)
+            }
+        }
+    )+};
+}
+
+sdk_error_from! {
+    ConfigError => Config,
+    IdentityError => Identity,
+    AllowListError => AllowList,
+    StartupError => Startup,
+    NetworkError => Network,
+    ForwardError => Forward,
+    std::io::Error => Io,
 }
 
 impl fmt::Display for SdkError {

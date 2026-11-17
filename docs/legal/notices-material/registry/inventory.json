@@ -491,18 +491,18 @@
     "historical_pre_n1": true
   },
   "counts": {
-    "registry_identity_count": 532,
-    "root_registry": 512,
+    "registry_identity_count": 536,
+    "root_registry": 516,
     "nested_registry": 215,
     "exact_root_nested_intersection": 195,
-    "root_only": 317,
+    "root_only": 321,
     "nested_only": 20,
-    "exact_archive_matched_identities": 532,
+    "exact_archive_matched_identities": 536,
     "retired_identity_count": 2,
     "missing_archive_identities": 0,
     "current_registry_classification_counts": {
       "missing": 2,
-      "package-complete": 504,
+      "package-complete": 508,
       "preserved_complete_text": 15,
       "reference-only": 11
     },
@@ -516,7 +516,7 @@
     "current_pass_material_bytes": 4421514,
     "current_pass_complete_text_rows": 501,
     "current_pass_missing_evidence_rows": 2,
-    "registry_text_available_identities": 519
+    "registry_text_available_identities": 523
   },
   "extra_local_data_candidates": [
     {
@@ -1177,6 +1177,117 @@
                 "availability": "unestablished",
                 "evidence": [],
                 "unestablished_reason": "No reviewed complete package-scope text for this alternative is established in the retained evidence; this is not a finding of absence."
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      }
+    },
+    {
+      "archive_data": [
+        {
+          "url": "https://static.crates.io/crates/anstyle/anstyle-1.0.14.crate",
+          "path": null,
+          "bytes": 17787,
+          "sha256": "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000",
+          "acquisition": "owner decision 2026-11-17 (clap command line); one GET, checksum equals the crates.io index"
+        }
+      ],
+      "checksum": "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000",
+      "classification": "package-complete",
+      "declared_license": "MIT OR Apache-2.0",
+      "materials": [
+        {
+          "archive_member": "anstyle-1.0.14/LICENSE-APACHE",
+          "member_bytes": 11358,
+          "member_sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "byte_range": [
+            0,
+            11358
+          ],
+          "material_path": "packages/added-1117/anstyle-1.0.14/terms/LICENSE-APACHE",
+          "material_bytes": 11358,
+          "material_sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "slice_sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-APACHE"
+        },
+        {
+          "archive_member": "anstyle-1.0.14/LICENSE-MIT",
+          "member_bytes": 1062,
+          "member_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "byte_range": [
+            0,
+            1062
+          ],
+          "material_path": "packages/added-1117/anstyle-1.0.14/terms/LICENSE-MIT",
+          "material_bytes": 1062,
+          "material_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "slice_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-MIT"
+        }
+      ],
+      "name": "anstyle",
+      "nested_lock": false,
+      "proposed_url": "https://static.crates.io/crates/anstyle/anstyle-1.0.14.crate",
+      "root_lock": true,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "1.0.14",
+      "manifest_evidence": [
+        {
+          "archive_member": "anstyle-1.0.14/Cargo.toml",
+          "bytes": 4166,
+          "sha256": "1464191f3d9cdcddee83a73a16c7cee7e48dba818248b3fd4273757fbed4407e",
+          "license": "MIT OR Apache-2.0",
+          "license_file": null
+        }
+      ],
+      "archive_member_count": 14,
+      "decoded_tar_bytes": 88064,
+      "review_note": "Authentic package-scope text supplies at least one complete alternative per declared expression group. This is not legal clearance, distribution sufficiency, or an OR-choice conclusion.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT OR Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "MIT OR Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "anstyle-1.0.14/LICENSE-MIT",
+                    "material_path": "packages/added-1117/anstyle-1.0.14/terms/LICENSE-MIT",
+                    "role": "package_terms",
+                    "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6"
+                  }
+                ],
+                "unestablished_reason": null
+              },
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "anstyle-1.0.14/LICENSE-APACHE",
+                    "material_path": "packages/added-1117/anstyle-1.0.14/terms/LICENSE-APACHE",
+                    "role": "package_terms",
+                    "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+                  }
+                ],
+                "unestablished_reason": null
               }
             ],
             "satisfied_by_available_text": true
@@ -5967,6 +6078,339 @@
                     "material_path": "packages/a-f/registry-supplement/c/range-a-to-i/i/p/h/e/r/package/0.4.4/terms/LICENSE-APACHE",
                     "role": "package_terms",
                     "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+                  }
+                ],
+                "unestablished_reason": null
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      }
+    },
+    {
+      "archive_data": [
+        {
+          "url": "https://static.crates.io/crates/clap/clap-4.6.8.crate",
+          "path": null,
+          "bytes": 64077,
+          "sha256": "ac230478587d0269d8d6998b82ae69ea51509d55df66d9e92edd1f986904cd4a",
+          "acquisition": "owner decision 2026-11-17 (clap command line); one GET, checksum equals the crates.io index"
+        }
+      ],
+      "checksum": "ac230478587d0269d8d6998b82ae69ea51509d55df66d9e92edd1f986904cd4a",
+      "classification": "package-complete",
+      "declared_license": "MIT OR Apache-2.0",
+      "materials": [
+        {
+          "archive_member": "clap-4.6.8/LICENSE-APACHE",
+          "member_bytes": 11349,
+          "member_sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "byte_range": [
+            0,
+            11349
+          ],
+          "material_path": "packages/added-1117/clap-4.6.8/terms/LICENSE-APACHE",
+          "material_bytes": 11349,
+          "material_sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "slice_sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-APACHE"
+        },
+        {
+          "archive_member": "clap-4.6.8/LICENSE-MIT",
+          "member_bytes": 1062,
+          "member_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "byte_range": [
+            0,
+            1062
+          ],
+          "material_path": "packages/added-1117/clap-4.6.8/terms/LICENSE-MIT",
+          "material_bytes": 1062,
+          "material_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "slice_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-MIT"
+        }
+      ],
+      "name": "clap",
+      "nested_lock": false,
+      "proposed_url": "https://static.crates.io/crates/clap/clap-4.6.8.crate",
+      "root_lock": true,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "4.6.8",
+      "manifest_evidence": [
+        {
+          "archive_member": "clap-4.6.8/Cargo.toml",
+          "bytes": 15155,
+          "sha256": "549fa73df55b0bc1a86165cfe7e9b38a51bddb5d6c524deb82905da38a24a95b",
+          "license": "MIT OR Apache-2.0",
+          "license_file": null
+        }
+      ],
+      "archive_member_count": 147,
+      "decoded_tar_bytes": 385536,
+      "review_note": "Authentic package-scope text supplies at least one complete alternative per declared expression group. This is not legal clearance, distribution sufficiency, or an OR-choice conclusion.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT OR Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "MIT OR Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "clap-4.6.8/LICENSE-MIT",
+                    "material_path": "packages/added-1117/clap-4.6.8/terms/LICENSE-MIT",
+                    "role": "package_terms",
+                    "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6"
+                  }
+                ],
+                "unestablished_reason": null
+              },
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "clap-4.6.8/LICENSE-APACHE",
+                    "material_path": "packages/added-1117/clap-4.6.8/terms/LICENSE-APACHE",
+                    "role": "package_terms",
+                    "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe"
+                  }
+                ],
+                "unestablished_reason": null
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      }
+    },
+    {
+      "archive_data": [
+        {
+          "url": "https://static.crates.io/crates/clap_builder/clap_builder-4.6.7.crate",
+          "path": null,
+          "bytes": 171709,
+          "sha256": "ec0797fb7aeb1406c84efac526901f7ec3ead2124f946b494e72879d4b54704d",
+          "acquisition": "owner decision 2026-11-17 (clap command line); one GET, checksum equals the crates.io index"
+        }
+      ],
+      "checksum": "ec0797fb7aeb1406c84efac526901f7ec3ead2124f946b494e72879d4b54704d",
+      "classification": "package-complete",
+      "declared_license": "MIT OR Apache-2.0",
+      "materials": [
+        {
+          "archive_member": "clap_builder-4.6.7/LICENSE-APACHE",
+          "member_bytes": 11349,
+          "member_sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "byte_range": [
+            0,
+            11349
+          ],
+          "material_path": "packages/added-1117/clap_builder-4.6.7/terms/LICENSE-APACHE",
+          "material_bytes": 11349,
+          "material_sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "slice_sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-APACHE"
+        },
+        {
+          "archive_member": "clap_builder-4.6.7/LICENSE-MIT",
+          "member_bytes": 1062,
+          "member_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "byte_range": [
+            0,
+            1062
+          ],
+          "material_path": "packages/added-1117/clap_builder-4.6.7/terms/LICENSE-MIT",
+          "material_bytes": 1062,
+          "material_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "slice_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-MIT"
+        }
+      ],
+      "name": "clap_builder",
+      "nested_lock": false,
+      "proposed_url": "https://static.crates.io/crates/clap_builder/clap_builder-4.6.7.crate",
+      "root_lock": true,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "4.6.7",
+      "manifest_evidence": [
+        {
+          "archive_member": "clap_builder-4.6.7/Cargo.toml",
+          "bytes": 5037,
+          "sha256": "6713390509693d70b80f30cecf55b09b4cc79d536dbd3252d2cacfb1abca9727",
+          "license": "MIT OR Apache-2.0",
+          "license_file": null
+        }
+      ],
+      "archive_member_count": 64,
+      "decoded_tar_bytes": 1031168,
+      "review_note": "Authentic package-scope text supplies at least one complete alternative per declared expression group. This is not legal clearance, distribution sufficiency, or an OR-choice conclusion.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT OR Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "MIT OR Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "clap_builder-4.6.7/LICENSE-MIT",
+                    "material_path": "packages/added-1117/clap_builder-4.6.7/terms/LICENSE-MIT",
+                    "role": "package_terms",
+                    "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6"
+                  }
+                ],
+                "unestablished_reason": null
+              },
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "clap_builder-4.6.7/LICENSE-APACHE",
+                    "material_path": "packages/added-1117/clap_builder-4.6.7/terms/LICENSE-APACHE",
+                    "role": "package_terms",
+                    "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe"
+                  }
+                ],
+                "unestablished_reason": null
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      }
+    },
+    {
+      "archive_data": [
+        {
+          "url": "https://static.crates.io/crates/clap_lex/clap_lex-1.1.2.crate",
+          "path": null,
+          "bytes": 13574,
+          "sha256": "e0921b3876b3a1df8a1c9f912e7f94342458022c2e84288015893d83c4d62a79",
+          "acquisition": "owner decision 2026-11-17 (clap command line); one GET, checksum equals the crates.io index"
+        }
+      ],
+      "checksum": "e0921b3876b3a1df8a1c9f912e7f94342458022c2e84288015893d83c4d62a79",
+      "classification": "package-complete",
+      "declared_license": "MIT OR Apache-2.0",
+      "materials": [
+        {
+          "archive_member": "clap_lex-1.1.2/LICENSE-APACHE",
+          "member_bytes": 11349,
+          "member_sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "byte_range": [
+            0,
+            11349
+          ],
+          "material_path": "packages/added-1117/clap_lex-1.1.2/terms/LICENSE-APACHE",
+          "material_bytes": 11349,
+          "material_sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "slice_sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-APACHE"
+        },
+        {
+          "archive_member": "clap_lex-1.1.2/LICENSE-MIT",
+          "member_bytes": 1062,
+          "member_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "byte_range": [
+            0,
+            1062
+          ],
+          "material_path": "packages/added-1117/clap_lex-1.1.2/terms/LICENSE-MIT",
+          "material_bytes": 1062,
+          "material_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "slice_sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-MIT"
+        }
+      ],
+      "name": "clap_lex",
+      "nested_lock": false,
+      "proposed_url": "https://static.crates.io/crates/clap_lex/clap_lex-1.1.2.crate",
+      "root_lock": true,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "1.1.2",
+      "manifest_evidence": [
+        {
+          "archive_member": "clap_lex-1.1.2/Cargo.toml",
+          "bytes": 4490,
+          "sha256": "1cc9ff60fe4414d086ab1c651d1d7e50e505ecfb6189a3706fb9e73d724f66be",
+          "license": "MIT OR Apache-2.0",
+          "license_file": null
+        }
+      ],
+      "archive_member_count": 9,
+      "decoded_tar_bytes": 53760,
+      "review_note": "Authentic package-scope text supplies at least one complete alternative per declared expression group. This is not legal clearance, distribution sufficiency, or an OR-choice conclusion.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT OR Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "MIT OR Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "clap_lex-1.1.2/LICENSE-MIT",
+                    "material_path": "packages/added-1117/clap_lex-1.1.2/terms/LICENSE-MIT",
+                    "role": "package_terms",
+                    "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6"
+                  }
+                ],
+                "unestablished_reason": null
+              },
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "clap_lex-1.1.2/LICENSE-APACHE",
+                    "material_path": "packages/added-1117/clap_lex-1.1.2/terms/LICENSE-APACHE",
+                    "role": "package_terms",
+                    "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe"
                   }
                 ],
                 "unestablished_reason": null

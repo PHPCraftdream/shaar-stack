@@ -4,6 +4,45 @@ The crate is `publish = false` and lives in this workspace. Add it as a path dep
 
 Cancellation: unless an item says otherwise, **dropping a future is not a clean shutdown**. Await the explicit `close`/`shutdown`/`stop` operations. Many futures are documented `cancel-safe: NO` in their doc comments.
 
+## The facade (crate root)
+
+Start here. The facade wraps the composed roles and the direct endpoint in typed builders and `Send` handles; everything below it stays available. The example [`sdk-example.rs`](sdk-example.rs) is compiled into the crate and run verbatim by `startup::facade::tests::guide`.
+
+```rust
+let server = Server::builder(server_identity)
+    .allow(AllowList::new([client_key])?)
+    .bind("127.0.0.1:0".parse().unwrap())
+    .handler(|peer: PeerKey, mut stream: ServiceStream| async move { /* serve one stream */ })
+    .build()?
+    .start()
+    .await?;
+let client = Client::builder(client_identity, server.address())
+    .server_address(server.local_addr().unwrap())
+    .build()?
+    .start()
+    .await?;
+let mut stream = client.connect().await?;      // AsyncRead + AsyncWrite
+```
+
+| Item | Behaviour |
+|---|---|
+| `PeerKey` | A public Ed25519 key: the address of a Server, the name of a Client. Text form 64 hex digits (parsing accepts either case and the key type's other text forms); `of(&Identity)`, `from_bytes`, `as_bytes`, `peer_id()` (libp2p text), `ygg_ip()`, `summary_lines()`. Ordered and hashable. |
+| `AllowList` | Distinct client keys, sorted. `new(keys)`, `parse(text)`, `read(path).await` use the allowlist file format and its bounds (256 entries counted before deduplication, 16,896 bytes) with the messages of the binary; `text_with` and `text_without` edit allowlist text keeping comments. |
+| `Server::builder(identity)` | `allow`, `forward_to(loopback target)` or `handler(..)` (one is required), `network(Network)`, `fallback`, `publish_address`, `address_key_file`, `bind` (direct shape only). `build()` renders ktav text and parses it with the rules of a file, so a builder value and a file value are validated identically and errors are the file's `ConfigError`s. |
+| `Server::from_config_file(path)` | Loads the identity from `key_file`, the clients from `allowlist_path` and the TCP service from `target`. `with_service(Service)` replaces the service. |
+| `Server::run(shutdown)` | Serves on the caller's runtime; the future is not `Send` (the roles are not). |
+| `Server::start()` | Runs the Server on a thread of its own (a small runtime; the role future is driven there) and returns a `Send` `RunningServer` once it is up: `address()`, `local_addr()` (the native socket; a wildcard IP means all interfaces), `shutdown().await`, `wait().await`. |
+| `Handler` | `Fn(PeerKey, ServiceStream) -> impl Future<Output = ()>`; called once per admitted stream with the authenticated client key; at most 16 per client session; a panic ends that stream only. |
+| `Client::builder(identity, server)` | `server_address` (required for `Network::Direct`), `network`, `fallback`, `listen`, `address_key_file`. `Client::from_config_file(path)`. |
+| `Client::start()` / `RunningClient` | `connect().await -> ServiceStream`; `local_addr()` (the loopback listener, when there is one: always in the composed shape, in the direct shape only when `listen` was set); `shutdown`, `wait`. The direct shape opens a QUIC stream on the session; the composed shape connects to the role's loopback listener, which forwards over the active path. |
+| `Network` | `Direct` (one QUIC socket, no discovery), `Public` (the defaults `init` writes) or `Custom(NetworkSpec { bootstrap, ygg_peers, relay })`. |
+| `ServiceStream` | One bidirectional byte stream. `shutdown()` finishes the sending side and keeps written bytes deliverable; dropping a stream that was not shut down resets it. |
+| `SdkError` | Wraps the config, identity, allowlist, startup, network, stream and local I/O errors (`From` for each) plus `Setup(&str)` for builder misuse and `Closed`. Display names fields and stages only. |
+
+Network defaults: bootstrap entries of `network.mainline.bootstrap` may be `host:port`; the composed roles resolve the names once at start (5 s deadline, first usable IPv4 of each), and `StartupError::BootstrapUnresolved` names the field when nothing is usable.
+
+Wire behaviour is unchanged (`shaar/tcp/1`); `Session::open_stream` and `Session::serve_streams` are the network-layer calls behind the facade.
+
 ## `shaar::identity`
 
 | Item | Behaviour |

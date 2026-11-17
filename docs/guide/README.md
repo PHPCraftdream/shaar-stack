@@ -6,7 +6,7 @@ Sha'ar forwards one local TCP port of a client to one fixed loopback TCP service
 |---|---|
 | [operations.md](operations.md) | Keys, allowlist, startup, shutdown, `signal` vs `standby`, what the DHT record discloses, errors and recovery |
 | [configuration.md](configuration.md) | Every ktav 0.8 field, defaults, validation messages |
-| [sdk-api.md](sdk-api.md) | Public SDK API |
+| [sdk-api.md](sdk-api.md) | Public SDK API: the facade first (builders, handles, handler), then the layers below it; [sdk-example.rs](sdk-example.rs) is compiled and run by a test |
 | [limits-and-evidence.md](limits-and-evidence.md) | OS, NAT, relay, Yggdrasil and FFI limits; the checks that were actually run and what was not |
 | [examples/](examples/) | Config files, allowlist and key program used below; each is exercised by a test |
 
@@ -24,6 +24,17 @@ Labels: **Verified** = exercised by tests that ran in GitHub CI; **Source** = re
 | Evidence | real processes on loopback in CI | real processes against owned fixtures in CI, controlled NAT and blockade matrix |
 
 The direct-only shape is the simplest path and is described first.
+
+## Quick start with the subcommands (public networks, key-only client) **Source**
+
+The subcommands ([operations.md](operations.md#subcommands)) generate the files, print the address and edit the configuration; the generated files already carry the public Mainline bootstrap hosts and Yggdrasil peers, so the client needs the server's key only. The SDK equivalent is in [sdk-api.md](sdk-api.md#the-facade-crate-root).
+
+1. **Server machine:** `shaar-server init` prints `public_key=<64 hex>` (the address to hand out), `peer_id=` and `ygg_ip=`. Then `shaar-server config set target 127.0.0.1:8080` (your local TCP service). `shaar-server address` prints the address again.
+2. **Client machine:** `shaar-client init <SERVER_ADDRESS>` prints your own key (`your public key for the server allowlist: public_key=<CLIENT_KEY>`).
+3. **Server machine:** `shaar-server allow add <CLIENT_KEY>`, then start the server: `shaar-server run` (the allowlist is read once at startup).
+4. **Client machine:** `shaar-client connect` prints `listening=<ip:port>`; connect your application there.
+
+`--private` writes direct-only files without public networks (the client then needs `--address ip:port`). `shaar-server config check` and `shaar-client config check` validate a file and what it names before you start. Contacting the public DHT and Yggdrasil peers is what the generated defaults do at startup; nothing in this guide proves a direct path through real NATs (see [limits-and-evidence.md](limits-and-evidence.md#nat-and-direct-quic)).
 
 ## Quick start (zero-configuration first run) **Source**
 
@@ -71,4 +82,4 @@ Same keys and allowlist (at most 16 allowlisted clients in this shape). In addit
 
 ## Tests that keep this guide honest
 
-`crates/shaar/src/config/guide_examples_tests.rs` loads the four `.ktav` examples verbatim and asserts their values and the quoted validation messages; `crates/shaar-server/src/tests/allowlist.rs` parses `allowlist.txt` with the production parser; `crates/shaar/tests/sdk_network.rs` compiles and runs `keygen.rs`; `crates/shaar/src/identity/provision/tests.rs` covers the provisioning layer; binary first-run tests exercise the two binaries' first-run flows, and the ignored process case `process_smoke::startup::real_first_run_bootstrap_without_arguments` is run by CI's process-feedback job. The CI impact map (`.github/ci/policy.py`) selects them when an example changes.
+`crates/shaar/src/startup/facade/tests/guide.rs` compiles and runs `sdk-example.rs`; `crates/shaar/src/config/guide_examples_tests.rs` loads the four `.ktav` examples verbatim and asserts their values and the quoted validation messages; `crates/shaar-server/src/tests/allowlist.rs` parses `allowlist.txt` with the production parser; `crates/shaar/tests/sdk_network.rs` compiles and runs `keygen.rs`; `crates/shaar/src/identity/provision/tests.rs` covers the provisioning layer; binary first-run tests exercise the two binaries' first-run flows, and the ignored process case `process_smoke::startup::real_first_run_bootstrap_without_arguments` is run by CI's process-feedback job. The CI impact map (`.github/ci/policy.py`) selects them when an example changes.

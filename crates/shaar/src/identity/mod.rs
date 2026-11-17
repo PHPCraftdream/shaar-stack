@@ -25,10 +25,11 @@ mod ygg;
 
 pub use error::IdentityError;
 pub use provision::{
-    FileState, NetworkChoice, ProvisionError, ProvisionPaths, ProvisionReport, Provisioned, Role,
-    allowlist_template_text, client_config_text, default_data_dir, first_run_summary_lines,
+    ConfigAction, ConfigEditError, FileState, NetworkChoice, ProvisionError, ProvisionPaths,
+    ProvisionReport, Provisioned, Role, allowlist_template_text, check_config_text,
+    client_config_text, config_command, default_data_dir, editable_keys, first_run_summary_lines,
     path_as_config_value, provision, provision_with, public_network_text, resolve_data_dir,
-    role_dir,
+    role_dir, set_config_network, set_config_value, unset_config_key, write_replacing,
 };
 
 use std::net::Ipv6Addr;

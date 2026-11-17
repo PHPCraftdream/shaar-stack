@@ -2176,6 +2176,10 @@ green fork CI, an exact-SHA upstream run and a merge:
    subcommand with examples that tests compile or execute; full-scope CI green on the
    final SHA. Non-goals: a tutorial site, translated guides.
 
+### SDK and command line: status (2026-11-17)
+
+All five leaves are written and executed in CI; the evidence and its limits are in [limits-and-evidence.md](../guide/limits-and-evidence.md#sdk-and-command-line). SDK-1 (ktav 0.8.1): fork run 44038242102. SDK-4 (host-name bootstrap, public defaults for `init`): fork run 44038409636. SDK-2 (facade): fork run 44043457256 and upstream run 44045761000 on `183b0f7`, merged with SDK-1 and SDK-4. SDK-3 (clap builder API, subcommands, configuration and allowlist editing) and SDK-5 (guide pages, runnable example): fork run 44056317957 on `c1ad2bc`. Changes against the plan above: the facade types are `PeerKey` (one type for a Server address and a Client key, instead of a separate `ServerAddress`), `AllowList` and `ServiceStream`; clap runs without derive and without colour (four packages, no proc macro); `address-key new` replaces a separate `keygen`; the Client's direct shape opens QUIC streams on its session and the composed shape connects to the role's loopback listener. A mistake of this work is recorded in the checkpoint: a worktree removal followed a junction and emptied the shared `target/`; the prepared sources and the offline vendor were rebuilt from the local archive store without the network.
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.
