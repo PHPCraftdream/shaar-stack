@@ -299,10 +299,11 @@ async fn config_edits_the_file_of_the_chosen_place() {
     let shown = run(&["config", "show", "--dir", fixture.dir()])
         .await
         .unwrap();
+    // A later edit normalises the file, so the value may print as `listen: ...` or `listen:: ...`.
     assert!(
         shown
             .iter()
-            .any(|line| line.contains("listen:: 127.0.0.1:3000"))
+            .any(|line| line.starts_with("listen") && line.contains("127.0.0.1:3000"))
     );
     assert!(!shown.iter().any(|line| line.contains("network:")));
 }

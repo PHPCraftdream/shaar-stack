@@ -324,10 +324,11 @@ async fn allow_and_config_edit_the_files_of_the_chosen_place() {
     let shown = run(&["config", "show", "--dir", fixture.dir()])
         .await
         .unwrap();
+    // A later edit normalises the file, so the value may print as `target: ...` or `target:: ...`.
     assert!(
         shown
             .iter()
-            .any(|line| line.contains("target:: 127.0.0.1:8080"))
+            .any(|line| line.starts_with("target") && line.contains("127.0.0.1:8080"))
     );
     assert!(shown.iter().any(|line| line.contains("dht.libtorrent.org")));
 }
