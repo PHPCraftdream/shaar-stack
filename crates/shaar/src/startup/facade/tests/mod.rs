@@ -2,6 +2,7 @@
 
 mod builders;
 mod direct;
+mod guide;
 mod peers;
 
 use std::path::PathBuf;

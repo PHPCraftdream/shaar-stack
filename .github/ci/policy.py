@@ -104,6 +104,7 @@ RULES = (
     ("crates/shaar/src/identity/", ("sdk-identity",)),
     ("crates/shaar/src/config/", ("sdk-config",)),
     # Documented examples are parsed verbatim by the tests of their owners.
+    ("docs/guide/sdk-example", ("sdk-startup",)),
     ("docs/guide/examples/allowlist", ("server-guide",)),
     ("docs/guide/examples/server", ("sdk-config",)),
     ("docs/guide/examples/client", ("sdk-config",)),

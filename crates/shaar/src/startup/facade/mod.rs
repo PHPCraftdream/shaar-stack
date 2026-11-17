@@ -59,6 +59,26 @@ pub enum SdkError {
     Closed,
 }
 
+macro_rules! sdk_error_from {
+    ($($source:ty => $variant:ident),+ $(,)?) => {$(
+        impl From<$source> for SdkError {
+            fn from(error: $source) -> Self {
+                Self::$variant(error)
+            }
+        }
+    )+};
+}
+
+sdk_error_from! {
+    ConfigError => Config,
+    IdentityError => Identity,
+    AllowListError => AllowList,
+    StartupError => Startup,
+    NetworkError => Network,
+    ForwardError => Forward,
+    std::io::Error => Io,
+}
+
 impl fmt::Display for SdkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
