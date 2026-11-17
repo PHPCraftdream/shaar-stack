@@ -545,7 +545,7 @@ for a Yggdrasil address that is derived from the key. No P07 work starts in para
 with P09. P10, P13 and P16 explicitly require accepted P07; P07 cannot be silently
 removed again to obtain a native-only green.
 
-The [P08 frame-acceptance plan](p08-carrier-frame-acceptance.md) retains finite
+The [P08 frame-acceptance plan](history/p08-carrier-frame-acceptance.md) retains finite
 #203 bootstrap and separately gated public smoke #204 at P13. It is not permission
 for public Yggdrasil traffic. Strict signaling-only remains invariant: libp2p never
 becomes an application-data backup path. The restored P07 requires the pinned
