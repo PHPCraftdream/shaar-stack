@@ -16,6 +16,7 @@ use crate::native_discovery::policy::{
     ClockSample as PolicyClock, CompletedQuery, PolicyOwner, PreparedQuery, QuerySource,
     RecordError,
 };
+use crate::network::observe::PortMapping;
 
 /// Owner-wide delivery budget: at most this many results (network or
 /// cached) can be held by callers at once.
@@ -281,6 +282,8 @@ impl std::fmt::Display for Lookup {
 pub(super) struct Window {
     pub(super) lookup: Lookup,
     pub(super) info: Option<Option<IpAddr>>,
+    /// Whether the NAT kept the Mainline socket's port in the observed address (trace only).
+    pub(super) mapping: PortMapping,
 }
 
 impl Window {
@@ -309,6 +312,9 @@ impl Window {
             "{}",
             probe_line(outcome, &self.lookup, info, start.elapsed().as_millis())
         );
+        if let Some(line) = self.mapping.line() {
+            eprintln!("{line}");
+        }
     }
 }
 
@@ -331,15 +337,27 @@ async fn reflexive_probe(
         },
     };
     let info_bound = tokio::time::Instant::now() + INFO_READ_BOUND;
-    let info = tokio::select! {
+    let read = tokio::select! {
         biased;
         _ = &mut *stop => return None,
         _ = tokio::time::sleep_until(info_bound) => None,
         read = handle.info() => read.ok().map(|info| {
-            info.public_address().map(|address| IpAddr::V4(*address.ip()))
+            let seen = info.public_address();
+            (
+                seen.map(|address| IpAddr::V4(*address.ip())),
+                PortMapping::of(seen, info.local_addr()),
+            )
         }),
     };
-    Some(Window { lookup, info })
+    let (info, mapping) = match read {
+        Some((address, mapping)) => (Some(address), mapping),
+        None => (None, PortMapping::Unknown),
+    };
+    Some(Window {
+        lookup,
+        info,
+        mapping,
+    })
 }
 
 /// The trace line of the first exposed majority: an outcome token and the time since the
@@ -528,9 +546,10 @@ pub(super) async fn reflexive_loop(
 
 #[cfg(test)]
 mod window_line_tests {
+    use super::super::RuntimeError;
     use super::{
-        FAST_START_CONFIRM, FAST_START_INTERVAL, FAST_START_RETRY, Lookup, ReflexiveTally, Window,
-        fast_start_pause, probe_line, window_line,
+        FAST_START_CONFIRM, FAST_START_INTERVAL, FAST_START_RETRY, Lookup, PortMapping,
+        ReflexiveTally, ResolveError, Window, fast_start_pause, probe_line, window_line,
     };
     use n0_mainline::ResourceError;
     use std::net::{IpAddr, Ipv4Addr};
@@ -543,7 +562,23 @@ mod window_line_tests {
     ];
 
     fn window(lookup: Lookup, info: Option<Option<IpAddr>>) -> Window {
-        Window { lookup, info }
+        Window {
+            lookup,
+            info,
+            mapping: PortMapping::Unknown,
+        }
+    }
+
+    #[test]
+    fn a_failed_lookup_is_named_by_a_token_without_a_payload() {
+        let incomplete = RuntimeError::Resolve(ResolveError::NoNetworkCompletion);
+        assert_eq!(incomplete.trace_token(), "incomplete");
+        assert_eq!(RuntimeError::ResolveBusy.trace_token(), "busy");
+        assert_eq!(RuntimeError::DeadlineExceeded.trace_token(), "deadline");
+        assert_eq!(RuntimeError::PutFailed.trace_token(), "put");
+        assert_eq!(RuntimeError::Clock.trace_token(), "other");
+        let bound = RuntimeError::Resource(ResourceError::CandidateLimit);
+        assert_eq!(bound.trace_token(), "resource:CandidateLimit");
     }
 
     #[test]

@@ -100,7 +100,7 @@ Where the files are: `--config <path.ktav>` names the configuration file (the ke
 
 ### Editing a configuration
 
-`config set`, `config unset` and `config network` read the file, normalise it with `ktav::format_str` (every comment and grouping blank survives, compounds take their block form), change one top-level entry (a value is written as a literal string, `key:: value`; the next edit normalises the file again, which prints a value that cannot be mistaken for a number or a keyword as a plain `key: value`), and validate the result with the rules of the role. A result that would be invalid is refused with the field and kind of the file's own message and nothing is written, with one allowance: a file that still lacks its required `target` (Server) or `server` (Client) can be edited step by step; `config check` is the strict gate. The previous content is kept as `<file>.bak`; the new content is written through a temporary file and a rename. `config network public` replaces the `network` object by the public defaults and drops the comment header `init` wrote above it; `config network private` removes it.
+`config set`, `config unset` and `config network` read the file, normalise it with `ktav::format_str` (every comment and grouping blank survives, compounds take their block form), change one top-level entry (a value is written as a literal string, `key:: value`; the next edit normalises the file again, which prints a value that cannot be mistaken for a number or a keyword as a plain `key: value`), and validate the result with the rules of the role. A result that would be invalid is refused with the field and kind of the file's own message and nothing is written, with two allowances: a file that still lacks its required `target` (Server) or `server` (Client) can be edited step by step, and so can a Server file that holds one half of the pair `publish_address: encrypted` and `address_key_file` (set either one first; the rest of the file is still validated while the other half is pending); `config check` is the strict gate and refuses a file with only one half. The previous content is kept as `<file>.bak`; the new content is written through a temporary file and a rename. `config network public` replaces the `network` object by the public defaults and drops the comment header `init` wrote above it; `config network private` removes it.
 
 Evidence for this section is stated in [limits-and-evidence.md](limits-and-evidence.md#sdk-and-command-line).
 
@@ -148,7 +148,7 @@ Policy defaults (**Source**; not configurable from the files; the SDK exposes th
 
 This section is **Verified** by unit tests and real-process cases in CI (fork CI 43694473684, process feedback 43695774162, upstream CI 43696633747 at `aac9ddf`). A live public smoke with these lines has not run yet; until it does, the smoke harness falls back to inferring the route.
 
-Both binaries print operator-facing lines on **stderr** with a fixed grammar (`crates/shaar/src/network/forwarding/observe.rs`). Lines carry only counts and typed tokens — never key material, addresses, or third-party data.
+Both binaries print operator-facing lines on **stderr** with a fixed grammar (`crates/shaar/src/network/forwarding/observe/`). Lines carry only counts and typed tokens — never key material, addresses, or third-party data.
 
 Client route line — printed once per successful dial (per route decision):
 
@@ -187,6 +187,10 @@ shaar: <client|server> punch ports own=<PORTS|-> peer=<PORTS|->
 shaar: server punch offer candidates=<N> answer=<sent|none|refused>
 shaar: reflexive window outcome=<skipped|empty|observed> lookup=<ok|incomplete|bounded|failed:<ERROR>> info=<some|none|failed> elapsed_ms=<MS>
 shaar: reflexive window outcome=exposed elapsed_ms=<MS>
+shaar: reflexive port mapping=<kept|changed>
+shaar-client: record lookup outcome=<found|not-found|failed:<TOKEN>> record=<N> late=<yes|no> elapsed_ms=<MS>
+shaar-client: direct attempts candidates=<N> local=<K> connected=<yes|no> elapsed_ms=<MS>
+shaar-server: record publication outcome=<ok|failed:<TOKEN>> retries=<N>
 ```
 
 - A punch attempt names why it ended. `candidates` counts what this side offered; a side that does not yet know its public address offers none.
@@ -194,6 +198,11 @@ shaar: reflexive window outcome=exposed elapsed_ms=<MS>
 - The same trace lines appear whichever channel carries the exchange: the Yggdrasil bridge control datagrams (no relay fields), or, with a pinned relay, the authenticated libp2p carrier link (leaf L4b). On the carrier link the punch messages are side-channel datagrams next to the QUIC packets; the relay still carries signaling only, never application data. With a relay the Client punches between bringing up the carrier link and the relay negotiation, using up to half of the remaining attempt, and falls through to the unchanged negotiation when no answer or probe succeeds.
 - The Server answers an Offer only when it has candidates of its own; `answer=none` means it had none to answer with.
 - One reflexive window is one lookup of the DHT address watcher. `lookup` says how the window's own lookup ended (`ok` completed; `incomplete` finished without a network answer; `bounded` hit the 10 s bound; `failed:<ERROR>` carried a typed error) and `info` what the DHT actor held afterwards (`some` an address, `none` no vote yet, `failed` the read did not finish). A completed lookup counts whatever it read; any other lookup still counts an address that another finished query already learned, and never counts "no vote" as evidence. `exposed` marks the first majority of two agreeing windows; only that majority is ever published in the record (`publish_address = plain`). The punch offers the address of the latest window that observed one as soon as it exists (a single DHT vote, never published) and switches to the majority once it is exposed, so a side can offer a candidate before two windows agree. One forged vote can therefore make a side offer a wrong IP; the peer then probes at most four candidates per attempt and one burst per interval.
+
+- `reflexive port mapping` compares the port the DHT nodes saw for the Mainline socket with the port the socket is bound to: `kept` = the NAT kept the port, `changed` = it rewrote it (a candidate made of the public address and the local port then misses); it is printed with a window that learned an address and never shows a port.
+- `record lookup` is printed once per finished lookup of the signed record. `record` counts the addresses it held (a sealed record opened with the Client's `address_key_file` counts like a plain one). `outcome` is `found`, `not-found` (the lookup completed with no address) or `failed:<TOKEN>` with TOKEN ∈ {`undecodable` (a record exists but cannot be read, for instance a missing or wrong address key), `incomplete`, `deadline`, `policy`, `busy`, `closed`, `other`}. `late=yes` means the route decision had already stopped waiting for this lookup (a live lookup takes 6 to 10 s, a dial that punches waits 1 s), so the record is used by a later attempt, not by the first one.
+- `record publication` is the Server's counterpart: one line per finished publication of its signed record (`ok`, or `failed:<TOKEN>` with the tokens above plus `put`, `publish` and `resource:<BOUND>`), with the number of failed publications before it. It shows whether the record ever reached the DHT; it says nothing about whether another node can find it.
+- `direct attempts` is printed after the direct-candidate phase of each dial attempt that had candidates: how many were tried, how many of them were private or local, and whether one connected.
 
 Consumers: the public smoke harness (`.github/probes/public-smoke/`) reads these lines from the product stderr and fails a run whose observed path contradicts its expectation. Absence of the lines (older binaries) keeps the previous inferred wording.
 

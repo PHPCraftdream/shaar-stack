@@ -15,6 +15,7 @@ use crate::native_discovery::runtime::owner::{
     PublicationHandle, ResolvedAddresses, RuntimeError, RuntimeOwner, current_vote, vote_changed,
 };
 use crate::native_discovery::runtime::publisher::PublicationStatus;
+use crate::network::observe::{emit, server_publication};
 
 use super::MAX_SNAPSHOT_ADDRESSES;
 
@@ -449,6 +450,11 @@ async fn maintain(
             Event::Published(result) => {
                 publish = None;
                 publish_admission = None;
+                let outcome = match &result {
+                    Ok(()) => "ok".to_owned(),
+                    Err(error) => format!("failed:{}", error.trace_token()),
+                };
+                emit(server_publication(&outcome, retry_step));
                 match result {
                     Ok(()) => {
                         current = None;

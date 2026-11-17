@@ -56,6 +56,85 @@ fn a_file_without_its_required_value_can_be_edited_step_by_step() {
     check_config_text(Role::Client, &edited, false).unwrap();
 }
 
+fn refused(result: Result<(), ConfigError>) -> (&'static str, ValidationKind) {
+    match result {
+        Err(ConfigError::Validation { field, kind }) => (field, kind),
+        other => panic!("expected a validation refusal, got {other:?}"),
+    }
+}
+
+fn composed_server() -> String {
+    set_config_network(Role::Server, SERVER, NetworkChoice::Public).unwrap()
+}
+
+#[test]
+fn the_encrypted_pair_can_be_set_in_either_order_and_the_strict_check_wants_both() {
+    let base = composed_server();
+    let mode = set_config_value(Role::Server, &base, "publish_address", "encrypted").unwrap();
+    assert_eq!(
+        refused(check_config_text(Role::Server, &mode, true)),
+        ("address_key_file", ValidationKind::MissingRequired)
+    );
+    let both =
+        set_config_value(Role::Server, &mode, "address_key_file", "/keys/address.key").unwrap();
+    check_config_text(Role::Server, &both, true).unwrap();
+
+    let key =
+        set_config_value(Role::Server, &base, "address_key_file", "/keys/address.key").unwrap();
+    assert_eq!(
+        refused(check_config_text(Role::Server, &key, true)),
+        ("address_key_file", ValidationKind::NotApplicable)
+    );
+    let other_order = set_config_value(Role::Server, &key, "publish_address", "encrypted").unwrap();
+    check_config_text(Role::Server, &other_order, true).unwrap();
+    assert!(other_order.contains("## keep me"));
+    assert_eq!(other_order.matches("address_key_file").count(), 1);
+}
+
+#[test]
+fn a_half_set_pair_does_not_hide_other_invalid_values() {
+    let base = composed_server();
+    let half = set_config_value(Role::Server, &base, "publish_address", "encrypted").unwrap();
+    let bad_target = set_config_value(Role::Server, &half, "target", "8.8.8.8:80").unwrap_err();
+    assert_eq!(invalid(bad_target), ("target", ValidationKind::NotLoopback));
+    let misspelt =
+        set_config_value(Role::Server, &base, "publish_address", "Encrypted").unwrap_err();
+    assert_eq!(
+        invalid(misspelt),
+        ("publish_address", ValidationKind::InvalidEnum)
+    );
+}
+
+#[test]
+fn unsetting_one_half_of_the_pair_is_allowed_and_the_strict_check_still_refuses_it() {
+    let base = composed_server();
+    let mode = set_config_value(Role::Server, &base, "publish_address", "encrypted").unwrap();
+    let both =
+        set_config_value(Role::Server, &mode, "address_key_file", "/keys/address.key").unwrap();
+    let without_mode = unset_config_key(Role::Server, &both, "publish_address").unwrap();
+    assert_eq!(
+        refused(check_config_text(Role::Server, &without_mode, true)),
+        ("address_key_file", ValidationKind::NotApplicable)
+    );
+    let clean = unset_config_key(Role::Server, &without_mode, "address_key_file").unwrap();
+    check_config_text(Role::Server, &clean, true).unwrap();
+}
+
+#[test]
+fn a_client_key_file_without_a_network_object_stays_refused() {
+    let error = set_config_value(
+        Role::Client,
+        CLIENT,
+        "address_key_file",
+        "/keys/address.key",
+    )
+    .unwrap_err();
+    assert_eq!(
+        invalid(error),
+        ("address_key_file", ValidationKind::NotApplicable)
+    );
+}
+
 #[test]
 fn an_invalid_result_is_refused_with_the_field_and_kind() {
     assert_eq!(
