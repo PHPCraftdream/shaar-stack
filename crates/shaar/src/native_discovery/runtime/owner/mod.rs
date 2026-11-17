@@ -27,7 +27,6 @@ use iroh_dns::pkarr::SignedPacket;
 
 const CLOSE_BOUND: Duration = Duration::from_secs(5);
 const COMMANDS: usize = 8;
-
 #[derive(Clone, Debug)]
 pub(crate) enum RuntimeError {
     Publish(PublishError),
@@ -85,6 +84,7 @@ mod flight;
 #[path = "../publisher/owner_loop.rs"]
 mod loop_state;
 mod options;
+pub(crate) use self::options::{LOOKUP_BOUND, PUBLISH_BOUND};
 mod resolver;
 
 #[derive(Clone)]
@@ -102,7 +102,7 @@ impl PublicationHandle {
     ) -> Result<(), RuntimeError> {
         self.replace_inner(
             snapshot,
-            tokio::time::Instant::now() + Duration::from_secs(10),
+            tokio::time::Instant::now() + PUBLISH_BOUND,
             Some(admitted),
         )
         .await
@@ -355,11 +355,8 @@ impl RuntimeOwner {
     }
 
     pub(crate) async fn replace(&self, snapshot: Vec<TransportAddr>) -> Result<(), RuntimeError> {
-        self.replace_until(
-            snapshot,
-            tokio::time::Instant::now() + Duration::from_secs(10),
-        )
-        .await
+        self.replace_until(snapshot, tokio::time::Instant::now() + PUBLISH_BOUND)
+            .await
     }
 
     pub(crate) async fn resolve_until(
@@ -389,7 +386,7 @@ impl RuntimeOwner {
         if let Some(error) = self.clock_fault_error() {
             return Err(error);
         }
-        let deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(10));
+        let deadline = deadline.min(tokio::time::Instant::now() + LOOKUP_BOUND);
         let sample = self.sample_until(deadline).await?;
         let begun = if fresh {
             self.resolver.begin_fresh(key, sample)
