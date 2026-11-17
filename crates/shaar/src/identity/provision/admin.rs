@@ -40,6 +40,8 @@ const CLIENT_KEYS: [&str; 6] = [
 const PLACEHOLDER_SERVER: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
 /// Loopback target that lets a server file without `target` be edited.
 const PLACEHOLDER_TARGET: &str = "127.0.0.1:1";
+/// Path that completes a half-set `address_key_file` pair while the rest is validated.
+const PLACEHOLDER_KEY_FILE: &str = "address.key";
 
 /// Why a configuration edit was refused; never carries a value of the file.
 #[derive(Debug)]
@@ -76,9 +78,10 @@ impl std::error::Error for ConfigEditError {
 
 /// Validates a configuration text against the schema of `role`. A strict check wants every
 /// required value; the lenient one lets a file without `target` (Server) or `server`
-/// (Client) pass, so such a file can still be edited step by step.
+/// (Client) pass, and a Server file that holds one half of the `publish_address: encrypted`
+/// plus `address_key_file` pair, so such a file can still be edited step by step.
 pub fn check_config_text(role: Role, text: &str, strict: bool) -> Result<(), ConfigError> {
-    match (check(role, text, false), strict) {
+    let result = match (check(role, text, false), strict) {
         (
             Err(ConfigError::Validation {
                 kind: ValidationKind::MissingRequired,
@@ -87,6 +90,35 @@ pub fn check_config_text(role: Role, text: &str, strict: bool) -> Result<(), Con
             false,
         ) => check(role, text, true),
         (result, _) => result,
+    };
+    let completed = match &result {
+        Err(ConfigError::Validation {
+            field: "address_key_file",
+            kind,
+        }) if !strict && role == Role::Server => pair_completed(text, *kind),
+        _ => None,
+    };
+    match completed {
+        Some(repaired) => check_config_text(role, &repaired, false),
+        None => result,
+    }
+}
+
+/// The text with the missing half of the `publish_address: encrypted` plus `address_key_file`
+/// pair filled in, so the lenient check still validates every other setting of the file.
+fn pair_completed(text: &str, kind: ValidationKind) -> Option<String> {
+    let normalised = ktav::format_str(text).ok()?;
+    match kind {
+        ValidationKind::MissingRequired => {
+            let line = format!("address_key_file:: {PLACEHOLDER_KEY_FILE}\n");
+            Some(splice(&normalised, "address_key_file", Some(&line)))
+        }
+        ValidationKind::NotApplicable => Some(splice(
+            &normalised,
+            "publish_address",
+            Some("publish_address: encrypted\n"),
+        )),
+        _ => None,
     }
 }
 
@@ -168,6 +200,14 @@ fn edit(
     replacement: Option<String>,
 ) -> Result<String, ConfigEditError> {
     let normalised = ktav::format_str(text).map_err(|_| ConfigEditError::Syntax)?;
+    let out = splice(&normalised, key, replacement.as_deref());
+    check_config_text(role, &out, false).map_err(ConfigEditError::Invalid)?;
+    Ok(out)
+}
+
+/// Replaces (or removes, with `None`) the top-level entry `key` of a normalised text, or
+/// appends the replacement when the key is absent.
+fn splice(normalised: &str, key: &str, replacement: Option<&str>) -> String {
     let lines: Vec<&str> = normalised.split_inclusive('\n').collect();
     let mut out = String::with_capacity(normalised.len() + 64);
     match entry_span(&lines, key) {
@@ -179,14 +219,14 @@ fn edit(
                 start
             };
             lines[..start].iter().for_each(|line| out.push_str(line));
-            if let Some(new) = &replacement {
+            if let Some(new) = replacement {
                 out.push_str(new);
             }
             lines[end..].iter().for_each(|line| out.push_str(line));
         }
         None => {
-            out.push_str(&normalised);
-            if let Some(new) = &replacement {
+            out.push_str(normalised);
+            if let Some(new) = replacement {
                 if !out.is_empty() && !out.ends_with('\n') {
                     out.push('\n');
                 }
@@ -194,8 +234,7 @@ fn edit(
             }
         }
     }
-    check_config_text(role, &out, false).map_err(ConfigEditError::Invalid)?;
-    Ok(out)
+    out
 }
 
 /// Moves `start` up over the comment header of the generated public network text, when the

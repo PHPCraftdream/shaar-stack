@@ -53,6 +53,7 @@ use crate::startup::preflight::preflight_client;
 use crate::startup::preflight::resolve::resolve_network;
 use crate::startup::resources::{SharedResources, SharedResourcesStart};
 use crate::startup::role::RoleOptions;
+pub(super) mod route_link;
 mod run_loop;
 use run_loop::run_parts;
 

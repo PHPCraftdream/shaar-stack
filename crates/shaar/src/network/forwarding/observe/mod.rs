@@ -6,6 +6,9 @@
 use super::{ForwardError, ForwardStats, ServeReport};
 use crate::path::PathKind;
 
+mod trace;
+pub use trace::{PortMapping, client_direct, client_lookup, server_publication};
+
 /// Which product emits an operator line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Product {
@@ -223,7 +226,12 @@ pub fn emit(line: String) {
 
 /// Saturating elapsed milliseconds since `started`.
 pub fn elapsed_ms(started: std::time::Instant) -> u64 {
-    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    duration_ms(started.elapsed())
+}
+
+/// Saturating milliseconds of a duration.
+pub fn duration_ms(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]

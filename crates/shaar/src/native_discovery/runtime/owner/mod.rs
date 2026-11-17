@@ -43,6 +43,25 @@ pub(crate) enum RuntimeError {
     PutFailed,
 }
 
+impl RuntimeError {
+    /// A payload-free token for a failed record lookup or publication, for the operator trace.
+    /// A DHT resource bound is named by its variant (for example `resource:CandidateLimit`).
+    pub(crate) fn trace_token(&self) -> String {
+        let token = match self {
+            Self::Resource(error) => return format!("resource:{error:?}"),
+            Self::Put(_) | Self::PutAdmission(_) | Self::PutFailed => "put",
+            Self::Resolve(ResolveError::Decode(_)) => "undecodable",
+            Self::Resolve(ResolveError::NoNetworkCompletion) => "incomplete",
+            Self::Resolve(ResolveError::DeadlineExceeded) | Self::DeadlineExceeded => "deadline",
+            Self::Resolve(ResolveError::Policy(_)) => "policy",
+            Self::Resolve(ResolveError::DeliveryLimit) | Self::ResolveBusy => "busy",
+            Self::Closed | Self::CloseTimeout => "closed",
+            _ => "other",
+        };
+        token.to_owned()
+    }
+}
+
 pub(super) enum Command {
     Replace(
         Result<Vec<TransportAddr>, SnapshotError>,

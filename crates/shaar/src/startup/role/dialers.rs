@@ -16,18 +16,20 @@ use std::time::Duration;
 
 use iroh_base::{EndpointId, PublicKey};
 use shaar_p2p::{RelayAddr, RelayLease};
-use tokio::net::TcpStream;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, timeout_at};
 
 use crate::native_discovery::runtime::owner::{ResolvedAddresses, RuntimeError};
-use crate::network::observe::{ResolveObservation, RoutePath, client_route, elapsed_ms, emit};
-use crate::network::signaling::{RelayOperations, punch};
-use crate::network::{
-    ForwardError, ForwardStats, NetworkError, Session, SignaledEndpoint, YggEndpoint,
+use crate::network::observe::{
+    ResolveObservation, RoutePath, client_direct, client_lookup, client_route, duration_ms,
+    elapsed_ms, emit,
 };
-use crate::path::{DialError, Dialer, PathKind, Route, StandbyError, StandbyOwner};
+use crate::network::signaling::{RelayOperations, punch};
+use crate::network::{NetworkError, Session, SignaledEndpoint, YggEndpoint};
+use crate::path::{DialError, Dialer};
 use crate::startup::resources::SharedResources;
+
+pub(crate) use super::client::route_link::{ErasedClientOwner, RouteLink};
 
 #[cfg(test)]
 #[path = "../tests/dial_order_tests.rs"]
@@ -106,7 +108,7 @@ pub(crate) struct NativeDialer {
     candidates: Vec<SocketAddr>,
     refresh_after_loss: bool,
     /// The record lookup an attempt stopped waiting for; the next attempt collects it.
-    pending_resolve: Option<JoinHandle<Result<ResolvedAddresses, RuntimeError>>>,
+    pending_resolve: Option<JoinHandle<(Duration, Result<ResolvedAddresses, RuntimeError>)>>,
     /// Configured relay pair (pinned address, retained ops handle); present
     /// only when the signaling settings carry `relay`/`relay_address` (L0).
     /// The reserved lease is owned here and released in [`Dialer::close`].
@@ -187,20 +189,24 @@ impl NativeDialer {
             let key = EndpointId::from_bytes(self.peer.as_bytes()).map_err(|_| DialError)?;
             let punching = self.punch.is_some() || self.carrier_punch.is_some();
             let budget = resolve_budget(Instant::now(), deadline, punching);
+            // A lookup an earlier attempt stopped waiting for finishes "late" (FIX-2 trace).
+            let late = self.pending_resolve.is_some();
             let answer = await_held(&mut self.pending_resolve, budget, || {
                 let resources = self.resources.clone();
                 let fresh = self.refresh_after_loss;
                 tokio::spawn(async move {
-                    if fresh {
+                    let begun = std::time::Instant::now();
+                    let result = if fresh {
                         resources.resolve_fresh(key).await
                     } else {
                         resources.resolve(key).await
-                    }
+                    };
+                    (begun.elapsed(), result)
                 })
             })
             .await;
             match answer {
-                Some(Ok(resolved)) => {
+                Some((took, Ok(resolved))) => {
                     let mut addresses: Vec<SocketAddr> = resolved
                         .addresses()
                         .iter()
@@ -209,10 +215,18 @@ impl NativeDialer {
                         .collect();
                     std::mem::swap(&mut self.candidates, &mut addresses);
                     self.refresh_after_loss = false;
-                    ResolveObservation::from_answer(Some(self.candidates.len()))
+                    let record = self.candidates.len();
+                    let outcome = if record == 0 { "not-found" } else { "found" };
+                    emit(client_lookup(outcome, record, late, duration_ms(took)));
+                    ResolveObservation::from_answer(Some(record))
                 }
-                // A failed or unfinished lookup answers nothing (stable value: timeout).
-                Some(Err(_)) | None => ResolveObservation::from_answer(None),
+                Some((took, Err(error))) => {
+                    let outcome = format!("failed:{}", error.trace_token());
+                    emit(client_lookup(&outcome, 0, late, duration_ms(took)));
+                    ResolveObservation::from_answer(None)
+                }
+                // An unfinished lookup answers nothing (stable value: timeout).
+                None => ResolveObservation::from_answer(None),
             }
         };
         let _ = self.note.send(Some(observation));
@@ -379,12 +393,28 @@ impl Dialer for NativeDialer {
         // the connect future is owned and the seam stays injectable in tests.
         let endpoint = Arc::clone(&self.endpoint);
         let peer = self.peer;
+        let listed = self.candidates.len();
+        let local = self
+            .candidates
+            .iter()
+            .filter(|a| candidate_is_local(**a))
+            .count();
+        let direct_started = std::time::Instant::now();
         let connected = dial_candidate_list(&mut self.candidates, deadline, move |address| {
             let endpoint = Arc::clone(&endpoint);
             async move { endpoint.connect(peer, address).await }
         })
-        .await?;
-        if let Some(session) = connected {
+        .await;
+        if listed > 0 {
+            let connected = matches!(connected, Ok(Some(_)));
+            emit(client_direct(
+                listed,
+                local,
+                connected,
+                elapsed_ms(direct_started),
+            ));
+        }
+        if let Some(session) = connected? {
             #[cfg(test)]
             if let Some(events) = &self.events {
                 events.capture_native(&session);
@@ -587,114 +617,5 @@ impl Dialer for MissingYggDialer {
 
     async fn close(&mut self) -> Result<(), DialError> {
         Ok(())
-    }
-}
-
-/// `RuntimeError` redaction: any failure maps to the bare dial failure; no
-/// upstream text is carried.
-impl From<RuntimeError> for DialError {
-    fn from(_: RuntimeError) -> Self {
-        DialError
-    }
-}
-
-/// Type-erased forwarding handle for the active route lease. Both link types
-/// are shared as `Arc`, so forward workers keep running across route
-/// switches: a new route never aborts in-flight streams — the "no stale
-/// snapshot replaces ongoing policy work" property. `Send + Sync` bounds are
-/// required because forward workers are spawned into a capped `JoinSet`.
-pub(crate) trait RouteLink: Send + Sync + 'static {
-    fn forward(
-        &self,
-        stream: TcpStream,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<ForwardStats, ForwardError>> + Send + '_>,
-    >;
-}
-
-impl RouteLink for Session {
-    fn forward(
-        &self,
-        stream: TcpStream,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<ForwardStats, ForwardError>> + Send + '_>,
-    > {
-        Box::pin(self.forward(stream))
-    }
-}
-
-/// The `Mode::Signal` placeholder link is never routed (standby gate), so
-/// this arm is unreachable in practice; it exists only to satisfy the trait.
-impl RouteLink for () {
-    fn forward(
-        &self,
-        _stream: TcpStream,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<ForwardStats, ForwardError>> + Send + '_>,
-    > {
-        Box::pin(std::future::ready(Err(ForwardError::PathUnavailable)))
-    }
-}
-
-/// Erases the fallback link type of one active route into a shared handle.
-fn shared_lease<N, F>(route: Route<N, F>) -> std::sync::Arc<dyn RouteLink>
-where
-    N: RouteLink,
-    F: RouteLink,
-{
-    match route {
-        Route::Native(link) => link as std::sync::Arc<dyn RouteLink>,
-        Route::Yggdrasil(link) => link as std::sync::Arc<dyn RouteLink>,
-    }
-}
-
-/// Object-safe seam over [`StandbyOwner`] so the retained client role needs no
-/// generic parameter. The owner's boxed futures are NOT `Send`: the owner is
-/// polled inline by the role waiter, never spawned, so this trait carries no
-/// `Send` bound and its implementors are intentionally non-`Send`.
-pub(crate) trait ErasedClientOwner {
-    /// One policy advance; all state lives in the owner, so this is
-    /// cancel-safe.
-    fn follow<'a>(
-        &'a mut self,
-        lease: &'a mut Option<(PathKind, Arc<dyn RouteLink>)>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PathKind, StandbyError>> + 'a>>;
-    /// A lease on the active route, erased into a shared handle.
-    fn route(&self) -> Option<std::sync::Arc<dyn RouteLink>>;
-    /// Joined close of both dial sides; the native dialer releases its owned
-    /// relay lease here. cancel-safe: YES — resumable by another call.
-    fn close(
-        &mut self,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), DialError>> + '_>>;
-}
-
-impl<D, F> ErasedClientOwner for StandbyOwner<D, F>
-where
-    D: Dialer + 'static,
-    D::Link: RouteLink,
-    F: Dialer + 'static,
-    F::Link: RouteLink,
-{
-    fn follow<'a>(
-        &'a mut self,
-        lease: &'a mut Option<(PathKind, Arc<dyn RouteLink>)>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PathKind, StandbyError>> + 'a>>
-    {
-        // Keep the full waiter alive: its owned timers must survive Pending polls.
-        Box::pin(self.follow_observing_route(move |present| {
-            if !present {
-                *lease = None;
-            }
-        }))
-    }
-
-    fn route(&self) -> Option<std::sync::Arc<dyn RouteLink>> {
-        StandbyOwner::route(self).map(shared_lease)
-    }
-
-    fn close(
-        &mut self,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), DialError>> + '_>> {
-        Box::pin(StandbyOwner::close(self))
     }
 }
