@@ -329,7 +329,7 @@ fn documented_network_validation_messages() {
         ),
         (
             "192.0.2.10:6881",
-            "dht.example.org:6881",
+            "dht_example.org:6881",
             invalid(bootstrap, "InvalidAddress"),
         ),
         (
