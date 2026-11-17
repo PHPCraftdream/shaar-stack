@@ -2120,6 +2120,62 @@ Identities are disposable: seeds are derived from the run id and attempt, so the
 protect nothing and are never uploaded; the allowlist admits one such client key and
 the only target is a local echo fixture bound to loopback.
 
+## SDK and command line (approved 2026-11-17)
+
+Owner request and answers are quoted in the decision log of [north-star](north-star.md)
+(2026-11-17). Scenario steps advanced: 1 and 2 (an operator generates a Server identity
+and hands out its address, the Client is configured with that key only), 3 and 5 (the
+generated files carry the public network defaults that make key-only discovery and the
+Yggdrasil fallback work without hand-written `network` objects) and 6 (the allowlist
+is managed from the command line; an embedding application may serve admitted streams
+in-process).
+
+**Overall non-goals:** publishing crates or binaries, packages, installers, a GUI, one
+binary that replaces both roles, shell completion files, a libp2p relay default, a new
+textual address encoding (the canonical Server address stays the 64-hex public key; the
+PeerId and the Yggdrasil IPv6 are printed as derived forms), UDP forwarding, more than
+one published service per Server, changes to the wire protocol `shaar/tcp/1`.
+
+Leaves, in delivery order; each records its acceptance before code and ends with a
+green fork CI, an exact-SHA upstream run and a merge:
+
+1. **SDK-1, ktav 0.8.1.** Acceptance: `Cargo.lock` pins `ktav` 0.8.1 with its crates.io
+   checksum, and the config test suites of `shaar` pass in CI on Linux and Windows with
+   no change to any config file shape. Non-goals: the 0.9 draft, any other dependency.
+2. **SDK-4, public network defaults.** Acceptance: `network.mainline.bootstrap` also
+   accepts `host:port` entries, resolved once at composed startup with a bounded deadline
+   to IPv4 addresses (an unresolvable set fails startup with a named field, values never
+   echoed); the provisioning API gains a network choice, and the files it writes for
+   `init` carry `network` objects with the bootstrap hosts and Yggdrasil peers of the
+   public smoke contract (section "Exact targets" above) unless `--private` is given;
+   the generated texts parse and pass the composed preflight in CI, and a `localhost`
+   bootstrap entry resolves in a CI fixture. The legacy first-run forms keep writing
+   direct-only files, so their behaviour and their CI process cases stay unchanged.
+   Non-goals: contacting public hosts in CI, a relay default, a peer-selection service.
+3. **SDK-2, facade.** Acceptance: a third-party-style integration test in
+   `crates/shaar/tests/` builds a Server and a Client only through the facade
+   (no ktav text, no file), exchanges exact bytes over a client stream with the
+   in-process handler on one side and over the fixed TCP target on the other, and
+   proves that a key outside the allowlist reaches neither the handler nor the target.
+   Facade items: `Server`/`Client` builders and `from_config_file`, `ServerAddress`
+   (parse/print of the 64-hex key, `peer_id`, `ygg_ip`), `AllowList` over
+   `ServerAddress`-style keys with the existing file parser moved into the SDK, a client
+   `ServiceStream` (`AsyncRead + AsyncWrite`, explicit `finish`), and a server handler
+   receiving the admitted peer key and one `ServiceStream`, with the existing stream and
+   session caps. Non-goals: making the roles `Send`, a request/response framework, a
+   second application protocol.
+4. **SDK-3, command line (`clap`).** Acceptance: both binaries accept the subcommands
+   `init`, `address`, `run`, `config show|check|set`, plus `allow add|remove|list` and
+   `address-key new` on the Server and `connect` on the Client; the existing invocation
+   forms (`--config`, positional first run) behave exactly as before; files written by
+   the CLI are ktav 0.8 and parse back to the same configuration (round-trip tests);
+   process tests in CI drive `init`, `allow add` and a `run`/`connect` exchange.
+   Non-goals: interactive prompts, preserving comments of a file rewritten by
+   `config set` (the rewrite says so and keeps a `.bak` copy).
+5. **SDK-5, guide.** Acceptance: `docs/guide` describes the facade and every
+   subcommand with examples that tests compile or execute; full-scope CI green on the
+   final SHA. Non-goals: a tutorial site, translated guides.
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.

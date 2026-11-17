@@ -15,7 +15,7 @@ futures = "=0.3.34"
 iroh = { version = "=1.3.0", default-features = false, features = ["tls-ring", "unstable-custom-transports"] }
 shaar-ygg = { path = "../shaar-ygg" }
 shaar-p2p = { path = "../shaar-p2p" }
-ktav = "=0.8.0"
+ktav = "=0.8.1"
 iroh-base = { version = "=1.3.0", default-features = false, features = ["key"] }
 iroh-dns = "=1.3.0"
 iroh-mainline-address-lookup = { version = "=0.6.1", path = "../../target/native-graph/adapter/iroh-mainline-address-lookup" }
