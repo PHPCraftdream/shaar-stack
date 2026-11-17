@@ -56,7 +56,7 @@ OS, with no ignored cases, and six wire cases per variant. Strict mode observed
 zero STREAM/DATAGRAM qlog metadata; allow-all observed four STREAM and two
 DATAGRAM frames across both senders. Physical egress is established by actual
 ciphertext/authenticated-receive correlation assertions, not qlog construction
-alone. See the [acceptance record](../../../../docs/plans/p08-carrier-frame-acceptance.md).
+alone. See the [acceptance record](../../../../docs/plans/history/p08-carrier-frame-acceptance.md).
 No local build, test, preparation, or project Python execution is permitted.
 
 Pure `checks.py` source-contract cases are not protocol evidence. Existing

@@ -2180,6 +2180,21 @@ green fork CI, an exact-SHA upstream run and a merge:
 
 All five leaves are written and executed in CI; the evidence and its limits are in [limits-and-evidence.md](../guide/limits-and-evidence.md#sdk-and-command-line). SDK-1 (ktav 0.8.1): fork run 44038242102. SDK-4 (host-name bootstrap, public defaults for `init`): fork run 44038409636. SDK-2 (facade): fork run 44043457256 and upstream run 44045761000 on `183b0f7`, merged with SDK-1 and SDK-4. SDK-3 (clap builder API, subcommands, configuration and allowlist editing) and SDK-5 (guide pages, runnable example): fork run 44056317957 on `c1ad2bc`. Changes against the plan above: the facade types are `PeerKey` (one type for a Server address and a Client key, instead of a separate `ServerAddress`), `AllowList` and `ServiceStream`; clap runs without derive and without colour (four packages, no proc macro); `address-key new` replaces a separate `keygen`; the Client's direct shape opens QUIC streams on its session and the composed shape connects to the role's loopback listener. A mistake of this work is recorded in the checkpoint: a worktree removal followed a junction and emptied the shared `target/`; the prepared sources and the offline vendor were rebuilt from the local archive store without the network.
 
+## Closed network and Android harness (decisions of 2026-11-17, design awaiting approval)
+
+Owner words and the recorded decisions are in the decision log of [north-star](north-star.md) (two rows of 2026-11-17); the design, threat model, bounds and open questions are in [closed network](closed-network.md). Nothing in this section is implemented except where a status line says so. Scenario steps advanced: 3, 5 and 6 of the closed-network scenario in the north star.
+
+| Leaf | Observable acceptance | Non-goals | State |
+|---|---|---|---|
+| AND-1 harness | A debuggable APK built without Gradle runs both product roles on the local x86_64 emulator; an exact payload crosses client, direct QUIC, server and an echo target | Store packaging, real devices, UI, CI execution | In progress, local evidence only |
+| CN-1 private DHT | In-process nodes form a private DHT from one bootstrap; records of non-certified keys are rejected; bounds hold under a flood | Public DHT interop | Blocked on the design approval |
+| CN-2 registration | Allowlisted relay receives a certificate; unlisted key refused; expiry honoured; signed relay index | Authority rotation | Blocked |
+| CN-3 relay | Direct path blocked in the controlled fixture, exact bytes through one relay; relay sees ciphertext only; disallowed client reaches no target | Multi-hop, UDP | Blocked |
+| CN-4 signed files | Authority-signed manifest, chunk verification, poisoned chunk rejected | Search, deletion | Blocked, right after CN-3 |
+| CN-5 Android node | The app is a relay and a client of the closed network on the local emulator | Real devices | Blocked |
+
+Local execution for the Android work follows the 2026-11-17 row (local build and emulator, `wnice -c 10 -m 10g`); CI keeps executing everything else, and local results are reported as local evidence.
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.

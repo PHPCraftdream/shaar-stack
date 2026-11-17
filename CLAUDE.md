@@ -25,7 +25,8 @@ written in English. The directory `docs/checkpoints/` may remain in Russian.
 - Every leaf names the end-to-end scenario step it advances; without one it is
   out of scope. Every ~10 tasks compare the TaskList with this goal.
 - Scope changes only by the user, recorded with date and quote in the decision
-  log of `docs/plans/north-star.md`. Torrent-style file sharing is future work.
+  log of `docs/plans/north-star.md`. Torrent-style file sharing is future work
+  (exception: authority-signed files of the closed network, 2026-11-17).
 - Checkpoints are always committed. Standing process principles: see the north-star
   file below.
 
