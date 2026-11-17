@@ -47,6 +47,7 @@ use crate::network::{
 use crate::path::PathKind;
 use crate::startup::StartupError;
 use crate::startup::preflight::preflight_server;
+use crate::startup::preflight::resolve::resolve_network;
 use crate::startup::resources::{SharedResources, SharedResourcesStart};
 #[cfg(test)]
 use crate::startup::role::{RoleEvent, RoleEventLog, emit, emit_payload_acquired};
@@ -285,6 +286,10 @@ impl ServerRole {
                 ServerPhase::New => {
                     // Idempotent: already validated at construction.
                     self.options.validate()?;
+                    // Cancel-safe: the phase stays `New` until the lookup completes.
+                    if let Some(network) = resolve_network(self.config.network()).await? {
+                        self.config.set_network(network);
+                    }
                     let keys: Vec<PublicKey> = self.allowlist.keys().collect();
                     let plan = preflight_server(&self.config, &self.identity, &keys)?;
                     // The server contract: ONE shared bounded admission pool.

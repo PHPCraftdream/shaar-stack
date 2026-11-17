@@ -3,8 +3,10 @@
 //! One optional `network` object may appear in either the server or the
 //! client file. Its absence keeps the legacy direct-only contract and is
 //! NOT an error at parse level (composed startup in a later leaf requires
-//! it). No public default peers are provided or contacted; validation is
+//! it). Parsing provides no default peers and contacts nothing; validation is
 //! pure, happens before any network I/O, and never echoes rejected values.
+//! Public defaults exist only in the files written by `init` (see
+//! `identity::provision::public_network_text`).
 
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -16,6 +18,9 @@ use url::Url;
 
 use super::error::{ConfigError, ValidationKind};
 use super::raw::{parse_socket_addr, require_dial_destination};
+
+mod bootstrap;
+pub use bootstrap::BootstrapHost;
 
 /// Matches `native_discovery/runtime/owner/options.rs`: bootstrap
 /// accepts 1..=4 raw entries (counted before deduplication).
@@ -103,6 +108,15 @@ impl NetworkSettings {
     pub fn ygg(&self) -> Option<&YggNetwork> {
         self.ygg.as_ref()
     }
+
+    /// The same settings with another Mainline section (bootstrap resolution).
+    pub(crate) fn with_mainline(&self, mainline: MainlineNetwork) -> NetworkSettings {
+        NetworkSettings {
+            mainline: Some(mainline),
+            signaling: self.signaling.clone(),
+            ygg: self.ygg.clone(),
+        }
+    }
 }
 
 /// Validated Mainline discovery settings.
@@ -110,6 +124,7 @@ impl NetworkSettings {
 pub struct MainlineNetwork {
     bind: SocketAddrV4,
     bootstrap: Vec<SocketAddrV4>,
+    hosts: Vec<BootstrapHost>,
 }
 
 impl MainlineNetwork {
@@ -118,9 +133,32 @@ impl MainlineNetwork {
         self.bind
     }
 
-    /// Bootstrap node endpoints (1..=4 entries).
+    /// Numeric bootstrap node endpoints. Together with [`Self::hosts`] the
+    /// configured list has 1..=4 entries; after the composed startup has
+    /// resolved the host names this holds every usable endpoint.
     pub fn bootstrap(&self) -> &[SocketAddrV4] {
         &self.bootstrap
+    }
+
+    /// Bootstrap host names not yet resolved; empty once resolved.
+    pub fn hosts(&self) -> &[BootstrapHost] {
+        &self.hosts
+    }
+
+    /// Replaces the host names by their resolved endpoints, keeping the
+    /// numeric entries first and dropping duplicates.
+    pub(crate) fn with_resolved(&self, resolved: &[SocketAddrV4]) -> MainlineNetwork {
+        let mut bootstrap = self.bootstrap.clone();
+        for address in resolved {
+            if !bootstrap.contains(address) {
+                bootstrap.push(*address);
+            }
+        }
+        MainlineNetwork {
+            bind: self.bind,
+            bootstrap,
+            hosts: Vec::new(),
+        }
     }
 }
 
@@ -250,24 +288,18 @@ fn parse_mainline(raw: MainlineFile) -> Result<MainlineNetwork, ConfigError> {
         ));
     }
     let mut bootstrap = Vec::with_capacity(entries.len());
+    let mut hosts = Vec::new();
     for entry in entries {
-        let addr = parse_socket_addr_v4(FIELD_BOOTSTRAP, entry)?;
-        if addr.port() == 0 {
-            return Err(ConfigError::validation(
-                FIELD_BOOTSTRAP,
-                ValidationKind::InvalidPort,
-            ));
+        match bootstrap::parse_entry(FIELD_BOOTSTRAP, entry)? {
+            bootstrap::Entry::Addr(addr) => bootstrap.push(addr),
+            bootstrap::Entry::Host(host) => hosts.push(host),
         }
-        let ip = *addr.ip();
-        if ip.is_unspecified() || ip.is_multicast() || ip.is_broadcast() {
-            return Err(ConfigError::validation(
-                FIELD_BOOTSTRAP,
-                ValidationKind::InvalidAddress,
-            ));
-        }
-        bootstrap.push(addr);
     }
-    Ok(MainlineNetwork { bind, bootstrap })
+    Ok(MainlineNetwork {
+        bind,
+        bootstrap,
+        hosts,
+    })
 }
 
 fn parse_signaling(raw: SignalingFile) -> Result<SignalingNetwork, ConfigError> {
@@ -447,3 +479,6 @@ mod uri_tests;
 
 #[cfg(test)]
 mod guide_examples_tests;
+
+#[cfg(test)]
+mod bootstrap_tests;

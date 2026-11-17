@@ -25,9 +25,10 @@ mod ygg;
 
 pub use error::IdentityError;
 pub use provision::{
-    FileState, ProvisionError, ProvisionPaths, ProvisionReport, Provisioned, Role,
+    FileState, NetworkChoice, ProvisionError, ProvisionPaths, ProvisionReport, Provisioned, Role,
     allowlist_template_text, client_config_text, default_data_dir, first_run_summary_lines,
-    path_as_config_value, provision, resolve_data_dir, role_dir,
+    path_as_config_value, provision, provision_with, public_network_text, resolve_data_dir,
+    role_dir,
 };
 
 use std::net::Ipv6Addr;

@@ -46,6 +46,10 @@ pub enum StartupError {
     /// The address key file could not be read or is not a valid key. Names the stage only;
     /// never the path text or key material.
     AddressKey,
+    /// No `network.mainline.bootstrap` entry is usable: every host name failed to
+    /// resolve within the deadline and no numeric entry is configured. Names the
+    /// field only; host names and resolver text are withheld.
+    BootstrapUnresolved,
 }
 
 impl fmt::Display for StartupError {
@@ -74,6 +78,10 @@ impl fmt::Display for StartupError {
             Self::Exhausted => write!(f, "no usable path remained within the attempt budget"),
             Self::RelayReserve => write!(f, "relay reservation failed at startup"),
             Self::AddressKey => write!(f, "address key file could not be loaded"),
+            Self::BootstrapUnresolved => write!(
+                f,
+                "no bootstrap host of `network.mainline.bootstrap` could be resolved"
+            ),
         }
     }
 }

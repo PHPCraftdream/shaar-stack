@@ -119,6 +119,12 @@ impl ServerConfig {
         self.network.as_ref()
     }
 
+    /// Swaps in network settings derived from the validated ones (resolved
+    /// bootstrap host names); never called with unvalidated settings.
+    pub(crate) fn set_network(&mut self, network: NetworkSettings) {
+        self.network = Some(network);
+    }
+
     /// Merge file values (already deserialized from `text`) with
     /// overrides, then validate. Syntax and schema errors are rejected
     /// before merging, even when overrides supply every required field.

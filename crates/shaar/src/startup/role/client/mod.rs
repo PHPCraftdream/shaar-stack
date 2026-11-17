@@ -50,6 +50,7 @@ use crate::network::{ForwardError, ForwardStats, Limits, SignaledEndpoint, YggEn
 use crate::path::{Mode, PathKind, StandbyError, StandbyOwner};
 use crate::startup::StartupError;
 use crate::startup::preflight::preflight_client;
+use crate::startup::preflight::resolve::resolve_network;
 use crate::startup::resources::{SharedResources, SharedResourcesStart};
 use crate::startup::role::RoleOptions;
 mod run_loop;
@@ -245,6 +246,10 @@ impl ClientRole {
     pub async fn start(&mut self) -> Result<(), StartupError> {
         // Preflight runs before taking the phase; `start_shared` copies what the owner task needs.
         if matches!(self.phase, ClientPhase::New) {
+            // Cancel-safe: the phase stays `New` until the lookup completes.
+            if let Some(network) = resolve_network(self.config.network()).await? {
+                self.config.set_network(network);
+            }
             let start = {
                 let service_key = PublicKey::from_bytes(self.config.server_key_bytes())
                     .map_err(|_| StartupError::InvalidPolicy)?;
