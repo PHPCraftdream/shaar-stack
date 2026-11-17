@@ -119,7 +119,9 @@ async fn owned_put_duplicate_entries_retain_holders_but_visit_and_send_once() {
 }
 
 #[tokio::test]
-async fn owned_put_hits_actual_per_operation_rpc_cap_with_typed_error() {
+async fn owned_put_reaches_only_the_nodes_the_per_operation_rpc_cap_allows() {
+    // Live finding (2026-11-17): a store phase offers 20 or more closest nodes, more than the 16
+    // RPCs one operation may hold; it must store at what fits instead of failing with RpcLimit.
     let (_bootstrap_peer, bootstrap) = captured_peer();
     let mut actor = actor(bootstrap);
     let budget = Arc::clone(&actor.owned_resources.as_ref().unwrap().budget);
@@ -131,13 +133,8 @@ async fn owned_put_hits_actual_per_operation_rpc_cap_with_typed_error() {
     let closest = token_node(100);
     let mut put = PutQuery::new_owned(put_request(), Some(extras), operation, Arc::clone(&budget))
         .expect("actual retained candidate holders");
-    let result = put.start(&mut actor.socket, &[closest]);
-    assert!(matches!(
-        result,
-        Err(crate::core::put_query::PutError::Query(
-            crate::core::put_query::PutQueryError::Resource(ResourceError::RpcLimit)
-        ))
-    ));
+    put.start(&mut actor.socket, &[closest])
+        .expect("a store that reached 16 nodes is not a failure");
     assert_eq!(put.transaction_ids().len(), 16);
     assert_eq!(actor.socket.operation_rpc_len(operation), 16);
     actor
@@ -147,6 +144,44 @@ async fn owned_put_hits_actual_per_operation_rpc_cap_with_typed_error() {
     assert_eq!(budget.visited_count(), 0);
     assert_eq!(actor.socket.operation_rpc_len(operation), 0);
     assert_eq!(budget.holder_count(), 1);
+}
+
+#[tokio::test]
+async fn owned_put_without_any_rpc_room_still_fails_with_the_typed_error() {
+    let (_bootstrap_peer, bootstrap) = captured_peer();
+    let mut actor = actor(bootstrap);
+    let budget = Arc::clone(&actor.owned_resources.as_ref().unwrap().budget);
+    let operation = actor
+        .socket
+        .allocate_operation()
+        .expect("actual socket operation");
+    for port in 0..16_u16 {
+        actor
+            .socket
+            .request_owned(
+                SocketAddrV4::new(Ipv4Addr::LOCALHOST, 10100 + port),
+                crate::common::RequestSpecific {
+                    requester_id: Id::random(),
+                    request_type: crate::common::RequestTypeSpecific::Ping,
+                },
+                operation,
+            )
+            .expect("RPC room for the operation");
+    }
+    assert_eq!(actor.socket.owned_rpc_room(operation), 0);
+    let mut put = PutQuery::new_owned(put_request(), None, operation, Arc::clone(&budget))
+        .expect("actual owned PUT store");
+    let result = put.start(&mut actor.socket, &[token_node(100)]);
+    assert!(matches!(
+        result,
+        Err(crate::core::put_query::PutError::Query(
+            crate::core::put_query::PutQueryError::Resource(ResourceError::RpcLimit)
+        ))
+    ));
+    assert_eq!(put.transaction_ids().len(), 0);
+    actor.socket.cancel_owned_operation(operation);
+    drop(put);
+    assert_eq!(budget.visited_count(), 0);
 }
 
 #[tokio::test]
