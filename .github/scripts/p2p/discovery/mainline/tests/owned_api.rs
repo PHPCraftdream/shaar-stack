@@ -233,8 +233,8 @@ async fn owned_api_far_future_unpolled_admission_is_clamped_before_enqueue() {
         .expect_err("25th admission exceeds capacity");
     assert_eq!(error.error, ResourceError::OperationLimit);
     assert_eq!(error.cleanup, n0_mainline::OwnedPutCleanup::Clean);
-    tokio::time::advance(Duration::from_secs(10)).await;
-    assert_eq!(tokio::time::Instant::now(), entry + Duration::from_secs(10));
+    tokio::time::advance(Duration::from_secs(45)).await;
+    assert_eq!(tokio::time::Instant::now(), entry + Duration::from_secs(45));
 
     let mut wait = Box::pin(admission.wait());
     std::future::poll_fn(|cx| {
@@ -398,7 +398,7 @@ async fn owned_api_get_original_deadline_precedes_budget_admission_after_waiting
 
 #[tokio::test(start_paused = true)]
 async fn owned_api_get_short_and_far_future_deadlines_keep_the_effective_bound() {
-    for (requested, effective) in [(3, 3), (3600, 10)] {
+    for (requested, effective) in [(3, 3), (3600, 45)] {
         let (bootstrap, bootstrap_addr) = loopback_bootstrap();
         let mut owner = OwnedDht::new(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), &[bootstrap_addr])
             .expect("owned loopback DHT");

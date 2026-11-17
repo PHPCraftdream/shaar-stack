@@ -18,6 +18,11 @@ use crate::resource::{
     OwnedQueryCompletion, RequestBudget, RequestLease, RequestReply, ResourceError,
 };
 
+/// The longest an owned GET or PUT may live from its entry, whatever deadline the caller gives.
+/// A live lookup takes about 8 s (three rounds, each waiting for its slowest node) and a PUT
+/// adds its store phase, so ten seconds could never complete a publication on the public DHT.
+const OPERATION_CAP: Duration = Duration::from_secs(45);
+
 /// A cloneable, limited capability for using an owned DHT actor.
 ///
 /// Clones retain only the actor message sender and cannot retain its socket.
@@ -55,7 +60,7 @@ impl OwnedDhtHandle {
         .await
     }
 
-    /// Use the caller's absolute deadline, capped at ten seconds from execution entry.
+    /// Use the caller's absolute deadline, capped at 45 seconds from execution entry.
     /// cancel-safe: NO — cancellation requests actor cleanup but does not join it.
     pub async fn resolve_mutable_until(
         &self,
@@ -66,7 +71,7 @@ impl OwnedDhtHandle {
         if let Some(error) = self.failure.get() {
             return Err(*error);
         }
-        let deadline = deadline.min(entry + Duration::from_secs(10));
+        let deadline = deadline.min(entry + OPERATION_CAP);
         if tokio::time::Instant::now() >= deadline {
             return Err(ResourceError::DeadlineExceeded);
         }
@@ -107,14 +112,14 @@ impl OwnedDhtHandle {
         result
     }
 
-    /// Start a mutable PUT using the caller's deadline, capped at 10 seconds from entry.
+    /// Start a mutable PUT using the caller's deadline, capped at 45 seconds from entry.
     pub fn put_mutable_until(
         &self,
         item: crate::MutableItem,
         deadline: tokio::time::Instant,
     ) -> Result<crate::resource::OwnedPutAdmission, crate::resource::OwnedPutAdmissionError> {
         let entry = tokio::time::Instant::now();
-        let deadline = deadline.min(entry + Duration::from_secs(10));
+        let deadline = deadline.min(entry + OPERATION_CAP);
         let clean = |error| crate::resource::OwnedPutAdmissionError {
             error,
             cleanup: crate::resource::OwnedPutCleanup::Clean,
