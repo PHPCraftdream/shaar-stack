@@ -162,3 +162,139 @@ fn the_network_list_carries_every_distinct_key() {
     let again = AllowList::new(network.keys().map(PeerKey::from_iroh)).unwrap();
     assert_eq!(again, list);
 }
+
+#[test]
+fn a_key_summary_has_the_three_derived_forms() {
+    let key = key(9);
+    let [public, peer, ygg] = key.summary_lines();
+    assert_eq!(public, format!("public_key={key}"));
+    assert_eq!(peer, format!("peer_id={}", key.peer_id()));
+    assert_eq!(ygg, format!("ygg_ip={}", key.ygg_ip()));
+}
+
+#[test]
+fn adding_a_key_appends_one_line_and_keeps_everything_else() {
+    let (a, b) = (key(1), key(2));
+    let text = format!("# clients\n{a}");
+    let added = AllowList::text_with(&text, &b).unwrap().unwrap();
+    assert_eq!(added, format!("# clients\n{a}\n{b}\n"));
+    // Already listed, in either case: nothing to change.
+    assert_eq!(AllowList::text_with(&added, &b), Ok(None));
+    assert_eq!(
+        AllowList::text_with(&format!("{}\n", a.to_string().to_uppercase()), &a),
+        Ok(None)
+    );
+    // An empty file gets the key as its first line.
+    assert_eq!(
+        AllowList::text_with("", &a).unwrap().unwrap(),
+        format!("{a}\n")
+    );
+    // A file that is already invalid is refused instead of being extended.
+    assert_eq!(
+        AllowList::text_with("not a key\n", &a),
+        Err(AllowListError::InvalidLine(1))
+    );
+}
+
+#[test]
+fn adding_beyond_the_entry_bound_is_refused() {
+    let keys: Vec<PeerKey> = (0..=255u8).map(key).collect();
+    let text: String = keys.iter().map(|k| format!("{k}\n")).collect();
+    assert_eq!(AllowList::parse(&text).unwrap().len(), MAX_ENTRIES);
+    let one_more = PeerKey::of(&identity(255));
+    assert_eq!(
+        AllowList::text_with(&text, &one_more),
+        Ok(None),
+        "already listed"
+    );
+    let mut full = text.clone();
+    full.push_str(&format!("{}\n", keys[0]));
+    assert_eq!(
+        AllowList::text_with(&full, &key(7)),
+        Err(AllowListError::TooMany),
+        "duplicates count as entries"
+    );
+}
+
+#[test]
+fn removing_a_key_drops_its_lines_only() {
+    let (a, b) = (key(1), key(2));
+    let text = format!(
+        "# one\n{a}\n\n# two\n{}\n{b}\n{a}\n",
+        b.to_string().to_uppercase()
+    );
+    let removed = AllowList::text_without(&text, &b).unwrap().unwrap();
+    assert_eq!(removed, format!("# one\n{a}\n\n# two\n{a}\n"));
+    assert_eq!(AllowList::text_without(&removed, &b), Ok(None));
+    let last = AllowList::text_without(&format!("{a}"), &a)
+        .unwrap()
+        .unwrap();
+    assert_eq!(last, "");
+    // A comment that mentions the key is not a listing.
+    let commented = format!("# {a}\n{b}\n");
+    assert_eq!(AllowList::text_without(&commented, &a), Ok(None));
+    assert_eq!(
+        AllowList::text_without("garbage\n", &a),
+        Err(AllowListError::InvalidLine(1))
+    );
+}
+
+#[tokio::test]
+async fn the_allow_command_lists_adds_and_removes_through_the_file() {
+    use crate::startup::facade::{AllowAction, allowlist_command};
+    let dir = FixtureDir::new();
+    let path = dir.0.join("allowed.txt");
+    std::fs::write(&path, "# clients\n").unwrap();
+    let (a, b) = (key(1), key(2));
+
+    let listed = allowlist_command(&path, AllowAction::List).await.unwrap();
+    assert_eq!(listed, ["clients=0"]);
+    let added = allowlist_command(&path, AllowAction::Add(vec![a, b, a]))
+        .await
+        .unwrap();
+    assert_eq!(added[0], format!("added: {a}"));
+    assert_eq!(added[1], format!("added: {b}"));
+    assert_eq!(added[2], format!("already listed: {a}"));
+    assert!(
+        added[3].starts_with("note: restart the server"),
+        "{added:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        format!("# clients\n{a}\n{b}\n")
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.0.join("allowed.txt.bak")).unwrap(),
+        "# clients\n"
+    );
+    let listed = allowlist_command(&path, AllowAction::List).await.unwrap();
+    assert_eq!(
+        listed,
+        [a.to_string(), b.to_string(), "clients=2".to_owned()]
+    );
+
+    let removed = allowlist_command(&path, AllowAction::Remove(vec![a, key(3)]))
+        .await
+        .unwrap();
+    assert_eq!(removed[0], format!("removed: {a}"));
+    assert_eq!(removed[1], format!("not listed: {}", key(3)));
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        format!("# clients\n{b}\n")
+    );
+    // Nothing to change: the file and its backup stay as they are.
+    let before = std::fs::read(dir.0.join("allowed.txt.bak")).unwrap();
+    let noop = allowlist_command(&path, AllowAction::Remove(vec![a]))
+        .await
+        .unwrap();
+    assert_eq!(noop, [format!("not listed: {a}")]);
+    assert_eq!(
+        std::fs::read(dir.0.join("allowed.txt.bak")).unwrap(),
+        before
+    );
+
+    let missing = allowlist_command(&dir.0.join("none.txt"), AllowAction::List)
+        .await
+        .unwrap_err();
+    assert_eq!(missing, "could not read allowlist");
+}

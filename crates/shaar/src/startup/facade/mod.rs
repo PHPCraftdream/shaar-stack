@@ -26,7 +26,7 @@ mod tests;
 use std::fmt;
 
 pub use client::{Client, ClientBuilder, RunningClient};
-pub use peers::{AllowList, AllowListError, KeyError, PeerKey};
+pub use peers::{AllowAction, AllowList, AllowListError, KeyError, PeerKey, allowlist_command};
 pub use server::{Handler, RunningServer, Server, ServerBuilder, Service};
 pub use text::{Network, NetworkSpec};
 

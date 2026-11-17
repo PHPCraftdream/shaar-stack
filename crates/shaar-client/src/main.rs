@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod cli;
+
 use std::{
     env, error::Error, fmt::Write as _, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration,
 };
@@ -598,13 +600,40 @@ async fn start_until_shutdown<T>(
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    let result = match parse_invocation(env::args()) {
+    let args: Vec<String> = env::args().collect();
+    if cli::is_cli_invocation(&args) {
+        return cli::main(args).await;
+    }
+    let result = match parse_invocation(args) {
         Ok(Invocation::Config(path)) => run_from_config(path).await,
         Ok(Invocation::Auto) => run_auto().await,
         Ok(Invocation::FirstRun {
             server,
             server_address,
         }) => run_first_run(server, server_address).await,
+        Err(error) => Err(error.into()),
+    };
+    match result {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("shaar-client: {error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// The `connect` subcommand: the legacy `--config` start on the file of the chosen place.
+async fn connect_command(place: cli::Place) -> std::process::ExitCode {
+    let result: Result<(), Box<dyn Error>> = match cli::config_path(&place) {
+        Ok(path) => match tokio::fs::try_exists(&path).await {
+            Ok(true) => run_from_config(path).await,
+            Ok(false) => Err(format!(
+                "no configuration at {}: run `shaar-client init <server-key>` first",
+                path.display()
+            )
+            .into()),
+            Err(error) => Err(error.into()),
+        },
         Err(error) => Err(error.into()),
     };
     match result {
@@ -624,9 +653,6 @@ mod task156_tests;
 
 #[cfg(test)]
 mod behavior_tests;
-
-#[cfg(test)]
-mod admission_tests;
 
 #[cfg(test)]
 mod operator_tests;

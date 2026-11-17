@@ -18,6 +18,8 @@ use shaar::{
 };
 use tokio::{sync::watch, task::JoinSet};
 
+mod cli;
+
 #[cfg(test)]
 mod first_run_tests;
 
@@ -72,7 +74,11 @@ fn parse_invocation(
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let invocation = match parse_invocation(env::args_os()) {
+    let args: Vec<std::ffi::OsString> = env::args_os().collect();
+    if cli::is_cli_invocation(&args) {
+        return cli::main(args).await;
+    }
+    let invocation = match parse_invocation(args) {
         Ok(invocation) => invocation,
         Err(error) => {
             eprintln!("shaar-server: {error}");
@@ -80,7 +86,7 @@ async fn main() -> ExitCode {
         }
     };
     let result = match invocation {
-        Invocation::Config(path) => run_from_config(path).await,
+        Invocation::Config(path) => run_from_config(path, None).await,
         Invocation::FirstRun { target } => run_first_run(target).await,
     };
     match result {
@@ -92,8 +98,12 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run_from_config(config_path: PathBuf) -> Result<(), String> {
-    let config = load_server(config_path, &ServerOverrides::default())
+async fn run_from_config(config_path: PathBuf, target: Option<String>) -> Result<(), String> {
+    let overrides = ServerOverrides {
+        target,
+        ..ServerOverrides::default()
+    };
+    let config = load_server(config_path, &overrides)
         .await
         .map_err(|error| format!("configuration: {error}"))?;
     let identity = Identity::load(config.key_file())
@@ -179,6 +189,26 @@ async fn first_run_state(base: &Path, target: Option<String>) -> Result<FirstRun
 async fn run_first_run(target: Option<String>) -> Result<(), String> {
     let base =
         shaar::identity::default_data_dir().map_err(|error| format!("first run: {error}"))?;
+    run_first_run_in(base, target).await
+}
+
+/// The `run` subcommand: the same three starts as the legacy forms, in the chosen place.
+async fn run_command(place: cli::Place, target: Option<String>) -> ExitCode {
+    let result = match (place.config, place.dir) {
+        (Some(path), _) => run_from_config(path, target).await,
+        (None, Some(dir)) => run_first_run_in(dir, target).await,
+        (None, None) => run_first_run(target).await,
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("shaar-server: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run_first_run_in(base: PathBuf, target: Option<String>) -> Result<(), String> {
     match first_run_state(&base, target).await? {
         FirstRunState::MissingTarget { block, error } => {
             for line in &block {

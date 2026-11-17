@@ -63,6 +63,16 @@ impl PeerKey {
         &self.0
     }
 
+    /// The three lines the command line prints for a key: its text, the derived libp2p
+    /// `PeerId` and the derived Yggdrasil address.
+    pub fn summary_lines(&self) -> [String; 3] {
+        [
+            format!("public_key={self}"),
+            format!("peer_id={}", self.peer_id()),
+            format!("ygg_ip={}", self.ygg_ip()),
+        ]
+    }
+
     /// The libp2p `PeerId` text (base58) derived from this key.
     pub fn peer_id(&self) -> String {
         let mut bytes = [0u8; 38];
@@ -212,6 +222,37 @@ impl AllowList {
         Self::parse(&text)
     }
 
+    /// The allowlist text with `key` appended as its own line (comments and other lines are
+    /// kept); `None` when the key is already listed. The result must still be a valid list.
+    pub fn text_with(text: &str, key: &PeerKey) -> Result<Option<String>, AllowListError> {
+        if Self::parse(text)?.contains(key) {
+            return Ok(None);
+        }
+        let mut out = text.to_owned();
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(&format!("{key}\n"));
+        Self::parse(&out)?;
+        Ok(Some(out))
+    }
+
+    /// The allowlist text without the lines that list `key`; `None` when it is not listed.
+    pub fn text_without(text: &str, key: &PeerKey) -> Result<Option<String>, AllowListError> {
+        Self::parse(text)?;
+        let mut out = String::with_capacity(text.len());
+        let mut removed = false;
+        for line in text.split_inclusive('\n') {
+            let value = line.trim();
+            if !value.starts_with('#') && parse_hex_key(value) == Some(*key) {
+                removed = true;
+            } else {
+                out.push_str(line);
+            }
+        }
+        Ok(removed.then_some(out))
+    }
+
     fn from_raw(mut keys: Vec<PeerKey>) -> Self {
         keys.sort_unstable();
         keys.dedup();
@@ -258,4 +299,66 @@ fn parse_hex_key(text: &str) -> Option<PeerKey> {
         *slot = u8::try_from(digit(pair[0])? * 16 + digit(pair[1])?).ok()?;
     }
     PeerKey::from_bytes(bytes).ok()
+}
+
+/// One `allow` subcommand of the Server binary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AllowAction {
+    /// List the admitted keys.
+    List,
+    /// Admit these keys.
+    Add(Vec<PeerKey>),
+    /// Stop admitting these keys.
+    Remove(Vec<PeerKey>),
+}
+
+/// Runs one `allow` subcommand on the allowlist file at `path` and returns the lines to
+/// print; the file is rewritten once, keeping its comments and the previous content as
+/// `<path>.bak`. A running Server reads the file only at startup.
+/// cancel-safe: NO — a write that already started completes after cancellation.
+pub async fn allowlist_command(path: &Path, action: AllowAction) -> Result<Vec<String>, String> {
+    let mut text = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|_| AllowListError::Read.to_string())?;
+    let (keys, adding) = match action {
+        AllowAction::List => {
+            let list = AllowList::parse(&text).map_err(|error| error.to_string())?;
+            let mut lines: Vec<String> = list.keys().iter().map(ToString::to_string).collect();
+            lines.push(format!("clients={}", list.len()));
+            return Ok(lines);
+        }
+        AllowAction::Add(keys) => (keys, true),
+        AllowAction::Remove(keys) => (keys, false),
+    };
+    let mut lines = Vec::new();
+    let mut changed = false;
+    for key in &keys {
+        let edited = if adding {
+            AllowList::text_with(&text, key)
+        } else {
+            AllowList::text_without(&text, key)
+        }
+        .map_err(|error| error.to_string())?;
+        let verb = match (&edited, adding) {
+            (Some(_), true) => "added",
+            (Some(_), false) => "removed",
+            (None, true) => "already listed",
+            (None, false) => "not listed",
+        };
+        lines.push(format!("{verb}: {key}"));
+        if let Some(edited) = edited {
+            text = edited;
+            changed = true;
+        }
+    }
+    if changed {
+        crate::identity::write_replacing(path, text, true)
+            .await
+            .map_err(|_| "could not write the allowlist".to_owned())?;
+        lines.push(format!(
+            "note: restart the server to apply; previous content kept as {}.bak",
+            path.display()
+        ));
+    }
+    Ok(lines)
 }
