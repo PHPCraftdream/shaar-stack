@@ -226,13 +226,15 @@ async fn a_panicking_handler_ends_its_stream_only() {
         .unwrap();
     let mut server = server;
     let client = client_of(2, &server).await.unwrap();
-    // The first stream is reset by the handler's panic; its outcome is not asserted.
+    // The handler's panic resets the first stream, possibly before the client has read the
+    // READY status: every step of this attempt may fail, none is asserted.
     let _ = timeout(WAIT, async {
-        let mut stream = client.connect().await.unwrap();
-        stream.write_all(b"x").await.unwrap();
-        stream.shutdown().await.unwrap();
-        let mut sink = Vec::new();
-        let _ = stream.read_to_end(&mut sink).await;
+        if let Ok(mut stream) = client.connect().await {
+            let _ = stream.write_all(b"x").await;
+            let _ = stream.shutdown().await;
+            let mut sink = Vec::new();
+            let _ = stream.read_to_end(&mut sink).await;
+        }
     })
     .await;
     assert_eq!(exchange(&client, b"alive").await, b"alive");
