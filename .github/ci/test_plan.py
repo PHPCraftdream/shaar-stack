@@ -367,11 +367,13 @@ class PolicyTests(unittest.TestCase):
                 self.assertTrue(result["selection"]["prepare"])
 
     def test_docs_and_ci_policy_do_not_compile_rust(self):
-        for paths in (["docs/plans/new.md", "CLAUDE.md"], [".github/ci/policy.py"]):
+        android = ["crates/shaar-platform/android/Runner.java"]
+        for paths in (["docs/plans/new.md", "CLAUDE.md"], [".github/ci/policy.py"], android):
             result = POLICY.select(paths)
             self.assertFalse(result["selection"]["prepare"])
             self.assertFalse(result["selection"]["rust"])
-        self.assertTrue(POLICY.select([".github/ci/policy.py"])["selection"]["ci_policy"])
+        for path in (".github/ci/policy.py", android[0]):
+            self.assertTrue(POLICY.select([path])["selection"]["ci_policy"])
 
     def test_legal_material_selects_license_domain_and_unknown_paths_fail_closed(self):
         material = POLICY.select(["docs/legal/notices-material/ygg-pinned-revision-c9a54f1-LICENSE"])

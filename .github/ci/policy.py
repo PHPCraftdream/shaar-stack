@@ -155,6 +155,8 @@ PROOFS = (
     (".github/workflows/noq-gate.yml", "ci_policy"),
     (".github/actions/prepare-sources/", "ci_policy"),
     (".github/scripts/tests/", "ci_policy"),
+    # The Android harness is built and run locally on a device; CI only checks the structure.
+    ("crates/shaar-platform/android/", "ci_policy"),
     (".github/scripts/check_structure.py", "ci_policy"),
     (".github/scripts/scan_identity_output.py", "ci_policy"),
     (".github/scripts/p2p/prepare.py", "relay"),
