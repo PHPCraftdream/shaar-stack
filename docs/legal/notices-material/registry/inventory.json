@@ -498,7 +498,7 @@
     "root_only": 317,
     "nested_only": 20,
     "exact_archive_matched_identities": 532,
-    "retired_identity_count": 1,
+    "retired_identity_count": 2,
     "missing_archive_identities": 0,
     "current_registry_classification_counts": {
       "missing": 2,
@@ -22231,69 +22231,67 @@
     {
       "archive_data": [
         {
-          "receipt_index": 198,
-          "url": "https://static.crates.io/crates/ktav/ktav-0.8.0.crate",
-          "path": "notices-registry-authorized-1109/0198.crate",
-          "bytes": 537769,
-          "sha256": "961a8932a06e7f2c02a301b70978c190b746925d615f20035a3e07c584282655"
+          "url": "https://static.crates.io/crates/ktav/ktav-0.8.1.crate",
+          "path": null,
+          "bytes": 548184,
+          "sha256": "7140dfe2fa6c320e74768cd6a637828c2d26f81746254f4fcd805f3993bd3fd5",
+          "acquisition": "owner decision 2026-11-17 (ktav 0.8.1); one GET, checksum equals the crates.io index"
         }
       ],
-      "checksum": "961a8932a06e7f2c02a301b70978c190b746925d615f20035a3e07c584282655",
+      "checksum": "7140dfe2fa6c320e74768cd6a637828c2d26f81746254f4fcd805f3993bd3fd5",
       "classification": "package-complete",
       "declared_license": "MIT OR Apache-2.0",
       "materials": [
         {
-          "archive_member": "ktav-0.8.0/LICENSE-APACHE",
+          "archive_member": "ktav-0.8.1/LICENSE-APACHE",
           "member_bytes": 11298,
           "member_sha256": "a6dc86d5f5d6c98462c1361d7c062ca8d3a932aa13ecbffbb2ab9f8b1586feec",
           "byte_range": [
             0,
             11298
           ],
-          "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.0/terms/LICENSE-APACHE",
+          "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.1/terms/LICENSE-APACHE",
           "material_bytes": 11298,
           "material_sha256": "a6dc86d5f5d6c98462c1361d7c062ca8d3a932aa13ecbffbb2ab9f8b1586feec",
           "slice_sha256": "a6dc86d5f5d6c98462c1361d7c062ca8d3a932aa13ecbffbb2ab9f8b1586feec",
           "role": "package_terms",
           "kind": "package_terms",
-          "archive_index": 198,
           "source_relative_path": "LICENSE-APACHE"
         },
         {
-          "archive_member": "ktav-0.8.0/LICENSE-MIT",
+          "archive_member": "ktav-0.8.1/LICENSE-MIT",
           "member_bytes": 1078,
           "member_sha256": "dab3570e779bf2a81f0331e5346b8f663278e624df1daf052751fa5ca2dbab5d",
           "byte_range": [
             0,
             1078
           ],
-          "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.0/terms/LICENSE-MIT",
+          "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.1/terms/LICENSE-MIT",
           "material_bytes": 1078,
           "material_sha256": "dab3570e779bf2a81f0331e5346b8f663278e624df1daf052751fa5ca2dbab5d",
           "slice_sha256": "dab3570e779bf2a81f0331e5346b8f663278e624df1daf052751fa5ca2dbab5d",
           "role": "package_terms",
           "kind": "package_terms",
-          "archive_index": 198,
           "source_relative_path": "LICENSE-MIT"
         }
       ],
       "name": "ktav",
       "nested_lock": false,
-      "proposed_url": "https://static.crates.io/crates/ktav/ktav-0.8.0.crate",
+      "proposed_url": "https://static.crates.io/crates/ktav/ktav-0.8.1.crate",
       "root_lock": true,
       "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "version": "0.8.0",
+      "version": "0.8.1",
       "manifest_evidence": [
         {
-          "archive_member": "ktav-0.8.0/Cargo.toml",
+          "archive_member": "ktav-0.8.1/Cargo.toml",
           "bytes": 3493,
-          "sha256": "5f9463f6a217a06a1d4f178eab1ea15d6afa31d0c9a6a1fb28a2e0691ed77616",
+          "sha256": "8a9977415301486606ee56e3e379ffa9dcbc3c5e0f0f7547fb7b97a3f1148abd",
           "license": "MIT OR Apache-2.0",
           "license_file": null
         }
       ],
-      "archive_member_count": 302,
-      "decoded_tar_bytes": 2328576,
+      "archive_member_count": 304,
+      "decoded_tar_bytes": 2373632,
       "review_note": "Authentic package-scope text supplies at least one complete alternative per declared expression group. This is not legal clearance, distribution sufficiency, or an OR-choice conclusion.",
       "terms_evidence": {
         "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
@@ -22310,8 +22308,8 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "archive_member": "ktav-0.8.0/LICENSE-MIT",
-                    "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.0/terms/LICENSE-MIT",
+                    "archive_member": "ktav-0.8.1/LICENSE-MIT",
+                    "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.1/terms/LICENSE-MIT",
                     "role": "package_terms",
                     "sha256": "dab3570e779bf2a81f0331e5346b8f663278e624df1daf052751fa5ca2dbab5d"
                   }
@@ -22326,8 +22324,8 @@
                 "availability": "available",
                 "evidence": [
                   {
-                    "archive_member": "ktav-0.8.0/LICENSE-APACHE",
-                    "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.0/terms/LICENSE-APACHE",
+                    "archive_member": "ktav-0.8.1/LICENSE-APACHE",
+                    "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.1/terms/LICENSE-APACHE",
                     "role": "package_terms",
                     "sha256": "a6dc86d5f5d6c98462c1361d7c062ca8d3a932aa13ecbffbb2ab9f8b1586feec"
                   }
@@ -56186,6 +56184,119 @@
         "component_scoped_text": []
       },
       "retired_reason": "Left the resolved graph: the reviewed multibase 0.9.3 preparation no longer declares the base45 dependency (the Base45 encoding is removed); no lawful notice could be reproduced because no authentic license text exists upstream. The held archive evidence stays bound to receipt index 20."
+    },
+    {
+      "archive_data": [
+        {
+          "receipt_index": 198,
+          "url": "https://static.crates.io/crates/ktav/ktav-0.8.0.crate",
+          "path": "notices-registry-authorized-1109/0198.crate",
+          "bytes": 537769,
+          "sha256": "961a8932a06e7f2c02a301b70978c190b746925d615f20035a3e07c584282655"
+        }
+      ],
+      "checksum": "961a8932a06e7f2c02a301b70978c190b746925d615f20035a3e07c584282655",
+      "classification": "package-complete",
+      "declared_license": "MIT OR Apache-2.0",
+      "materials": [
+        {
+          "archive_member": "ktav-0.8.0/LICENSE-APACHE",
+          "member_bytes": 11298,
+          "member_sha256": "a6dc86d5f5d6c98462c1361d7c062ca8d3a932aa13ecbffbb2ab9f8b1586feec",
+          "byte_range": [
+            0,
+            11298
+          ],
+          "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.0/terms/LICENSE-APACHE",
+          "material_bytes": 11298,
+          "material_sha256": "a6dc86d5f5d6c98462c1361d7c062ca8d3a932aa13ecbffbb2ab9f8b1586feec",
+          "slice_sha256": "a6dc86d5f5d6c98462c1361d7c062ca8d3a932aa13ecbffbb2ab9f8b1586feec",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "archive_index": 198,
+          "source_relative_path": "LICENSE-APACHE"
+        },
+        {
+          "archive_member": "ktav-0.8.0/LICENSE-MIT",
+          "member_bytes": 1078,
+          "member_sha256": "dab3570e779bf2a81f0331e5346b8f663278e624df1daf052751fa5ca2dbab5d",
+          "byte_range": [
+            0,
+            1078
+          ],
+          "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.0/terms/LICENSE-MIT",
+          "material_bytes": 1078,
+          "material_sha256": "dab3570e779bf2a81f0331e5346b8f663278e624df1daf052751fa5ca2dbab5d",
+          "slice_sha256": "dab3570e779bf2a81f0331e5346b8f663278e624df1daf052751fa5ca2dbab5d",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "archive_index": 198,
+          "source_relative_path": "LICENSE-MIT"
+        }
+      ],
+      "name": "ktav",
+      "nested_lock": false,
+      "proposed_url": "https://static.crates.io/crates/ktav/ktav-0.8.0.crate",
+      "root_lock": false,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "0.8.0",
+      "manifest_evidence": [
+        {
+          "archive_member": "ktav-0.8.0/Cargo.toml",
+          "bytes": 3493,
+          "sha256": "5f9463f6a217a06a1d4f178eab1ea15d6afa31d0c9a6a1fb28a2e0691ed77616",
+          "license": "MIT OR Apache-2.0",
+          "license_file": null
+        }
+      ],
+      "archive_member_count": 302,
+      "decoded_tar_bytes": 2328576,
+      "review_note": "Authentic package-scope text supplies at least one complete alternative per declared expression group. This is not legal clearance, distribution sufficiency, or an OR-choice conclusion. Retired 2026-11-17: the root lock moved to ktav 0.8.1 (owner decision).",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT OR Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "MIT OR Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "ktav-0.8.0/LICENSE-MIT",
+                    "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.0/terms/LICENSE-MIT",
+                    "role": "package_terms",
+                    "sha256": "dab3570e779bf2a81f0331e5346b8f663278e624df1daf052751fa5ca2dbab5d"
+                  }
+                ],
+                "unestablished_reason": null
+              },
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "ktav-0.8.0/LICENSE-APACHE",
+                    "material_path": "packages/j-l/registry-supplement/k/t/a/v/package/0.8.0/terms/LICENSE-APACHE",
+                    "role": "package_terms",
+                    "sha256": "a6dc86d5f5d6c98462c1361d7c062ca8d3a932aa13ecbffbb2ab9f8b1586feec"
+                  }
+                ],
+                "unestablished_reason": null
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      }
     }
   ],
   "identity_fields": [
