@@ -28,7 +28,7 @@ This page separates what was written, what ran in GitHub CI, and what has no evi
 ### Encrypted address (opt-in)
 
 - `publish_address: encrypted` (leaf L3b) publishes the address list sealed under a key file that the Client must hold. It hides the addresses from a passive DHT observer, a storage node or a crawler; it does not hide the record's existence, size and sequence number, the Yggdrasil address derived from the key, the IP seen by the Server's configured Yggdrasil peers, or the IP seen by any peer that connects directly. A holder of the key file learns the addresses, and a leaked key file reveals every record sealed under it until it is rotated. A Server holds exactly one key, so one key file is one audience. The key file is a second secret next to the identity key (same format, same permission checks) and has to be distributed to the Clients out of band.
-- **Status**: **Verified** in CI (fork run 43914611115, upstream run 43917519888 on `a2dbe17`): the sealing, the record codec, the publisher, the configuration and the start-up failure tests passed on Linux and Windows. **Verified** in the controlled namespace fixture (dispatch 43920291161): the two cases `dnat-cone-encrypted-signal` and `-standby` stored a sealed record without any plain address, the Client holding the key opened it and both ended on the direct path with the APP exact. Not shown: that the sealed addresses were needed for the punch (the relay-less rendezvous also carries the Server's candidates) and a Client without the key in the namespace. **Unverified**: any live run with a real DHT, and the interaction with real NATs.
+- **Status**: **Verified** in CI (fork run 43914611115, upstream run 43917519888 on `a2dbe17`): the sealing, the record codec, the publisher, the configuration and the start-up failure tests passed on Linux and Windows. **Verified** in the controlled namespace fixture (dispatch 43920291161): the two cases `dnat-cone-encrypted-signal` and `-standby` stored a sealed record without any plain address, the Client holding the key opened it and both ended on the direct path with the APP exact. Not shown: that the sealed addresses were needed for the punch (the relay-less rendezvous also carries the Server's candidates) and a Client without the key in the namespace. **Live, two devices (2026-11-17, local, not CI)**: a Server on a phone (LTE, carrier NAT) with `publish_address: encrypted` and a Client on a Windows computer holding the key file; the first route decision printed `record:0 resolve=timeout` because a lookup that takes 6 to 10 s gets 1 s while a punch channel exists, and the session ran on Yggdrasil standby. The sealed record was **not shown to open**: the logs do not record a later resolution. Details and the control attempt: `docs/plans/v1-focus.md`, "Two-device live test". **Unverified**: that a Client opens a sealed record on the live DHT, and the interaction with real NATs beyond that one pair.
 
 ### Yggdrasil
 
@@ -63,13 +63,13 @@ The dispatch workflow "Platform build evidence" builds release executables of bo
 
 | Target | Built in CI | Executed in CI | Devices |
 |---|---|---|---|
-| x86_64-unknown-linux-gnu | yes; run evidence: _to be filled after the first dispatch_ | Ordinary CI compiles and executes the selected unit, SDK and real-process tests on Ubuntu runners | Never run on devices |
-| x86_64-pc-windows-msvc | yes; run evidence: _to be filled after the first dispatch_ | Ordinary CI compiles and executes the selected tests on Windows runners | Never run on devices |
-| aarch64-apple-darwin | built in CI only; run evidence: _to be filled after the first dispatch_ | Nothing — macOS has never executed anything in this repository's CI | Never |
-| x86_64-apple-darwin | built in CI only; run evidence: _to be filled after the first dispatch_ | Nothing | Never |
-| aarch64-linux-android | built in CI only; run evidence: _to be filled after the first dispatch_ | Nothing | Never |
+| x86_64-unknown-linux-gnu | yes; run 44092750956 at `a932218` (success) | Ordinary CI compiles and executes the selected unit, SDK and real-process tests on Ubuntu runners | Never run on devices |
+| x86_64-pc-windows-msvc | yes; run 44092750956 at `a932218` (success) | Ordinary CI compiles and executes the selected tests on Windows runners | The run's release executables served as the Client on one computer in the two-device test of 2026-11-17 (local evidence) |
+| aarch64-apple-darwin | not built: in run 44092750956 no runner was assigned within 15 minutes and the job was cancelled, no step ran | Nothing — macOS has never executed anything in this repository's CI | Never |
+| x86_64-apple-darwin | not built: same cancelled run, no step ran | Nothing | Never |
+| aarch64-linux-android | yes; run 44092750956 at `a932218` (success) | Nothing | The run's executables ran as the Server inside the debuggable harness app of `crates/shaar-platform/android/` on one arm64 phone in the two-device test of 2026-11-17; a locally built debug pair passed the loopback case of the same harness (both local evidence) |
 
-No GUI, no APK, no system packages, no installers, and no release publication are produced; the separate first-run effort is out of scope here.
+The only APK is that debuggable test harness, built locally without Gradle and uninstalled after each test; no packages, installers or release publication are produced, and the separate first-run effort is out of scope here.
 
 ## Checks actually performed
 
@@ -90,6 +90,6 @@ All runs below are GitHub Actions runs on the owner's CI; "executed" means the t
 ## Not performed (explicitly open)
 
 - Public-network interoperability beyond one bounded smoke: the smoke is authorized through its default-off contract (2026-11-14). One relay-less run passed over Yggdrasil standby (run 43671098240); a run with a public libp2p relay failed at the relay reservation (run 43629141158). Neither observed a direct path or a hole punch, and neither is an acceptance of the end-to-end claim.
-- Real home, mobile or LAN device tests; a product mechanism that learns public (reflexive) addresses, without which double-NAT hole punching does not happen (§10 A5).
+- Real home, mobile or LAN device tests beyond one pair: on 2026-11-17 a Windows computer and an Android phone on LTE exchanged one exact payload twice over Yggdrasil standby, with no direct path and no hole punch observed (two attempts, local evidence, `docs/plans/v1-focus.md`). A product mechanism that learns public (reflexive) addresses exists, but its address is paired with the local port, which a port-remapping carrier NAT defeats (unproven).
 - Long-duration, public-network and many-peer resource behaviour; P16 first-version readiness; notices and license corpus completion.
 - Building outside the CI recipes, running under a service manager (SIGTERM is handled but no unit file or manager was exercised), packaging and releases.
