@@ -55,6 +55,8 @@ PREPARED_RECIPE = "1fde87853a5dfdccdc9770569952dcd0cd9fea7e7a97fb7a7b0f723b2256c
 
 FEATURE_ADDS = {
     ('aead', '0.5.2'): frozenset(('alloc', 'getrandom', 'rand_core')),
+    # Leaf L3b: the sealed address uses the Vec-returning AEAD API; snow enables no feature of it.
+    ('chacha20poly1305', '0.10.1'): frozenset(('alloc',)),
     ('cipher', '0.4.4'): frozenset(('zeroize',)),
     ('crypto-common', '0.1.7'): frozenset(('getrandom', 'rand_core')),
     ('curve25519-dalek', '4.1.3'): frozenset(('alloc', 'digest', 'precomputed-tables', 'zeroize')),
@@ -80,11 +82,20 @@ FEATURE_ADDS = {
 # Native payload-loss observation uses the already locked production-transitive Stream trait.
 NATIVE_OBSERVER_EDGE = (('shaar', '0.1.0'), ('futures', '0.3.34'))
 
+# Encrypted address publication (leaf L3b): the seal is ChaCha20-Poly1305 under a key derived by
+# HKDF-SHA256, so the package gains these three direct edges to already locked registry packages.
+SEALED_ADDRESS_EDGES = (
+    (('shaar', '0.1.0'), ('chacha20poly1305', '0.10.1')),
+    (('shaar', '0.1.0'), ('hkdf', '0.13.0')),
+    (('shaar', '0.1.0'), ('sha2', '0.11.1')),
+)
+
 METADATA_EDGES = frozenset({
     NATIVE_OBSERVER_EDGE,
     (('curve25519-dalek', '4.1.3'), ('digest', '0.10.7')),
     (('curve25519-dalek', '4.1.3'), ('zeroize', '1.9.1')),
     (('generic-array', '0.14.7'), ('zeroize', '1.9.1')),
+    *SEALED_ADDRESS_EDGES,
     (('shaar', '0.1.0'), ('url', '2.5.8')),
     (('shaar-ygg', '0.1.0'), ('iroh', '1.3.0')),
     (('shaar-ygg', '0.1.0'), ('iroh-base', '1.3.0')),
@@ -103,6 +114,7 @@ UNIT_EDGES = frozenset({
     NATIVE_OBSERVER_EDGE,
     (('cipher', '0.4.4'), ('zeroize', '1.9.1')),
     (('generic-array', '0.14.7'), ('zeroize', '1.9.1')),
+    *SEALED_ADDRESS_EDGES,
     (('shaar', '0.1.0'), ('url', '2.5.8')),
     (('shaar-ygg', '0.1.0'), ('iroh', '1.3.0')),
     (('shaar-ygg', '0.1.0'), ('iroh-base', '1.3.0')),
@@ -118,6 +130,9 @@ FIRST_UNITS = frozenset({
     ('asn1-rs', '0.7.2'),
     ('asn1-rs-derive', '0.6.0'),
     ('asn1-rs-impl', '0.2.0'),
+    # Leaf L3b: the sealed-address AEAD and its stream cipher compile for the first time.
+    ('chacha20', '0.9.1'),
+    ('chacha20poly1305', '0.10.1'),
     ('curve25519-dalek', '4.1.3'),
     ('der-parser', '10.0.0'),
     ('errno', '0.3.14'),
@@ -164,6 +179,13 @@ def _need(ok, message):
         raise AuditError(message)
 
 
+def _need_all(problems):
+    """Raise one error naming every problem; a single problem keeps its exact message."""
+    if problems:
+        from features import AuditError
+        raise AuditError("; ".join(sorted(set(problems))))
+
+
 def _source_ok(key):
     name, version, source = key
     if (name, version) in REG:
@@ -189,7 +211,7 @@ def reduce_metadata(control, candidate):
     _need(not any(key[:2] in CLOSURE for key in control), "yggdrasil closure already present in the control")
     for key in added:
         _need(_source_ok(key), "unapproved yggdrasil closure source: " + key[0])
-    reduced = {}
+    reduced, problems = {}, []
     for key, features in candidate.items():
         if key in added:
             continue
@@ -198,9 +220,10 @@ def reduce_metadata(control, candidate):
             reduced[key] = features
             continue
         extra = set(features) - set(base)
-        _need(set(base) <= set(features) and extra <= FEATURE_ADDS.get(key[:2], frozenset()),
-              "unapproved feature change: " + key[0] + " +" + ",".join(sorted(extra)))
+        if not (set(base) <= set(features) and extra <= FEATURE_ADDS.get(key[:2], frozenset())):
+            problems.append("unapproved feature change: " + key[0] + " +" + ",".join(sorted(extra)))
         reduced[key] = base
+    _need_all(problems)
     return reduced
 
 
@@ -224,12 +247,14 @@ def _normal_edges(parsed):
 def check_edges(control, candidate):
     """Normal metadata edges may grow only through the closure or declared pairs."""
     before, after = _normal_edges(control), _normal_edges(candidate)
+    problems = []
     for edge in after - before:
-        _need(edge[0] in CLOSURE or edge[1] in CLOSURE or edge in METADATA_EDGES,
-              "unapproved dependency edge: " + edge[0][0] + " -> " + edge[1][0])
+        if not (edge[0] in CLOSURE or edge[1] in CLOSURE or edge in METADATA_EDGES):
+            problems.append("unapproved dependency edge: " + edge[0][0] + " -> " + edge[1][0])
     for edge in before - after:
-        _need(edge[0][0] in _EMOJI or edge[1][0] in _EMOJI,
-              "unapproved dependency edge removal: " + edge[0][0] + " -> " + edge[1][0])
+        if not (edge[0][0] in _EMOJI or edge[1][0] in _EMOJI):
+            problems.append("unapproved dependency edge removal: " + edge[0][0] + " -> " + edge[1][0])
+    _need_all(problems)
 
 
 def _label(form):
@@ -255,20 +280,25 @@ def _edges(form):
 def check_units(control, candidate):
     """Candidate units must embed the control units; every extra is declared."""
     before, after = _index(control, "control"), _index(candidate, "candidate")
+    problems = []
     for key, old in before.items():
         new = after.get(key)
-        _need(new is not None, "control unit missing from candidate: " + _label(old))
+        if new is None:
+            problems.append("control unit missing from candidate: " + _label(old))
+            continue
         ident = tuple(old["package"][:2])
         extra = set(new["features"]) - set(old["features"])
-        _need(set(old["features"]) <= set(new["features"]) and extra <= FEATURE_ADDS.get(ident, frozenset()),
-              "unapproved unit feature change: " + _label(old) + " +" + ",".join(sorted(extra)))
+        if not (set(old["features"]) <= set(new["features"]) and extra <= FEATURE_ADDS.get(ident, frozenset())):
+            problems.append("unapproved unit feature change: " + _label(old) + " +" + ",".join(sorted(extra)))
         had, has = _edges(old), _edges(new)
-        _need(had <= has, "control dependency missing from candidate: " + _label(old))
+        if not had <= has:
+            problems.append("control dependency missing from candidate: " + _label(old))
         for _, _, owner, _ in has - had:
-            _need(owner in NEW_UNIT_PACKAGES or (ident, owner) in UNIT_EDGES,
-                  "unapproved unit dependency: " + _label(old) + " -> " + owner[0])
+            if not (owner in NEW_UNIT_PACKAGES or (ident, owner) in UNIT_EDGES):
+                problems.append("unapproved unit dependency: " + _label(old) + " -> " + owner[0])
     for key, unit in after.items():
         if key not in before:
             ident = tuple(unit["package"][:2])
-            _need(ident in NEW_UNIT_PACKAGES or ident + (unit.get("context"),) in NEW_SHARED_UNITS,
-                  "unapproved candidate unit: " + _label(unit))
+            if not (ident in NEW_UNIT_PACKAGES or ident + (unit.get("context"),) in NEW_SHARED_UNITS):
+                problems.append("unapproved candidate unit: " + _label(unit))
+    _need_all(problems)
