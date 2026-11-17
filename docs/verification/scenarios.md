@@ -540,10 +540,12 @@ selection map, so this measurement stays valid for that product code. One run pe
 The largest change against 11.5 is the composed steady RSS, +0.7 MiB, far inside its ceiling of 96 MiB. The
 ceilings are not tightened here. The raw reports are the `resource-budget` artifact of the dispatch.
 
-## 12. P16 first-version readiness (2026-11-16)
+## 12. P16 first-version readiness (2026-11-16, final checks 2026-11-17)
 
-Prepared on `65617d3` (the product code is that of `f166782`, the L4b merge; everything after it is documentation and the
-namespace harness). This is the cross-check that development plan P16 asks for. It creates no evidence of its own: every
+Prepared on `65617d3` (the product code of `f166782`, the L4b merge) and repeated on the final candidate `5c83e48` after
+L3b was added: the product code is that of `5802273` (the L3b merge); everything after it is test code, the data of the
+native-graph guard and documentation, so the binaries are those of `5802273`. This is the cross-check that development plan
+P16 asks for. It creates no evidence of its own: every
 statement cites a run or a section above. Whether the first version is accepted is the owner's decision; the open risks and
 gates the owner must weigh are in 12.5.
 
@@ -562,52 +564,66 @@ Every namespace row above was executed once per case; the matrix does not claim 
 
 ### 12.2 Efficiency criteria of 2026-11-05, recomputed on the final product code
 
-Source: the retained `p10-*.csv` files of the full-scope fork run 43861074349 on `f166782` (both OS green), nearest-rank p95
-over 20 samples, read with a stdlib script as inert data.
+Source: the retained `p10-*.csv` files (artifact `selected-tests-<os>`) of the full-scope fork run 43966680594 on `fdb461f`
+(both OS green; the final candidate `5c83e48` differs from it by test code only), nearest-rank p95 over 20 samples, read with
+a stdlib script as inert data.
 
 | Criterion | Limit | Linux | Windows |
 |---|---|---|---|
-| First byte, known address | 3 s | 112.2 ms | 111.6 ms |
-| First byte, cold DHT lookup | 10 s | 114.1 ms | 128.0 ms |
-| Failover to Yggdrasil under blocking of every IP path | 10 s | 9.029 s | 9.051 s |
+| First byte, known address | 3 s | 79.8 ms | 110.6 ms |
+| First byte, cold DHT lookup | 10 s | 98.4 ms | 138.1 ms |
+| Failover to Yggdrasil under blocking of every IP path | 10 s | 9.030 s | 9.041 s |
 | Share of connections that end on the direct path | 95 % | 98.387 % (61 of 62) | 98.387 % (61 of 62) |
 
-All four hold. The known-address value is about 30 ms above the campaign of `361e169` (80.4 to 81.1 ms on Linux); samples
-move by that much between runs on shared runners and both startup limits are far away. The criteria are measured in
+All four hold, with the values of the earlier campaigns: the Linux known-address value is back at the level of `361e169`
+(80.4 to 81.1 ms) after 112.2 ms on `f166782`, and the failover stays at 9.03 s as in every earlier campaign (9.029 to 9.053 s). Samples
+move by tens of milliseconds between runs on shared runners and both startup limits are far away. The criteria are measured in
 a controlled fixture, never on the public network.
 
-### 12.3 Resources (P14), re-measured on the final code
+### 12.3 Resources (P14), re-measured on the code of the L3b merge
 
-Dispatch 43875890398 on `65617d3` (release products, loopback only): **38 of 38 rows inside their ceilings** (19 direct, 19
-composed). Composed steady RSS 23.6 MiB server and 23.0 MiB client against 96 MiB, idle CPU 0.08 % and 0.14 % against 2 %,
-round trip p95 0.457 ms, bulk echo 95.0 MiB/s against a floor of 20, 6.4 MiB accepted from a never-reading target against 32,
-server growth after client restarts 0 fds, 0 threads and 0.19 MiB, server stop in 4.2 ms. The ceilings stay as approved on
-2026-11-14.
+Dispatch 43923887074 on `5802273` (release products, loopback only): **38 of 38 rows inside their ceilings**. Composed steady
+RSS 24.4 MiB server and 25.1 MiB client against 96 MiB, idle CPU 0.06 % and 0.12 % against 2 %, round trip p95 0.416 ms, bulk
+echo 136.5 MiB/s against a floor of 20. The ceilings stay as approved on 2026-11-14. Later commits changed no product code (see
+the introduction of this section), so the measurement stands for the final candidate; the earlier run 43875890398 on
+`65617d3` is the reference without L3b.
 
 ### 12.4 CI and legal checks on the final code
 
-- Full-scope fork run 43861074349 on `f166782`: green on Linux and Windows. Libtest totals: Linux 1,057 passed, 0 failed, 21
-  ignored (23 binaries); Windows 1,064 passed, 0 failed, 15 ignored (23 binaries); the Windows-only SDK-parallelism
-  diagnostic step 1,611 passed and 0 failed over 3 binaries. Later commits (harness cases,
-  documentation) were checked by targeted runs: fork 43866538507 and 43873666590, upstream develop 43867542657, 43869466418
-  and 43874597907, all green on both OS.
-- Privileged namespace matrix: six authorized dispatches used, 43867617110 (`punch`, 5 of 5 cases) and 43870509412
-  (`base`, 12 of 12 cases) on the L4b product code; earlier dispatches are indexed in 10.1. The seventh, 43920291161
-  on `a2dbe17` (`punch`, 7 of 7 cases including the L3b pair `dnat-cone-encrypted-*`), passed; one of the two further
-  dispatches granted on 2026-11-16 is left for the final regression.
-- Platform builds (build only, nothing executed, packaged or released): fork run 43874797967 on `65617d3`: Linux
-  x86_64, Windows x86_64, macOS aarch64 and Android aarch64 built. **macOS x86_64 was not built on this SHA**: the job never
-  started in three attempts (the first run and two re-runs, each cancelled after about 15 minutes of queueing with "The job
-  was not acquired by Runner of type hosted even after multiple attempts" and GitHub's notice about macOS arm64 runner
-  capacity), so this is a runner-capacity event with no build output either way. The same target built from the same
-  sources up to `1e6da6c` (fork run 43834970372), and the macOS aarch64 job built the final sources with the same toolchain
-  in this run. A re-run when capacity returns would close the row. Android stays build-only: no device or emulator ran it.
+- Full-scope fork run 43966680594 on `fdb461f`: green on Linux and Windows, including the native-graph verification on both OS
+  and the Windows-only SDK-parallelism diagnostic (three trials of the SDK library tests). The libtest totals of this run were
+  not re-read in this pass; the previous full-scope run, 43861074349 on `f166782`, had 1,057 passed on Linux and 1,064 on
+  Windows, 0 failed. `5c83e48` (the repair of the port allocation of a Windows test fixture, test code only) was checked by
+  ordinary CI: fork run 43985999369 and upstream `develop` run 43986770266, both green on both OS.
+- Path to that green, stated as it happened: four full-scope runs failed first, each stopping at its first failing step. 43923957457
+  (the pinned digest of the root lock of the owned-DNS guard, stale after L3b); 43930658923 (the native-graph guard knew
+  neither the three direct edges of L3b nor its feature growth; Windows FLAKE-W1); 43946142325 (the guard then named two new
+  compiler units, `chacha20` and `chacha20poly1305`; FLAKE-W1 in its second form); 43955590853 (Ubuntu green; Windows: a timing
+  assertion of `native_loss_is_observed_while_the_same_signaling_connection_stays_alive`). After the second failure the repair
+  was planned as one consolidated commit; its run was the third failure, which triggered the standing stop-and-review rule, and
+  the reviewed repair found both causes of that run together. The guard audits now report every offender at once. After the green full-scope run the upstream run 43980926424 on `fdb461f`
+  failed on Windows in the carrier-wire proof (TCP bind refused with 10013 on 16 sequential UDP-chosen ports of a fixture
+  helper; fixed in `5c83e48`, see 12.5 item 7). None of these changed product code.
+- Privileged namespace matrix: all eight authorized dispatches are used. 43867617110 (`punch`, 5 of 5 cases) and 43870509412
+  (`base`, 12 of 12 cases) ran on the L4b product code, earlier dispatches are indexed in 10.1, the seventh, 43920291161 on
+  `a2dbe17` (`punch`, 7 of 7 cases including the L3b pair `dnat-cone-encrypted-*`), passed. The eighth, 43988889055 on `5c83e48`
+  (`base`, the final regression, 2026-11-17), passed: 12 of 12 product cases and the three controls (setup fault, fixture
+  fault, interrupt) in 175 s, 566,353 forwarded bytes of the 58,720,256 allocated, the ruleset syntax pre-check and the
+  namespace cleanup clean.
+- Platform builds (build only, nothing executed, packaged or released): fork run 43923966480 on `5802273`, the product code of the
+  final candidate: Linux x86_64, Windows x86_64, macOS x86_64 and Android aarch64 built. **macOS aarch64 was not built on this
+  SHA**: the job never got a runner in four attempts ("The job was not acquired by Runner of type hosted even after multiple
+  attempts", GitHub's macOS runner capacity), so this is a capacity event with no build output either way. The same target
+  built from the product code before L3b (`65617d3`, fork run 43874797967, where macOS x86_64 was the one that never started;
+  all five targets at `1e6da6c`, run 43834970372); no single SHA has all five targets built since the L3b change. A re-run when capacity
+  returns would close the row. Android stays build-only: no device or emulator ran it.
 - First execution on macOS: the `Process feedback` matrix of 2026-11-16 (run 43846060445) ran the 13 reviewed process
   cases on `macos-latest` (aarch64) and passed; debug products, loopback only.
-- Licence gate: cargo-deny reports `licenses ok` in the full-scope run, and the Linux notice manifest of that run lists 371
-  linked packages, 0 release blockers, 13 reviewed not-distributed identities and `release_ready` true (the Windows manifest
-  is retained in the same run and was not re-read in this pass). The licence texts are authentic upstream files; the
-  elections of 2026-11-14 are an engineering decision, not legal advice.
+- Licence gate: cargo-deny reports `licenses ok` in the full-scope run. The committed notice manifests were regenerated for 373
+  linked packages (L3b adds `chacha20` 0.9.1 and `chacha20poly1305` 0.10.1 to the linked set) and the CI notice check compares them
+  byte for byte; it is green. The release-blocker counts of the new manifests were not re-read in this pass; the earlier Linux
+  manifest (371 packages) had 0 release blockers, 13 reviewed not-distributed identities and `release_ready` true. The licence
+  texts are authentic upstream files; the elections of 2026-11-14 are an engineering decision, not legal advice.
 - Reproducibility: every build uses the pinned toolchain 1.99.1, the locked graph and prepared sources with verified
   checksums. Byte-for-byte reproducibility of the binaries is not claimed and was not tested.
 - Secrets: the unit oracles of `security.md` (SEC-CFG-02, SEC-KEY-03) cover logs and `Debug` output; the live smoke evidence
@@ -617,20 +633,22 @@ server growth after client restarts 0 fds, 0 threads and 0.19 MiB, server stop i
 
 | # | Item | Kind | State |
 |---|---|---|---|
-| 1 | Encrypted reflexive address (L3b, the opt-in of 2026-11-15) | owner decision made, implemented | On 2026-11-16 the owner decided that L3b is part of the first version, with exactly two publication options, open and encrypted with a key the client must know (design note v4, `p13-controlled-network.md` section 7: one key per Server, because the sealed value rides in the 245-character `user-data` attribute). The code is on `develop` (fork CI 43914611115 and upstream CI 43917519888 green on `a2dbe17`) and the namespace pair passed (dispatch 43920291161). It reopens the final checks: a full-scope run, the platform builds and a re-measurement on the new product code, which are not repeated yet |
+| 1 | Encrypted reflexive address (L3b, the opt-in of 2026-11-15) | owner decision made, implemented, final checks repeated | On 2026-11-16 the owner decided that L3b is part of the first version, with exactly two publication options, open and encrypted with a key the client must know (design note v4, `p13-controlled-network.md` section 7: one key per Server, because the sealed value rides in the 245-character `user-data` attribute). The code is in `main` (fork CI 43914611115 and upstream CI 43917519888 green on `a2dbe17`), the namespace pair passed (dispatch 43920291161) and the final checks were repeated on the final candidate: the full-scope run, P10 (12.2), P14 and the platform builds on the same product code (12.3, 12.4) and the final regression dispatch 43988889055. Still the owner's to confirm: my reading of "a key the client must know" as a secret provisioned to the client (not the client's own identity key), and the single key per Server (several audiences would need a patched `iroh-dns` or several Servers) |
 | 2 | Direct path between real networks | product risk, bounded observation | Thirteen live dispatches: ten passed over Yggdrasil, none obtained a direct path between the two cloud runners. The last one (43870725952) shows the Server never learned its public address (five reflexive windows skipped), so it answered none of 30 Offers. By the decision of 2026-11-15 this is an observation, neither a pass nor a failure. Further live work stays inside the recorded contract |
 | 3 | Real devices and networks (E2), Android execution | gated | No home, mobile or cafe network and no device ran the products; Android is build-only |
 | 4 | NAT variety (A6) | not established | Only port-preserving cone (direct) and fully random ports (no direct path, `standby` carries) were run |
 | 5 | Long-period NAT keepalive (D4), circuit exhaustion and Client-side relay exhaustion (C5) | not established | Single NAT recovery and Server reservation exhaustion are accepted; the rest needs real devices or a new case |
 | 6 | The reflexive address comes from the Mainline DHT only | design limit | A side that cannot learn it offers no candidate; an unanswered Offer holds the Client for up to 1.5 s per attempt (answering with an empty list would end the wait; not done) |
-| 7 | Windows flake `pinned_relay_negotiation_carries_native_payload_with_zero_relay_payload` (FLAKE-W1) | oracle fixed, repeat check pending | It repeated on the two full-scope Windows runs of 2026-11-16 (43930658923 and 43946142325, the second under the SDK-parallelism diagnostic): `application frames crossed unclassified path` once with RX stream 75 and once with TX stream 11 on a path that appears only in the terminal snapshot. Mechanism: iroh registers a path only if `conn.path(id)` still exists when its `Established` event is handled; under load a short-lived native candidate (the runner has several local addresses) is gone by then, so it is never reported as opened, yet it can carry APP frames. The role oracle no longer demands zero APP frames on such a path: its TX stays in the conserved totals, its stream frames count as native evidence, and the signaling paths (classified from the first packet, observed on both roles) must stay zero on TX and RX, so a leak over a signaling path is still caught. The pinned iroh is untouched. Residual gap: a signaling path that both roles failed to register would hide a leak; the Ygg path is the initial path and was registered in every observed failure. The next full-scope Windows run is the check. The same diagnostic step (three parallel SDK trials) also exposed a timing assertion of `native_loss_is_observed_while_the_same_signaling_connection_stays_alive` (run 43955590853, trial 2 of 3): it sampled the signaling PING counter at the instant the native loss was observed, which can precede the next keepalive PING (2 s period against a loss seen 2-4 s after the block); it now waits up to three keepalive periods for a fresh PING and reports the counters if none arrives |
-| 8 | Privileged dispatches | resource | Seven of eight authorized dispatches are used (six, plus one of the two granted on 2026-11-16); the last one is reserved for the final regression and any further namespace run needs a new grant |
+| 7 | Windows flakes of the full-scope path (FLAKE-W1, W2, W3) | fixed, each checked by one green run | **W1** (`pinned_relay_negotiation_carries_native_payload_with_zero_relay_payload`): it failed on two full-scope Windows runs of 2026-11-16 (43930658923, 43946142325) with `application frames crossed unclassified path`, once with RX stream 75 and once with TX stream 11 on a path that appears only in the terminal snapshot. Mechanism: iroh registers a path only if `conn.path(id)` still exists when its `Established` event is handled; under load a short-lived native candidate (the runner has several local addresses) is gone by then, so it is never reported as opened, yet it can carry APP frames. The role oracle no longer demands zero APP frames on such a path: its TX stays in the conserved totals, its stream frames count as native evidence, and the signaling paths (classified from the first packet, observed on both roles) must stay zero on TX and RX, so a leak over a signaling path is still caught. The pinned iroh is untouched. Residual gap: a signaling path that both roles failed to register would hide a leak; the Ygg path is the initial path and was registered in every observed failure. **W2** (`native_loss_is_observed_while_the_same_signaling_connection_stays_alive`, run 43955590853, trial 2 of 3 of the SDK-parallelism diagnostic): the test sampled the signaling PING counter at the instant the native loss was observed, which can precede the next keepalive PING (2 s period against a loss seen 2 to 4 s after the block); it now waits up to three keepalive periods for a fresh PING and reports the counters if none arrives. **W3** (`carrier_protocol_fixture_revocation`, upstream run 43980926424): the owned DNS socket pair of a test fixture failed on Windows because the sequential UDP-chosen ports 49720 to 49735 all lay in a TCP-excluded block (10013) wider than the 16 retries; after a 10013 on an ephemeral port the pair is now also tried TCP first, which skips excluded blocks. Evidence: the full-scope run 43966680594 passed the three SDK-parallelism trials and `cargo test` on Windows after W1 and W2, and the fork run 43985999369 and the upstream run 43986770266 passed after W3. One green run does not prove that a flake is gone; the mechanisms are named and the contracts they weakened are recorded above |
+| 8 | Privileged dispatches | resource | All eight authorized dispatches are used (six, plus the two granted on 2026-11-16: the L3b check 43920291161 and the final regression 43988889055); any further namespace run needs a new grant |
 | 9 | Public-network, legal, release gates | gated | Publishing crates, a release, a version change, commit and push, public peers beyond the recorded contract and legal clearance of the notices stay separate explicit requests |
+| 10 | macOS aarch64 build on the final SHA | not established | The job got no runner in four attempts on `5802273`; the target built on the product code before L3b and the macOS aarch64 first-run cases passed on `macos-latest` (12.4). A re-run when GitHub macOS capacity returns closes it; it is a build-only row |
 
 ### 12.6 What this section does and does not conclude
 
 Every mandatory scenario of the matrix is accepted, or tested with its limits recorded, or gated as listed above. On
 2026-11-16 the owner accepted this report with its open risks and added L3b to the first version, so the first version is
-accepted only together with item 1 once that is implemented and its final checks are repeated. The version has **not** been shown to punch through real home or cloud NATs;
+accepted only together with item 1; item 1 is implemented and its final checks were repeated on the final candidate `5c83e48` (12.2 to 12.4), so what is left is
+the owner's decision and the open rows above. The version has **not** been shown to punch through real home or cloud NATs;
 what is shown is the mechanism in the controlled fixture, the fail-closed and fallback behavior around it, and a live
 fallback over Yggdrasil that works every time it was tried. Nothing here is published, tagged or versioned.

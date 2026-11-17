@@ -928,5 +928,5 @@ a reviewed patch of the prepared `iroh-dns`, which was not made and is a decisio
   bind with a redacted message. The namespace check (two privileged dispatches are authorized)
   showed that a Client holding the key still reaches a direct path through the cone NATs: dispatch
   43920291161 on `a2dbe17`, 7 of 7 `punch` cases passed, including `dnat-cone-encrypted-signal` and
-  `-standby` (sealed record stored, `record:1 resolve=found` in the Client route line, direct after 72 ms and 18 ms).
+  `-standby` (sealed record stored, `record:1 resolve=found` in the Client route line, direct after 72 ms and 18 ms). The second dispatch granted on 2026-11-16, 43988889055 on `5c83e48`, was the final regression of the `base` group: 12 of 12 product cases and the three controls passed in 175 s with 566,353 forwarded bytes of the 58,720,256 allocated; no authorized dispatch is left.
 
