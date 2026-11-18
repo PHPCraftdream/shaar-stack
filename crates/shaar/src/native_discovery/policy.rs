@@ -222,6 +222,19 @@ impl PolicyOwner {
         if query.records.len() > MAX_BATCH_RECORDS {
             return Err(RecordError::BatchTooLarge);
         }
+        // Nodes keep older replicas of a record for hours, so a batch usually holds stale
+        // versions next to the fresh one; a stale record is dropped, not fatal, and only a
+        // batch without any fresh record is `TooOld`.
+        let now_wall_us = query.completed_at.wall_us;
+        query.records.retain(|record| {
+            !matches!(
+                check_freshness(now_wall_us, record.signed_at_us),
+                Err(RecordError::TooOld)
+            )
+        });
+        if query.records.is_empty() {
+            return Err(RecordError::TooOld);
+        }
         let mut batch_bytes = 0_usize;
         for record in &query.records {
             if record.verified_key.is_some_and(|verified| verified != key) {
