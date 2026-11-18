@@ -435,14 +435,26 @@ impl Dialer for NativeDialer {
             let reflexive = self.resources.punch_address();
             let candidates = punch::local_candidates(self.endpoint.local_addr(), reflexive);
             let endpoint = Arc::clone(&self.endpoint);
+            let epoch = self.punch_epoch;
             if let Some(session) = punch::client_attempt(
                 channel,
                 move |address| {
                     let endpoint = Arc::clone(&endpoint);
-                    async move { endpoint.connect(peer, address).await }
+                    async move {
+                        punch::scan_then_connect(
+                            address,
+                            epoch,
+                            |probe_address| {
+                                let probes = endpoint.probe_handle();
+                                async move { probes.probe(peer, probe_address).await }
+                            },
+                            |dial_address| endpoint.connect(peer, dial_address),
+                        )
+                        .await
+                    }
                 },
                 candidates,
-                self.punch_epoch,
+                epoch,
                 deadline,
                 "client",
             )

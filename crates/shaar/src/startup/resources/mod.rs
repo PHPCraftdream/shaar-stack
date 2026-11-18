@@ -455,6 +455,27 @@ impl SharedResources {
             })
     }
 
+    /// The port the DHT nodes saw for the Mainline socket when the NAT rewrote it: the centre of the
+    /// Client's port scan (leaf NAT-2). Never published. Cancel-safe.
+    pub(crate) fn punch_rewritten_port(&self) -> Option<u16> {
+        let slot = slot_lock(&self.shared.slot);
+        let resources = slot.resources.as_ref()?;
+        resources
+            .owner
+            .as_ref()
+            .and_then(RuntimeOwner::punch_rewritten_port)
+            .or_else(|| {
+                resources.maintenance.as_ref().and_then(|maintenance| {
+                    Some(
+                        maintenance
+                            .rewritten_port
+                            .load(std::sync::atomic::Ordering::Relaxed),
+                    )
+                    .filter(|port| *port != 0)
+                })
+            })
+    }
+
     /// The address punch candidates are built from (leaf HINT-1): the confirmed vote, else the
     /// single-source hint of the first window. Never published; publication reads
     /// `public_address` only. Cancel-safe.

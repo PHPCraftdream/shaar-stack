@@ -6,6 +6,7 @@ use iroh_base::EndpointId;
 use n0_mainline::{OwnedDhtHandle, OwnedQueryCompletion};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 
@@ -284,6 +285,9 @@ pub(super) struct Window {
     pub(super) info: Option<Option<IpAddr>>,
     /// Whether the NAT kept the Mainline socket's port in the observed address (trace only).
     pub(super) mapping: PortMapping,
+    /// The port the DHT nodes saw for the Mainline socket, only when the NAT rewrote it: the
+    /// centre of the Client's port scan (leaf NAT-2). Never published.
+    pub(super) rewritten_port: Option<u16>,
 }
 
 impl Window {
@@ -343,20 +347,26 @@ async fn reflexive_probe(
         _ = tokio::time::sleep_until(info_bound) => None,
         read = handle.info() => read.ok().map(|info| {
             let seen = info.public_address();
+            let mapping = PortMapping::of(seen, info.local_addr());
+            let rewritten = seen
+                .filter(|_| mapping == PortMapping::Changed)
+                .map(|address| address.port());
             (
                 seen.map(|address| IpAddr::V4(*address.ip())),
-                PortMapping::of(seen, info.local_addr()),
+                mapping,
+                rewritten,
             )
         }),
     };
-    let (info, mapping) = match read {
-        Some((address, mapping)) => (Some(address), mapping),
-        None => (None, PortMapping::Unknown),
+    let (info, mapping, rewritten_port) = match read {
+        Some((address, mapping, rewritten)) => (Some(address), mapping, rewritten),
+        None => (None, PortMapping::Unknown, None),
     };
     Some(Window {
         lookup,
         info,
         mapping,
+        rewritten_port,
     })
 }
 
@@ -444,6 +454,22 @@ fn note_hint(
     }
 }
 
+/// What the reflexive loop publishes: the confirmed address, the punch-only hint and the rewritten
+/// Mainline port (zero: none).
+pub(super) struct ReflexiveSinks {
+    pub(super) sender: watch::Sender<Option<IpAddr>>,
+    pub(super) hint: watch::Sender<Option<IpAddr>>,
+    pub(super) rewritten_port: Arc<AtomicU16>,
+}
+
+/// Remembers the rewritten Mainline port of a window that observed one; an empty window keeps the
+/// last one. Zero means none. Never published: only the Server's punch answer reads it.
+fn note_rewritten_port(cell: &AtomicU16, observed: Option<u16>) {
+    if let Some(port) = observed {
+        cell.store(port, Ordering::Relaxed);
+    }
+}
+
 /// Advisory reflexive-address watcher. Never published anywhere (record,
 /// publisher and dial behavior are untouched): publication is leaf L3.
 ///
@@ -480,11 +506,15 @@ pub(super) async fn reflexive_loop(
     handle: OwnedDhtHandle,
     target: n0_mainline::Id,
     mut tally: ReflexiveTally,
-    sender: watch::Sender<Option<IpAddr>>,
-    hint: watch::Sender<Option<IpAddr>>,
+    sinks: ReflexiveSinks,
     mut stop: oneshot::Receiver<()>,
     fast_start: bool,
 ) {
+    let ReflexiveSinks {
+        sender,
+        hint,
+        rewritten_port,
+    } = sinks;
     let mut sent: Option<IpAddr> = None;
     let start = tokio::time::Instant::now();
     if fast_start {
@@ -494,6 +524,7 @@ pub(super) async fn reflexive_loop(
                 return;
             };
             probe.note(start);
+            note_rewritten_port(&rewritten_port, probe.rewritten_port);
             let observation = probe.observation();
             if let Some(observed) = observation {
                 let value = tally.observe(observed);
@@ -528,6 +559,7 @@ pub(super) async fn reflexive_loop(
                     return;
                 };
                 probe.note(start);
+                note_rewritten_port(&rewritten_port, probe.rewritten_port);
                 // No observation this window (bounded out, failed or no vote learned).
                 let Some(observed) = probe.observation() else {
                     continue;
@@ -549,10 +581,12 @@ mod window_line_tests {
     use super::super::RuntimeError;
     use super::{
         FAST_START_CONFIRM, FAST_START_INTERVAL, FAST_START_RETRY, Lookup, PortMapping,
-        ReflexiveTally, ResolveError, Window, fast_start_pause, probe_line, window_line,
+        ReflexiveTally, ResolveError, Window, fast_start_pause, note_rewritten_port, probe_line,
+        window_line,
     };
     use n0_mainline::ResourceError;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::atomic::{AtomicU16, Ordering};
 
     const ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
     const MISSES: [Lookup; 3] = [
@@ -566,7 +600,20 @@ mod window_line_tests {
             lookup,
             info,
             mapping: PortMapping::Unknown,
+            rewritten_port: None,
         }
+    }
+
+    #[test]
+    fn the_rewritten_port_is_remembered_and_an_empty_window_keeps_it() {
+        let cell = AtomicU16::new(0);
+        note_rewritten_port(&cell, None);
+        assert_eq!(cell.load(Ordering::Relaxed), 0);
+        note_rewritten_port(&cell, Some(47_287));
+        note_rewritten_port(&cell, None);
+        assert_eq!(cell.load(Ordering::Relaxed), 47_287);
+        note_rewritten_port(&cell, Some(51_000));
+        assert_eq!(cell.load(Ordering::Relaxed), 51_000);
     }
 
     #[test]

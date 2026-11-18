@@ -16,7 +16,9 @@ use tokio::{
     time::{Instant, timeout},
 };
 
-use super::{PunchLink, PunchMessage, SendError, client_attempt, encode, local_candidates};
+use super::{
+    PunchLink, PunchMessage, SendError, client_attempt, encode, local_candidates, scan_then_connect,
+};
 use crate::network::{NetworkError, Session, SignaledEndpoint, signaling::peer_id};
 
 /// Queued inbound messages per allowlisted peer; a full queue drops the message because the
@@ -157,7 +159,18 @@ pub(crate) async fn connect_via_punched(
         link,
         move |address| {
             let endpoint = Arc::clone(&dialer);
-            async move { endpoint.connect(peer, address).await }
+            async move {
+                scan_then_connect(
+                    address,
+                    epoch,
+                    |probe_address| {
+                        let probes = endpoint.probe_handle();
+                        async move { probes.probe(peer, probe_address).await }
+                    },
+                    |dial_address| endpoint.connect(peer, dial_address),
+                )
+                .await
+            }
         },
         candidates,
         epoch,
