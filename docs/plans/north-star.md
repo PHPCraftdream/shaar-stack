@@ -70,6 +70,16 @@ publication, and torrent-style file sharing (future work over the finished chann
 the only exception is the authority-signed files of the closed network, decision of
 2026-11-17). An in-house Yggdrasil implementation is not permitted.
 
+## Current goals (owner, 2026-11-18)
+
+Written at the owner's request from the decisions of 2026-11-18 (quotes in the decision log below). Order is priority.
+
+1. **The two-device case works over a direct path.** The Client on the computer, holding only the Server key and the address key file, opens the Server's sealed record on the live DHT and reaches the Server on the owner's phone (LTE, carrier NAT) over a direct path after the punch, with an exact payload. Keep trying as far as possible until a clear wall is measured or the goal is reached; a limit is recorded only with a measurement. State: the record opened (attempt 16), the payload crosses over Yggdrasil standby, no direct path yet; open measurements are the phone's filtering and the offset of its QUIC external port.
+2. **The record lookup is reliable and fast.** A cold lookup within the 10 s criterion; stale replicas never fail a lookup (leaf FIX-7); the request timeout no longer grows with dead nodes (leaf FIX-3e).
+3. **Keys follow the user.** Generate, import and export a client key to continue on another device; an encrypted-start option keeps a key file encrypted on disk and asks for the password at start.
+4. **Closed network** (design v2 in [closed network](closed-network.md), awaiting approval, put aside for now): one Server is the authority; any client that has connected before can become a relay with an "I want to help" option and is registered by the Server, which gives its addresses to others; a relay is a plain proxy and sees nothing inside the end-to-end encrypted traffic; relays distribute only Server-signed files; trusted keys with levels kept in a signed ledger sent to clients on connect, and files of a trusted key wait for the Server's countersignature (one day).
+5. **Where and how:** Android work runs on the owner's phone; the local CPU cap and the babysit interval stay as they are; acceptance of the first version and related questions are put aside.
+
 ## Process principles
 
 - Goal first: before each leaf, name the end-to-end scenario step it advances. Add
