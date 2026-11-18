@@ -28,9 +28,11 @@ use crate::network::{NetworkError, Session};
 use shaar_ygg::DatagramError;
 
 mod carrier;
+mod scan;
 #[cfg(test)]
 pub(crate) use carrier::carrier_punched_for_tests;
 pub(crate) use carrier::{CarrierPunch, connect_via_punched, route};
+pub(crate) use scan::scan_then_connect;
 
 /// Maximum candidates carried per punch message and probe burst.
 pub(crate) const MAX_CANDIDATES: usize = 4;
@@ -257,6 +259,28 @@ pub(crate) fn local_candidates(local: SocketAddr, reflexive: Option<IpAddr>) -> 
     }
     push(local, &mut candidates);
     candidates.truncate(MAX_CANDIDATES);
+    candidates
+}
+
+/// The Server's answer candidates: like [`local_candidates`], but when the NAT rewrote the port of
+/// the Mainline socket (`rewritten_port`) the reflexive IP with that port replaces the guess of
+/// the local QUIC port, which a port-rewriting NAT does not keep; it is the centre of the
+/// Client's port scan (leaf NAT-2).
+pub(crate) fn answer_candidates(
+    local: SocketAddr,
+    reflexive: Option<IpAddr>,
+    rewritten_port: Option<u16>,
+) -> Vec<SocketAddr> {
+    let (Some(ip), Some(port)) = (reflexive, rewritten_port) else {
+        return local_candidates(local, reflexive);
+    };
+    let mut candidates = Vec::with_capacity(MAX_CANDIDATES);
+    for candidate in [SocketAddr::new(ip, port), local] {
+        let canonical = SocketAddr::new(candidate.ip().to_canonical(), candidate.port());
+        if candidate_allowed(candidate) && !candidates.contains(&canonical) {
+            candidates.push(canonical);
+        }
+    }
     candidates
 }
 

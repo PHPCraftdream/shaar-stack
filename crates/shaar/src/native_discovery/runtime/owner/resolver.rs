@@ -6,6 +6,7 @@ use iroh_base::EndpointId;
 use n0_mainline::{OwnedDhtHandle, OwnedQueryCompletion};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 
@@ -284,6 +285,9 @@ pub(super) struct Window {
     pub(super) info: Option<Option<IpAddr>>,
     /// Whether the NAT kept the Mainline socket's port in the observed address (trace only).
     pub(super) mapping: PortMapping,
+    /// The port the DHT nodes saw for the Mainline socket, only when the NAT rewrote it: the
+    /// centre of the Client's port scan (leaf NAT-2). Never published.
+    pub(super) rewritten_port: Option<u16>,
 }
 
 impl Window {
@@ -343,20 +347,26 @@ async fn reflexive_probe(
         _ = tokio::time::sleep_until(info_bound) => None,
         read = handle.info() => read.ok().map(|info| {
             let seen = info.public_address();
+            let mapping = PortMapping::of(seen, info.local_addr());
+            let rewritten = seen
+                .filter(|_| mapping == PortMapping::Changed)
+                .map(|address| address.port());
             (
                 seen.map(|address| IpAddr::V4(*address.ip())),
-                PortMapping::of(seen, info.local_addr()),
+                mapping,
+                rewritten,
             )
         }),
     };
-    let (info, mapping) = match read {
-        Some((address, mapping)) => (Some(address), mapping),
-        None => (None, PortMapping::Unknown),
+    let (info, mapping, rewritten_port) = match read {
+        Some((address, mapping, rewritten)) => (Some(address), mapping, rewritten),
+        None => (None, PortMapping::Unknown, None),
     };
     Some(Window {
         lookup,
         info,
         mapping,
+        rewritten_port,
     })
 }
 
@@ -430,7 +440,7 @@ impl ReflexiveTally {
 /// Punch-only hint (leaf HINT-1): the address a window just observed, available before two
 /// windows agree. Once a majority is exposed the hint follows it; an empty window never clears
 /// it. It is never published and never counts toward the majority.
-fn note_hint(
+pub(super) fn note_hint(
     hint: &watch::Sender<Option<IpAddr>>,
     observed: Option<IpAddr>,
     exposed: Option<IpAddr>,
@@ -441,6 +451,22 @@ fn note_hint(
             *current = Some(address);
             changed
         });
+    }
+}
+
+/// What the reflexive loop publishes: the confirmed address, the punch-only hint and the rewritten
+/// Mainline port (zero: none).
+pub(super) struct ReflexiveSinks {
+    pub(super) sender: watch::Sender<Option<IpAddr>>,
+    pub(super) hint: watch::Sender<Option<IpAddr>>,
+    pub(super) rewritten_port: Arc<AtomicU16>,
+}
+
+/// Remembers the rewritten Mainline port of a window that observed one; an empty window keeps the
+/// last one. Zero means none. Never published: only the Server's punch answer reads it.
+pub(super) fn note_rewritten_port(cell: &AtomicU16, observed: Option<u16>) {
+    if let Some(port) = observed {
+        cell.store(port, Ordering::Relaxed);
     }
 }
 
@@ -480,11 +506,15 @@ pub(super) async fn reflexive_loop(
     handle: OwnedDhtHandle,
     target: n0_mainline::Id,
     mut tally: ReflexiveTally,
-    sender: watch::Sender<Option<IpAddr>>,
-    hint: watch::Sender<Option<IpAddr>>,
+    sinks: ReflexiveSinks,
     mut stop: oneshot::Receiver<()>,
     fast_start: bool,
 ) {
+    let ReflexiveSinks {
+        sender,
+        hint,
+        rewritten_port,
+    } = sinks;
     let mut sent: Option<IpAddr> = None;
     let start = tokio::time::Instant::now();
     if fast_start {
@@ -494,6 +524,7 @@ pub(super) async fn reflexive_loop(
                 return;
             };
             probe.note(start);
+            note_rewritten_port(&rewritten_port, probe.rewritten_port);
             let observation = probe.observation();
             if let Some(observed) = observation {
                 let value = tally.observe(observed);
@@ -528,6 +559,7 @@ pub(super) async fn reflexive_loop(
                     return;
                 };
                 probe.note(start);
+                note_rewritten_port(&rewritten_port, probe.rewritten_port);
                 // No observation this window (bounded out, failed or no vote learned).
                 let Some(observed) = probe.observation() else {
                     continue;
@@ -541,154 +573,5 @@ pub(super) async fn reflexive_loop(
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod window_line_tests {
-    use super::super::RuntimeError;
-    use super::{
-        FAST_START_CONFIRM, FAST_START_INTERVAL, FAST_START_RETRY, Lookup, PortMapping,
-        ReflexiveTally, ResolveError, Window, fast_start_pause, probe_line, window_line,
-    };
-    use n0_mainline::ResourceError;
-    use std::net::{IpAddr, Ipv4Addr};
-
-    const ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
-    const MISSES: [Lookup; 3] = [
-        Lookup::Incomplete,
-        Lookup::Bounded,
-        Lookup::Failed(ResourceError::DeadlineExceeded),
-    ];
-
-    fn window(lookup: Lookup, info: Option<Option<IpAddr>>) -> Window {
-        Window {
-            lookup,
-            info,
-            mapping: PortMapping::Unknown,
-        }
-    }
-
-    #[test]
-    fn a_failed_lookup_is_named_by_a_token_without_a_payload() {
-        let incomplete = RuntimeError::Resolve(ResolveError::NoNetworkCompletion);
-        assert_eq!(incomplete.trace_token(), "incomplete");
-        assert_eq!(RuntimeError::ResolveBusy.trace_token(), "busy");
-        assert_eq!(RuntimeError::DeadlineExceeded.trace_token(), "deadline");
-        assert_eq!(RuntimeError::PutFailed.trace_token(), "put");
-        assert_eq!(RuntimeError::Clock.trace_token(), "other");
-        let bound = RuntimeError::Resource(ResourceError::CandidateLimit);
-        assert_eq!(bound.trace_token(), "resource:CandidateLimit");
-    }
-
-    #[test]
-    fn the_window_line_carries_an_outcome_and_a_time_only() {
-        assert_eq!(
-            window_line("observed", 21_000),
-            "shaar: reflexive window outcome=observed elapsed_ms=21000"
-        );
-        assert_eq!(
-            window_line("exposed", 0),
-            "shaar: reflexive window outcome=exposed elapsed_ms=0"
-        );
-    }
-
-    #[test]
-    fn a_probe_line_carries_tokens_and_a_time_only() {
-        assert_eq!(
-            probe_line("skipped", &Lookup::Incomplete, "none", 1001),
-            "shaar: reflexive window outcome=skipped lookup=incomplete info=none elapsed_ms=1001"
-        );
-        let failed = Lookup::Failed(ResourceError::DeadlineExceeded);
-        assert_eq!(
-            probe_line("observed", &failed, "some", 7),
-            "shaar: reflexive window outcome=observed lookup=failed:DeadlineExceeded info=some elapsed_ms=7"
-        );
-        assert_eq!(Lookup::Completed.to_string(), "ok");
-        assert_eq!(Lookup::Bounded.to_string(), "bounded");
-    }
-
-    #[test]
-    fn a_completed_lookup_counts_whatever_the_info_read_holds() {
-        let completed = |info| window(Lookup::Completed, info).observation();
-        assert_eq!(completed(Some(Some(ADDRESS))), Some(Some(ADDRESS)));
-        assert_eq!(completed(Some(None)), Some(None));
-        assert_eq!(completed(None), None);
-    }
-
-    #[test]
-    fn an_address_learned_elsewhere_counts_when_the_own_lookup_did_not_complete() {
-        for lookup in MISSES {
-            assert_eq!(
-                window(lookup, Some(Some(ADDRESS))).observation(),
-                Some(Some(ADDRESS)),
-                "{lookup:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn no_network_answer_is_never_evidence_of_no_address() {
-        for lookup in MISSES {
-            assert_eq!(window(lookup, Some(None)).observation(), None, "{lookup:?}");
-            assert_eq!(window(lookup, None).observation(), None, "{lookup:?}");
-        }
-    }
-
-    #[test]
-    fn the_fast_start_pause_follows_what_the_window_observed() {
-        assert_eq!(fast_start_pause(Some(Some(ADDRESS))), FAST_START_CONFIRM);
-        assert_eq!(fast_start_pause(Some(None)), FAST_START_INTERVAL);
-        assert_eq!(fast_start_pause(None), FAST_START_RETRY);
-        // An address is confirmed first, a failed window retried before a completed empty one,
-        // and no pause is zero, so a fast start can never spin.
-        assert!(FAST_START_CONFIRM < FAST_START_RETRY);
-        assert!(FAST_START_RETRY < FAST_START_INTERVAL);
-        assert!(!FAST_START_CONFIRM.is_zero());
-    }
-
-    #[test]
-    fn the_punch_hint_follows_the_latest_observation_until_a_majority_is_exposed() {
-        use super::note_hint;
-        let other = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 8));
-        let (hint, view) = tokio::sync::watch::channel(None);
-        note_hint(&hint, None, None);
-        assert_eq!(*view.borrow(), None, "an empty window sets nothing");
-        note_hint(&hint, Some(ADDRESS), None);
-        assert_eq!(
-            *view.borrow(),
-            Some(ADDRESS),
-            "one observation is enough for the hint"
-        );
-        note_hint(&hint, Some(other), None);
-        assert_eq!(
-            *view.borrow(),
-            Some(other),
-            "the latest single observation wins"
-        );
-        note_hint(&hint, None, None);
-        assert_eq!(
-            *view.borrow(),
-            Some(other),
-            "an empty window never clears it"
-        );
-        note_hint(&hint, Some(other), Some(ADDRESS));
-        assert_eq!(
-            *view.borrow(),
-            Some(ADDRESS),
-            "an exposed majority wins over a single observation"
-        );
-    }
-
-    #[test]
-    fn a_learned_address_still_needs_two_agreeing_windows_to_be_exposed() {
-        let mut tally = ReflexiveTally::new();
-        let learned = || {
-            window(Lookup::Incomplete, Some(Some(ADDRESS)))
-                .observation()
-                .expect("an address learned elsewhere is an observation")
-        };
-        assert_eq!(tally.observe(learned()), None);
-        assert_eq!(tally.observe(learned()), Some(ADDRESS));
     }
 }

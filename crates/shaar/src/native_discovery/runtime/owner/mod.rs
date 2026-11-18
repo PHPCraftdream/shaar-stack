@@ -4,7 +4,7 @@
 
 use std::net::{IpAddr, SocketAddrV4};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::time::Duration;
 
 #[cfg(test)]
@@ -171,6 +171,7 @@ pub(crate) struct RuntimeOwner {
     publication: watch::Receiver<PublicationStatus>,
     public_address: watch::Receiver<Option<IpAddr>>,
     punch_hint: watch::Receiver<Option<IpAddr>>,
+    rewritten_port: Arc<AtomicU16>,
 }
 
 impl RuntimeOwner {
@@ -253,12 +254,16 @@ impl RuntimeOwner {
             watch::channel(PublicationStatus::Pending { generation: 0 });
         let (reflexive_tx, public_address) = watch::channel(None);
         let (hint_tx, punch_hint) = watch::channel(None);
+        let rewritten_port = Arc::new(AtomicU16::new(0));
         let reflexive = tokio::spawn(resolver::reflexive_loop(
             reflexive_handle,
             reflexive_target,
             ReflexiveTally::new(),
-            reflexive_tx,
-            hint_tx,
+            resolver::ReflexiveSinks {
+                sender: reflexive_tx,
+                hint: hint_tx,
+                rewritten_port: Arc::clone(&rewritten_port),
+            },
             reflexive_stop_receiver,
             fast_reflexive,
         ));
@@ -285,6 +290,7 @@ impl RuntimeOwner {
             publication,
             public_address,
             punch_hint,
+            rewritten_port,
         })
     }
 
@@ -523,6 +529,16 @@ impl RuntimeOwner {
     /// address, before the majority. For punch candidates only; never published.
     pub(crate) fn punch_hint(&self) -> Option<IpAddr> {
         *self.punch_hint.borrow()
+    }
+
+    /// The shared cell of the rewritten Mainline port (zero: none), for the maintenance task.
+    pub(crate) fn rewritten_port_cell(&self) -> Arc<AtomicU16> {
+        Arc::clone(&self.rewritten_port)
+    }
+
+    /// The port the DHT nodes saw for the Mainline socket when the NAT rewrote it (leaf NAT-2).
+    pub(crate) fn punch_rewritten_port(&self) -> Option<u16> {
+        Some(self.rewritten_port.load(Ordering::Relaxed)).filter(|port| *port != 0)
     }
 
     /// Watch clone of the punch hint; `changed()` on tokio watch is cancel-safe.

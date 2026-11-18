@@ -170,6 +170,7 @@ impl Maintenance {
             commands,
             votes: watch::channel(None).1,
             hint: watch::channel(None).1,
+            rewritten_port: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
             stop: Some(stop),
             task: Some(task),
             watcher_stopped: Some(watcher_stopped),
