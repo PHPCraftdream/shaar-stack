@@ -438,3 +438,167 @@ async fn fresh_lookup_bypasses_live_address_cache_but_preserves_replay_watermark
         .await
         .expect("actual fresh-lookup owner joins");
 }
+
+#[cfg(test)]
+mod window_line_tests {
+    use super::super::RuntimeError;
+    use super::super::resolver::{
+        FAST_START_CONFIRM, FAST_START_INTERVAL, FAST_START_RETRY, Lookup, ReflexiveTally,
+        ResolveError, Window, fast_start_pause, note_rewritten_port, probe_line, window_line,
+    };
+    use crate::network::observe::PortMapping;
+    use n0_mainline::ResourceError;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::atomic::{AtomicU16, Ordering};
+
+    const ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
+    const MISSES: [Lookup; 3] = [
+        Lookup::Incomplete,
+        Lookup::Bounded,
+        Lookup::Failed(ResourceError::DeadlineExceeded),
+    ];
+
+    fn window(lookup: Lookup, info: Option<Option<IpAddr>>) -> Window {
+        Window {
+            lookup,
+            info,
+            mapping: PortMapping::Unknown,
+            rewritten_port: None,
+        }
+    }
+
+    #[test]
+    fn the_rewritten_port_is_remembered_and_an_empty_window_keeps_it() {
+        let cell = AtomicU16::new(0);
+        note_rewritten_port(&cell, None);
+        assert_eq!(cell.load(Ordering::Relaxed), 0);
+        note_rewritten_port(&cell, Some(47_287));
+        note_rewritten_port(&cell, None);
+        assert_eq!(cell.load(Ordering::Relaxed), 47_287);
+        note_rewritten_port(&cell, Some(51_000));
+        assert_eq!(cell.load(Ordering::Relaxed), 51_000);
+    }
+
+    #[test]
+    fn a_failed_lookup_is_named_by_a_token_without_a_payload() {
+        let incomplete = RuntimeError::Resolve(ResolveError::NoNetworkCompletion);
+        assert_eq!(incomplete.trace_token(), "incomplete");
+        assert_eq!(RuntimeError::ResolveBusy.trace_token(), "busy");
+        assert_eq!(RuntimeError::DeadlineExceeded.trace_token(), "deadline");
+        assert_eq!(RuntimeError::PutFailed.trace_token(), "put");
+        assert_eq!(RuntimeError::Clock.trace_token(), "other");
+        let bound = RuntimeError::Resource(ResourceError::CandidateLimit);
+        assert_eq!(bound.trace_token(), "resource:CandidateLimit");
+    }
+
+    #[test]
+    fn the_window_line_carries_an_outcome_and_a_time_only() {
+        assert_eq!(
+            window_line("observed", 21_000),
+            "shaar: reflexive window outcome=observed elapsed_ms=21000"
+        );
+        assert_eq!(
+            window_line("exposed", 0),
+            "shaar: reflexive window outcome=exposed elapsed_ms=0"
+        );
+    }
+
+    #[test]
+    fn a_probe_line_carries_tokens_and_a_time_only() {
+        assert_eq!(
+            probe_line("skipped", &Lookup::Incomplete, "none", 1001),
+            "shaar: reflexive window outcome=skipped lookup=incomplete info=none elapsed_ms=1001"
+        );
+        let failed = Lookup::Failed(ResourceError::DeadlineExceeded);
+        assert_eq!(
+            probe_line("observed", &failed, "some", 7),
+            "shaar: reflexive window outcome=observed lookup=failed:DeadlineExceeded info=some elapsed_ms=7"
+        );
+        assert_eq!(Lookup::Completed.to_string(), "ok");
+        assert_eq!(Lookup::Bounded.to_string(), "bounded");
+    }
+
+    #[test]
+    fn a_completed_lookup_counts_whatever_the_info_read_holds() {
+        let completed = |info| window(Lookup::Completed, info).observation();
+        assert_eq!(completed(Some(Some(ADDRESS))), Some(Some(ADDRESS)));
+        assert_eq!(completed(Some(None)), Some(None));
+        assert_eq!(completed(None), None);
+    }
+
+    #[test]
+    fn an_address_learned_elsewhere_counts_when_the_own_lookup_did_not_complete() {
+        for lookup in MISSES {
+            assert_eq!(
+                window(lookup, Some(Some(ADDRESS))).observation(),
+                Some(Some(ADDRESS)),
+                "{lookup:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_network_answer_is_never_evidence_of_no_address() {
+        for lookup in MISSES {
+            assert_eq!(window(lookup, Some(None)).observation(), None, "{lookup:?}");
+            assert_eq!(window(lookup, None).observation(), None, "{lookup:?}");
+        }
+    }
+
+    #[test]
+    fn the_fast_start_pause_follows_what_the_window_observed() {
+        assert_eq!(fast_start_pause(Some(Some(ADDRESS))), FAST_START_CONFIRM);
+        assert_eq!(fast_start_pause(Some(None)), FAST_START_INTERVAL);
+        assert_eq!(fast_start_pause(None), FAST_START_RETRY);
+        // An address is confirmed first, a failed window retried before a completed empty one,
+        // and no pause is zero, so a fast start can never spin.
+        assert!(FAST_START_CONFIRM < FAST_START_RETRY);
+        assert!(FAST_START_RETRY < FAST_START_INTERVAL);
+        assert!(!FAST_START_CONFIRM.is_zero());
+    }
+
+    #[test]
+    fn the_punch_hint_follows_the_latest_observation_until_a_majority_is_exposed() {
+        use super::super::resolver::note_hint;
+        let other = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 8));
+        let (hint, view) = tokio::sync::watch::channel(None);
+        note_hint(&hint, None, None);
+        assert_eq!(*view.borrow(), None, "an empty window sets nothing");
+        note_hint(&hint, Some(ADDRESS), None);
+        assert_eq!(
+            *view.borrow(),
+            Some(ADDRESS),
+            "one observation is enough for the hint"
+        );
+        note_hint(&hint, Some(other), None);
+        assert_eq!(
+            *view.borrow(),
+            Some(other),
+            "the latest single observation wins"
+        );
+        note_hint(&hint, None, None);
+        assert_eq!(
+            *view.borrow(),
+            Some(other),
+            "an empty window never clears it"
+        );
+        note_hint(&hint, Some(other), Some(ADDRESS));
+        assert_eq!(
+            *view.borrow(),
+            Some(ADDRESS),
+            "an exposed majority wins over a single observation"
+        );
+    }
+
+    #[test]
+    fn a_learned_address_still_needs_two_agreeing_windows_to_be_exposed() {
+        let mut tally = ReflexiveTally::new();
+        let learned = || {
+            window(Lookup::Incomplete, Some(Some(ADDRESS)))
+                .observation()
+                .expect("an address learned elsewhere is an observation")
+        };
+        assert_eq!(tally.observe(learned()), None);
+        assert_eq!(tally.observe(learned()), Some(ADDRESS));
+    }
+}
