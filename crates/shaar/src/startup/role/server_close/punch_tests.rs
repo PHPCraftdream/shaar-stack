@@ -161,6 +161,27 @@ async fn same_epoch_forwards_one_batch_new_epoch_a_second() {
     assert_eq!(second.peer, PEER);
 }
 
+/// Leaf SET-1d: the batches of one peer carry rising burst numbers, which pick the slice of the
+/// peer's port set that each burst walks; an offer suppressed inside the interval takes no number.
+#[tokio::test(start_paused = true)]
+async fn the_batches_of_one_peer_carry_rising_burst_numbers() {
+    let candidates = vec!["198.51.100.9:4433".parse().unwrap()];
+    let (in_tx, _out_rx, mut batches) = serve_with(candidates, 4).await;
+    let mut numbers = Vec::new();
+    for epoch in 1..=3u32 {
+        in_tx.send(offer(epoch)).await.unwrap();
+        let batch = timeout(Duration::from_secs(1), batches.recv())
+            .await
+            .unwrap()
+            .expect("batch");
+        numbers.push(batch.burst);
+        in_tx.send(offer(epoch + 100)).await.unwrap();
+        no_batch(&mut batches).await;
+        tokio::time::advance(punch::BURST_MIN_INTERVAL).await;
+    }
+    assert_eq!(numbers, [1, 2, 3]);
+}
+
 /// Finding 1a: a flood of fresh epochs yields at most one batch per
 /// `punch::BURST_MIN_INTERVAL`, even though every epoch is new. Pre-fix
 /// code produced a batch per fresh epoch, so the `no_batch` assertions
@@ -260,6 +281,7 @@ async fn run_batches_caps_concurrent_bursts_and_drains_the_channel() {
         tx.send(OfferBatch {
             peer: PEER,
             candidates: Vec::new(),
+            burst: 1,
         })
         .await
         .unwrap();
