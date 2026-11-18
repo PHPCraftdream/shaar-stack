@@ -512,3 +512,32 @@ async fn the_owned_socket_reports_its_request_timeout_and_round_cap() {
     assert_eq!(socket.owned_request_timeout(), Duration::from_millis(500));
     assert_eq!(socket.owned_get_round_cap(), 6);
 }
+
+#[test]
+fn an_owned_get_operation_admits_six_rounds_and_then_refuses() {
+    let mut resources = super::resources::SocketResources::default();
+    let operation = resources.allocate_operation().unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    resources.register_owned_deadline(operation, deadline).unwrap();
+    let cap = super::resources::OWNED_GET_ROUNDS;
+    assert_eq!(cap, 6);
+    for round in 1..=cap {
+        assert_eq!(resources.admit_owned_get_round(operation), Ok(round));
+    }
+    assert_eq!(
+        resources.admit_owned_get_round(operation),
+        Err(ResourceError::DeadlineExceeded)
+    );
+    assert_eq!(resources.owned_get_rounds(operation), cap);
+    assert_eq!(resources.owned_deadline(operation), Some(deadline));
+}
+
+#[test]
+fn an_operation_without_a_registered_deadline_admits_no_round() {
+    let mut resources = super::resources::SocketResources::default();
+    let operation = resources.allocate_operation().unwrap();
+    assert_eq!(
+        resources.admit_owned_get_round(operation),
+        Err(ResourceError::DeadlineExceeded)
+    );
+}

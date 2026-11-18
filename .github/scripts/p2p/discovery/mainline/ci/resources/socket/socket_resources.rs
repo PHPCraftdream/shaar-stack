@@ -27,34 +27,6 @@ mod tests {
         resources.register_owned_put_deadline(ninth, deadline).unwrap();
         assert_eq!(resources.owned_put_deadline(ninth), Some(deadline));
     }
-
-    #[test]
-    fn an_owned_get_operation_admits_six_rounds_and_then_refuses() {
-        let mut resources = SocketResources::default();
-        let operation = resources.allocate_operation().unwrap();
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        resources.register_owned_deadline(operation, deadline).unwrap();
-        assert_eq!(OWNED_GET_ROUNDS, 6);
-        for round in 1..=OWNED_GET_ROUNDS {
-            assert_eq!(resources.admit_owned_get_round(operation), Ok(round));
-        }
-        assert_eq!(
-            resources.admit_owned_get_round(operation),
-            Err(ResourceError::DeadlineExceeded)
-        );
-        assert_eq!(resources.owned_get_rounds(operation), OWNED_GET_ROUNDS);
-        assert_eq!(resources.owned_deadline(operation), Some(deadline));
-    }
-
-    #[test]
-    fn an_operation_without_a_registered_deadline_admits_no_round() {
-        let mut resources = SocketResources::default();
-        let operation = resources.allocate_operation().unwrap();
-        assert_eq!(
-            resources.admit_owned_get_round(operation),
-            Err(ResourceError::DeadlineExceeded)
-        );
-    }
 }
 
 /// Most in-flight RPCs one owned operation may hold; a query round must stay within it.
