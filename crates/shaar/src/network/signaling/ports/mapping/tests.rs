@@ -270,3 +270,73 @@ fn the_error_and_protocol_tokens_are_fixed_words() {
     assert_eq!(Protocol::Pcp.token(), "pcp");
     assert_eq!(Protocol::NatPmp.token(), "nat-pmp");
 }
+
+fn gateway_of(fake: &Fake) -> Gateway {
+    Gateway {
+        address: fake.address,
+        local: LOCAL,
+    }
+}
+
+#[tokio::test]
+async fn the_measurement_reports_a_grant_and_the_release_without_an_address() {
+    let gateway = fake(|_, request| vec![pcp_answer(request, 0, 51_000)]).await;
+    let lines = measure(Some(gateway_of(&gateway)), INTERNAL, false).await;
+    assert_eq!(
+        lines,
+        [
+            "port-map gateway=found",
+            "port-map request internal=48896 external=48896 lifetime_s=120",
+            "port-map result=granted protocol=pcp external-port=51000 same-port=no lifetime_s=7200",
+            "port-map release=yes",
+        ]
+    );
+    let text = lines.join("\n");
+    assert!(!text.contains("203.0.113.7") && !text.contains("127.0.0.1"));
+}
+
+#[tokio::test]
+async fn the_measurement_shows_the_addresses_only_when_asked() {
+    let gateway = fake(natpmp_only).await;
+    let lines = measure(Some(gateway_of(&gateway)), 50_002, true).await;
+    assert_eq!(lines[0], "port-map gateway=found address=127.0.0.1");
+    assert_eq!(
+        lines[2],
+        "port-map result=granted protocol=nat-pmp external-port=50002 same-port=yes lifetime_s=3600 external-address=203.0.113.7"
+    );
+}
+
+#[tokio::test]
+async fn the_measurement_names_a_missing_gateway_a_refusal_and_silence() {
+    assert_eq!(
+        measure(None, INTERNAL, false).await,
+        ["port-map gateway=none"]
+    );
+    let refusing = fake(|_, request| vec![pcp_answer(request, 2, 0)]).await;
+    let lines = measure(Some(gateway_of(&refusing)), INTERNAL, false).await;
+    assert_eq!(lines.last().unwrap(), "port-map result=refused:2");
+    let silent = fake(|_, _| Vec::new()).await;
+    let lines = measure_within(
+        Some(gateway_of(&silent)),
+        INTERNAL,
+        false,
+        Duration::from_millis(400),
+    )
+    .await;
+    assert_eq!(lines.last().unwrap(), "port-map result=silent");
+    assert_eq!(lines.len(), 3, "no release line after a failure");
+}
+
+#[tokio::test]
+async fn a_failed_release_is_reported_after_the_grant() {
+    let gateway = fake(|index, request| {
+        if index == 0 {
+            vec![pcp_answer(request, 0, INTERNAL)]
+        } else {
+            Vec::new()
+        }
+    })
+    .await;
+    let lines = measure(Some(gateway_of(&gateway)), INTERNAL, false).await;
+    assert_eq!(lines.last().unwrap(), "port-map release=no:silent");
+}

@@ -12,6 +12,7 @@ use shaar::network::observe::{
     Listen, MAX_CATCH_SECONDS, MAX_LISTEN_SECONDS, MAX_PROBE_WAIT_SECONDS, MAX_SOCKETS,
     MAX_SWEEP_RATE, Sweep, nat_filter_catch, nat_filter_listen, nat_filter_probe, nat_ports,
 };
+use shaar::network::ports::{PORTS, mapping};
 
 use super::{Invocation, ParseError, Place, mainline_of, place_of};
 
@@ -149,6 +150,16 @@ fn catch_command() -> Command {
         ))
 }
 
+fn port_map_command() -> Command {
+    Command::new("port-map")
+        .about("Ask the home router for a UDP port mapping (PCP, then NAT-PMP), report it and delete it")
+        .arg(port_arg(
+            "port",
+            "The port to map to the same external port (default: the first port of the fixed set)",
+        ))
+        .arg(show_address_arg())
+}
+
 /// The `diag` command tree (the place arguments are added by the caller).
 pub(super) fn command() -> Command {
     Command::new("diag")
@@ -167,6 +178,7 @@ pub(super) fn command() -> Command {
                 )
                 .arg(show_address_arg()),
         )
+        .subcommand(port_map_command())
         .subcommand(
             Command::new("nat-filter")
                 .about("Measure which datagrams the NAT in front of this machine lets in")
@@ -248,6 +260,12 @@ pub(super) fn parse(sub: &ArgMatches) -> Result<Invocation, ParseError> {
             show_address: args.get_flag("show-address"),
         });
     }
+    if what == "port-map" {
+        return Ok(Invocation::DiagPortMap {
+            port: args.get_one::<u16>("port").copied().unwrap_or(PORTS[0]),
+            show_address: args.get_flag("show-address"),
+        });
+    }
     let (role, args) = args.subcommand().expect("a subcommand is required");
     let target = || *args.get_one::<SocketAddrV4>("target").expect("required");
     match role {
@@ -276,6 +294,11 @@ pub(super) async fn ports(
     show_address: bool,
 ) -> Result<Vec<String>, String> {
     nat_ports(&mainline_of(place).await?, sockets, show_address).await
+}
+
+/// `diag port-map`: one mapping at the home router of this machine, reported and deleted.
+pub(super) async fn port_map(port: u16, show_address: bool) -> Vec<String> {
+    mapping::measure(mapping::home_gateway().await, port, show_address).await
 }
 
 /// Whether the invocation is a measurement that prints as it goes.

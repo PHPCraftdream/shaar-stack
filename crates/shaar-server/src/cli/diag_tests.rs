@@ -514,3 +514,29 @@ async fn diag_nat_filter_listen_needs_the_bootstrap_hosts_of_a_public_configurat
         "{direct_only}"
     );
 }
+
+#[test]
+fn diag_port_map_takes_the_first_port_of_the_set_by_default_or_a_given_port() {
+    assert_eq!(
+        parsed(&["diag", "port-map"]),
+        Invocation::DiagPortMap {
+            port: shaar::network::ports::PORTS[0],
+            show_address: false,
+        }
+    );
+    assert_eq!(
+        parsed(&["diag", "port-map", "--port", "48896", "--show-address"]),
+        Invocation::DiagPortMap {
+            port: 48_896,
+            show_address: true,
+        }
+    );
+    for bad in [
+        &["diag", "port-map", "--port", "0"][..],
+        &["diag", "port-map", "--port", "65536"],
+        &["diag", "port-map", "--port", "many"],
+        &["diag", "port-map", "extra"],
+    ] {
+        assert!(matches!(refused(bad), ParseError::Clap(_)), "{bad:?}");
+    }
+}

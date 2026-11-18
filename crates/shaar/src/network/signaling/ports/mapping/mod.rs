@@ -9,8 +9,11 @@
 
 mod natpmp;
 mod pcp;
+mod probe;
 #[cfg(test)]
 mod tests;
+
+pub use probe::{Gateway, MEASURE_BUDGET, MEASURE_LIFETIME, home_gateway, measure, measure_within};
 
 use std::{
     fmt,
