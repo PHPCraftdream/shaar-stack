@@ -23,7 +23,8 @@ MAINLINE = HERE.parent
 ROOT = MAINLINE.parents[4]
 VERIFY_PATH = ROOT / ".github/scripts/p2p/discovery/owned_dns/verify.py"
 PREFIXES = (
-    "owned::tests::", "owned::failed_admission_tests::", "actor::owned_tests::", "actor::resource_tests::",
+    "owned::tests::", "owned::failed_admission_tests::", "owned::get_trace::get_trace_tests::",
+    "actor::owned_tests::", "actor::resource_tests::",
     "core::iterative_query::resource_tests::", "resource::store_resource_tests::",
     "resource::visited_store::tests::", "common::messages::signed_peer_length_tests::",
     "common::messages::ingress_tests::", "actor::socket::ingress_tests::",

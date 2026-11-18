@@ -237,6 +237,8 @@ impl RuntimeOwner {
         fast_reflexive: bool,
         address_key: Option<AddressKey>,
     ) -> std::io::Result<Self> {
+        // The library's query counters reach the operator trace (leaf FIX-3b).
+        crate::network::observe::install_dht_trace();
         let dht = OwnedDht::new(bind, bootstrap)?;
         let handle = dht.handle();
         let key = endpoint_key(&identity)?;

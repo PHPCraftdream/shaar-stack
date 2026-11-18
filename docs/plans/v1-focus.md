@@ -2267,6 +2267,15 @@ Repair prepared (not yet run live): a store that has reached at least one node a
 - **Correction (same day):** the first version of this record listed a defect "`address-key new` fails with a forward-slash Windows path". That was wrong. The scratch directory had not been created: a native Windows `mkdir -p` given an MSYS path made `D:\d\dev\…` instead, so the parent of the key file did not exist and the OS error 3 was correct; the retry succeeded because `client init` had created the directory in between. No such defect exists; the stray empty tree was removed. A missing parent directory is still reported only as a bare OS error, which is a message quality matter, not a defect of path handling.
 - **Defects found on the way** (not fixed here): `shaar-server config set` cannot enable the encrypted publication, because `publish_address encrypted` is refused without `address_key_file` and `address_key_file` is refused while the mode is not `encrypted` (the file had to be edited by hand); the route line is printed once, so a late record resolution is invisible.
 
+**Attempt 8 (2026-11-18 01:12, executables of `c40bbb4` built on this machine, the first locally built attempt; the cap of attempts is lifted, so no count).** Same setup, the Server stopped by a fixed timer after 106 s, the Client by its own 86 s limit.
+
+- **The first successful publication in this cycle:** `record publication outcome=ok retries=0` about 20 s after the Server bound. The PUT store fix works: the store ended instead of failing with `RpcLimit`.
+- **The Client still found no record.** One lookup ended `failed:policy:CacheMiss record=0 late=yes` after 3.8 s (the network completed and no valid record was seen); two later lookups ended `failed:deadline` at 30.0 s, the caller's own deadline. The Client's own publication ended `failed:resource:DeadlineExceeded` and then `failed:deadline`.
+- **The delivered fallback came up again:** `route path=ygg-standby`, the exact payload `shaar-live-pair-8` came back in 2 s (`bytes_in=17 bytes_out=17`). Attempt 7's failure did not repeat, which fits public peers at that moment but does not prove it.
+- **Budgets:** the phone's mobile interface moved by about 0.19 MB received and 0.17 MB sent in all; the Server ran 106 s (stopped by the timer), the Client was stopped by its 86 s limit. The computer's interface counter is machine-wide and is not attributed to the Client. No libp2p relay was used.
+- **Open, with no evidence yet:** how many nodes took the store (the library calls it a success when one node accepted), how far the lookup travelled (a lookup is bounded to three rounds), and why two lookups ran to their deadline. Repair prepared: counts-only `shaar: dht` operator lines from the library's events and a stage trace of every owned GET (leaf FIX-3b); see the resource review, fifth finding.
+- **Build cost:** the cold local release builds took 108 min (Windows) and 106 min (Android arm64) under `wnice -c 10 -m 10g`; the next ones are incremental.
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.

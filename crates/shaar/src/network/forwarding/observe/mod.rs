@@ -6,7 +6,9 @@
 use super::{ForwardError, ForwardStats, ServeReport};
 use crate::path::PathKind;
 
+mod dht;
 mod trace;
+pub use dht::install_dht_trace;
 pub use trace::{PortMapping, client_direct, client_lookup, server_publication};
 
 /// Which product emits an operator line.

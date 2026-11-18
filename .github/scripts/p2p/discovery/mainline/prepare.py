@@ -36,6 +36,7 @@ TEST_MODULE = '\n\n#[cfg(test)]\n#[path = "messages/signed_peer_length_tests.rs"
 GENERATED = "src/common/messages/signed_peer_length_tests.rs"
 OWNER = "src/owned.rs"
 LIFECYCLE = "src/owned/lifecycle_tests.rs"
+GET_TRACE = "src/owned/get_trace.rs"
 ACTOR_TESTS = "src/actor/owned_tests.rs"
 SOCKET_INGRESS_TESTS = "src/actor/socket/ingress_tests.rs"
 RESOURCE_MODULE = "src/resource.rs"
@@ -106,7 +107,7 @@ def recipe() -> dict[str, str]:
         "tests/lifecycle_tests.rs", "tests/actor_tests.rs", "ci/ingress.py",
         "ci/bencode/prepare.py", "ci/bencode/edits.py", "ci/resources/edits.py",
         "ci/resources/store_edits.py", "ci/ownership/actor.py", "ci/ownership/queries.py",
-        "ci/ownership/completion.py", "ci/resources/resource.rs", "ci/resources/stores/store_owner.rs",
+        "ci/ownership/completion.py", "ci/ownership/get_trace.rs", "ci/resources/resource.rs", "ci/resources/stores/store_owner.rs",
         "ci/resources/socket/socket_resources.rs", "ci/resources/socket/socket_owned.rs", "ci/resources/socket/publication_observer.rs", "ci/resources/stores/visited_store.rs",
         "ci/resources/actor/mod.rs", "ci/resources/actor/owned_resources/admission.rs",
         "ci/resources/actor/owned_resources/maintenance.rs", "ci/resources/actor/owned_resources/tick.rs",
@@ -225,6 +226,7 @@ def generated_sources() -> dict[str, bytes]:
         GENERATED: (TESTS / "regressions.rs").read_bytes(),
         OWNER: (HERE / "owner.rs").read_bytes() + OWNER_SUFFIX.encode("utf-8"),
         LIFECYCLE: (TESTS / "lifecycle_tests.rs").read_bytes(),
+        GET_TRACE: (HERE / "ci/ownership/get_trace.rs").read_bytes(),
         ACTOR_TESTS: (TESTS / "actor_tests.rs").read_bytes(),
         INGRESS_TESTS: (TESTS / "ingress_tests.rs").read_bytes(),
         SOCKET_INGRESS_TESTS: (TESTS / "udp_ingress_tests.rs").read_bytes(),
