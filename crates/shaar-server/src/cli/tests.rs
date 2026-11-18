@@ -69,6 +69,7 @@ fn only_subcommands_help_and_version_select_the_cli_layer() {
         "address-key",
         "allow",
         "config",
+        "diag",
         "run",
         "help",
         "--help",
@@ -364,6 +365,63 @@ async fn address_key_new_creates_a_key_and_never_overwrites() {
     let again = run(&["address-key", "new", &path]).await.unwrap_err();
     assert!(again.starts_with("address key: "), "{again}");
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 32);
+}
+
+#[test]
+fn diag_nat_ports_takes_a_default_and_a_bounded_socket_count() {
+    let place = |dir: Option<&str>| Place {
+        config: None,
+        dir: dir.map(PathBuf::from),
+    };
+    assert_eq!(
+        parsed(&["diag", "nat-ports"]),
+        Invocation::DiagNatPorts {
+            place: place(None),
+            sockets: shaar::network::observe::DEFAULT_SOCKETS,
+        }
+    );
+    assert_eq!(
+        parsed(&["diag", "nat-ports", "--sockets", "3", "--dir", "d"]),
+        Invocation::DiagNatPorts {
+            place: place(Some("d")),
+            sockets: 3,
+        }
+    );
+    assert_eq!(
+        parsed(&["diag", "--dir", "d", "nat-ports", "--sockets", "16"]),
+        Invocation::DiagNatPorts {
+            place: place(Some("d")),
+            sockets: MAX_SOCKETS,
+        }
+    );
+    for bad in [
+        &["diag"][..],
+        &["diag", "other"],
+        &["diag", "nat-ports", "--sockets", "0"],
+        &["diag", "nat-ports", "--sockets", "17"],
+        &["diag", "nat-ports", "--sockets", "many"],
+    ] {
+        assert!(matches!(refused(bad), ParseError::Clap(_)), "{bad:?}");
+    }
+}
+
+#[tokio::test]
+async fn diag_nat_ports_needs_the_bootstrap_hosts_of_a_public_configuration() {
+    let fixture = Fixture::new();
+    run(&["init", "--dir", fixture.dir(), "--private"])
+        .await
+        .unwrap();
+    let direct_only = run(&["diag", "nat-ports", "--dir", fixture.dir()])
+        .await
+        .unwrap_err();
+    assert!(
+        direct_only.contains("no DHT bootstrap hosts"),
+        "{direct_only}"
+    );
+    let missing = run(&["diag", "nat-ports", "--config", "no-such-file.ktav"])
+        .await
+        .unwrap_err();
+    assert!(missing.starts_with("configuration: "), "{missing}");
 }
 
 #[tokio::test]

@@ -7,8 +7,10 @@ use super::{ForwardError, ForwardStats, ServeReport};
 use crate::path::PathKind;
 
 mod dht;
+mod nat_ports;
 mod trace;
 pub use dht::install_dht_trace;
+pub use nat_ports::{DEFAULT_SOCKETS, MAX_SOCKETS, nat_ports};
 pub use trace::{PortMapping, client_direct, client_lookup, server_publication};
 
 /// Which product emits an operator line.

@@ -1,4 +1,4 @@
-//! Subcommands of `shaar-server`: init, address, address-key, allow, config and run.
+//! Subcommands of `shaar-server`: init, address, address-key, allow, config, diag and run.
 //!
 //! The legacy invocations (`shaar-server`, `shaar-server <target>`, `shaar-server --config
 //! <path>`) are parsed by `main.rs` and stay unchanged; this module only answers when the
@@ -10,15 +10,24 @@ use std::process::ExitCode;
 use std::str::FromStr;
 
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
-use shaar::config::{ServerOverrides, load_server};
+use shaar::config::{MainlineNetwork, ServerOverrides, load_server};
 use shaar::identity::{
     ConfigAction, Identity, NetworkChoice, Role, config_command, default_data_dir,
     first_run_summary_lines, provision_with, role_dir,
 };
+use shaar::network::observe::{MAX_SOCKETS, nat_ports};
 use shaar::{AllowAction, PeerKey, allowlist_command};
 
 /// First arguments that select this module instead of the legacy parser.
-const SUBCOMMANDS: [&str; 6] = ["init", "address", "address-key", "allow", "config", "run"];
+const SUBCOMMANDS: [&str; 7] = [
+    "init",
+    "address",
+    "address-key",
+    "allow",
+    "config",
+    "diag",
+    "run",
+];
 
 /// Loopback target that lets the path of a file be read before `target` is set.
 const PLACEHOLDER_TARGET: &str = "127.0.0.1:1";
@@ -58,6 +67,11 @@ pub(crate) enum Invocation {
     Config {
         place: Place,
         action: ConfigAction,
+    },
+    /// `diag nat-ports`: the external UDP ports `sockets` fresh sockets get.
+    DiagNatPorts {
+        place: Place,
+        sockets: u8,
     },
     Run {
         place: Place,
@@ -170,6 +184,24 @@ pub(crate) fn command() -> Command {
                 ),
             true,
         ))
+        .subcommand(place_args(
+            Command::new("diag")
+                .about("Measure this machine's network (ports only, no addresses)")
+                .subcommand_required(true)
+                .subcommand(
+                    Command::new("nat-ports")
+                        .about("Print the external UDP ports that fresh sockets get at the DHT bootstrap hosts")
+                        .arg(
+                            Arg::new("sockets")
+                                .long("sockets")
+                                .value_name("N")
+                                .value_parser(value_parser!(u8).range(1..=i64::from(MAX_SOCKETS)))
+                                .default_value("6")
+                                .help("Sockets to measure"),
+                        ),
+                ),
+            true,
+        ))
         .subcommand(
             place_args(
                 Command::new("run")
@@ -255,6 +287,13 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
                 action,
             }
         }
+        "diag" => {
+            let (_, args) = sub.subcommand().expect("a subcommand is required");
+            Invocation::DiagNatPorts {
+                place: place_of(sub),
+                sockets: *args.get_one::<u8>("sockets").expect("has a default"),
+            }
+        }
         _ => Invocation::Run {
             place: place_of(sub),
             target: sub.get_one::<String>("target").cloned(),
@@ -337,8 +376,30 @@ pub(crate) async fn execute(invocation: Invocation) -> Result<Vec<String>, Strin
         Invocation::Config { place, action } => {
             config_command(Role::Server, &config_path(&place)?, action).await
         }
+        Invocation::DiagNatPorts { place, sockets } => {
+            nat_ports(&mainline_of(&place).await?, sockets).await
+        }
         Invocation::Run { .. } => Err("run is not an administration command".to_owned()),
     }
+}
+
+/// The Mainline settings of the configuration a place names.
+async fn mainline_of(place: &Place) -> Result<MainlineNetwork, String> {
+    let over = ServerOverrides {
+        target: Some(PLACEHOLDER_TARGET.to_owned()),
+        ..ServerOverrides::default()
+    };
+    let config = load_server(config_path(place)?, &over)
+        .await
+        .map_err(|error| format!("configuration: {error}"))?;
+    config
+        .network()
+        .and_then(|network| network.mainline())
+        .cloned()
+        .ok_or_else(|| {
+            "the configuration names no DHT bootstrap hosts (see `config network public`)"
+                .to_owned()
+        })
 }
 
 async fn init(dir: Option<PathBuf>, private: bool) -> Result<Vec<String>, String> {
