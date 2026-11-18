@@ -391,6 +391,12 @@ async fn retained_roles_cancel_and_resume_borrowed_waiters() {
         // redundant role cache is likewise undetectable if the shared-resource
         // start repeats the same first error. No mutation was executed; this is
         // the scope of the regression.
+        // The initial PUT stays unanswered and ends by itself after its attempts, and a failed
+        // publication retries after a pause. Wait for a PUT that is in flight now, so the held
+        // cleanup below never depends on how long the earlier steps or the timeouts took.
+        let _republished = tokio::time::timeout(CANCEL_BUDGET, service_peer.capture_put_record())
+            .await
+            .expect("the unanswered publication is retried, so a PUT is in flight at shutdown");
         let observed_stage = {
             let mut waiter = std::pin::pin!(server_role.shutdown());
             let close_pending = |event: &RoleEvent| matches!(event, RoleEvent::ClosePending { .. });

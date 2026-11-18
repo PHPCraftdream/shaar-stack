@@ -2406,6 +2406,18 @@ Advances north-star steps 1 and 3 of the two-device case (the Server publishes, 
 
 **Status (2026-11-18).** CI green on `ffabfea` (run 44304249916, ubuntu and windows; fmt, clippy, the mainline lifecycle suite with `the_maintenance_lookup_stops_after_three_rounds`, `real_owned_get_runs_at_most_the_round_cap_then_finishes`, `retained_put_get_recreation_keeps_operation_round_budget`, `the_owned_socket_reports_its_request_timeout_and_round_cap` executed and passed, and the targeted shaar tests including `retained_roles_cancel_and_resume_borrowed_waiters`); merged into local `main` as `87423f5`. Live attempt 16: the Server answers Offers again, the record opens, the payload crosses over standby, the app stays in the foreground. Acceptance (3) is met only in part: the first reflexive window still ended `lookup=bounded` at 10 s (its outcome was `observed`, the address came from another query's votes), so the margin of the 10 s window is thin and the growing timeout (leaf FIX-3e) remains the cause to remove.
 
+### Leaf FIX-3e: silent requests stop feeding the RTT estimate, and the startup test stops depending on it
+
+Advances north-star step 3 (the client resolves the record within the cold-lookup budget). Evidence: attempts 11 to 16 (`timeout_ms` 1330, 1540, then the 2 s cap within one lookup) and the failed run of `9f82f5b` (see leaf FIX-3d).
+
+**What the failed run showed, and the repair of the test.** `retained_roles_cancel_and_resume_borrowed_waiters` asserts that a shutdown of a Live Server finds a PUT in flight (it holds the actor's cancellation cleanup and expects `ClosePending`). It relied on the Server's initial PUT, which the test never answers, still being alive at the end of the test; that held only while the grown timeout stretched the three PUT attempts. The test now waits for a PUT that is in flight at that moment (`capture_put_record` on the DHT peer: the unanswered publication is retried after a 2 s pause, and the peer answers the lookups in between), so it no longer depends on how long the earlier steps or the timeouts took.
+
+**Acceptance (observable).** (1) An owned request that expires or is cancelled leaves the in-flight table without a sample (`InflightRequests::forget`), so dead nodes no longer raise the timeout; an answer still feeds the estimate and the 2 s cap stays. Tests: `a_forgotten_request_does_not_move_the_rtt_estimate_but_an_answer_does`, `expired_owned_requests_do_not_feed_the_request_timeout`, `cancelled_owned_requests_do_not_feed_the_request_timeout`, and the cap tests unchanged. (2) `retained_roles_cancel_and_resume_borrowed_waiters` passes with the timeout at its 500 ms floor. (3) The live attempt shows `timeout_ms` staying at 500 in the `get-round` lines and the cold lookup time; no claim in advance about the 10 s criterion.
+
+**Non-goals.** No change of the 2 s cap, of the round caps, of the PUT attempts, of any deadline or of the 16-RPC cap; the send-failure paths keep `remove` (their samples are below the 500 ms floor and are ignored); no other test changes.
+
+**Status (2026-11-18).** Written; the CI formatting check and `cargo clippy -p shaar --all-targets -- -D warnings` pass locally (the pinned `n0-mainline` prints its own upstream warnings, as before); not yet run in CI.
+
 ### Leaf FIX-7: a stale replica must not fail a record lookup
 
 Advances north-star step 3 (the client resolves the record). Evidence: attempt 17 (see there) and the code of `prepare_query`.

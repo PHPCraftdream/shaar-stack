@@ -47,7 +47,11 @@ def edits() -> dict[str, list[tuple[str, str]]]:
             ),
             (
                 "const MIN_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);\n",
-                "const MIN_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);\n/// Longest a request may stay unanswered. Expired requests feed the RTT estimate with samples at\n/// least as long as the timeout, so without a cap the timeout grows with every dead node.\nconst MAX_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);\n",
+                "const MIN_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);\n/// Longest a request may stay unanswered. Slow answers feed the RTT estimate and raise the\n/// timeout, so the cap bounds what they can build up.\nconst MAX_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);\n",
+            ),
+            (
+                "    fn find_by_tid(&self, tid: u32) -> Result<usize, usize> {\n",
+                "    /// Drops a request that got no answer (timed out or cancelled) without feeding its age to\n    /// the RTT estimate: a timeout is not a round-trip sample, and counting it made the timeout\n    /// grow with every dead node of a lookup round.\n    fn forget(&mut self, key: u32) {\n        if let Ok(index) = self.find_by_tid(key) {\n            self.requests.remove(index);\n        }\n    }\n\n    fn find_by_tid(&self, tid: u32) -> Result<usize, usize> {\n",
             ),
             (
                 "        self.estimated_rtt + self.deviation_rtt.mul_f64(4.0)\n    }\n",
@@ -63,7 +67,7 @@ def edits() -> dict[str, list[tuple[str, str]]]:
             ),
             (
                 "        self.inflight_requests.cleanup();\n",
-                "        if let Some(owned) = self.owned.as_mut() {\n            for tid in owned.resources.expired(self.inflight_requests.request_timeout()) {\n                self.inflight_requests.remove(tid);\n                owned.resources.rollback_rpc(tid);\n            }\n        } else {\n            self.inflight_requests.cleanup();\n        }\n",
+                "        if let Some(owned) = self.owned.as_mut() {\n            for tid in owned.resources.expired(self.inflight_requests.request_timeout()) {\n                self.inflight_requests.forget(tid);\n                owned.resources.rollback_rpc(tid);\n            }\n        } else {\n            self.inflight_requests.cleanup();\n        }\n",
             ),
             (
                 "    pub fn inflight(&self, transaction_id: &u32) -> bool {\n        self.inflight_requests.get(*transaction_id).is_some()\n    }",
