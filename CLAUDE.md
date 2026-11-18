@@ -156,7 +156,9 @@ written in English. The directory `docs/checkpoints/` may remain in Russian.
   binaries are taken from verified CI artifacts. If a check triggers a build
   of third-party code via `build.rs`, a separate permission for that build is
   required first.
-- Do not bump project or dependency versions without an explicit user request.
+- Do not bump project versions without an explicit user request. Dependencies may be
+  updated freely (2026-11-18) but only to a version published at least 7 days ago
+  (quarantine); record its publication date and update the lock, notices and guards.
 - Do not commit, push, or run subagents without an explicit user request.
 - Comments in code are concise and written in English.
 
