@@ -395,7 +395,9 @@ async fn fixture_fast_start_without_votes_stays_none_and_is_bounded() {
 /// stores one, and zero never counts as a port.
 #[tokio::test]
 async fn the_rewritten_port_is_none_until_a_window_stores_one() {
-    let (mut owner, _watch) = start_owner(0x53, &[]).await;
+    // A numeric bootstrap nobody listens on: the owner starts, the DHT learns nothing.
+    let silent: SocketAddr = "127.0.0.1:9".parse().expect("numeric bootstrap");
+    let (mut owner, _watch) = start_owner(0x53, &[silent]).await;
     assert_eq!(owner.punch_rewritten_port(), None);
     owner.rewritten_port_cell().store(47_287, Ordering::Relaxed);
     assert_eq!(owner.punch_rewritten_port(), Some(47_287));
