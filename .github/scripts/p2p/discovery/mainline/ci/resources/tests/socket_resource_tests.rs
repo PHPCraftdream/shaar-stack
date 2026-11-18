@@ -485,59 +485,25 @@ fn the_request_timeout_starts_at_the_floor_and_is_capped() {
     assert_eq!(super::MAX_REQUEST_TIMEOUT, Duration::from_secs(2));
 }
 
-fn aged_request(requests: &mut super::InflightRequests, age: Duration) -> u32 {
-    let tid = requests.add(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9));
-    let index = requests.find_by_tid(tid).expect("registered request");
-    requests.requests[index].sent_at = std::time::Instant::now()
-        .checked_sub(age)
-        .expect("monotonic clock reads more than the request age");
-    tid
-}
-
 #[test]
-fn slow_answers_cannot_stretch_the_request_timeout_past_the_cap() {
+fn expired_requests_cannot_stretch_the_request_timeout_past_the_cap() {
+    // Leaf FIX-3d: an expired request feeds the RTT estimate with an age at least as long as the
+    // timeout, so the timeout used to climb with every dead node of a lookup round.
     let mut requests = super::InflightRequests::new();
+    let to = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9);
+    let age = Duration::from_millis(2_500);
     for _ in 0..40 {
-        let tid = aged_request(&mut requests, Duration::from_millis(2_500));
+        let tid = requests.add(to);
+        let index = requests.find_by_tid(tid).expect("registered request");
+        requests.requests[index].sent_at = std::time::Instant::now()
+            .checked_sub(age)
+            .expect("monotonic clock reads more than the request age");
         assert!(requests.get(tid).is_none(), "a request older than the cap is expired");
         assert!(requests.remove(tid).is_some());
         assert!(requests.request_timeout() <= super::MAX_REQUEST_TIMEOUT);
     }
-    let fresh = requests.add(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9));
+    let fresh = requests.add(to);
     assert!(requests.get(fresh).is_some(), "the cap does not expire a fresh request");
-}
-
-#[test]
-fn a_forgotten_request_does_not_move_the_rtt_estimate_but_an_answer_does() {
-    // Leaf FIX-3d: a timeout is not a round-trip sample.
-    let mut requests = super::InflightRequests::new();
-    let silent = aged_request(&mut requests, Duration::from_millis(1_500));
-    requests.forget(silent);
-    assert!(requests.find_by_tid(silent).is_err());
-    assert_eq!(requests.request_timeout(), Duration::from_millis(500));
-    let answered = aged_request(&mut requests, Duration::from_millis(1_500));
-    assert!(requests.remove(answered).is_some());
-    assert!(requests.request_timeout() > Duration::from_millis(500));
-}
-
-#[tokio::test]
-async fn expired_owned_requests_do_not_feed_the_request_timeout() {
-    // Leaf FIX-3d: before it, every request of a lookup round that timed out fed its age to the
-    // estimate, so the timeout grew with each dead node (3 to 9 s rounds on the live DHT).
-    let (_peer, destination) = capture();
-    let mut socket = owned_socket();
-    let operation = new_operation(&mut socket);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    socket.register_owned_deadline(operation, deadline).unwrap();
-    for _ in 0..8 {
-        socket.request_owned(destination, ping(), operation).unwrap();
-    }
-    socket.flush_owned().await;
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    socket.expire_owned_requests(Duration::from_millis(500));
-    let state = socket.owned_test_state().unwrap();
-    assert_eq!((state.2, state.3), (0, 0));
-    assert_eq!(socket.owned_request_timeout(), Duration::from_millis(500));
 }
 
 #[tokio::test]

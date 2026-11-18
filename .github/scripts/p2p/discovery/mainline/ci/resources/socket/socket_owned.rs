@@ -526,7 +526,7 @@ impl super::KrpcSocket {
             owned.persistent_send_gate = None;
         }
         for &tid in tids {
-            self.inflight_requests.forget(tid);
+            self.inflight_requests.remove(tid);
             resources.rollback_rpc(tid);
         }
     }
@@ -536,7 +536,7 @@ impl super::KrpcSocket {
             return;
         };
         for tid in owned.resources.expired(timeout) {
-            self.inflight_requests.forget(tid);
+            self.inflight_requests.remove(tid);
             owned.resources.rollback_rpc(tid);
         }
     }
