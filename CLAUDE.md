@@ -13,8 +13,8 @@ written in English. The directory `docs/checkpoints/` may remain in Russian.
 
 - Goal: one Ed25519 key reaches a service anywhere. The client knows only the
   server key, finds the server through the Mainline DHT, connects, and falls back
-  to Yggdrasil when direct QUIC is blocked. No TUN, root, router changes or n0
-  infrastructure.
+  to Yggdrasil when direct QUIC is blocked. No TUN, root or n0 infrastructure;
+  asking the router for a port mapping is allowed (2026-11-18).
 - Four networks, each covering another's weakness: iroh/QUIC (fast direct data
   path, priority), Mainline DHT (signed address records by key), libp2p
   (negotiation only, never application data), Yggdrasil (key-derived address,
