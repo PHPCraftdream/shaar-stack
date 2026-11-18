@@ -1,6 +1,22 @@
 # V1 delivery focus and standing reminders
 
-**Distance to v1 (updated 2026-11-17):**
+## Current plan (2026-11-18, evening)
+
+**Where the two-device case stands.** The sealed record opens on the live DHT and the exact payload crosses over Yggdrasil standby; there is no direct path. Measured: both NATs give each new socket a random external port (NAT-3a); the phone's carrier NAT keeps one port per socket for every destination but filters by address and port (NAT-1, NAT-3b); the computer sits behind its home router and a second NAT that picks a random port per destination (NAT-3a and the gateway evidence). So neither side can predict or choose the port the other must hit, a plain punch cannot work, and only a sweep from the phone's socket over the computer's ports (NAT-3c) or a router that maps ports can open the way.
+
+**Order of work.**
+1. CI-2: push the local commits (NAT-3c tool, PORT-1 step 1, the archive of the docs), watch CI, merge into local `main` when green.
+2. LIVE-22, one window on the phone (owner's word): NAT-3c in two runs (1500 and 1000 datagrams per second), and in the same window live attempt 22 for FIX-3e and FIX-3c (`timeout_ms` stays at 500; the cold lookup time).
+3. Branch on NAT-3c. A catch with the way back open: NAT-4, make the QUIC sockets do it (learn the QUIC socket's external port, sweep from it, punch), design acceptance, code, live attempt. No catch at two rates: record the wall for this pair with the numbers, Yggdrasil standby stays the delivered route, and the owner decides about the birthday variant (it needs a custom transport).
+4. PORT-1 steps 2 to 4 in the gaps: the `portmapper` package (one new package, past the quarantine), binding on the key-ordered set, `diag port-map`, then the chain beyond the first gateway. It helps wherever the router is the outermost NAT; for this pair it opens only the first hop.
+5. FIX-3c follow-up only if attempt 22 shows a cold lookup above 10 s.
+6. KEY-1, then KEY-2 (generate, import and export a client key; encrypted start): a short design each, for the owner's go; Argon2id can come in under the quarantine rule.
+7. On hold until the owner approves the note: the closed network (CN-1 to CN-5, CN-K).
+8. Last: FIX-6, the honest report and the cleanup (harness app, scratch data, worktree, fork branch).
+
+Dropped: NAT-2c, the attribution of the ring scan; a ring scan cannot find a random port, and the scan in the product stays only until NAT-4 replaces it.
+
+**Distance to v1 (updated 2026-11-17, kept as the record of that day):**
 
 - Accepted stages: P01–P12 and D1 (P07 adapter `efa5c62`, P09 `b076458`, P10 path policy and efficiency campaign, P11 Server, P12 Client), P14 (resource measurement dispatch 43642328666 on `c84d9a6`, every budget row inside its ceiling, `docs/verification/scenarios.md` section 11.5) and P15 (SDK and operations documentation). Completed campaigns are not reopened; a later code change still invalidates the tested SHA of an earlier measurement; the re-measurement on the final code is recorded below (EFF-RE, 2026-11-16).
 - P13: the namespace matrix ran in three passes (E4 base, E8 extension, E9 remaining rows; report in scenarios section 10). Row A5 (direct path through double cone NAT) was a recorded **negative finding** that started the NAT toolkit below; the relay-less direct punch is now proven in the namespace fixture (group `punch`, dispatch 43743773385 on `119fbe8`) and re-checked after the live-network fixes (dispatch 43794634221 on `70ae253`: `dnat-cone-norelay-signal` and `-standby` direct, route `native`, APP exact 61/61, the DHT-drop guard stays a fallback). With relay fields and with symmetric NAT it stays open. Still open inside closed rows: key-only IPv6 discovery, circuit and Client-side relay exhaustion, other NAT types, long-period keepalive. Gated: real home/mobile/cafe devices.
