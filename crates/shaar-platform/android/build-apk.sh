@@ -15,7 +15,7 @@ android_jar="$sdk/platforms/android-35/android.jar"
 
 rm -rf "$out"
 mkdir -p "$out/classes" "$out/stage/lib/$abi"
-javac --release 8 -classpath "$(w "$android_jar")" -d "$(w "$out/classes")" "$(w "$here/Runner.java")"
+javac --release 8 -encoding UTF-8 -classpath "$(w "$android_jar")" -d "$(w "$out/classes")" "$(w "$here/Runner.java")"
 mapfile -t classes < <(find "$out/classes" -name '*.class' -exec cygpath -m {} \;)
 java -cp "$(w "$bt/lib/d8.jar")" com.android.tools.r8.D8 --release --min-api 26 \
     --lib "$(w "$android_jar")" --output "$(w "$out/stage")" "${classes[@]}"

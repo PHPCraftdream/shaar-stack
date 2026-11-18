@@ -1,6 +1,6 @@
 # Android test harness
 
-A debuggable, Gradle-free APK that runs the two product executables (`shaar-server`, `shaar-client`) inside an app sandbox, so that Android behaviour is observed in the real app domain and not only through `adb shell`. It is a test vehicle, not a product: one activity with a text view, no packaging for distribution, no release signing (the build creates a throwaway key).
+A debuggable, Gradle-free APK that runs the two product executables (`shaar-server`, `shaar-client`) inside an app sandbox, so that Android behaviour is observed in the real app domain and not only through `adb shell`. It is a test vehicle, not a product: one activity that shows each command and follows its log in muted colors (wrapped to the screen width, newest line in view), no packaging for distribution, no release signing (the build creates a throwaway key).
 
 | File | Purpose |
 |---|---|
