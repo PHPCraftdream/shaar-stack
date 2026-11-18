@@ -8,6 +8,8 @@
 //! the same first port, and the Server, which knows the key of the client, tries the ports in the
 //! same order without any message.
 
+pub mod mapping;
+
 use sha2::{Digest, Sha256};
 
 /// How many ports the set holds.
