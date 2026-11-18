@@ -107,8 +107,18 @@ fn candidate(index: usize) -> Node {
 }
 
 fn query(socket: &mut KrpcSocket, budget: &Arc<StoreBudget>) -> IterativeQuery {
+    query_from(socket, budget, Id::from([0_u8; 20]))
+}
+
+/// A query for the target `[1; 20]` asked by `requester`; asking for its own ID is the
+/// maintenance lookup.
+fn query_from(
+    socket: &mut KrpcSocket,
+    budget: &Arc<StoreBudget>,
+    requester: Id,
+) -> IterativeQuery {
     let mut query = IterativeQuery::new(
-        Id::from([0_u8; 20]),
+        requester,
         Id::from([1_u8; 20]),
         GetRequestSpecific::GetValue(GetValueRequestArguments {
             target: Id::from([1_u8; 20]),
@@ -149,35 +159,24 @@ async fn answer_request(
     assert!(socket.accept_owned_response(request.transaction_id, from));
 }
 
-#[tokio::test]
-async fn real_owned_get_runs_at_most_the_round_cap_then_finishes() {
+/// Runs an owned query round by round until the round cap ends it, and returns the rounds it ran.
+async fn rounds_until_the_cap(maintenance: bool) -> usize {
     let budget = Arc::new(StoreBudget::default());
     let mut socket = owned_socket();
-    let mut query = query(&mut socket, &budget);
+    let requester = Id::from([if maintenance { 1_u8 } else { 0_u8 }; 20]);
+    let mut query = query_from(&mut socket, &budget, requester);
     let operation = query.operation().expect("owned operation");
-    let deadline = socket
-        .owned_deadline(operation)
-        .expect("registered operation deadline");
-    let cap = usize::from(socket.owned_get_round_cap());
-    assert_eq!(cap, 6);
+    let deadline = socket.owned_deadline(operation).expect("registered operation deadline");
+    let cap = usize::from(socket.owned_round_cap(maintenance));
 
     let mut captures = Vec::new();
     for _ in 0..=cap {
-        captures.push(
-            tokio::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
-                .await
-                .expect("loopback peer"),
-        );
+        captures.push(tokio::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.expect("loopback peer"));
     }
-    let destinations: Vec<SocketAddrV4> = captures
-        .iter()
-        .map(
-            |capture| match capture.local_addr().expect("peer address") {
-                std::net::SocketAddr::V4(address) => address,
-                std::net::SocketAddr::V6(_) => unreachable!("IPv4 peer"),
-            },
-        )
-        .collect();
+    let destinations: Vec<SocketAddrV4> = captures.iter().map(|capture| match capture.local_addr().unwrap() {
+        std::net::SocketAddr::V4(address) => address,
+        std::net::SocketAddr::V6(_) => unreachable!("IPv4 peer"),
+    }).collect();
 
     query.visit(&mut socket, destinations[0]);
     answer_request(&mut socket, &captures[0], destinations[0]).await;
@@ -211,6 +210,18 @@ async fn real_owned_get_runs_at_most_the_round_cap_then_finishes() {
         captures[cap].try_recv_from(&mut buffer).unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock
     );
+    cap
+}
+
+#[tokio::test]
+async fn real_owned_get_runs_at_most_the_round_cap_then_finishes() {
+    assert_eq!(rounds_until_the_cap(false).await, 6);
+}
+
+/// Leaf FIX-3f: the own-ID lookup keeps its three rounds, so its 10 s window can complete.
+#[tokio::test]
+async fn the_maintenance_lookup_stops_after_three_rounds() {
+    assert_eq!(rounds_until_the_cap(true).await, 3);
 }
 
 #[tokio::test]

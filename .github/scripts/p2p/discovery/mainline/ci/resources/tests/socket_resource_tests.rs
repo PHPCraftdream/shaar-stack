@@ -510,7 +510,8 @@ fn expired_requests_cannot_stretch_the_request_timeout_past_the_cap() {
 async fn the_owned_socket_reports_its_request_timeout_and_round_cap() {
     let socket = owned_socket();
     assert_eq!(socket.owned_request_timeout(), Duration::from_millis(500));
-    assert_eq!(socket.owned_get_round_cap(), 6);
+    assert_eq!(socket.owned_round_cap(false), 6);
+    assert_eq!(socket.owned_round_cap(true), 3);
 }
 
 #[test]
