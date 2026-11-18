@@ -29,11 +29,6 @@ pub(crate) const SCAN_PORTS_PER_ATTEMPT: usize = 2 * SCAN_RING_WIDTH as usize;
 /// link-local, shared (100.64/10), unspecified, multicast and broadcast addresses are never
 /// scanned; a mapped IPv6 address counts as its IPv4 form, other IPv6 addresses are not scanned.
 fn scan_centre(address: SocketAddr) -> bool {
-    // Test builds also scan loopback: the only address two local endpoints share.
-    #[cfg(test)]
-    if address.ip().to_canonical().is_loopback() {
-        return address.port() != 0;
-    }
     let IpAddr::V4(ip) = address.ip().to_canonical() else {
         return false;
     };
@@ -210,11 +205,11 @@ mod tests {
     fn nothing_is_scanned_outside_the_scanning_attempts_or_around_a_non_public_centre() {
         assert!(ring_addresses(public(40_000), 0).is_empty());
         assert!(ring_addresses(public(40_000), SCAN_RINGS + 1).is_empty());
-        // Loopback is scanned in test builds only (see `scan_centre`), so it is not listed.
         for text in [
             "10.0.0.5",
             "192.168.1.9",
             "172.16.3.4",
+            "127.0.0.1",
             "169.254.1.1",
             "100.64.7.7",
             "100.127.255.1",

@@ -19,7 +19,6 @@ use tokio::time::Instant;
 use super::{
     EXCHANGE_BUDGET, Kind, NetworkError, PROBE_WINDOW, PunchLink, PunchMessage, SendError, Session,
     client_attempt, decode, encode, peer_claimed_probe_allowed, peer_claimed_probe_denied,
-    scan_then_connect,
 };
 
 fn v4(a: [u8; 4], port: u16) -> SocketAddr {
@@ -225,61 +224,4 @@ async fn client_probes_skip_link_local_but_keep_loopback_and_private_lan_under_t
 fn loopback_port_zero_is_denied_even_under_test_gate() {
     assert!(!peer_claimed_probe_allowed(v6("::1", 0)));
     assert!(peer_claimed_probe_allowed(v6("::1", 1)));
-}
-
-// ------------------------------------------------- scan with real endpoints ----
-
-/// Two real loopback endpoints that allow each other: (client, server, server identity).
-async fn scan_pair() -> (
-    Arc<crate::network::SignaledEndpoint>,
-    crate::network::SignaledEndpoint,
-    crate::identity::Identity,
-) {
-    let a = crate::identity::Identity::generate();
-    let b = crate::identity::Identity::generate();
-    let server = crate::network::SignaledEndpoint::bind(
-        &b,
-        loopback_addr(),
-        loopback_addr(),
-        &[public(&a)],
-        crate::network::Limits::default(),
-    )
-    .await
-    .unwrap();
-    let client = crate::network::SignaledEndpoint::bind(
-        &a,
-        loopback_addr(),
-        loopback_addr(),
-        &[public(&b)],
-        crate::network::Limits::default(),
-    )
-    .await
-    .unwrap();
-    (Arc::new(client), server, b)
-}
-
-/// Real endpoints, a centre that is 100 ports off: no ring-1 address is the server's port, the
-/// scan ends with the typed deadline within about one slice and dials nothing. The positive
-/// control (a scan that finds the real port) is not here: see leaf NAT-2c in the V1 focus plan.
-#[tokio::test]
-async fn a_scan_with_real_endpoints_that_misses_the_real_port_ends_typed() {
-    let (client, server, b) = scan_pair().await;
-    let real = server.local_addr();
-    let centre = SocketAddr::new(real.ip(), real.port() - 100);
-    let peer = public(&b);
-    let probes = client.probe_handle();
-    let started = Instant::now();
-    let dialed: Result<Session, NetworkError> = scan_then_connect(
-        centre,
-        1,
-        |address| {
-            let probes = probes.clone();
-            async move { probes.probe(peer, address).await }
-        },
-        |_| async { panic!("no address was found: nothing may be dialed") },
-    )
-    .await;
-    assert!(matches!(dialed, Err(NetworkError::Deadline)));
-    assert!(started.elapsed() < Duration::from_secs(3));
-    drop(server);
 }
