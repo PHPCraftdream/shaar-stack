@@ -446,7 +446,7 @@ impl Dialer for NativeDialer {
                             punch::scan_ring(epoch),
                             |probe_address| {
                                 let probes = endpoint.probe_handle();
-                                async move { probes.probe(peer, probe_address).await }
+                                async move { probes.probe_answer(peer, probe_address).await }
                             },
                             |dial_address| endpoint.connect(peer, dial_address),
                         )
