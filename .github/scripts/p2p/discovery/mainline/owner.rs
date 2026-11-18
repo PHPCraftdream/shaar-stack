@@ -12,8 +12,11 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+mod get_trace;
+
 use crate::actor;
 use crate::actor::ActorMessage;
+use get_trace::GetTrace;
 use crate::resource::{
     OwnedQueryCompletion, RequestBudget, RequestLease, RequestReply, ResourceError,
 };
@@ -67,6 +70,18 @@ impl OwnedDhtHandle {
         target: crate::Id,
         deadline: tokio::time::Instant,
     ) -> Result<OwnedQueryCompletion, ResourceError> {
+        let mut trace = GetTrace::start();
+        let result = self.resolve_mutable_traced(target, deadline, &mut trace).await;
+        trace.finish(&result);
+        result
+    }
+
+    async fn resolve_mutable_traced(
+        &self,
+        target: crate::Id,
+        deadline: tokio::time::Instant,
+        trace: &mut GetTrace,
+    ) -> Result<OwnedQueryCompletion, ResourceError> {
         let entry = tokio::time::Instant::now();
         if let Some(error) = self.failure.get() {
             return Err(*error);
@@ -81,6 +96,7 @@ impl OwnedDhtHandle {
             .ok_or(ResourceError::OperationLimit)?;
         let _cancellation = self.request_budget.cancellation_guard();
         let (admission_sender, admission_receiver) = oneshot::channel();
+        trace.stage = 1;
         let permit = tokio::time::timeout_at(deadline, self.sender.reserve())
             .await
             .map_err(|_| ResourceError::DeadlineExceeded)?
@@ -94,6 +110,7 @@ impl OwnedDhtHandle {
             deadline,
             request_lease,
         ));
+        trace.stage = 2;
         let result_receiver = match tokio::time::timeout_at(deadline, admission_receiver)
             .await
             .map_err(|_| ResourceError::DeadlineExceeded)?
@@ -102,6 +119,7 @@ impl OwnedDhtHandle {
             RequestReply::Ready(receiver) => receiver,
             RequestReply::Error(error) => return Err(error),
         };
+        trace.stage = 3;
         let result = tokio::time::timeout_at(deadline, result_receiver)
             .await
             .map_err(|_| ResourceError::DeadlineExceeded)?
