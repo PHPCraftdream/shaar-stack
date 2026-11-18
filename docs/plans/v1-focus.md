@@ -2276,6 +2276,15 @@ Repair prepared (not yet run live): a store that has reached at least one node a
 - **Open, with no evidence yet:** how many nodes took the store (the library calls it a success when one node accepted), how far the lookup travelled (a lookup is bounded to three rounds), and why two lookups ran to their deadline. Repair prepared: counts-only `shaar: dht` operator lines from the library's events and a stage trace of every owned GET (leaf FIX-3b); see the resource review, fifth finding.
 - **Build cost:** the cold local release builds took 108 min (Windows) and 106 min (Android arm64) under `wnice -c 10 -m 10g`; the next ones are incremental.
 
+**Attempt 9 (2026-11-18 02:42, executables of `8ed680b` built on this machine, with the DHT counters of leaf FIX-3b).** Same setup and bounds as attempt 8.
+
+- **The sealed record was found on the live DHT and opened for the first time:** `shaar-client: record lookup outcome=found record=4` (four addresses; the Client held only the Server key and `address_key_file`). The Server's publication ended `ok`; its store was accepted by 11 nodes (`stored_at=11`, then 10 at the republication).
+- **The first lookup still missed.** It asked 5 nodes from a cold routing table and ended `failed:policy:CacheMiss` after 7.6 s (`items=0`). The second lookup started about 4 s later, asked 42 nodes and found the record after 23.7 s, 36 s after the DHT started. The efficiency criterion for a cold lookup is 10 s (tracked as FIX-3c).
+- **No direct path.** Four direct attempts followed the lookup (`candidates=4`, `3`, `2`, `1`, one candidate a local address each time), each ended `connected=no` after about 3 s, and every coordinated punch ended `fallback reason=probe`. The phone's mobile interface is IPv4 only (a private address behind the carrier NAT, no IPv6), the computer has no global IPv6 either, so there is no address family without a NAT to fall back to.
+- **The delivered fallback again:** `route path=ygg-standby`, the exact payload `shaar-live-pair-9` came back (`bytes_in=17 bytes_out=17`).
+- **Budgets:** the phone's mobile interface moved by about 0.17 MB received and 0.15 MB sent in all; the Server ran 106 s (stopped by the timer), the Client was stopped by its 86 s limit; no libp2p relay.
+- **A counting artefact:** the `visited` count of `query-done` is 0 in every line because the owned query keeps its visited nodes in a separate store; fixed in the next repair, together with counts of the answers that named the socket's public address (`voted`, `voted_addresses`, `voted_ports`). More than one port among them for one local socket means the NAT mapping depends on the destination, which is the measurement the direct path needs from both devices (leaf NAT-1).
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.

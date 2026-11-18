@@ -24,7 +24,7 @@ const MESSAGES: [(&str, &str); 7] = [
 ];
 
 /// The numeric fields printed, in this order, when an event carries them.
-const COUNTERS: [&str; 11] = [
+const COUNTERS: [&str; 14] = [
     "op",
     "stage",
     "total_ms",
@@ -33,6 +33,9 @@ const COUNTERS: [&str; 11] = [
     "closest",
     "visited",
     "responders",
+    "voted",
+    "voted_addresses",
+    "voted_ports",
     "closest_secure_nodes",
     "stored_at",
     "nodes_count",
@@ -135,14 +138,16 @@ mod tests {
             tracing::debug!(
                 target: "n0_mainline::core::iterative_query",
                 id = ?"0123456789abcdef", closest = ?20_usize, visited = ?37_usize, responders = ?8_usize,
-                "Done query"
+                voted = ?30_u32, voted_addresses = ?3_usize, voted_ports = ?3_usize, "Done query"
             );
         });
         assert_eq!(lines.len(), 1);
         let line = &lines[0];
         assert!(line.starts_with("shaar: dht query-done t="), "{line}");
         assert!(
-            line.ends_with(" closest=20 visited=37 responders=8"),
+            line.ends_with(
+                " closest=20 visited=37 responders=8 voted=30 voted_addresses=3 voted_ports=3"
+            ),
             "{line}"
         );
         assert!(!line.contains("0123456789abcdef"), "{line}");
