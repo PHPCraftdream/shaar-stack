@@ -232,10 +232,35 @@ async fn owned_get_deadline_stops_next_round_before_emitting_request() {
         .expect("register expired deadline");
     let destination = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9);
     query.add_candidate(Node::new(Id::from([9_u8; 20]), destination));
-    query.visit_closest_at(&mut socket, deadline);
+    let lines = Arc::new(std::sync::Mutex::new(Vec::new()));
+    tracing::subscriber::with_default(EventCapture(Arc::clone(&lines)), || {
+        query.visit_closest_at(&mut socket, deadline);
+    });
+    let lines = lines.lock().unwrap();
+    assert!(lines.iter().any(|line| line.starts_with("Owned GET deadline")
+        && line.contains(" round=0") && line.contains(" candidates=1")
+        && line.contains(" inflight=0")), "{lines:?}");
     assert_eq!(query.owner_error(), Some(ResourceError::DeadlineExceeded));
     assert_eq!(socket.owned_test_state().unwrap().2, 0);
     assert!(query.is_done(&socket));
+}
+
+/// Leaf FIX-3c: an admitted owned round is traced with its candidate count and RPC room.
+#[tokio::test]
+async fn an_admitted_owned_round_is_traced_with_its_candidates_and_room() {
+    let budget = Arc::new(StoreBudget::default());
+    let mut socket = owned_socket();
+    let mut query = query(&mut socket, &budget);
+    let destination = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9);
+    query.add_candidate(Node::new(Id::from([2_u8; 20]), destination));
+    let lines = Arc::new(std::sync::Mutex::new(Vec::new()));
+    tracing::subscriber::with_default(EventCapture(Arc::clone(&lines)), || {
+        query.visit_closest_at(&mut socket, tokio::time::Instant::now());
+    });
+    let lines = lines.lock().unwrap();
+    assert!(lines.iter().any(|line| line.starts_with("Owned GET round")
+        && line.contains(" round=1") && line.contains(" candidates=1")
+        && line.contains(" room=")), "{lines:?}");
 }
 
 #[tokio::test]

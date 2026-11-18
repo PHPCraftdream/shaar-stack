@@ -1,6 +1,7 @@
 //! The DHT library's own query counters as operator lines (leaf FIX-3b), so a live run shows
 //! how far a lookup went and how many nodes took a store. Counts only: the library's targets,
-//! addresses and error details are never printed, whatever else its events carry.
+//! addresses and error details are never printed, whatever else its events carry; the one
+//! exception is the name of a payload-free error variant of a failed GET.
 
 use std::fmt::{Debug, Write as _};
 use std::time::Instant;
@@ -13,7 +14,7 @@ use tracing::{Event, Level, Metadata, Subscriber};
 const LIBRARY: &str = "n0_mainline";
 
 /// The library messages worth a line, with the label each one prints under.
-const MESSAGES: [(&str, &str); 7] = [
+const MESSAGES: [(&str, &str); 9] = [
     ("Owned GET finished", "get-finished"),
     ("Owned GET failed", "get-failed"),
     ("Owned GET dropped", "get-dropped"),
@@ -21,10 +22,12 @@ const MESSAGES: [(&str, &str); 7] = [
     ("PutQuery start", "put-start"),
     ("PutQuery Done successfully", "put-done"),
     ("Put Query: failed", "put-failed"),
+    ("Owned GET round", "get-round"),
+    ("Owned GET deadline", "get-deadline"),
 ];
 
 /// The numeric fields printed, in this order, when an event carries them.
-const COUNTERS: [&str; 14] = [
+const COUNTERS: [&str; 18] = [
     "op",
     "stage",
     "total_ms",
@@ -39,18 +42,37 @@ const COUNTERS: [&str; 14] = [
     "closest_secure_nodes",
     "stored_at",
     "nodes_count",
+    "round",
+    "candidates",
+    "inflight",
+    "room",
 ];
+
+/// Longest error variant name printed.
+const ERROR_TOKEN_MAX: usize = 32;
 
 #[derive(Default)]
 struct Pick {
     message: String,
     counters: [Option<usize>; COUNTERS.len()],
+    error: Option<String>,
+}
+
+/// Whether a debug rendering is a bare variant name: letters, digits and underscores only, so
+/// a value that carries data (parentheses, quotes, addresses) is never printed.
+fn is_variant_name(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= ERROR_TOKEN_MAX
+        && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 impl Visit for Pick {
     fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
         if field.name() == "message" {
             self.message = format!("{value:?}");
+        } else if field.name() == "error" {
+            let text = format!("{value:?}");
+            self.error = is_variant_name(&text).then_some(text);
         } else if let Some(at) = COUNTERS.iter().position(|name| *name == field.name()) {
             self.counters[at] = format!("{value:?}").parse().ok();
         }
@@ -70,6 +92,9 @@ fn event_line(event: &Event<'_>, since_ms: u64) -> Option<String> {
         if let Some(value) = value {
             let _ = write!(line, " {name}={value}");
         }
+    }
+    if let Some(error) = pick.error {
+        let _ = write!(line, " error={error}");
     }
     Some(line)
 }
@@ -184,6 +209,65 @@ mod tests {
         assert!(lines[0].starts_with("shaar: dht get-finished "));
         assert!(lines[1].starts_with("shaar: dht get-dropped "));
         assert!(lines[2].starts_with("shaar: dht get-failed "));
+    }
+
+    #[test]
+    fn a_get_round_and_a_get_deadline_print_their_counts() {
+        let lines = captured(|| {
+            tracing::debug!(
+                target: "n0_mainline::core::iterative_query",
+                round = ?2_u8, candidates = ?17_usize, room = ?160_usize, "Owned GET round"
+            );
+            tracing::debug!(
+                target: "n0_mainline::core::iterative_query",
+                round = ?1_u8, closest = ?20_usize, candidates = ?3_usize, visited = ?20_usize,
+                inflight = ?4_usize, room = ?0_usize, "Owned GET deadline"
+            );
+        });
+        let tails: Vec<&str> = lines
+            .iter()
+            .map(|line| line.split_once(" t=").unwrap().1.split_once(' ').unwrap().1)
+            .collect();
+        assert_eq!(
+            tails,
+            [
+                "round=2 candidates=17 room=160",
+                "closest=20 visited=20 round=1 candidates=3 inflight=4 room=0",
+            ]
+        );
+        assert!(lines[0].starts_with("shaar: dht get-round "));
+        assert!(lines[1].starts_with("shaar: dht get-deadline "));
+    }
+
+    #[test]
+    fn a_failed_get_prints_only_a_bare_error_variant_name() {
+        // The library's error is an enum, whose debug rendering is its bare variant name.
+        #[derive(Debug)]
+        enum Failure {
+            DeadlineExceeded,
+        }
+        let lines = captured(|| {
+            tracing::debug!(
+                target: "n0_mainline::owner",
+                op = 7_u64, stage = 2_u8, total_ms = 0_u64, error = ?Failure::DeadlineExceeded, "Owned GET failed"
+            );
+            tracing::debug!(
+                target: "n0_mainline::owner",
+                op = 8_u64, stage = 3_u8, total_ms = 1_u64, error = ?("Busy", "203.0.113.7:6881"), "Owned GET failed"
+            );
+        });
+        assert_eq!(lines.len(), 2);
+        assert!(
+            lines[0].ends_with(" op=7 stage=2 total_ms=0 error=DeadlineExceeded"),
+            "{}",
+            lines[0]
+        );
+        assert!(
+            lines[1].ends_with(" op=8 stage=3 total_ms=1"),
+            "{}",
+            lines[1]
+        );
+        assert!(!lines[1].contains("203.0.113.7"), "{}", lines[1]);
     }
 
     #[test]

@@ -43,10 +43,11 @@ impl GetTrace {
                 completed = u8::from(done.network_completed()),
                 "Owned GET finished"
             ),
-            Err(_) => tracing::debug!(
+            Err(error) => tracing::debug!(
                 op = self.op,
                 stage = self.stage,
                 total_ms = self.total_ms(),
+                error = ?error,
                 "Owned GET failed"
             ),
         }
@@ -141,6 +142,7 @@ mod get_trace_tests {
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].starts_with("Owned GET failed"), "{lines:?}");
         assert!(lines[0].contains(" stage=2"), "{lines:?}");
+        assert!(lines[0].contains(" error=DeadlineExceeded"), "{lines:?}");
     }
 
     #[test]
