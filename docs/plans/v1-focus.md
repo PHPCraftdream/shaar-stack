@@ -2416,6 +2416,20 @@ Advances north-star step 3 (the client resolves the record). Evidence: attempt 1
 
 **Status (2026-11-18).** CI green on `44d14fd` (run 44314337809, ubuntu and windows; fmt, clippy and the targeted shaar tests, the two new tests `stale_replicas_next_to_a_fresh_record_are_dropped_and_the_fresh_one_wins` and `a_batch_of_only_stale_replicas_is_too_old_and_keeps_the_winner` executed and passed); merged into local `main` as `8111965`. Live: attempt 18 (fresh identity) opened the record on its second lookup after a first `CacheMiss`; attempt 17, before the fix, ended `TooOld` four times.
 
+### Leaf NAT-3: measure the phone's NAT before more scanning (owner decision of 2026-11-18, design only)
+
+Advances north-star step 4 (the coordinated punch) of the two-device case. Evidence: attempts 13 and 16 (the clean ones): the record opens, the payload crosses over standby, the direct attempts to the record's candidates and eight scan rings (49 ports each, around the port the DHT nodes saw for the phone's Mainline socket) found nothing; the computer's mapping depends on the destination, the phone's does not and it rewrites the port.
+
+**What is unknown, and why each answer decides the next step.**
+1. *The phone's filtering.* If the phone accepts a datagram from any address on a mapped port, only the QUIC socket's external port is missing and a scan can find it. If it accepts only from an address it has sent to, the Client's packet must come from an address the phone has contacted (the computer's IP), which the Server's probes already create. If it accepts only from an address and port it has sent to, the computer's destination-dependent mapping makes the direct path impossible without a relay: that is the physical limit the owner's rule asks to measure before it is recorded.
+2. *The offset of the phone's QUIC external port from its DHT port* (the carrier gives a port block; whether the allocation is sequential, random or block-wise decides the shape and the width of a scan, and whether the ring order should be one-sided).
+
+**Measuring step (NAT-3a, a diagnostic and not a product behaviour).** A small command (a `diag nat-ports` subcommand or a harness-only tool, decided at acceptance) that, on the phone and on the computer, opens a few UDP sockets, sends one Mainline `ping` from each to the two bootstrap hosts of the live attempts and prints only port numbers: the local port and the external port that the reply reports, per socket, in order. It sends a few hundred bytes in all, no address is printed, no key is read. A second step lets the computer ping the phone's observed DHT port from two different source ports, before and after the phone has pinged the computer, which separates the three filtering cases above.
+
+**Acceptance (observable).** (1) The phone's and the computer's port sequences are printed and recorded in this plan with the number of sockets and the order of creation; (2) the filtering case of the phone is named from the two pings, with the raw replies (yes or no per case); (3) the next step is chosen from them and recorded: a one-sided or wider scan within the NIC bound of 5 MiB per attempt, the shared DHT and QUIC socket, or the limit with these measurements as its evidence. **Non-goals.** No change of the punch or of the scan in this step, no new wire format, no helper server, no libp2p relay, no router change; no QUIC probe volume beyond the existing scan; the NAT-2c attribution defect stays a separate leaf.
+
+**Status (2026-11-18).** Design only; waits for a free phone window (the owner uses the phone, and the harness stalls when the app leaves the foreground) and for the acceptance above to be confirmed.
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.
