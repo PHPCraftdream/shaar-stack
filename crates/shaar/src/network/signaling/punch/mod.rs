@@ -264,8 +264,9 @@ pub(crate) fn local_candidates(local: SocketAddr, reflexive: Option<IpAddr>) -> 
 
 /// The Server's answer candidates: like [`local_candidates`], but when the NAT rewrote the port of
 /// the Mainline socket (`rewritten_port`) the reflexive IP with that port replaces the guess of
-/// the local QUIC port, which a port-rewriting NAT does not keep; it is the centre of the
-/// Client's port scan (leaf NAT-2).
+/// the local QUIC port, which a port-rewriting NAT does not keep. It was the centre of the Client's
+/// ring scan (leaf NAT-2); the walk over the key-ordered set (leaf SET-1) has no centre, so this
+/// candidate is only a candidate now, and its retirement is the cleanup SET-1c.
 pub(crate) fn answer_candidates(
     local: SocketAddr,
     reflexive: Option<IpAddr>,
@@ -344,10 +345,12 @@ impl PunchLink for PunchChannel {
     }
 }
 
-/// One client-side punch attempt payload: the peer and its answer candidates.
+/// One server-side probe burst payload: the peer, its offered candidates and the number of this
+/// peer's bursts so far (from 1), which picks the slice of its port set that the burst walks.
 pub(crate) struct OfferBatch {
     pub peer: [u8; 32],
     pub candidates: Vec<SocketAddr>,
+    pub burst: u32,
 }
 
 /// Why one punch attempt ended: the `reason` token of the trace line.
@@ -502,28 +505,25 @@ where
 /// own `PROBE_SLICE` deadline inside the handle (a silent candidate cannot
 /// starve the rest); the whole burst is thus bounded by
 /// `MAX_CANDIDATES * PROBE_SLICE` (2 s), matching the client's
-/// `PROBE_WINDOW`. Stops on the first completed handshake. Completed
-/// connections are closed by the handle (they only open the NAT mapping; the
-/// accept loop owns the real session). Traces exactly once and returns
-/// whether any probe completed.
-pub(crate) async fn probe_burst_sequential(
+/// `PROBE_WINDOW`. At the same time one slice (`burst`, the number of this
+/// peer's bursts) of the peer's key-ordered port set is walked on the peer's
+/// public addresses (`scan::server_burst`, leaf SET-1d), all at once under
+/// the same `PROBE_SLICE`. Completed connections are closed by the handle
+/// (they only open the NAT mapping; the accept loop owns the real session).
+/// Traces exactly once and returns whether any probe completed.
+pub(crate) async fn probe_burst(
     probes: &crate::network::admission::ProbeHandle,
     peer: PublicKey,
     candidates: &[SocketAddr],
+    burst: u32,
     role: &'static str,
 ) -> bool {
     let started = Instant::now();
-    let mut completed = false;
-    for candidate in candidates.iter().take(MAX_CANDIDATES) {
-        // Peer-claimed gate (Finding 2): special ranges never become probes.
-        if !peer_claimed_probe_allowed(*candidate) {
-            continue;
-        }
-        if probes.probe(peer, *candidate).await {
-            completed = true;
-            break;
-        }
-    }
+    let completed =
+        scan::server_burst(peer.as_bytes(), candidates, burst, PROBE_SLICE, |address| {
+            probes.probe(peer, address)
+        })
+        .await;
     let reason = if completed {
         EndReason::Direct
     } else {

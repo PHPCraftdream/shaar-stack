@@ -136,7 +136,7 @@ pub(super) async fn drive_links<L, P>(
             let Ok(peer) = PublicKey::from_bytes(&batch.peer) else {
                 return;
             };
-            punch::probe_burst_sequential(&probes, peer, &batch.candidates, "server").await;
+            punch::probe_burst(&probes, peer, &batch.candidates, batch.burst, "server").await;
         }
     };
     // One owned worker per channel, driven concurrently together with the
@@ -189,6 +189,8 @@ async fn serve_peer<L, P>(
     // Per-peer burst rate limit (Finding 1a), on the tokio (pausable)
     // monotonic clock.
     let mut last_batch: Option<tokio::time::Instant> = None;
+    // Bursts handed over for this peer: each one walks the next slice of the peer's port set.
+    let mut bursts: u32 = 0;
     loop {
         let Some(raw) = channel.recv_raw().await else {
             // Link died: this peer's punching is disabled.
@@ -242,9 +244,11 @@ async fn serve_peer<L, P>(
             // peer, even when the channel is full and the batch is skipped.
             last_batch = Some(tokio::time::Instant::now());
             last_epoch = Some(offer.epoch);
+            bursts = bursts.saturating_add(1);
             let _ = batches.try_send(OfferBatch {
                 peer,
                 candidates: batch_candidates,
+                burst: bursts,
             });
         } else if last_epoch != Some(offer.epoch) {
             // Suppressed burst: still track the epoch so retries of the same
