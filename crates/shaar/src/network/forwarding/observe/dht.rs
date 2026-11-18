@@ -241,10 +241,15 @@ mod tests {
 
     #[test]
     fn a_failed_get_prints_only_a_bare_error_variant_name() {
+        // The library's error is an enum, whose debug rendering is its bare variant name.
+        #[derive(Debug)]
+        enum Failure {
+            DeadlineExceeded,
+        }
         let lines = captured(|| {
             tracing::debug!(
                 target: "n0_mainline::owner",
-                op = 7_u64, stage = 2_u8, total_ms = 0_u64, error = ?"DeadlineExceeded", "Owned GET failed"
+                op = 7_u64, stage = 2_u8, total_ms = 0_u64, error = ?Failure::DeadlineExceeded, "Owned GET failed"
             );
             tracing::debug!(
                 target: "n0_mainline::owner",
