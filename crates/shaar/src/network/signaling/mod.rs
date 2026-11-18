@@ -1,5 +1,6 @@
 mod endpoint;
 mod owner;
+pub mod ports;
 pub use endpoint::SignaledEndpoint;
 
 use std::{io, net::SocketAddr};

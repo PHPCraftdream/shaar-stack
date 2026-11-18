@@ -18,6 +18,7 @@ pub(crate) use admission::ProbeHandle;
 pub use error::NetworkError;
 pub use forwarding::{ForwardError, ForwardStats, ServeReport, ServiceStream, observe};
 pub use session::Session;
+pub use signaling::ports;
 pub use signaling::{
     DiscoveredRelay, DiscoveryConfig, SignaledEndpoint, bind_signaling,
     bind_signaling_with_discovery,
