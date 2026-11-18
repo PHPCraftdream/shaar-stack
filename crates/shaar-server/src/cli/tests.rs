@@ -378,6 +378,7 @@ fn diag_nat_ports_takes_a_default_and_a_bounded_socket_count() {
         Invocation::DiagNatPorts {
             place: place(None),
             sockets: shaar::network::observe::DEFAULT_SOCKETS,
+            show_address: false,
         }
     );
     assert_eq!(
@@ -385,6 +386,7 @@ fn diag_nat_ports_takes_a_default_and_a_bounded_socket_count() {
         Invocation::DiagNatPorts {
             place: place(Some("d")),
             sockets: 3,
+            show_address: false,
         }
     );
     assert_eq!(
@@ -392,6 +394,7 @@ fn diag_nat_ports_takes_a_default_and_a_bounded_socket_count() {
         Invocation::DiagNatPorts {
             place: place(Some("d")),
             sockets: MAX_SOCKETS,
+            show_address: false,
         }
     );
     for bad in [
@@ -422,6 +425,211 @@ async fn diag_nat_ports_needs_the_bootstrap_hosts_of_a_public_configuration() {
         .await
         .unwrap_err();
     assert!(missing.starts_with("configuration: "), "{missing}");
+}
+
+#[test]
+fn diag_nat_ports_shows_the_address_only_when_asked() {
+    let shown = parsed(&["diag", "nat-ports", "--show-address"]);
+    assert!(matches!(
+        shown,
+        Invocation::DiagNatPorts {
+            show_address: true,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn diag_nat_filter_listen_takes_defaults_a_bounded_window_and_an_optional_knock() {
+    use shaar::network::observe::{
+        DEFAULT_KNOCK_AFTER_SECONDS, DEFAULT_LISTEN_SECONDS, MAX_LISTEN_SECONDS,
+    };
+    assert_eq!(
+        parsed(&["diag", "nat-filter", "listen"]),
+        Invocation::DiagNatFilterListen {
+            place: Place::default(),
+            seconds: DEFAULT_LISTEN_SECONDS,
+            knock: None,
+            show_address: false,
+        }
+    );
+    assert_eq!(
+        parsed(&[
+            "diag",
+            "nat-filter",
+            "listen",
+            "--seconds",
+            "60",
+            "--knock-ip",
+            "203.0.113.7",
+            "--knock-after",
+            "10",
+            "--show-address",
+            "--dir",
+            "d",
+        ]),
+        Invocation::DiagNatFilterListen {
+            place: Place {
+                config: None,
+                dir: Some(PathBuf::from("d")),
+            },
+            seconds: 60,
+            knock: Some((Ipv4Addr::new(203, 0, 113, 7), 10)),
+            show_address: true,
+        }
+    );
+    // The default first knock applies when only the address is given.
+    assert_eq!(
+        parsed(&["diag", "nat-filter", "listen", "--knock-ip", "203.0.113.7"]),
+        Invocation::DiagNatFilterListen {
+            place: Place::default(),
+            seconds: DEFAULT_LISTEN_SECONDS,
+            knock: Some((Ipv4Addr::new(203, 0, 113, 7), DEFAULT_KNOCK_AFTER_SECONDS)),
+            show_address: false,
+        }
+    );
+    let longest = MAX_LISTEN_SECONDS.to_string();
+    assert!(matches!(
+        parsed(&["diag", "nat-filter", "listen", "--seconds", &longest]),
+        Invocation::DiagNatFilterListen { seconds, .. } if seconds == MAX_LISTEN_SECONDS
+    ));
+    for bad in [
+        &["diag", "nat-filter"][..],
+        &["diag", "nat-filter", "other"],
+        &["diag", "nat-filter", "listen", "--seconds", "0"],
+        &["diag", "nat-filter", "listen", "--seconds", "111"],
+        &["diag", "nat-filter", "listen", "--seconds", "soon"],
+        &["diag", "nat-filter", "listen", "--knock-ip", "not-an-ip"],
+        &[
+            "diag",
+            "nat-filter",
+            "listen",
+            "--knock-ip",
+            "1.2.3.4",
+            "--knock-after",
+            "110",
+        ],
+    ] {
+        assert!(matches!(refused(bad), ParseError::Clap(_)), "{bad:?}");
+    }
+    let orphan = refused(&["diag", "nat-filter", "listen", "--knock-after", "5"]);
+    assert!(
+        matches!(&orphan, ParseError::Value(message) if message.contains("--knock-ip")),
+        "{orphan:?}"
+    );
+    // A first knock that would come after the window ends is refused with a message.
+    let late = refused(&[
+        "diag",
+        "nat-filter",
+        "listen",
+        "--seconds",
+        "20",
+        "--knock-ip",
+        "1.2.3.4",
+    ]);
+    assert!(
+        matches!(&late, ParseError::Value(message) if message.contains("--knock-after")),
+        "{late:?}"
+    );
+}
+
+#[test]
+fn diag_nat_filter_probe_needs_a_target_and_takes_a_bounded_pause() {
+    use shaar::network::observe::{DEFAULT_PROBE_WAIT_SECONDS, MAX_PROBE_WAIT_SECONDS};
+    assert_eq!(
+        parsed(&[
+            "diag",
+            "nat-filter",
+            "probe",
+            "--target",
+            "203.0.113.7:4000"
+        ]),
+        Invocation::DiagNatFilterProbe {
+            target: "203.0.113.7:4000".parse().unwrap(),
+            wait: DEFAULT_PROBE_WAIT_SECONDS,
+        }
+    );
+    let longest = MAX_PROBE_WAIT_SECONDS.to_string();
+    assert!(matches!(
+        parsed(&[
+            "diag",
+            "nat-filter",
+            "probe",
+            "--target",
+            "203.0.113.7:4000",
+            "--wait",
+            &longest,
+        ]),
+        Invocation::DiagNatFilterProbe { wait, .. } if wait == MAX_PROBE_WAIT_SECONDS
+    ));
+    for bad in [
+        &["diag", "nat-filter", "probe"][..],
+        &["diag", "nat-filter", "probe", "--target", "203.0.113.7"],
+        &["diag", "nat-filter", "probe", "--target", "[::1]:4000"],
+        &[
+            "diag",
+            "nat-filter",
+            "probe",
+            "--target",
+            "1.2.3.4:4000",
+            "--wait",
+            "0",
+        ],
+        &[
+            "diag",
+            "nat-filter",
+            "probe",
+            "--target",
+            "1.2.3.4:4000",
+            "--wait",
+            "101",
+        ],
+    ] {
+        assert!(matches!(refused(bad), ParseError::Clap(_)), "{bad:?}");
+    }
+}
+
+#[tokio::test]
+async fn diag_nat_filter_probe_reports_both_phases_and_refuses_a_target_with_port_zero() {
+    let sink = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let target = sink.local_addr().unwrap().to_string();
+    let lines = run(&[
+        "diag",
+        "nat-filter",
+        "probe",
+        "--target",
+        &target,
+        "--wait",
+        "1",
+    ])
+    .await
+    .unwrap();
+    assert_eq!(
+        lines,
+        [
+            "nat-filter probe phase=A sent=3",
+            "nat-filter probe phase=B sent=3"
+        ]
+    );
+    let refused = run(&["diag", "nat-filter", "probe", "--target", "127.0.0.1:0"])
+        .await
+        .unwrap_err();
+    assert!(refused.contains("unicast IPv4 address"), "{refused}");
+}
+
+#[tokio::test]
+async fn diag_nat_filter_listen_needs_the_bootstrap_hosts_of_a_public_configuration() {
+    let fixture = Fixture::new();
+    run(&["init", "--dir", fixture.dir(), "--private"])
+        .await
+        .unwrap();
+    let direct_only = run(&["diag", "nat-filter", "listen", "--dir", fixture.dir()])
+        .await
+        .unwrap_err();
+    assert!(
+        direct_only.contains("no DHT bootstrap hosts"),
+        "{direct_only}"
+    );
 }
 
 #[tokio::test]

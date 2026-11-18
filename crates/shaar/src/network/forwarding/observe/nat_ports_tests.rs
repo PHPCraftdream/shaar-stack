@@ -7,10 +7,15 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 
 use super::{
-    MAX_SOCKETS, distinct_hosts, external_port, measure, ping_packet, summary, top_level_bytes,
+    MAX_SOCKETS, distinct_hosts, external_endpoint, learn_external, measure, ping_packet, summary,
+    top_level_bytes,
 };
 
 const WAIT: Duration = Duration::from_millis(400);
+
+fn external_port(packet: &[u8], transaction: [u8; 2]) -> Option<u16> {
+    external_endpoint(packet, transaction).map(|seen| seen.port())
+}
 
 /// A response of a bootstrap node that reports `ip:port` for the sender.
 fn reply(transaction: [u8; 2], ip: Ipv4Addr, port: u16) -> Vec<u8> {
@@ -38,6 +43,15 @@ fn the_ping_is_a_bencoded_query_with_the_id_and_the_transaction() {
 fn a_matching_response_reports_the_external_port() {
     let packet = reply([3, 4], Ipv4Addr::new(1, 2, 3, 4), 9653);
     assert_eq!(external_port(&packet, [3, 4]), Some(9653));
+}
+
+#[test]
+fn a_matching_response_reports_the_external_address_too() {
+    let packet = reply([3, 4], Ipv4Addr::new(1, 2, 3, 4), 9653);
+    assert_eq!(
+        external_endpoint(&packet, [3, 4]),
+        Some(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 9653))
+    );
 }
 
 #[test]
@@ -188,7 +202,9 @@ fn field(line: &str, name: &str) -> String {
 async fn every_socket_is_measured_against_both_hosts_and_the_ports_are_printed() {
     let (first, one) = host(0, false).await;
     let (second, two) = host(0, false).await;
-    let lines = measure(&[first, second], 3, WAIT).await.expect("measured");
+    let lines = measure(&[first, second], 3, WAIT, false)
+        .await
+        .expect("measured");
     assert_eq!(
         lines.len(),
         3 * 2 + 1,
@@ -213,7 +229,9 @@ async fn every_socket_is_measured_against_both_hosts_and_the_ports_are_printed()
 async fn a_host_that_moves_the_port_makes_the_mapping_dependent() {
     let (first, one) = host(0, false).await;
     let (second, two) = host(1000, false).await;
-    let lines = measure(&[first, second], 2, WAIT).await.expect("measured");
+    let lines = measure(&[first, second], 2, WAIT, false)
+        .await
+        .expect("measured");
     let last = lines.last().expect("summary");
     assert!(last.contains("endpoint_independent=no"), "{last}");
     one.abort();
@@ -223,7 +241,7 @@ async fn a_host_that_moves_the_port_makes_the_mapping_dependent() {
 #[tokio::test]
 async fn replies_with_a_wrong_transaction_or_from_another_socket_are_ignored() {
     let (first, one) = host(0, true).await;
-    let lines = measure(&[first], 2, WAIT).await.expect("measured");
+    let lines = measure(&[first], 2, WAIT, false).await.expect("measured");
     for line in &lines[..2] {
         assert_eq!(
             field(line, "local_port"),
@@ -244,7 +262,7 @@ async fn a_silent_host_is_reported_as_none_within_the_wait() {
         panic!("an IPv4 socket");
     };
     let started = std::time::Instant::now();
-    let lines = measure(&[answering, silent_address], 2, WAIT)
+    let lines = measure(&[answering, silent_address], 2, WAIT, false)
         .await
         .expect("measured");
     assert!(started.elapsed() < WAIT * 2 * 2 + Duration::from_secs(2));
@@ -265,8 +283,68 @@ async fn a_silent_host_is_reported_as_none_within_the_wait() {
 #[tokio::test]
 async fn no_hosts_and_a_bad_socket_count_are_refused() {
     let (address, one) = host(0, false).await;
-    assert!(measure(&[], 3, WAIT).await.is_err());
-    assert!(measure(&[address], 0, WAIT).await.is_err());
-    assert!(measure(&[address], MAX_SOCKETS + 1, WAIT).await.is_err());
+    assert!(measure(&[], 3, WAIT, false).await.is_err());
+    assert!(measure(&[address], 0, WAIT, false).await.is_err());
+    assert!(
+        measure(&[address], MAX_SOCKETS + 1, WAIT, false)
+            .await
+            .is_err()
+    );
     one.abort();
+}
+
+#[tokio::test]
+async fn the_external_address_is_printed_only_when_asked() {
+    let (first, one) = host(0, false).await;
+    let hidden = measure(&[first], 2, WAIT, false).await.expect("measured");
+    assert!(hidden.iter().all(|line| !line.contains("external_ip")));
+    let shown = measure(&[first], 2, WAIT, true).await.expect("measured");
+    for line in &shown[..2] {
+        assert_eq!(field(line, "external_ip"), "127.0.0.1", "{line}");
+    }
+    assert!(!shown.last().expect("summary").contains("127.0.0.1"));
+    one.abort();
+}
+
+#[tokio::test]
+async fn an_answering_host_names_the_external_endpoint_of_the_socket() {
+    let (silent_host, quiet) = {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("silent host");
+        let SocketAddr::V4(address) = socket.local_addr().expect("address") else {
+            panic!("an IPv4 socket");
+        };
+        (address, socket)
+    };
+    let (answering, one) = host(0, false).await;
+    let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("socket");
+    let local = socket.local_addr().expect("local").port();
+    let seen = learn_external(&socket, &[silent_host, answering], WAIT)
+        .await
+        .expect("the answering host is enough");
+    assert_eq!((*seen.ip(), seen.port()), (Ipv4Addr::LOCALHOST, local));
+    one.abort();
+    drop(quiet);
+}
+
+#[tokio::test]
+async fn no_answer_in_any_round_leaves_the_external_endpoint_unknown() {
+    let silent = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("silent host");
+    let SocketAddr::V4(silent_address) = silent.local_addr().expect("address") else {
+        panic!("an IPv4 socket");
+    };
+    let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("socket");
+    let started = std::time::Instant::now();
+    assert_eq!(
+        learn_external(&socket, &[silent_address], Duration::from_millis(100)).await,
+        None
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
 }

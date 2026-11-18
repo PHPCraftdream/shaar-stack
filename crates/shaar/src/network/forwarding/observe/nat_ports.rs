@@ -1,7 +1,8 @@
 //! Operator measurement of the NAT in front of this machine (leaf NAT-3a): the external UDP port
 //! that a few fresh sockets get when they talk to the Mainline bootstrap hosts, the pattern of
-//! those ports and whether they depend on the destination. Ports and counts only: no address is
-//! printed, no key is read, and the traffic is one ping per socket and host.
+//! those ports and whether they depend on the destination. Ports and counts only unless the
+//! operator asks for the external address (`show_address`): no key is read, and the traffic is one
+//! ping per socket and host.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -24,18 +25,24 @@ const RESOLVE_WAIT: Duration = Duration::from_secs(5);
 /// Distinct bootstrap hosts each socket pings (two, to see whether the port depends on the host).
 const HOSTS: usize = 2;
 const MAX_PACKET: usize = 1500;
+/// Ping rounds of [`learn_external`] before it gives up.
+const ROUNDS: u8 = 3;
 /// Deepest nesting the reply walker follows.
 const MAX_DEPTH: u8 = 8;
 
 /// Measures `sockets` fresh sockets against the bootstrap hosts of `network` and returns the lines
 /// to print.
-pub async fn nat_ports(network: &MainlineNetwork, sockets: u8) -> Result<Vec<String>, String> {
+pub async fn nat_ports(
+    network: &MainlineNetwork,
+    sockets: u8,
+    show_address: bool,
+) -> Result<Vec<String>, String> {
     let hosts = bootstrap_hosts(network).await;
-    measure(&hosts, sockets, ANSWER_WAIT).await
+    measure(&hosts, sockets, ANSWER_WAIT, show_address).await
 }
 
 /// The first `HOSTS` distinct bootstrap hosts: numeric entries first, then resolved names.
-async fn bootstrap_hosts(network: &MainlineNetwork) -> Vec<SocketAddrV4> {
+pub(crate) async fn bootstrap_hosts(network: &MainlineNetwork) -> Vec<SocketAddrV4> {
     let mut found: Vec<SocketAddrV4> = network.bootstrap().to_vec();
     for host in network.hosts() {
         let looked_up = timeout(
@@ -70,6 +77,7 @@ pub(crate) async fn measure(
     hosts: &[SocketAddrV4],
     sockets: u8,
     wait: Duration,
+    show_address: bool,
 ) -> Result<Vec<String>, String> {
     if hosts.is_empty() {
         return Err(
@@ -96,27 +104,36 @@ pub(crate) async fn measure(
             .port();
         let answers = ask(socket, hosts, index, wait).await;
         for (host, answer) in answers.iter().enumerate() {
-            let external = answer.map_or_else(|| "none".to_owned(), |port| port.to_string());
+            let external = answer.map_or_else(|| "none".to_owned(), |seen| seen.port().to_string());
+            let address = match answer {
+                Some(seen) if show_address => format!(" external_ip={}", seen.ip()),
+                _ => String::new(),
+            };
             lines.push(format!(
-                "nat-ports socket={} local_port={local} host={} external_port={external}",
+                "nat-ports socket={} local_port={local} host={} external_port={external}{address}",
                 index + 1,
                 host + 1
             ));
         }
         locals.push(local);
-        seen.push(answers);
+        seen.push(
+            answers
+                .iter()
+                .map(|answer| answer.map(|a| a.port()))
+                .collect(),
+        );
     }
     lines.push(summary(&locals, &seen));
     Ok(lines)
 }
 
-/// Pings every host from `socket` and collects the reported ports, in host order.
+/// Pings every host from `socket` and collects the reported endpoints, in host order.
 async fn ask(
     socket: &UdpSocket,
     hosts: &[SocketAddrV4],
     index: usize,
     wait: Duration,
-) -> Vec<Option<u16>> {
+) -> Vec<Option<SocketAddrV4>> {
     let id = random_id();
     for (host, address) in hosts.iter().enumerate() {
         // A failed send only leaves that host unanswered.
@@ -136,12 +153,43 @@ async fn ask(
             continue;
         };
         if let Some(host) = hosts.iter().position(|address| *address == from)
-            && let Some(port) = external_port(&buffer[..length], transaction(index, host))
+            && let Some(seen) = external_endpoint(&buffer[..length], transaction(index, host))
         {
-            answers[host] = Some(port);
+            answers[host] = Some(seen);
         }
     }
     answers
+}
+
+/// The endpoint a bootstrap host reports for `socket`: pings every host, up to `ROUNDS` times, and
+/// returns the first valid report; `None` when no host answers.
+pub(crate) async fn learn_external(
+    socket: &UdpSocket,
+    hosts: &[SocketAddrV4],
+    wait: Duration,
+) -> Option<SocketAddrV4> {
+    let id = random_id();
+    let mut buffer = [0_u8; MAX_PACKET];
+    for _ in 0..ROUNDS {
+        for (host, address) in hosts.iter().enumerate() {
+            let _ = socket
+                .send_to(&ping_packet(&id, transaction(0, host)), address)
+                .await;
+        }
+        let deadline = Instant::now() + wait;
+        while let Ok(Ok((length, from))) = timeout_at(deadline, socket.recv_from(&mut buffer)).await
+        {
+            let SocketAddr::V4(from) = from else {
+                continue;
+            };
+            if let Some(host) = hosts.iter().position(|address| *address == from)
+                && let Some(seen) = external_endpoint(&buffer[..length], transaction(0, host))
+            {
+                return Some(seen);
+            }
+        }
+    }
+    None
 }
 
 /// One socket and one host name a distinct two-byte transaction.
@@ -173,9 +221,9 @@ pub(crate) fn ping_packet(id: &[u8; 20], transaction: [u8; 2]) -> Vec<u8> {
     packet
 }
 
-/// The external port a response reports for the sender (BEP 42 `ip`: four address bytes and a
+/// The external endpoint a response reports for the sender (BEP 42 `ip`: four address bytes and a
 /// big-endian port); `None` unless the packet is a response to this transaction.
-pub(crate) fn external_port(packet: &[u8], transaction: [u8; 2]) -> Option<u16> {
+pub(crate) fn external_endpoint(packet: &[u8], transaction: [u8; 2]) -> Option<SocketAddrV4> {
     // Only a whole, well-formed bencoded value is read: a cut or padded packet is refused.
     if skip(packet, 0, 0)? != packet.len() {
         return None;
@@ -185,11 +233,12 @@ pub(crate) fn external_port(packet: &[u8], transaction: [u8; 2]) -> Option<u16> 
     }
     let ip = top_level_bytes(packet, b"ip")?;
     let port = u16::from_be_bytes([*ip.get(4)?, *ip.get(5)?]);
-    (ip.len() == 6 && port != 0).then_some(port)
+    (ip.len() == 6 && port != 0)
+        .then(|| SocketAddrV4::new(Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]), port))
 }
 
 /// The byte-string value of `key` in the top-level dictionary of a bencoded packet.
-fn top_level_bytes<'a>(packet: &'a [u8], key: &[u8]) -> Option<&'a [u8]> {
+pub(crate) fn top_level_bytes<'a>(packet: &'a [u8], key: &[u8]) -> Option<&'a [u8]> {
     if packet.first() != Some(&b'd') {
         return None;
     }
