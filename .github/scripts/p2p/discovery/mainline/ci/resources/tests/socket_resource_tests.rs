@@ -474,3 +474,70 @@ async fn original_deadline_is_enforced_at_real_send_after_flush_cancellation() {
         assert_eq!(socket.owned_test_state(), Some((0, 0, 0, 0)));
     }
 }
+
+#[test]
+fn the_request_timeout_starts_at_the_floor_and_is_capped() {
+    let mut requests = super::InflightRequests::new();
+    assert_eq!(requests.request_timeout(), Duration::from_millis(500));
+    requests.estimated_rtt = Duration::from_secs(30);
+    requests.deviation_rtt = Duration::from_secs(10);
+    assert_eq!(requests.request_timeout(), super::MAX_REQUEST_TIMEOUT);
+    assert_eq!(super::MAX_REQUEST_TIMEOUT, Duration::from_secs(2));
+}
+
+#[test]
+fn expired_requests_cannot_stretch_the_request_timeout_past_the_cap() {
+    // Leaf FIX-3d: an expired request feeds the RTT estimate with an age at least as long as the
+    // timeout, so the timeout used to climb with every dead node of a lookup round.
+    let mut requests = super::InflightRequests::new();
+    let to = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9);
+    let age = Duration::from_millis(2_500);
+    for _ in 0..40 {
+        let tid = requests.add(to);
+        let index = requests.find_by_tid(tid).expect("registered request");
+        requests.requests[index].sent_at = std::time::Instant::now()
+            .checked_sub(age)
+            .expect("monotonic clock reads more than the request age");
+        assert!(requests.get(tid).is_none(), "a request older than the cap is expired");
+        assert!(requests.remove(tid).is_some());
+        assert!(requests.request_timeout() <= super::MAX_REQUEST_TIMEOUT);
+    }
+    let fresh = requests.add(to);
+    assert!(requests.get(fresh).is_some(), "the cap does not expire a fresh request");
+}
+
+#[tokio::test]
+async fn the_owned_socket_reports_its_request_timeout_and_round_cap() {
+    let socket = owned_socket();
+    assert_eq!(socket.owned_request_timeout(), Duration::from_millis(500));
+    assert_eq!(socket.owned_get_round_cap(), 6);
+}
+
+#[test]
+fn an_owned_get_operation_admits_six_rounds_and_then_refuses() {
+    let mut resources = super::resources::SocketResources::default();
+    let operation = resources.allocate_operation().unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    resources.register_owned_deadline(operation, deadline).unwrap();
+    let cap = super::resources::OWNED_GET_ROUNDS;
+    assert_eq!(cap, 6);
+    for round in 1..=cap {
+        assert_eq!(resources.admit_owned_get_round(operation), Ok(round));
+    }
+    assert_eq!(
+        resources.admit_owned_get_round(operation),
+        Err(ResourceError::DeadlineExceeded)
+    );
+    assert_eq!(resources.owned_get_rounds(operation), cap);
+    assert_eq!(resources.owned_deadline(operation), Some(deadline));
+}
+
+#[test]
+fn an_operation_without_a_registered_deadline_admits_no_round() {
+    let mut resources = super::resources::SocketResources::default();
+    let operation = resources.allocate_operation().unwrap();
+    assert_eq!(
+        resources.admit_owned_get_round(operation),
+        Err(ResourceError::DeadlineExceeded)
+    );
+}

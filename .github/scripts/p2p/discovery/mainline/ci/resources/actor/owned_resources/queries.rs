@@ -50,7 +50,7 @@ impl Actor {
                 owner.operation_for(target, &mut self.socket, deadline)?
             }
         };
-        if self.socket.owned_get_rounds(operation) >= 3 {
+        if self.socket.owned_get_rounds(operation) >= self.socket.owned_get_round_cap() {
             return Err(ResourceError::DeadlineExceeded);
         }
         self.owned_resources

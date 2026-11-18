@@ -32,6 +32,10 @@ mod tests {
 /// Most in-flight RPCs one owned operation may hold; a query round must stay within it.
 pub(crate) const OPERATION_RPC_CAP: usize = 16;
 
+/// Most query rounds one owned GET operation may run (leaf FIX-3d; three before it). A round
+/// asks at most `OPERATION_RPC_CAP` nodes, so this bounds the requests of one operation.
+pub(crate) const OWNED_GET_ROUNDS: u8 = 6;
+
 #[derive(Debug)]
 struct RpcOwner {
     operation: OperationId,
@@ -111,7 +115,7 @@ impl SocketResources {
         let Some((_, rounds)) = self.deadlines.get_mut(&operation) else {
             return Err(ResourceError::DeadlineExceeded);
         };
-        if *rounds >= 3 {
+        if *rounds >= OWNED_GET_ROUNDS {
             return Err(ResourceError::DeadlineExceeded);
         }
         *rounds += 1;

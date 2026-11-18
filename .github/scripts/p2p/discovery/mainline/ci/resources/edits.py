@@ -46,6 +46,14 @@ def edits() -> dict[str, list[tuple[str, str]]]:
                 "use super::config::Config;\n#[path = \"socket/resources.rs\"]\nmod resources;\n#[path = \"socket/owned.rs\"]\nmod owned_socket;\n",
             ),
             (
+                "const MIN_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);\n",
+                "const MIN_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);\n/// Longest a request may stay unanswered. Expired requests feed the RTT estimate with samples at\n/// least as long as the timeout, so without a cap the timeout grows with every dead node.\nconst MAX_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);\n",
+            ),
+            (
+                "        self.estimated_rtt + self.deviation_rtt.mul_f64(4.0)\n    }\n",
+                "        (self.estimated_rtt + self.deviation_rtt.mul_f64(4.0)).min(MAX_REQUEST_TIMEOUT)\n    }\n",
+            ),
+            (
                 "    outbox: VecDeque<(Vec<u8>, SocketAddr)>,\n",
                 "    outbox: VecDeque<(Vec<u8>, SocketAddr)>,\n    owned: Option<owned_socket::OwnedSocket>,\n",
             ),

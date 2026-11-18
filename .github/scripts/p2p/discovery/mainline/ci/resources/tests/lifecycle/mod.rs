@@ -531,7 +531,9 @@ async fn retained_put_get_recreation_keeps_operation_round_budget() {
         })
     ));
 
-    for round in 1..=3 {
+    let cap = actor.socket.owned_get_round_cap();
+    assert_eq!(cap, 6);
+    for round in 1..=cap {
         actor
             .owned_get_until(GetRequestSpecific::from(&request), None, deadline)
             .expect("live GET coalesces without consuming another round");
@@ -579,7 +581,7 @@ async fn retained_put_get_recreation_keeps_operation_round_budget() {
             "actual PUT RPC remains live"
         );
         assert_eq!(actor.socket.owned_deadline(operation), Some(deadline));
-        if round < 3 {
+        if round < cap {
             actor
                 .owned_get_until(GetRequestSpecific::from(&request), None, deadline)
                 .expect("recreate GET on retained PUT operation");
