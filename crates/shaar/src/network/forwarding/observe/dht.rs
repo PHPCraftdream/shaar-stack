@@ -27,7 +27,7 @@ const MESSAGES: [(&str, &str); 9] = [
 ];
 
 /// The numeric fields printed, in this order, when an event carries them.
-const COUNTERS: [&str; 18] = [
+const COUNTERS: [&str; 19] = [
     "op",
     "stage",
     "total_ms",
@@ -46,6 +46,7 @@ const COUNTERS: [&str; 18] = [
     "candidates",
     "inflight",
     "room",
+    "timeout_ms",
 ];
 
 /// Longest error variant name printed.
@@ -216,7 +217,8 @@ mod tests {
         let lines = captured(|| {
             tracing::debug!(
                 target: "n0_mainline::core::iterative_query",
-                round = ?2_u8, candidates = ?17_usize, room = ?160_usize, "Owned GET round"
+                round = ?2_u8, candidates = ?17_usize, room = ?160_usize, timeout_ms = ?2_000_u128,
+                "Owned GET round"
             );
             tracing::debug!(
                 target: "n0_mainline::core::iterative_query",
@@ -231,7 +233,7 @@ mod tests {
         assert_eq!(
             tails,
             [
-                "round=2 candidates=17 room=160",
+                "round=2 candidates=17 room=160 timeout_ms=2000",
                 "closest=20 visited=20 round=1 candidates=3 inflight=4 room=0",
             ]
         );

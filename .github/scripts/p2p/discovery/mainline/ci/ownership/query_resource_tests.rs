@@ -133,8 +133,24 @@ fn owned_socket() -> KrpcSocket {
     socket
 }
 
+/// Receives the request a visit sent to `capture` and answers it through the socket.
+async fn answer_request(
+    socket: &mut KrpcSocket,
+    capture: &tokio::net::UdpSocket,
+    from: SocketAddrV4,
+) {
+    let mut buffer = [0_u8; 4096];
+    socket.flush_owned().await;
+    let (length, _) = tokio::time::timeout(Duration::from_secs(2), capture.recv_from(&mut buffer))
+        .await
+        .expect("request timeout")
+        .expect("receive request");
+    let request = crate::common::Message::from_bytes(&buffer[..length]).expect("decode request");
+    assert!(socket.accept_owned_response(request.transaction_id, from));
+}
+
 #[tokio::test]
-async fn real_owned_get_runs_at_most_three_rounds_then_finishes() {
+async fn real_owned_get_runs_at_most_the_round_cap_then_finishes() {
     let budget = Arc::new(StoreBudget::default());
     let mut socket = owned_socket();
     let mut query = query(&mut socket, &budget);
@@ -142,9 +158,11 @@ async fn real_owned_get_runs_at_most_three_rounds_then_finishes() {
     let deadline = socket
         .owned_deadline(operation)
         .expect("registered operation deadline");
+    let cap = usize::from(socket.owned_get_round_cap());
+    assert_eq!(cap, 6);
 
     let mut captures = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..=cap {
         captures.push(
             tokio::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
                 .await
@@ -160,62 +178,37 @@ async fn real_owned_get_runs_at_most_three_rounds_then_finishes() {
             },
         )
         .collect();
-    let mut buffer = [0_u8; 4096];
 
     query.visit(&mut socket, destinations[0]);
-    socket.flush_owned().await;
-    let (length, _) =
-        tokio::time::timeout(Duration::from_secs(2), captures[0].recv_from(&mut buffer))
-            .await
-            .expect("first request timeout")
-            .expect("receive first request");
-    let first =
-        crate::common::Message::from_bytes(&buffer[..length]).expect("decode first request");
-    assert!(socket.accept_owned_response(first.transaction_id, destinations[0]));
+    answer_request(&mut socket, &captures[0], destinations[0]).await;
+    assert_eq!(socket.owned_get_rounds(operation), 1);
 
     let base = tokio::time::Instant::now();
-    query.add_candidate(Node::new(Id::from([2_u8; 20]), destinations[1]));
-    query.visit_closest_at(&mut socket, base);
-    let second_round = base + Duration::from_millis(100);
-    if let Some(next) = query.owned_next_round() {
-        assert!(next <= second_round);
+    for round in 1..cap {
+        query.add_candidate(Node::new(
+            Id::from([round as u8 + 1; 20]),
+            destinations[round],
+        ));
+        let scheduled = base + Duration::from_secs(round as u64);
+        query.visit_closest_at(&mut socket, scheduled);
+        if let Some(next) = query.owned_next_round() {
+            assert!(next <= scheduled + Duration::from_millis(200));
+        }
+        query.visit_closest_at(&mut socket, scheduled + Duration::from_millis(200));
+        answer_request(&mut socket, &captures[round], destinations[round]).await;
+        assert_eq!(usize::from(socket.owned_get_rounds(operation)), round + 1);
     }
-    query.visit_closest_at(&mut socket, second_round);
-    socket.flush_owned().await;
-    let (length, _) =
-        tokio::time::timeout(Duration::from_secs(2), captures[1].recv_from(&mut buffer))
-            .await
-            .expect("second request timeout")
-            .expect("receive second request");
-    let second =
-        crate::common::Message::from_bytes(&buffer[..length]).expect("decode second request");
-    assert!(socket.accept_owned_response(second.transaction_id, destinations[1]));
 
-    query.add_candidate(Node::new(Id::from([3_u8; 20]), destinations[2]));
-    let third_schedule = base + Duration::from_millis(101);
-    query.visit_closest_at(&mut socket, third_schedule);
-    if let Some(next) = query.owned_next_round() {
-        assert!(next <= base + Duration::from_millis(301));
-    }
-    query.visit_closest_at(&mut socket, base + Duration::from_millis(301));
-    socket.flush_owned().await;
-    let (length, _) =
-        tokio::time::timeout(Duration::from_secs(2), captures[2].recv_from(&mut buffer))
-            .await
-            .expect("third request timeout")
-            .expect("receive third request");
-    let third =
-        crate::common::Message::from_bytes(&buffer[..length]).expect("decode third request");
-    assert!(socket.accept_owned_response(third.transaction_id, destinations[2]));
-
-    query.add_candidate(Node::new(Id::from([4_u8; 20]), destinations[3]));
-    query.visit_closest_at(&mut socket, base + Duration::from_secs(1));
+    query.add_candidate(Node::new(Id::from([cap as u8 + 1; 20]), destinations[cap]));
+    query.visit_closest_at(&mut socket, base + Duration::from_secs(cap as u64));
     assert_eq!(query.owner_error(), None);
     assert!(query.is_done(&socket));
+    assert_eq!(usize::from(socket.owned_get_rounds(operation)), cap);
     assert_eq!(socket.owned_test_state().unwrap().2, 0);
     assert_eq!(socket.owned_deadline(operation), Some(deadline));
+    let mut buffer = [0_u8; 4096];
     assert_eq!(
-        captures[3].try_recv_from(&mut buffer).unwrap_err().kind(),
+        captures[cap].try_recv_from(&mut buffer).unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock
     );
 }
@@ -260,7 +253,7 @@ async fn an_admitted_owned_round_is_traced_with_its_candidates_and_room() {
     let lines = lines.lock().unwrap();
     assert!(lines.iter().any(|line| line.starts_with("Owned GET round")
         && line.contains(" round=1") && line.contains(" candidates=1")
-        && line.contains(" room=")), "{lines:?}");
+        && line.contains(" room=") && line.contains(" timeout_ms=500")), "{lines:?}");
 }
 
 #[tokio::test]

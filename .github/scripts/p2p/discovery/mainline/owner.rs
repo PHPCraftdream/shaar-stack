@@ -22,8 +22,9 @@ use crate::resource::{
 };
 
 /// The longest an owned GET or PUT may live from its entry, whatever deadline the caller gives.
-/// A live lookup takes about 8 s (three rounds, each waiting for its slowest node) and a PUT
-/// adds its store phase, so ten seconds could never complete a publication on the public DHT.
+/// A live lookup took about 8 s over three rounds, each waiting for its slowest node (it may
+/// run six now), and a PUT adds its store phase, so ten seconds could never complete a
+/// publication on the public DHT.
 const OPERATION_CAP: Duration = Duration::from_secs(45);
 
 /// A cloneable, limited capability for using an owned DHT actor.
