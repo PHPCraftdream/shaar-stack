@@ -278,21 +278,26 @@ async fn a_scan_with_real_endpoints_finds_the_real_port_inside_the_ring_and_conn
         },
         |address| async move { dialer.connect(peer, address).await },
     );
-    // The server accepts like its accept loop does: a closed probe connection is not a session.
+    // The server accepts like its accept loop does: for as long as the scan runs, and a closed
+    // probe connection ends no more than its own accept.
     let accept = async {
+        // Accepted sessions are kept: dropping one would close its connection under the dial.
+        let mut kept = Vec::new();
         loop {
             if let Ok(session) = server.accept().await {
-                break session;
+                kept.push(session);
             }
         }
     };
-    let (dialed, accepted) = tokio::time::timeout(Duration::from_secs(10), async {
-        tokio::join!(scan, accept)
+    let dialed = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::select! {
+            result = scan => result,
+            () = accept => unreachable!("the accept loop never ends"),
+        }
     })
     .await
-    .expect("the scan and the accept finish within ten seconds");
-    dialed.expect("the scan found the real port and dialed it");
-    drop(accepted);
+    .expect("the scan finishes within ten seconds");
+    drop(dialed.expect("the scan found the real port and dialed it"));
     server.close().await.expect("server close");
 }
 
