@@ -297,7 +297,7 @@ approved integration of the exact pinned candidate and reviewed lifecycle repair
 after P09, with Linux/Windows GitHub CI. The user also made controlled blockade
 resilience mandatory and conditionally approved a bounded public smoke; exact
 peer endpoints still require agreement before any contact. Record decisions and
-limits in [the permission record](v1-focus.md#2026-11-04-permission-decisions-and-remaining-gate).
+limits in [the permission record](history/v1-focus-implemented-sections.md#2026-11-04-permission-decisions-and-remaining-gate).
 Owned fixtures are not public interoperability proof. This is not permission for
 local execution, TUN/root/routes or a bypass of any subsequent tool refusal.
 
