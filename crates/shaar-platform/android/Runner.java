@@ -3,6 +3,7 @@ package dev.shaar.harness;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import android.view.WindowManager;
 import android.widget.TextView;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -29,6 +30,11 @@ public final class Runner extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        // A sleeping or locked device moves the app to the background, where Android drops its
+        // network capability (seen in live attempts 14 and 15): keep the harness on screen.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         view = new TextView(this);
         view.setText("Shaar harness: idle\n");
         setContentView(view);

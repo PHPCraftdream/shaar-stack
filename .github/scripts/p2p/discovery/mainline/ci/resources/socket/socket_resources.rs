@@ -36,6 +36,10 @@ pub(crate) const OPERATION_RPC_CAP: usize = 16;
 /// asks at most `OPERATION_RPC_CAP` nodes, so this bounds the requests of one operation.
 pub(crate) const OWNED_GET_ROUNDS: u8 = 6;
 
+/// Rounds of the maintenance operation (the node's own-address self-lookup). Its window is
+/// bound to 10 s and publication waits for it, so six slow rounds do not fit (leaf FIX-3f).
+pub(crate) const OWNED_MAINTENANCE_ROUNDS: u8 = 3;
+
 #[derive(Debug)]
 struct RpcOwner {
     operation: OperationId,

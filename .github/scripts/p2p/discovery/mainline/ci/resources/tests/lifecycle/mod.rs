@@ -531,7 +531,7 @@ async fn retained_put_get_recreation_keeps_operation_round_budget() {
         })
     ));
 
-    let cap = actor.socket.owned_get_round_cap();
+    let cap = actor.socket.owned_round_cap(false);
     assert_eq!(cap, 6);
     for round in 1..=cap {
         actor

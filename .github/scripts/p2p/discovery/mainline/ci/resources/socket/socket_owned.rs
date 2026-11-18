@@ -6,7 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddrV4;
 use std::time::{Duration, Instant};
 
-use super::resources::{OWNED_GET_ROUNDS, SocketResources};
+use super::resources::{OWNED_GET_ROUNDS, OWNED_MAINTENANCE_ROUNDS, SocketResources};
 use crate::common::{ErrorSpecific, MessageType, RequestSpecific, ResponseSpecific};
 use crate::resource::{OperationId, ResourceError};
 
@@ -123,9 +123,14 @@ impl super::KrpcSocket {
             .map_or(0, |owned| owned.resources.owned_get_rounds(operation))
     }
 
-    /// Query rounds one owned GET operation may run.
-    pub(crate) fn owned_get_round_cap(&self) -> u8 {
-        OWNED_GET_ROUNDS
+    /// Query rounds an owned operation may run: the maintenance operation (a lookup of the
+    /// node's own ID) keeps three, any other GET gets six.
+    pub(crate) fn owned_round_cap(&self, maintenance: bool) -> u8 {
+        if maintenance {
+            OWNED_MAINTENANCE_ROUNDS
+        } else {
+            OWNED_GET_ROUNDS
+        }
     }
 
     /// How long a request may stay unanswered before the socket drops it (capped at 2 s).
