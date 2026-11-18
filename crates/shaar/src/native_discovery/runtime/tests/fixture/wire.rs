@@ -341,6 +341,36 @@ impl LoopbackPeer {
         }
     }
 
+    /// Reads whatever is queued until the socket has been quiet for `quiet`: lookups are
+    /// answered as usual, PUTs are dropped unanswered and not retained. A capture that follows sees
+    /// only a PUT sent after this call, that is a PUT in flight now and not an attempt that died
+    /// while nobody was reading.
+    pub(crate) async fn discard_queued(&mut self, quiet: std::time::Duration) {
+        loop {
+            let mut packet = [0; MAX_PACKET];
+            let Ok(Ok((length, source))) =
+                tokio::time::timeout(quiet, self.socket.recv_from(&mut packet)).await
+            else {
+                return;
+            };
+            let parsed: Value = serde_bencode::from_bytes(&packet[..length])
+                .expect("bounded KRPC while discarding");
+            assert_eq!(bytes_field(&parsed, b"y"), Some(b"q".as_slice()));
+            let transaction = bytes_field(&parsed, b"t").expect("transaction id");
+            let kind = match bytes_field(&parsed, b"q").expect("KRPC method") {
+                b"put" => continue,
+                b"get" => ReplyKind::Get,
+                b"find_node" => ReplyKind::FindNode,
+                b"ping" => ReplyKind::Ping,
+                other => panic!(
+                    "unexpected Mainline query: {:?}",
+                    String::from_utf8_lossy(other)
+                ),
+            };
+            self.reply(source, response(transaction, kind)).await;
+        }
+    }
+
     pub(crate) async fn capture_put(&mut self) -> (SocketAddr, Vec<u8>, CapturedPut) {
         let captured = self.serve_puts(1).await;
         let (source, transaction) = self
