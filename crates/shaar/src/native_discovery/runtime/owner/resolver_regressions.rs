@@ -444,13 +444,11 @@ mod window_line_tests {
     use super::super::RuntimeError;
     use super::super::resolver::{
         FAST_START_CONFIRM, FAST_START_INTERVAL, FAST_START_RETRY, Lookup, ReflexiveTally,
-        ResolveError, Window, fast_start_pause, note_rewritten_port, probe_line, rewritten_port_of,
-        window_line,
+        ResolveError, Window, fast_start_pause, probe_line, window_line,
     };
     use crate::network::observe::PortMapping;
     use n0_mainline::ResourceError;
     use std::net::{IpAddr, Ipv4Addr};
-    use std::sync::atomic::{AtomicU16, Ordering};
 
     const ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
     const MISSES: [Lookup; 3] = [
@@ -464,32 +462,7 @@ mod window_line_tests {
             lookup,
             info,
             mapping: PortMapping::Unknown,
-            rewritten_port: None,
         }
-    }
-
-    #[test]
-    fn only_a_rewritten_mainline_port_becomes_the_scan_centre() {
-        let seen = Some(std::net::SocketAddrV4::new(
-            Ipv4Addr::new(203, 0, 113, 7),
-            30_191,
-        ));
-        assert_eq!(rewritten_port_of(seen, PortMapping::Changed), Some(30_191));
-        assert_eq!(rewritten_port_of(seen, PortMapping::Kept), None);
-        assert_eq!(rewritten_port_of(seen, PortMapping::Unknown), None);
-        assert_eq!(rewritten_port_of(None, PortMapping::Changed), None);
-    }
-
-    #[test]
-    fn the_rewritten_port_is_remembered_and_an_empty_window_keeps_it() {
-        let cell = AtomicU16::new(0);
-        note_rewritten_port(&cell, None);
-        assert_eq!(cell.load(Ordering::Relaxed), 0);
-        note_rewritten_port(&cell, Some(47_287));
-        note_rewritten_port(&cell, None);
-        assert_eq!(cell.load(Ordering::Relaxed), 47_287);
-        note_rewritten_port(&cell, Some(51_000));
-        assert_eq!(cell.load(Ordering::Relaxed), 51_000);
     }
 
     #[test]

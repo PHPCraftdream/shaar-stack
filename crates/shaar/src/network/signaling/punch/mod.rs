@@ -262,29 +262,6 @@ pub(crate) fn local_candidates(local: SocketAddr, reflexive: Option<IpAddr>) -> 
     candidates
 }
 
-/// The Server's answer candidates: like [`local_candidates`], but when the NAT rewrote the port of
-/// the Mainline socket (`rewritten_port`) the reflexive IP with that port replaces the guess of
-/// the local QUIC port, which a port-rewriting NAT does not keep. It was the centre of the Client's
-/// ring scan (leaf NAT-2); the walk over the key-ordered set (leaf SET-1) has no centre, so this
-/// candidate is only a candidate now, and its retirement is the cleanup SET-1c.
-pub(crate) fn answer_candidates(
-    local: SocketAddr,
-    reflexive: Option<IpAddr>,
-    rewritten_port: Option<u16>,
-) -> Vec<SocketAddr> {
-    let (Some(ip), Some(port)) = (reflexive, rewritten_port) else {
-        return local_candidates(local, reflexive);
-    };
-    let mut candidates = Vec::with_capacity(MAX_CANDIDATES);
-    for candidate in [SocketAddr::new(ip, port), local] {
-        let canonical = SocketAddr::new(candidate.ip().to_canonical(), candidate.port());
-        if candidate_allowed(candidate) && !candidates.contains(&canonical) {
-            candidates.push(canonical);
-        }
-    }
-    candidates
-}
-
 /// Why one punch datagram was not sent. `Refused` is transient (request
 /// queue or carrier budget full, no route yet on a cold Yggdrasil path): the
 /// sender retries inside its window. `Closed` is permanent for this link.

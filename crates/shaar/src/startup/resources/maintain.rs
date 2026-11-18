@@ -73,8 +73,6 @@ pub(crate) struct Maintenance {
     pub(crate) votes: watch::Receiver<Option<std::net::IpAddr>>,
     /// Single-source reflexive hint for punch candidates only; never published.
     pub(crate) hint: watch::Receiver<Option<std::net::IpAddr>>,
-    /// The Mainline port the NAT rewrote (zero: none), for the Server's punch answer only.
-    pub(crate) rewritten_port: std::sync::Arc<std::sync::atomic::AtomicU16>,
     pub(super) stop: Option<oneshot::Sender<()>>,
     pub(super) task: Option<JoinHandle<MaintenanceExit>>,
     pub(super) watcher_stopped: Option<oneshot::Receiver<()>>,
@@ -113,7 +111,6 @@ impl Maintenance {
         let (watcher_stopped_tx, watcher_stopped) = oneshot::channel();
         let votes = owner.public_address_watch();
         let hint = owner.punch_hint_watch();
-        let rewritten_port = owner.rewritten_port_cell();
         let task = tokio::spawn(async move {
             // A fault unwinds only to the poll-boundary containment below, so
             // the owner is always handed back for the joined close.
@@ -145,7 +142,6 @@ impl Maintenance {
             commands,
             votes,
             hint,
-            rewritten_port,
             stop: Some(stop),
             task: Some(task),
             watcher_stopped: Some(watcher_stopped),

@@ -245,56 +245,16 @@ fn reflexive_none_offers_local_only() {
     assert_eq!(local_candidates(local, None), vec![local]);
 }
 
-/// Leaf NAT-2: when the NAT rewrote the Mainline socket's port, the answer names the reflexive IP
-/// with that port (a former scan centre, now only a candidate) instead of the guess of the local QUIC port.
+/// Leaf SET-1c: every offered candidate carries the port the QUIC socket is bound to (a port of the
+/// key-ordered set, possibly mapped by a router); the port a DHT node saw for the Mainline socket is
+/// never offered in its place.
 #[test]
-fn a_rewritten_mainline_port_replaces_the_local_port_guess() {
-    let local = v4([10, 0, 0, 1], 7777);
+fn every_offered_candidate_carries_the_bound_quic_port() {
+    let local = v4([10, 0, 0, 1], 48_896);
     let reflexive = Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)));
-    assert_eq!(
-        answer_candidates(local, reflexive, Some(47_287)),
-        vec![v4([8, 8, 8, 8], 47_287), local]
-    );
-}
-
-/// Without a rewritten port, or without a reflexive IP to attach it to, the answer is the
-/// unchanged candidate list.
-#[test]
-fn without_a_rewritten_port_or_a_reflexive_ip_the_answer_is_unchanged() {
-    let local = v4([10, 0, 0, 1], 7777);
-    let reflexive = Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)));
-    assert_eq!(
-        answer_candidates(local, reflexive, None),
-        local_candidates(local, reflexive)
-    );
-    assert_eq!(
-        answer_candidates(local, None, Some(47_287)),
-        local_candidates(local, None)
-    );
-}
-
-/// The answer keeps the codec's rules: a duplicate of the local address collapses and a wildcard
-/// bind is never offered.
-#[test]
-fn the_rewritten_port_candidate_follows_the_candidate_rules() {
-    let reflexive = Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)));
-    assert_eq!(
-        answer_candidates(v4([8, 8, 8, 8], 47_287), reflexive, Some(47_287)),
-        vec![v4([8, 8, 8, 8], 47_287)]
-    );
-    assert_eq!(
-        answer_candidates(v4([0, 0, 0, 0], 7777), reflexive, Some(47_287)),
-        vec![v4([8, 8, 8, 8], 47_287)]
-    );
-    assert!(answer_candidates(v4([10, 0, 0, 1], 7777), reflexive, Some(0)).len() <= MAX_CANDIDATES);
-    assert!(
-        encode(&PunchMessage {
-            kind: Kind::Answer,
-            epoch: 1,
-            candidates: answer_candidates(v4([10, 0, 0, 1], 7777), reflexive, Some(47_287)),
-        })
-        .is_some()
-    );
+    let offered = local_candidates(local, reflexive);
+    assert_eq!(offered, vec![v4([8, 8, 8, 8], 48_896), local]);
+    assert!(offered.iter().all(|candidate| candidate.port() == 48_896));
 }
 
 /// A wildcard bind is never offered itself; with a reflexive guess the guess
