@@ -172,10 +172,10 @@ mod tests {
         assert_eq!(ring_after(&first, 3), 2);
         assert_eq!(ring_after(&first, 11), 10);
         assert!(ring_after(&first, 12) > SCAN_RINGS);
-        assert!(
-            ring_after(&first, 1) > SCAN_RINGS,
-            "an earlier epoch never scans"
-        );
+        // An epoch before the first answered one is no ring in range, so nothing is scanned.
+        let earlier = ring_after(&first, 1);
+        assert!(!(1..=SCAN_RINGS).contains(&earlier), "ring {earlier}");
+        assert!(ring_addresses(public(40_000), earlier).is_empty());
     }
 
     #[test]
