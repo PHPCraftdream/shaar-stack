@@ -2192,6 +2192,7 @@ Owner words and the recorded decisions are in the decision log of [north-star](n
 | CN-3 relay | Direct path blocked in the controlled fixture, exact bytes through one relay; relay sees ciphertext only; disallowed client reaches no target | Multi-hop, UDP | Blocked |
 | CN-4 signed files | Authority-signed manifest, chunk verification, poisoned chunk rejected | Search, deletion | Blocked, right after CN-3 |
 | CN-5 Android node | The app is a relay and a client of the closed network on the local emulator | Real devices | Blocked |
+| CN-K ledger, KEY-1 key export/import, KEY-2 encrypted key start | See the leaf table of [closed network](closed-network.md) (added 2026-11-18 from the owner's answers) | Consensus, UI, hardware tokens | Blocked on the design approval |
 
 Local execution for the Android work follows the 2026-11-17 row (local build and emulator, `wnice -c 10 -m 10g`); CI keeps executing everything else, and local results are reported as local evidence.
 

@@ -1,4 +1,4 @@
-# Closed network with an authority, relays and signed files (design note, proposal)
+# Closed network with an authority, relays and signed files (design note, proposal v2 of 2026-11-18)
 
 **Status: proposal for the owner's approval.** No protocol, cryptographic or network code starts before the owner approves this note (the rule used for L3b). Written 2026-11-17 from the owner's decisions recorded in the [north-star decision log](north-star.md). Nothing here is implemented, compiled or run; items marked *verify* are assumptions about pinned dependencies that the first leaf must check against the prepared sources.
 
@@ -48,9 +48,18 @@ The client wants the authority's service. With a direct path blocked, it picks a
 
 The authority signs a manifest: name, size, chunk size, BLAKE3 root of a chunk-hash list, version, sequence, expiry. Relays holding the file serve chunks; every receiver verifies each chunk against the signed hashes, so a malicious relay can withhold but not poison. A node serves only files whose manifest verifies against the authority key. Bounds: file size, chunk size, concurrent transfers and storage per relay are fixed in the leaf. Not included: discovery of files by arbitrary names, deletion, partial-update formats, any file that the authority did not sign.
 
+## 6a. Keys, trust levels and the ledger (CN-K, owner requirement of 2026-11-18)
+
+- The authority key is the root and stays out of daily work: it signs the ledger and the countersignatures of files. Day-to-day signing uses delegated *trusted keys* that the authority creates. A relay is registered (section 4) but is never a trusted key.
+- Every trusted key has a level, a non-negative integer. Level 0 manages all keys above 0, level 1 cannot manage level 0, the authority key manages all keys. Engineer's reading, to be confirmed: a key may add, revoke or re-level only keys whose level number is greater than its own.
+- The ledger is the authority's database of these facts: an append-only, hash-chained log of signed entries (add a trusted key with its level, re-level, revoke). Each entry is signed by a key that the state built from the earlier entries allows to make it. There is no mining and no consensus: the authority is the single head. The owner's word is "blockchain"; this reading (a signed hash chain) is to be confirmed.
+- Distribution: on connect the authority sends the head, the trusted keys with their levels and the relay index; a client that lacks the ledger, or has an older head, receives the missing entries and verifies the chain from the authority key. A relay forwards the same data.
+- Files (replaces the plain rule of section 6): a manifest signed by a trusted key is *pending*. Relays and clients do not distribute a pending manifest. The authority countersigns it, on its own only after 24 hours (if the signing key is still trusted by then) or earlier by an operator command; only countersigned manifests are distributed. A manifest signed by the authority itself is distributed at once.
+- Compromise: a stolen trusted key is revoked by a higher key through a ledger entry, and its pending files never get a countersignature; a stolen authority key is the end of the network (new network, accepted in the first version).
+
 ## 7. Configuration (ktav 0.8)
 
-A `network` object gains the closed form for Server, Client and relays: `network: { closed: { authority: <64 hex>, bootstrap: [host:port] } }` next to the existing public form; the two forms are mutually exclusive in one file. Relay and file settings (`relay: { max_splices, ... }`, `files: { dir, max_bytes }`) are separate top-level objects validated by the same schema rules, errors naming the field and never a secret. Role packaging (open question 3): a relay is a Client that also serves, so `shaar-client relay` and `shaar-server allow relay ...`; no third binary.
+A `network` object gains the closed form for Server, Client and relays: `network: { closed: { authority: <64 hex>, bootstrap: [host:port] } }` next to the existing public form; the two forms are mutually exclusive in one file. Relay and file settings (`relay: { max_splices, ... }`, `files: { dir, max_bytes }`) are separate top-level objects validated by the same schema rules, errors naming the field and never a secret. Role packaging (owner answer of 2026-11-18): a relay is any client that enabled the option "I want to help" (a launch option and a configuration setting, not a separate program, no third binary). Key handling for every role: an API and commands to generate, import and export a client key (so a user can continue after a change of device), and an encrypted-start option: the key file lies on disk encrypted and the Server (and a client that has the option set) asks for a password to decrypt it at start; a plain key file keeps working.
 
 ## 8. Threat model (first version)
 
@@ -61,7 +70,9 @@ A `network` object gains the closed form for Server, Client and relays: `network
 | Relay reads or tampers with traffic | End-to-end encryption between client and authority; tamper means the stream fails |
 | Relay as an open proxy | Forwards only toward the authority and its listed servers |
 | Replay of an old index or manifest | Sequence numbers and expiry checked against the last seen value |
-| Authority key compromise | Not handled in v1: new network |
+| Authority key compromise | Not handled in v1: new network (accepted by the owner) |
+| Trusted key stolen | Revocation entry in the ledger by a higher key; its files stay pending (24 h) and are never countersigned after revocation |
+| Key file stolen from a disk | Optional passphrase-encrypted key file; the password is asked at start |
 | Flood of registrations or records | Registration allowlist, per-key and total bounds, rate limits |
 | Traffic analysis by a relay | Accepted: keys, timing and volume are visible to it |
 
@@ -71,12 +82,15 @@ A `network` object gains the closed form for Server, Client and relays: `network
 |---|---|---|
 | AND-1 | A debuggable minimal APK runs `shaar-server` and `shaar-client` on the local x86_64 emulator and an exact payload crosses client, QUIC, server and an echo target | Store packaging, real devices, UI beyond one activity, CI execution |
 | CN-1 | In-process nodes form a private DHT from one bootstrap; a record signed by a non-certified key is rejected; bounds hold under a flood; no contact with the public DHT | Public DHT interop, NAT traversal inside the DHT |
-| CN-2 | A relay on the allowlist registers and obtains a certificate; an unlisted key is refused; an expired certificate is ignored; the signed index lists the relay | Authority rotation, revocation lists |
+| CN-2 | A client that has connected to the Server before and enabled the relay option registers and obtains a certificate; a stranger is refused; an expired certificate is ignored; the signed index lists the relay | Authority rotation |
+| CN-K | The ledger accepts an entry only from a key that the level rule allows; a tampered, reordered, forked or unsigned chain is rejected; a client without the ledger receives it on connect and ends with the same head; a revoked key's pending file is never countersigned | Consensus, mining, several heads |
+| KEY-1 | A client key exported on one device imports on another with the same public key; a malformed or wrongly protected export is refused; no secret appears in logs or errors | UI, cloud backup |
+| KEY-2 | A key file stored encrypted: the Server refuses to start without the password, starts with the right one and refuses a wrong one; a plain key file still starts | Hardware tokens, OS key stores |
 | CN-3 | With direct QUIC blocked in the controlled fixture, a client reaches the authority's service through one relay with exact bytes; a disallowed client reaches no target; the relay never sees plaintext; limits and backpressure tested | Multi-hop, relay incentives, UDP forwarding |
-| CN-4 | A relay serves a file; a receiver verifies it against the manifest; a poisoned chunk and an unsigned manifest are rejected | Arbitrary-name search, deletion, large-scale swarming |
-| CN-5 | The Android app joins the closed network as a relay and as a client on the local emulator | Real devices, mobile carrier networks |
+| CN-4 | A relay serves a file whose manifest is signed by the authority or by a trusted key and countersigned; a pending manifest is not served; a poisoned chunk and an unsigned manifest are rejected | Arbitrary-name search, deletion, large-scale swarming |
+| CN-5 | The Android app joins the closed network as a relay and as a client on the owner's phone (owner, 2026-11-18: do everything on the phone for now) | Emulator, other devices, store packaging |
 
-Verification stays as in the project rules: unit and loopback integration tests and the namespace matrix run in CI; the Android cases run on the local emulator and are reported as local evidence only. No public network is contacted.
+Verification stays as in the project rules: unit and loopback integration tests and the namespace matrix run in CI; the Android cases run on the owner's phone and are reported as local evidence only. No public network is contacted.
 
 ## 10. Open questions for the owner
 
@@ -86,4 +100,7 @@ Verification stays as in the project rules: unit and loopback integration tests 
 4. **No rotation.** Accept that a compromised authority key means a new network in the first version?
 5. **Scope of CN-4.** *Answered 2026-11-18:* a relay forwards traffic or distributes files that the Server signed, and only those. (Was: delegated publishers or not.)
 
-Still open: 3 (packaging: `shaar-client relay` or a third binary), 4 (no key rotation in the first version) and the approval of the note.
+3. **Packaging.** *Answered 2026-11-18:* a relay is any client with the option "I want to help"; no third binary; plus key generate/import/export API.
+4. **No rotation.** *Answered 2026-11-18:* accepted, with an encrypted-start option (key encrypted on disk, password at start).
+
+Open clarifications after the new requirements (asked to the owner in simple words): (a) the ledger as a signed hash chain without mining; (b) the level rule: a key manages only keys with a higher level number; (c) the 24 h countersignature delay, the authority signing on its own or earlier by command; (d) the encrypted key file for clients and trusted keys as well as for the Server; (e) a password-hashing crate (Argon2id) is a new dependency and needs approval; (f) the approval of the note.
