@@ -386,3 +386,69 @@ fn age_300_is_immediate_only_age_over_300_is_rejected_and_deadline_overflow_safe
         Err(RecordError::DeadlineOverflow)
     );
 }
+
+#[test]
+fn stale_replicas_next_to_a_fresh_record_are_dropped_and_the_fresh_one_wins() {
+    // Nodes keep older replicas for hours: a lookup returns them next to the fresh record.
+    let mut owner = crate::native_discovery::PolicyOwner::new();
+    let key = id(PUB1);
+    owner.admit_expected_key(key).expect("authorized");
+    let now = ClockSample {
+        wall_us: 2_000_000_000,
+        monotonic_us: 10_000_000,
+    };
+    let fresh = now.wall_us - 1_000_000;
+    owner
+        .complete_query(
+            key,
+            CompletedQuery::new(
+                QuerySource::Network,
+                now,
+                vec![
+                    observation(now.wall_us - 301_000_000, &[1]),
+                    observation(fresh, &[2]),
+                    observation(now.wall_us - 600_000_000, &[3]),
+                ],
+            ),
+        )
+        .expect("the fresh record wins over the stale replicas");
+    assert_eq!(owner.winner_sequence(key), Some(fresh));
+    assert_eq!(owner.signed_timestamp(key), Some(fresh));
+}
+
+#[test]
+fn a_batch_of_only_stale_replicas_is_too_old_and_keeps_the_winner() {
+    let mut owner = crate::native_discovery::PolicyOwner::new();
+    let key = id(PUB1);
+    owner.admit_expected_key(key).expect("authorized");
+    let now = ClockSample {
+        wall_us: 2_000_000_000,
+        monotonic_us: 10_000_000,
+    };
+    let winner = now.wall_us - 10_000_000;
+    owner
+        .complete_query(
+            key,
+            CompletedQuery::new(QuerySource::Network, now, vec![observation(winner, &[1])]),
+        )
+        .expect("a fresh record");
+    let later = ClockSample {
+        wall_us: now.wall_us + 400_000_000,
+        monotonic_us: 20_000_000,
+    };
+    assert_eq!(
+        owner.complete_query(
+            key,
+            CompletedQuery::new(
+                QuerySource::Network,
+                later,
+                vec![
+                    observation(winner, &[1]),
+                    observation(now.wall_us - 20_000_000, &[2]),
+                ],
+            ),
+        ),
+        Err(RecordError::TooOld)
+    );
+    assert_eq!(owner.winner_sequence(key), Some(winner));
+}

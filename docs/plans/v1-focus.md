@@ -2340,6 +2340,13 @@ Repair prepared (not yet run live): a store that has reached at least one node a
 - **Not established:** that the record is found reliably (one run); why the phone's QUIC port is not within the scanned rings or whether its filtering is port-restricted (the scan covered at most 240 ports around the DHT port in the attempts so far); the attribution defect of the scan (NAT-2c) would also make a hit ambiguous.
 - **Conclusion:** the lookup half of the case works on the live DHT with the six-round cap, the own-ID lookup at three rounds and the screen kept on. The direct path is still missing; the open measurements are the phone's filtering and the offset of its QUIC mapping.
 
+**Attempt 17 (2026-11-18 14:22, executables of `ffabfea`, Client limit 118 s, Server timer 116 s).** Same bounds. The Server identity of attempt 16 was reused (setup was not repeated), which matters below.
+
+- **Results:** the exact payload `shaar-live-pair-17` came back over `ygg-standby`. The record was **not resolved: every lookup ended `policy:TooOld`** (`record lookup outcome=failed:policy:TooOld record=0`), four times, although each lookup returned records (`items=10`, `12`, `12`, `11`, `completed=1`, 12 to 19 s each). No candidate, so no direct attempt and no scan ring. The Server's own publication needed three tries and stored at 48 s (`put-done stored_at=16`). Phone mobile interface: +0.18 MB received, +0.14 MB sent. The app stayed in the foreground; the echo target needed one clean restart of the app (a stale listener held port 47100).
+- **What it shows, read in `native_discovery/policy.rs` (`prepare_query`):** the policy checked the signed age of every record of the batch and failed the whole lookup at the first one older than 300 s. The DHT nodes keep older replicas of a record for hours (here the records of attempt 16 under the same key, 38 minutes old), so a batch with one fresh record and several stale ones failed, also after the Server's fresh store at 48 s (the lookup at 61 to 80 s still ended `TooOld`). That is a defect beyond this test setup: a running Server republishes every 60 s, and replicas on nodes that left its closest set go stale after five minutes, so lookups of a long-running Server fail the same way; a node that serves an old signed copy could also block resolution on purpose. Attempts 13 to 16 did not meet it because each ran a fresh setup (a new Server identity, so no old replicas).
+- **Repair:** leaf FIX-7 below.
+- **Not established:** whether the fresh record of the run was among the items of the later lookups; the fix and a new attempt with a fresh identity will show.
+
 ### Leaf NAT-2: bounded port scan for the direct path (owner decision of 2026-11-18)
 
 Advances north-star step 4 (the client tries direct QUIC after a coordinated punch). Evidence: attempt 10 (phone: destination-independent but port-rewriting mapping; computer: destination-dependent).
@@ -2389,6 +2396,16 @@ Advances north-star steps 1 and 3 of the two-device case (the Server publishes, 
 **Non-goals.** The root cause of the growing timeout (leaf FIX-3e, blocked by the startup test that depends on it), any change of deadlines, of the 16-RPC cap or of PUT attempts, and any other harness change.
 
 **Status (2026-11-18).** CI green on `ffabfea` (run 44304249916, ubuntu and windows; fmt, clippy, the mainline lifecycle suite with `the_maintenance_lookup_stops_after_three_rounds`, `real_owned_get_runs_at_most_the_round_cap_then_finishes`, `retained_put_get_recreation_keeps_operation_round_budget`, `the_owned_socket_reports_its_request_timeout_and_round_cap` executed and passed, and the targeted shaar tests including `retained_roles_cancel_and_resume_borrowed_waiters`); merged into local `main` as `87423f5`. Live attempt 16: the Server answers Offers again, the record opens, the payload crosses over standby, the app stays in the foreground. Acceptance (3) is met only in part: the first reflexive window still ended `lookup=bounded` at 10 s (its outcome was `observed`, the address came from another query's votes), so the margin of the 10 s window is thin and the growing timeout (leaf FIX-3e) remains the cause to remove.
+
+### Leaf FIX-7: a stale replica must not fail a record lookup
+
+Advances north-star step 3 (the client resolves the record). Evidence: attempt 17 (see there) and the code of `prepare_query`.
+
+**Acceptance (observable).** A lookup batch that holds stale records next to a fresh one resolves to the fresh one: stale records (signed more than 300 s before the lookup) are dropped, the record with the highest sequence among the rest wins, and the replay and equal-sequence conflict rules apply to the rest only. A batch without any fresh record is still `TooOld` and changes nothing (the winner, the cache). Tests: `stale_replicas_next_to_a_fresh_record_are_dropped_and_the_fresh_one_wins`, `a_batch_of_only_stale_replicas_is_too_old_and_keeps_the_winner`, and the existing age-boundary tests unchanged.
+
+**Non-goals.** No change of the 300 s signed-age limit, of the future limit (`TooFarFuture` stays fatal), of the other per-record checks, of publication or of the DHT code.
+
+**Status (2026-11-18).** Written; not yet run in CI.
 
 ## Checkpoint format
 
