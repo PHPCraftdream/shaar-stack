@@ -30,7 +30,7 @@ Recommendation: `libp2p-kad` (already prepared in the pinned set, same Ed25519 i
 ## 4. Registration and certificates (CN-2)
 
 1. A node dials the authority (libp2p request-response over the existing carrier, Noise-authenticated, so the authority knows the node key).
-2. Admission. Recommendation: the authority admits only keys on its relay allowlist (`shaar-server allow relay add KEY`), because open registration lets anyone become a relay and observe traffic metadata. Alternative: a shared join token. The owner's wording ("все остальные могут подключаться") is the open question 1 below.
+2. Admission. Recommendation: the authority admits only keys on its relay allowlist (`shaar-server allow relay add KEY`), because open registration lets anyone become a relay and observe traffic metadata. Alternative: a shared join token. Owner answer of 2026-11-18 (question 1): any client that has already connected to the Server may register itself as a relay, and the Server then gives its addresses to other clients; registration stays closed to strangers, and there is no join token.
 3. The authority returns a certificate: its signature over a domain-separated message with the node key, `not_before`, `not_after` (at most 24 h) and the capability set (`relay`, `files`). The node renews it by registering again before expiry; expiry is the only revocation.
 4. The authority publishes the relay index in the DHT as signed shards (a record holds about a dozen entries because of the 2 KiB bound; shards are numbered) and answers a direct "list relays" request with the same signed data. Clients verify the signature and expiry and pin nothing else.
 
@@ -38,6 +38,7 @@ Recommendation: `libp2p-kad` (already prepared in the pinned set, same Ed25519 i
 
 The client wants the authority's service. With a direct path blocked, it picks a certified relay from the index and reaches the authority through it. The end-to-end QUIC (or an inner Noise layer, see below) is between the client key and the authority key, so the relay sees ciphertext, the two keys, timing and volume; it cannot read, alter or inject.
 
+- Owner answer of 2026-11-18 (question 2): the relay is a plain proxy. The client connects to the relay as it would to the Server (the Server key is known to both), the relay forwards to the Server, and the encryption stays between client and Server, so the relay sees nothing inside the traffic. Whatever the mechanism, it keeps this contract.
 - Mechanism *verify* in a spike before the leaf is accepted: reuse the custom-transport path that the Yggdrasil standby uses in the iroh endpoint (the relay forwards QUIC datagrams addressed to the authority key). Fallback if that path cannot carry a third-party hop: the relay splices a byte stream and the client and authority run an inner end-to-end Noise session over it.
 - The relay forwards only toward the authority (and servers the authority lists); it is not an open proxy. The authority still applies its client allowlist; a disallowed client reaches no target, as in step 6.
 - Relay limits (to be fixed in the leaf): concurrent splices, bytes per second per client key, idle timeout, total memory. Backpressure is mandatory; a relay never buffers beyond a fixed window.
@@ -79,8 +80,10 @@ Verification stays as in the project rules: unit and loopback integration tests 
 
 ## 10. Open questions for the owner
 
-1. **Admission.** Relay registration by the authority's explicit allowlist (recommended) or open to anyone holding the authority address (with a join token)?
-2. **Relay mechanism.** Accept the spike-first plan in section 5 (custom-transport datagram forwarding, byte-stream splice with an inner layer as fallback)?
+1. **Admission.** *Answered 2026-11-18:* any client that has already connected to the Server may register as a relay; the Server hands its addresses to other clients. (Was: allowlist or open with a join token.)
+2. **Relay mechanism.** *Answered 2026-11-18:* a plain proxy with end-to-end encryption between client and Server; the relay sees nothing inside. (Was: spike-first plan.)
 3. **Packaging.** A relay is `shaar-client relay` (recommended) or a third binary?
 4. **No rotation.** Accept that a compromised authority key means a new network in the first version?
-5. **Scope of CN-4.** Authority-signed files only, as above, or also files signed by delegated publishers?
+5. **Scope of CN-4.** *Answered 2026-11-18:* a relay forwards traffic or distributes files that the Server signed, and only those. (Was: delegated publishers or not.)
+
+Still open: 3 (packaging: `shaar-client relay` or a third binary), 4 (no key rotation in the first version) and the approval of the note.
