@@ -1,8 +1,14 @@
 package dev.shaar.harness;
 
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.os.Bundle;
+import android.os.IBinder;
 import android.view.WindowManager;
 import android.widget.TextView;
 import java.io.File;
@@ -47,12 +53,38 @@ public final class Runner extends Activity {
         launch(intent);
     }
 
+    /**
+     * Keeps the app a foreground service while the commands run: when the screen turns off or
+     * another app comes up, the activity stops and Android takes the network away from a plain
+     * app (seen in live attempts 14, 15 and 18); a foreground service keeps it.
+     */
+    public static final class Keeper extends Service {
+        @Override
+        public IBinder onBind(Intent intent) {
+            return null;
+        }
+
+        @Override
+        public int onStartCommand(Intent intent, int flags, int startId) {
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            manager.createNotificationChannel(new NotificationChannel(
+                    "harness", "Shaar harness", NotificationManager.IMPORTANCE_LOW));
+            Notification note = new Notification.Builder(this, "harness")
+                    .setContentTitle("Shaar harness running")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .build();
+            startForeground(1, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            return START_NOT_STICKY;
+        }
+    }
+
     private void launch(Intent intent) {
         String name = intent.getStringExtra("name");
         String argv = intent.getStringExtra("argv");
         if (name == null || argv == null) {
             return;
         }
+        startForegroundService(new Intent(this, Keeper.class));
         if (!name.matches("[A-Za-z0-9_-]{1,32}")) {
             view.append("refused: bad name\n");
             return;

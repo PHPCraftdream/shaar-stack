@@ -2347,6 +2347,15 @@ Repair prepared (not yet run live): a store that has reached at least one node a
 - **Repair:** leaf FIX-7 below.
 - **Not established:** whether the fresh record of the run was among the items of the later lookups; the fix and a new attempt with a fresh identity will show.
 
+**Attempts 18, 19 and 20 (2026-11-18 14:53, 14:59 and 15:05, executables of `44d14fd`, the build with leaf FIX-7).** Same bounds; attempts 18 and 19 each with a fresh Server identity, attempt 20 with the identity of 19 (a diagnostic run).
+
+- **Attempt 18:** the exact payload `shaar-live-pair-18` came back over `ygg-standby`. The record opened on the second lookup: the first ended `CacheMiss` at 17 s (`items=0`, nothing was published yet), the second `found record=4` at 44 s (`items=9`, `visited=60 responders=44`, 17.7 s). The direct attempts to its four candidates ended `connected=no` (3 s), scan rings 1 to 4 `found=no`. The Client ended at 64 s with `no usable path remained within the attempt budget`: the Server stopped answering Offers. The phone's log ends at 33 s.
+- **Attempt 19** (a harness with a foreground service, see below): payload over `ygg-standby` again; the record was not found (`CacheMiss` at 19 s, `items=0` at 48 s); the Client ended at 61 s, the Server's log ends at 32 s.
+- **Attempt 20** (diagnostic): the payload failed (`IOException`), the Client ended at 30 s; the Server's log ends at 5 s.
+- **What the phone shows (Android process and event logs, the phone's clock is two hours ahead):** in attempt 18 the harness app left the foreground (`TOP` to `LAST`) 31 s after the start and in attempt 19 it went to the foreground-service state with network capability 28 s after the start; in attempt 20 the event log shows `wm_pause_activity ... userLeaving=true` for the harness at 17:05:05, the launcher resumed at once and WhatsApp at 17:05:06: **the owner was using the phone while the attempt ran**. In every attempt where the app left the foreground (15, 18, 19, 20) the Server's log stopped within seconds, although the app process and the Server child were still alive when probed (state `S`, attempt 20). The mobile interface counters of these attempts include the owner's own traffic (+1.5 MB received were counted from the start of attempt 19 to three minutes after its end), so they are no measure of the Server.
+- **Not established:** why the Server child stalls once the activity is stopped (a stopped child, a frozen cgroup or a network block; the probe could not tell), and so whether a foreground service is enough; and what Android does to a native child process of a harness app. Attempts 14, 15 and 17 to 20 are disturbed by this; attempts 13 and 16 were not and are the clean ones.
+- **Conclusion:** the lookup half is repaired (records open in 16 and 18, stale replicas no longer fail a lookup), the direct path is still missing, and further live attempts need the phone free for about three minutes with the screen on and the harness app in front. The harness now runs the commands under a foreground service (`Runner$Keeper`, type `dataSync`; a manifest change and about 25 lines of `Runner.java`), which keeps the app's network capability but did not keep the Server running.
+
 ### Leaf NAT-2: bounded port scan for the direct path (owner decision of 2026-11-18)
 
 Advances north-star step 4 (the client tries direct QUIC after a coordinated punch). Evidence: attempt 10 (phone: destination-independent but port-rewriting mapping; computer: destination-dependent).
@@ -2405,7 +2414,7 @@ Advances north-star step 3 (the client resolves the record). Evidence: attempt 1
 
 **Non-goals.** No change of the 300 s signed-age limit, of the future limit (`TooFarFuture` stays fatal), of the other per-record checks, of publication or of the DHT code.
 
-**Status (2026-11-18).** Written; not yet run in CI.
+**Status (2026-11-18).** CI green on `44d14fd` (run 44314337809, ubuntu and windows; fmt, clippy and the targeted shaar tests, the two new tests `stale_replicas_next_to_a_fresh_record_are_dropped_and_the_fresh_one_wins` and `a_batch_of_only_stale_replicas_is_too_old_and_keeps_the_winner` executed and passed); merged into local `main` as `8111965`. Live: attempt 18 (fresh identity) opened the record on its second lookup after a first `CacheMiss`; attempt 17, before the fix, ended `TooOld` four times.
 
 ## Checkpoint format
 
