@@ -10,6 +10,7 @@ use shaar_p2p::SignalingTransport;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::identity::Identity;
+use crate::network::ports;
 
 use super::{
     ALPN, NetworkError, STREAM_LIMIT, STREAM_TRANSPORT_LIMIT, Session, session::ACCESS_DENIED,
@@ -23,6 +24,22 @@ pub use policy::{Allowlist, Limits};
     expect(dead_code, reason = "P10 4c path-owner wiring is pending")
 )]
 pub(crate) mod ygg;
+
+/// The addresses a bind tries, in order (leaf SET-1b). With a port of zero on an address that is
+/// not loopback, the ports of the fixed set in the order of the endpoint's own key come first, so
+/// that the port is known to anyone who knows the key; a busy one is skipped, and the address
+/// itself (an ephemeral port) is the last attempt. An explicit port, and any loopback address, are
+/// tried as they are.
+fn bind_attempts(identity: &Identity, address: SocketAddr) -> Vec<SocketAddr> {
+    if address.port() != 0 || address.ip().is_loopback() {
+        return vec![address];
+    }
+    ports::order(&identity.public_key_bytes())
+        .into_iter()
+        .map(|port| SocketAddr::new(address.ip(), port))
+        .chain(std::iter::once(address))
+        .collect()
+}
 
 #[cfg(test)]
 #[path = "tests.rs"]
@@ -180,7 +197,9 @@ impl Endpoint {
         }
     }
 
-    /// Binds without n0, relays, port mapping or external address lookup.
+    /// Binds without n0, relays, port mapping or external address lookup. With a port of zero on an
+    /// address that is not loopback, the first free port of the endpoint's key-ordered port set is
+    /// taken (leaf SET-1b), and an ephemeral port only when the whole set is busy.
     /// cancel-safe: NO — a cancelled bind must not be treated as successful startup.
     pub async fn bind(
         identity: &Identity,
@@ -219,25 +238,15 @@ impl Endpoint {
         .await
     }
 
-    /// Binds over a caller-provided admission pool. The shared pool bounds LIVE
-    /// admission (outbound handshakes, authenticated sessions and live handles)
-    /// across every endpoint built over it; the numeric iroh incoming/connection
-    /// limits stay per endpoint as transport-level guards.
-    /// Inbound handshakes are bounded per endpoint by the pending cap before authentication.
+    /// One bind of the native endpoint on `address`.
     /// cancel-safe: NO — cancellation does not prove completed backend startup or drain.
-    pub(in crate::network) async fn bind_custom_shared(
+    async fn bind_endpoint(
         identity: &Identity,
         address: SocketAddr,
-        allowlist: Allowlist,
         limits: Limits,
-        custom: Option<Arc<SignalingTransport>>,
-        slots: Arc<Semaphore>,
+        custom: Option<&Arc<SignalingTransport>>,
         dual_stack: bool,
-    ) -> Result<Self, NetworkError> {
-        Self::validate_bind(address)?;
-        if dual_stack && address != SocketAddr::from(([0, 0, 0, 0], 0)) {
-            return Err(NetworkError::InvalidAddress);
-        }
+    ) -> Result<iroh::Endpoint, NetworkError> {
         let transport = QuicTransportConfig::builder()
             .application_data_filter(|path| policy::native_ip(path.remote().ip()))
             .max_idle_timeout(Some(VarInt::from_u32(NATIVE_IDLE_TIMEOUT_MS).into()))
@@ -273,14 +282,53 @@ impl Endpoint {
             .incoming_limits(limits.sessions, 16 * 1024, 512 * 1024)
             .connection_limit(limits.sessions * 2)
             .transport_config(transport);
-        let builder = match &custom {
+        let builder = match custom {
             Some(factory) => builder.add_custom_transport(factory.clone()),
             None => builder,
         };
-        let inner = builder
+        builder
             .bind()
             .await
-            .map_err(|error| NetworkError::Bind(Box::new(error)))?;
+            .map_err(|error| NetworkError::Bind(Box::new(error)))
+    }
+
+    /// Binds over a caller-provided admission pool. The shared pool bounds LIVE
+    /// admission (outbound handshakes, authenticated sessions and live handles)
+    /// across every endpoint built over it; the numeric iroh incoming/connection
+    /// limits stay per endpoint as transport-level guards.
+    /// Inbound handshakes are bounded per endpoint by the pending cap before authentication.
+    /// cancel-safe: NO — cancellation does not prove completed backend startup or drain.
+    pub(in crate::network) async fn bind_custom_shared(
+        identity: &Identity,
+        address: SocketAddr,
+        allowlist: Allowlist,
+        limits: Limits,
+        custom: Option<Arc<SignalingTransport>>,
+        slots: Arc<Semaphore>,
+        dual_stack: bool,
+    ) -> Result<Self, NetworkError> {
+        Self::validate_bind(address)?;
+        if dual_stack && address != SocketAddr::from(([0, 0, 0, 0], 0)) {
+            return Err(NetworkError::InvalidAddress);
+        }
+        let attempts = bind_attempts(identity, address);
+        let last = attempts.len() - 1;
+        let mut bound = None;
+        for (index, attempt) in attempts.into_iter().enumerate() {
+            match Self::bind_endpoint(identity, attempt, limits, custom.as_ref(), dual_stack).await
+            {
+                Ok(inner) => {
+                    bound = Some(inner);
+                    break;
+                }
+                Err(error) if index == last => return Err(error),
+                // A busy port of the set: the next one of the order is tried.
+                Err(_) => {}
+            }
+        }
+        let Some(inner) = bound else {
+            return Err(NetworkError::InvalidAddress);
+        };
         let address = match inner
             .bound_sockets()
             .into_iter()

@@ -163,6 +163,7 @@ pub(crate) async fn connect_via_punched(
             async move {
                 scan_then_connect(
                     address,
+                    peer.as_bytes(),
                     scan_ring(epoch),
                     |probe_address| {
                         let probes = endpoint.probe_handle();

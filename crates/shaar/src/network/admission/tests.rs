@@ -488,3 +488,130 @@ async fn backend_metadata_exhaustion_is_capacity_not_a_generic_connect_failure()
     .await
     .expect("SDK metadata capacity mapping deadline");
 }
+
+fn any_ip(port: u16) -> SocketAddr {
+    SocketAddr::from(([0, 0, 0, 0], port))
+}
+
+async fn bind_unspecified(seed: u8) -> Endpoint {
+    Endpoint::bind(
+        &identity(seed),
+        any_ip(0),
+        Allowlist::default(),
+        Limits::new(1).unwrap(),
+    )
+    .await
+    .expect("bind on the unspecified address")
+}
+
+/// A port is free when a socket can take it right now.
+async fn is_free(port: u16) -> bool {
+    UdpSocket::bind(any_ip(port)).await.is_ok()
+}
+
+#[test]
+fn the_bind_attempts_follow_the_key_order_only_for_a_zero_port_off_loopback() {
+    let who = identity(70);
+    let order = ports::order(&who.public_key_bytes());
+    let attempts = bind_attempts(&who, any_ip(0));
+    assert_eq!(attempts.len(), ports::PORT_COUNT + 1);
+    for (attempt, port) in attempts.iter().zip(order) {
+        assert_eq!(*attempt, any_ip(port));
+    }
+    assert_eq!(
+        *attempts.last().unwrap(),
+        any_ip(0),
+        "an ephemeral port is the last resort"
+    );
+    let lan = SocketAddr::from(([192, 0, 2, 10], 0));
+    assert_eq!(bind_attempts(&who, lan)[0].ip(), lan.ip());
+    // An explicit port and any loopback address are tried as they are.
+    assert_eq!(bind_attempts(&who, any_ip(5000)), [any_ip(5000)]);
+    let loopback = SocketAddr::from(([127, 0, 0, 1], 0));
+    assert_eq!(bind_attempts(&who, loopback), [loopback]);
+}
+
+#[test]
+fn the_key_of_the_order_is_the_key_the_peers_dial() {
+    let who = identity(71);
+    assert_eq!(
+        who.transport_key().public().as_bytes(),
+        &who.public_key_bytes()
+    );
+}
+
+#[tokio::test]
+async fn a_zero_port_takes_the_first_free_port_of_the_key_order() {
+    let who = identity(72);
+    let order = ports::order(&who.public_key_bytes());
+    let endpoint = bind_unspecified(72).await;
+    let port = endpoint.local_addr().port();
+    let at = order
+        .iter()
+        .position(|&candidate| candidate == port)
+        .unwrap_or_else(|| panic!("port {port} is not in the set"));
+    // Every port that the order prefers over the bound one was not free.
+    for &earlier in &order[..at] {
+        assert!(
+            !is_free(earlier).await,
+            "port {earlier} was free but skipped"
+        );
+    }
+    endpoint.close().await;
+}
+
+#[tokio::test]
+async fn a_busy_first_port_is_skipped_for_the_next_of_the_order() {
+    let who = identity(73);
+    let order = ports::order(&who.public_key_bytes());
+    // Hold the first port (when it cannot be taken, something else holds it already).
+    let _blocker = UdpSocket::bind(any_ip(order[0])).await;
+    let endpoint = bind_unspecified(73).await;
+    let port = endpoint.local_addr().port();
+    assert_ne!(port, order[0]);
+    let at = order
+        .iter()
+        .position(|&candidate| candidate == port)
+        .expect("a port of the set");
+    assert!(at >= 1);
+    for &earlier in &order[1..at] {
+        assert!(
+            !is_free(earlier).await,
+            "port {earlier} was free but skipped"
+        );
+    }
+    endpoint.close().await;
+}
+
+#[tokio::test]
+async fn an_explicit_port_is_kept_and_a_full_set_falls_back_to_an_ephemeral_port() {
+    let probe = UdpSocket::bind(any_ip(0)).await.unwrap();
+    let explicit = probe.local_addr().unwrap().port();
+    drop(probe);
+    let kept = Endpoint::bind(
+        &identity(74),
+        any_ip(explicit),
+        Allowlist::default(),
+        Limits::new(1).unwrap(),
+    )
+    .await
+    .expect("bind on an explicit port");
+    assert_eq!(kept.local_addr().port(), explicit);
+    kept.close().await;
+
+    // With every port of the set held, the endpoint takes an ephemeral port.
+    let mut held = Vec::new();
+    for &port in &ports::PORTS {
+        if let Ok(socket) = UdpSocket::bind(any_ip(port)).await {
+            held.push(socket);
+        }
+    }
+    let fallback = bind_unspecified(75).await;
+    assert!(
+        !ports::PORTS.contains(&fallback.local_addr().port()),
+        "port {} is in the set although all of it was held",
+        fallback.local_addr().port()
+    );
+    fallback.close().await;
+    drop(held);
+}

@@ -246,7 +246,7 @@ fn reflexive_none_offers_local_only() {
 }
 
 /// Leaf NAT-2: when the NAT rewrote the Mainline socket's port, the answer names the reflexive IP
-/// with that port (the centre of the Client's scan) instead of the guess of the local QUIC port.
+/// with that port (a former scan centre, now only a candidate) instead of the guess of the local QUIC port.
 #[test]
 fn a_rewritten_mainline_port_replaces_the_local_port_guess() {
     let local = v4([10, 0, 0, 1], 7777);

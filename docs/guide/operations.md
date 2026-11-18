@@ -188,7 +188,7 @@ Hole-punch diagnostics — tokens and counts only, never an address:
 shaar: <client|server> punch candidates=<N> outcome=<direct|fallback> reason=<direct|deadline|no-answer|closed|probe> elapsed_ms=<MS>
 shaar: <client|server> punch ports own=<PORTS|-> peer=<PORTS|->
 shaar: server punch offer candidates=<N> answer=<sent|none|refused>
-shaar: client punch scan ring=<R> probed=<N> found=<yes|no>
+shaar: client punch scan ring=<R> probed=<N> found=<yes|no>   (R is the slice of the peer's key-ordered port set, 1 to 5)
 shaar: reflexive window outcome=<skipped|empty|observed> lookup=<ok|incomplete|bounded|failed:<ERROR>> info=<some|none|failed> elapsed_ms=<MS>
 shaar: reflexive window outcome=exposed elapsed_ms=<MS>
 shaar: reflexive port mapping=<kept|changed>

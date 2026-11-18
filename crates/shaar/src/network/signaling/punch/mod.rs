@@ -264,8 +264,9 @@ pub(crate) fn local_candidates(local: SocketAddr, reflexive: Option<IpAddr>) -> 
 
 /// The Server's answer candidates: like [`local_candidates`], but when the NAT rewrote the port of
 /// the Mainline socket (`rewritten_port`) the reflexive IP with that port replaces the guess of
-/// the local QUIC port, which a port-rewriting NAT does not keep; it is the centre of the
-/// Client's port scan (leaf NAT-2).
+/// the local QUIC port, which a port-rewriting NAT does not keep. It was the centre of the Client's
+/// ring scan (leaf NAT-2); the walk over the key-ordered set (leaf SET-1) has no centre, so this
+/// candidate is only a candidate now, and its retirement is the cleanup SET-1c.
 pub(crate) fn answer_candidates(
     local: SocketAddr,
     reflexive: Option<IpAddr>,
