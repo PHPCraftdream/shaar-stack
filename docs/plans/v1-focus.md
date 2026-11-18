@@ -2327,6 +2327,8 @@ Advances north-star step 4 (the client tries direct QUIC after a coordinated pun
 
 **Known cost of the design.** The observed DHT port is a sample of the same carrier port block as the QUIC socket's mapping, not that mapping; whether the two are within 240 ports of each other is exactly what the live attempt measures.
 
+**Status (2026-11-18).** Implemented and accepted by CI on `42ef2a9` (run 44263009653, ubuntu and windows green; the scan unit tests, the rewritten-port regressions and the two end-to-end punch tests `punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero` and `a_pinned_relay_composition_punches_a_direct_session_over_the_carrier` executed and passed; the mainline fixture tests were not part of this run's selection, they ran green with the leaf that added them). Live result: attempts 11 and 12 scanned rings 2 to 10 and 1 to 10 around the phone's DHT port and found nothing. Open: the attribution defect of the scan (a completed probe proves only that the peer answered at some address it knows), recorded under attempt 12 as leaf NAT-2c; the leaf's claim stays "the scan runs and is bounded", not "a found port ends in a direct session".
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.
