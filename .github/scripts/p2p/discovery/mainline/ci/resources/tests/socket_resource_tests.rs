@@ -506,6 +506,66 @@ fn expired_requests_cannot_stretch_the_request_timeout_past_the_cap() {
     assert!(requests.get(fresh).is_some(), "the cap does not expire a fresh request");
 }
 
+fn aged_request(requests: &mut super::InflightRequests, age: Duration) -> u32 {
+    let tid = requests.add(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9));
+    let index = requests.find_by_tid(tid).expect("registered request");
+    requests.requests[index].sent_at = std::time::Instant::now()
+        .checked_sub(age)
+        .expect("monotonic clock reads more than the request age");
+    tid
+}
+
+#[test]
+fn a_forgotten_request_does_not_move_the_rtt_estimate_but_an_answer_does() {
+    // Leaf FIX-3e: a timeout is not a round-trip sample.
+    let mut requests = super::InflightRequests::new();
+    let silent = aged_request(&mut requests, Duration::from_millis(1_500));
+    requests.forget(silent);
+    assert!(requests.find_by_tid(silent).is_err(), "the request is gone");
+    assert_eq!(requests.request_timeout(), Duration::from_millis(500));
+    requests.forget(silent);
+    assert_eq!(requests.request_timeout(), Duration::from_millis(500));
+    let answered = aged_request(&mut requests, Duration::from_millis(1_500));
+    assert!(requests.remove(answered).is_some());
+    assert!(requests.request_timeout() > Duration::from_millis(500));
+}
+
+#[tokio::test]
+async fn expired_owned_requests_do_not_feed_the_request_timeout() {
+    // Leaf FIX-3e: each dead node of a lookup round fed its age to the estimate, so the timeout
+    // grew round after round (2 to 9 s rounds on the live DHT).
+    let (_peer, destination) = capture();
+    let mut socket = owned_socket();
+    let operation = new_operation(&mut socket);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    socket.register_owned_deadline(operation, deadline).unwrap();
+    for _ in 0..8 {
+        socket.request_owned(destination, ping(), operation).unwrap();
+    }
+    socket.flush_owned().await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    socket.expire_owned_requests(Duration::from_millis(500));
+    let state = socket.owned_test_state().unwrap();
+    assert_eq!((state.2, state.3), (0, 0), "the expired requests are released");
+    assert_eq!(socket.owned_request_timeout(), Duration::from_millis(500));
+}
+
+#[tokio::test]
+async fn cancelled_owned_requests_do_not_feed_the_request_timeout() {
+    let (_peer, destination) = capture();
+    let mut socket = owned_socket();
+    let operation = new_operation(&mut socket);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    socket.register_owned_deadline(operation, deadline).unwrap();
+    let tids: Vec<u32> = (0..8)
+        .map(|_| socket.request_owned(destination, ping(), operation).unwrap())
+        .collect();
+    socket.flush_owned().await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    socket.cancel_owned_transactions(&tids);
+    assert_eq!(socket.owned_request_timeout(), Duration::from_millis(500));
+}
+
 #[tokio::test]
 async fn the_owned_socket_reports_its_request_timeout_and_round_cap() {
     let socket = owned_socket();

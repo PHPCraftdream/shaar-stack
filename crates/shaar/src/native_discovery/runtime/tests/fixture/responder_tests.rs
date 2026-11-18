@@ -429,3 +429,31 @@ async fn observed_address_option_stamps_the_requester_endpoint_into_every_reply(
     .await
     .expect("bounded option-on observed-address exchange");
 }
+
+#[tokio::test]
+async fn discarding_queued_datagrams_answers_lookups_and_drops_stale_puts() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut peer = LoopbackPeer::bind().await;
+        let socket = UdpSocket::bind("127.0.0.1:0").await.expect("owned sender");
+        socket.connect(peer.address).await.expect("owned peer");
+        let stale = record(0x79);
+        let fresh = record(0x7a);
+        // An attempt that nobody read and a lookup, both queued before the discard.
+        socket.send(&put(&stale, false)).await.expect("stale PUT");
+        socket.send(&get(&stale)).await.expect("queued GET");
+        peer.discard_queued(Duration::from_millis(100)).await;
+        // The lookup is answered, the stale PUT is neither answered nor retained.
+        assert_eq!(
+            field(&receive(&socket).await, b"t"),
+            &Value::Bytes(b"gg".to_vec())
+        );
+        let silent = tokio::time::timeout(Duration::from_millis(150), receive(&socket)).await;
+        assert!(silent.is_err(), "the stale PUT must not be acknowledged");
+        // A capture after the discard sees only what is sent later.
+        socket.send(&put(&fresh, false)).await.expect("fresh PUT");
+        let (_, _, captured) = peer.capture_put().await;
+        assert_eq!(captured.key, fresh.key());
+    })
+    .await
+    .expect("bounded discard exchange");
+}

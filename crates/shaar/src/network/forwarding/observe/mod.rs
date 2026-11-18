@@ -7,8 +7,16 @@ use super::{ForwardError, ForwardStats, ServeReport};
 use crate::path::PathKind;
 
 mod dht;
+mod nat_filter;
+mod nat_ports;
 mod trace;
 pub use dht::install_dht_trace;
+pub use nat_filter::{
+    DEFAULT_KNOCK_AFTER_SECONDS, DEFAULT_LISTEN_SECONDS, DEFAULT_PROBE_WAIT_SECONDS, KNOCK_EVERY,
+    KNOCK_PORT, Knock, Listen, MAX_LISTEN_SECONDS, MAX_PROBE_WAIT_SECONDS,
+    listen as nat_filter_listen, probe as nat_filter_probe,
+};
+pub use nat_ports::{ANSWER_WAIT, DEFAULT_SOCKETS, MAX_SOCKETS, nat_ports};
 pub use trace::{PortMapping, client_direct, client_lookup, server_publication};
 
 /// Which product emits an operator line.

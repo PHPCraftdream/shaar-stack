@@ -1,24 +1,39 @@
-//! Subcommands of `shaar-server`: init, address, address-key, allow, config and run.
+//! Subcommands of `shaar-server`: init, address, address-key, allow, config, diag and run.
 //!
 //! The legacy invocations (`shaar-server`, `shaar-server <target>`, `shaar-server --config
 //! <path>`) are parsed by `main.rs` and stay unchanged; this module only answers when the
 //! first argument names a subcommand (or asks for help or the version).
 
 use std::ffi::OsString;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
+use std::time::Duration;
 
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
-use shaar::config::{ServerOverrides, load_server};
+use shaar::config::{MainlineNetwork, ServerOverrides, load_server};
 use shaar::identity::{
     ConfigAction, Identity, NetworkChoice, Role, config_command, default_data_dir,
     first_run_summary_lines, provision_with, role_dir,
 };
+use shaar::network::observe::{
+    ANSWER_WAIT, DEFAULT_KNOCK_AFTER_SECONDS, DEFAULT_LISTEN_SECONDS, DEFAULT_PROBE_WAIT_SECONDS,
+    KNOCK_EVERY, KNOCK_PORT, Knock, Listen, MAX_LISTEN_SECONDS, MAX_PROBE_WAIT_SECONDS,
+    MAX_SOCKETS, nat_filter_listen, nat_filter_probe, nat_ports,
+};
 use shaar::{AllowAction, PeerKey, allowlist_command};
 
 /// First arguments that select this module instead of the legacy parser.
-const SUBCOMMANDS: [&str; 6] = ["init", "address", "address-key", "allow", "config", "run"];
+const SUBCOMMANDS: [&str; 7] = [
+    "init",
+    "address",
+    "address-key",
+    "allow",
+    "config",
+    "diag",
+    "run",
+];
 
 /// Loopback target that lets the path of a file be read before `target` is set.
 const PLACEHOLDER_TARGET: &str = "127.0.0.1:1";
@@ -59,10 +74,36 @@ pub(crate) enum Invocation {
         place: Place,
         action: ConfigAction,
     },
+    /// `diag nat-ports`: the external UDP ports `sockets` fresh sockets get.
+    DiagNatPorts {
+        place: Place,
+        sockets: u8,
+        show_address: bool,
+    },
+    /// `diag nat-filter listen`: listens `seconds` and, with a knock address, knocks on it after
+    /// `knock.1` seconds.
+    DiagNatFilterListen {
+        place: Place,
+        seconds: u16,
+        knock: Option<(Ipv4Addr, u16)>,
+        show_address: bool,
+    },
+    /// `diag nat-filter probe`: probes `target` before and after `wait` seconds.
+    DiagNatFilterProbe {
+        target: SocketAddrV4,
+        wait: u16,
+    },
     Run {
         place: Place,
         target: Option<String>,
     },
+}
+
+fn show_address_arg() -> Arg {
+    Arg::new("show-address")
+        .long("show-address")
+        .action(ArgAction::SetTrue)
+        .help("Print the external address too (it stays on this screen and in this log)")
 }
 
 fn dir_arg(global: bool) -> Arg {
@@ -170,6 +211,84 @@ pub(crate) fn command() -> Command {
                 ),
             true,
         ))
+        .subcommand(place_args(
+            Command::new("diag")
+                .about("Measure this machine's network (ports and counts; an address only on request)")
+                .subcommand_required(true)
+                .subcommand(
+                    Command::new("nat-ports")
+                        .about("Print the external UDP ports that fresh sockets get at the DHT bootstrap hosts")
+                        .arg(
+                            Arg::new("sockets")
+                                .long("sockets")
+                                .value_name("N")
+                                .value_parser(value_parser!(u8).range(1..=i64::from(MAX_SOCKETS)))
+                                .default_value("6")
+                                .help("Sockets to measure"),
+                        )
+                        .arg(show_address_arg()),
+                )
+                .subcommand(
+                    Command::new("nat-filter")
+                        .about("Measure which datagrams the NAT in front of this machine lets in")
+                        .subcommand_required(true)
+                        .subcommand(
+                            Command::new("listen")
+                                .about("Listen on a fresh socket, print its external port and the probes that arrive")
+                                .arg(
+                                    Arg::new("seconds")
+                                        .long("seconds")
+                                        .value_name("S")
+                                        .value_parser(
+                                            value_parser!(u16)
+                                                .range(1..=i64::from(MAX_LISTEN_SECONDS)),
+                                        )
+                                        .help(format!("How long to listen (default {DEFAULT_LISTEN_SECONDS})")),
+                                )
+                                .arg(
+                                    Arg::new("knock-ip")
+                                        .long("knock-ip")
+                                        .value_name("IP")
+                                        .value_parser(value_parser!(Ipv4Addr))
+                                        .help("Send knocks to this address (the other device) from the listening socket"),
+                                )
+                                .arg(
+                                    Arg::new("knock-after")
+                                        .long("knock-after")
+                                        .value_name("S")
+                                        .value_parser(
+                                            value_parser!(u16)
+                                                .range(0..i64::from(MAX_LISTEN_SECONDS)),
+                                        )
+                                        .help(format!("Seconds from the start of listening to the first knock (default {DEFAULT_KNOCK_AFTER_SECONDS})")),
+                                )
+                                .arg(show_address_arg()),
+                        )
+                        .subcommand(
+                            Command::new("probe")
+                                .about("Send probes to a listening device, before and after a pause")
+                                .arg(
+                                    Arg::new("target")
+                                        .long("target")
+                                        .value_name("IP:PORT")
+                                        .required(true)
+                                        .value_parser(value_parser!(SocketAddrV4))
+                                        .help("The listener's external address and port"),
+                                )
+                                .arg(
+                                    Arg::new("wait")
+                                        .long("wait")
+                                        .value_name("S")
+                                        .value_parser(
+                                            value_parser!(u16)
+                                                .range(1..=i64::from(MAX_PROBE_WAIT_SECONDS)),
+                                        )
+                                        .help(format!("Seconds between the two probe phases (default {DEFAULT_PROBE_WAIT_SECONDS})")),
+                                ),
+                        ),
+                ),
+            true,
+        ))
         .subcommand(
             place_args(
                 Command::new("run")
@@ -255,6 +374,51 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
                 action,
             }
         }
+        "diag" => {
+            let (what, args) = sub.subcommand().expect("a subcommand is required");
+            if what == "nat-ports" {
+                Invocation::DiagNatPorts {
+                    place: place_of(sub),
+                    sockets: *args.get_one::<u8>("sockets").expect("has a default"),
+                    show_address: args.get_flag("show-address"),
+                }
+            } else {
+                let (role, args) = args.subcommand().expect("a subcommand is required");
+                if role == "listen" {
+                    let seconds = args
+                        .get_one::<u16>("seconds")
+                        .copied()
+                        .unwrap_or(DEFAULT_LISTEN_SECONDS);
+                    let named_after = args.get_one::<u16>("knock-after").copied();
+                    let after = named_after.unwrap_or(DEFAULT_KNOCK_AFTER_SECONDS);
+                    let knock = args.get_one::<Ipv4Addr>("knock-ip").map(|ip| (*ip, after));
+                    if knock.is_none() && named_after.is_some() {
+                        return Err(ParseError::Value(
+                            "--knock-after needs --knock-ip".to_owned(),
+                        ));
+                    }
+                    if knock.is_some_and(|(_, after)| after >= seconds) {
+                        return Err(ParseError::Value(
+                            "--knock-after must be shorter than --seconds".to_owned(),
+                        ));
+                    }
+                    Invocation::DiagNatFilterListen {
+                        place: place_of(sub),
+                        seconds,
+                        knock,
+                        show_address: args.get_flag("show-address"),
+                    }
+                } else {
+                    Invocation::DiagNatFilterProbe {
+                        target: *args.get_one::<SocketAddrV4>("target").expect("required"),
+                        wait: args
+                            .get_one::<u16>("wait")
+                            .copied()
+                            .unwrap_or(DEFAULT_PROBE_WAIT_SECONDS),
+                    }
+                }
+            }
+        }
         _ => Invocation::Run {
             place: place_of(sub),
             target: sub.get_one::<String>("target").cloned(),
@@ -337,8 +501,92 @@ pub(crate) async fn execute(invocation: Invocation) -> Result<Vec<String>, Strin
         Invocation::Config { place, action } => {
             config_command(Role::Server, &config_path(&place)?, action).await
         }
+        Invocation::DiagNatPorts {
+            place,
+            sockets,
+            show_address,
+        } => nat_ports(&mainline_of(&place).await?, sockets, show_address).await,
+        Invocation::DiagNatFilterListen {
+            place,
+            seconds,
+            knock,
+            show_address,
+        } => {
+            let mut lines = Vec::new();
+            filter_listen(&place, seconds, knock, show_address, &mut |line| {
+                lines.push(line);
+            })
+            .await?;
+            Ok(lines)
+        }
+        Invocation::DiagNatFilterProbe { target, wait } => {
+            let mut lines = Vec::new();
+            filter_probe(target, wait, &mut |line| lines.push(line)).await?;
+            Ok(lines)
+        }
         Invocation::Run { .. } => Err("run is not an administration command".to_owned()),
     }
+}
+
+/// `diag nat-filter listen`; every line goes to `emit` as soon as it exists, so a log shows the
+/// external port while the window is still open.
+async fn filter_listen(
+    place: &Place,
+    seconds: u16,
+    knock: Option<(Ipv4Addr, u16)>,
+    show_address: bool,
+    emit: &mut (dyn FnMut(String) + Send),
+) -> Result<(), String> {
+    let options = Listen {
+        answer_wait: ANSWER_WAIT,
+        window: Duration::from_secs(u64::from(seconds)),
+        knock: knock.map(|(ip, after)| Knock {
+            target: SocketAddrV4::new(ip, KNOCK_PORT),
+            after: Duration::from_secs(u64::from(after)),
+            every: KNOCK_EVERY,
+        }),
+        show_address,
+    };
+    nat_filter_listen(&mainline_of(place).await?, &options, emit).await
+}
+
+/// `diag nat-filter probe`.
+async fn filter_probe(
+    target: SocketAddrV4,
+    wait: u16,
+    emit: &mut (dyn FnMut(String) + Send),
+) -> Result<(), String> {
+    nat_filter_probe(target, Duration::from_secs(u64::from(wait)), emit).await
+}
+
+/// Prints the failure of a streamed command, or succeeds.
+fn finish(result: Result<(), String>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("shaar-server: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The Mainline settings of the configuration a place names.
+async fn mainline_of(place: &Place) -> Result<MainlineNetwork, String> {
+    let over = ServerOverrides {
+        target: Some(PLACEHOLDER_TARGET.to_owned()),
+        ..ServerOverrides::default()
+    };
+    let config = load_server(config_path(place)?, &over)
+        .await
+        .map_err(|error| format!("configuration: {error}"))?;
+    config
+        .network()
+        .and_then(|network| network.mainline())
+        .cloned()
+        .ok_or_else(|| {
+            "the configuration names no DHT bootstrap hosts (see `config network public`)"
+                .to_owned()
+        })
 }
 
 async fn init(dir: Option<PathBuf>, private: bool) -> Result<Vec<String>, String> {
@@ -386,9 +634,27 @@ pub(crate) async fn main(args: Vec<OsString>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if let Invocation::Run { place, target } = invocation {
-        return crate::run_command(place, target).await;
-    }
+    // The measuring commands print as they go, so a log shows the first line before the end.
+    let invocation = match invocation {
+        Invocation::Run { place, target } => return crate::run_command(place, target).await,
+        Invocation::DiagNatFilterListen {
+            place,
+            seconds,
+            knock,
+            show_address,
+        } => {
+            let result = filter_listen(&place, seconds, knock, show_address, &mut |line| {
+                println!("{line}");
+            })
+            .await;
+            return finish(result);
+        }
+        Invocation::DiagNatFilterProbe { target, wait } => {
+            let result = filter_probe(target, wait, &mut |line| println!("{line}")).await;
+            return finish(result);
+        }
+        other => other,
+    };
     match execute(invocation).await {
         Ok(lines) => {
             for line in lines {
