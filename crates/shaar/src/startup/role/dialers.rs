@@ -443,7 +443,7 @@ impl Dialer for NativeDialer {
                     async move {
                         punch::scan_then_connect(
                             address,
-                            epoch,
+                            punch::scan_ring(epoch),
                             |probe_address| {
                                 let probes = endpoint.probe_handle();
                                 async move { probes.probe(peer, probe_address).await }

@@ -17,7 +17,8 @@ use tokio::{
 };
 
 use super::{
-    PunchLink, PunchMessage, SendError, client_attempt, encode, local_candidates, scan_then_connect,
+    PunchLink, PunchMessage, SendError, client_attempt, encode, local_candidates, scan_ring,
+    scan_then_connect,
 };
 use crate::network::{NetworkError, Session, SignaledEndpoint, signaling::peer_id};
 
@@ -162,7 +163,7 @@ pub(crate) async fn connect_via_punched(
             async move {
                 scan_then_connect(
                     address,
-                    epoch,
+                    scan_ring(epoch),
                     |probe_address| {
                         let probes = endpoint.probe_handle();
                         async move { probes.probe(peer, probe_address).await }

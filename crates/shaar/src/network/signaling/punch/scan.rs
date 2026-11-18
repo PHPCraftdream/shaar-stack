@@ -8,6 +8,7 @@
 use std::{
     future::Future,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::atomic::{AtomicU32, Ordering},
     time::Duration,
 };
 
@@ -17,7 +18,7 @@ use crate::network::NetworkError;
 
 /// Ports probed on each side of the centre by one attempt.
 pub(crate) const SCAN_RING_WIDTH: u16 = 24;
-/// Attempts that scan: the ring of attempt `e` lies at distance `(e-1)*WIDTH+1 ..= e*WIDTH`.
+/// Rings scanned: ring `r` lies at distance `(r-1)*WIDTH+1 ..= r*WIDTH`.
 pub(crate) const SCAN_RINGS: u32 = 10;
 /// Bound of one probe: below one QUIC initial retransmission, so one datagram of about 1.2 KB.
 pub(crate) const SCAN_SLICE: Duration = Duration::from_millis(300);
@@ -42,27 +43,46 @@ fn scan_centre(address: SocketAddr) -> bool {
         && ip != Ipv4Addr::BROADCAST
 }
 
-/// The scan addresses of attempt `epoch` around `centre`, nearest first, both sides of a
-/// distance together; empty outside attempts `1..=SCAN_RINGS` or for a centre that is not
-/// scannable. Ports outside `1..=65535` are skipped.
-pub(crate) fn ring_addresses(centre: SocketAddr, epoch: u32) -> Vec<SocketAddr> {
-    if !(1..=SCAN_RINGS).contains(&epoch) || !scan_centre(centre) {
+/// The epoch of the first attempt that reached a scan, zero until then.
+static FIRST_SCAN_EPOCH: AtomicU32 = AtomicU32::new(0);
+
+/// The ring of the attempt with punch epoch `epoch`: the first attempt that reaches a scan (one
+/// that received an Answer) is ring 1, the next ring 2, and so on. Counting from the first
+/// answered attempt, not from epoch 1, keeps the nearest ring from being lost to attempts that
+/// never got an Answer; one attempt has one ring however many candidates it scans.
+pub(crate) fn scan_ring(epoch: u32) -> u32 {
+    ring_after(&FIRST_SCAN_EPOCH, epoch)
+}
+
+fn ring_after(first: &AtomicU32, epoch: u32) -> u32 {
+    let start = match first.compare_exchange(0, epoch, Ordering::Relaxed, Ordering::Relaxed) {
+        Ok(_) => epoch,
+        Err(existing) => existing,
+    };
+    epoch.wrapping_sub(start).wrapping_add(1)
+}
+
+/// The scan addresses of ring `ring` around `centre`, nearest first, both sides of a distance
+/// together; empty outside rings `1..=SCAN_RINGS` or for a centre that is not scannable. Ports
+/// outside `1..=65535` are skipped.
+pub(crate) fn ring_addresses(centre: SocketAddr, ring: u32) -> Vec<SocketAddr> {
+    if !(1..=SCAN_RINGS).contains(&ring) || !scan_centre(centre) {
         return Vec::new();
     }
     let width = u32::from(SCAN_RING_WIDTH);
     let port = i64::from(centre.port());
-    let mut ring = Vec::with_capacity(SCAN_PORTS_PER_ATTEMPT);
-    for distance in ((epoch - 1) * width + 1)..=(epoch * width) {
+    let mut addresses = Vec::with_capacity(SCAN_PORTS_PER_ATTEMPT);
+    for distance in ((ring - 1) * width + 1)..=(ring * width) {
         for candidate in [port + i64::from(distance), port - i64::from(distance)] {
             match u16::try_from(candidate) {
                 Ok(candidate) if candidate != 0 => {
-                    ring.push(SocketAddr::new(centre.ip(), candidate));
+                    addresses.push(SocketAddr::new(centre.ip(), candidate));
                 }
                 _ => {}
             }
         }
     }
-    ring
+    addresses
 }
 
 /// The counts-only trace line of one scan.
@@ -73,14 +93,14 @@ pub(crate) fn scan_line(ring: u32, probed: usize, found: bool) -> String {
     )
 }
 
-/// Dials `centre`. In an attempt that scans, the centre and its ring are probed first (all at
-/// once, each bounded by [`SCAN_SLICE`]) and the first address whose handshake completed is
-/// dialed; with none, the attempt ends with [`NetworkError::Deadline`]. Outside a scanning
-/// attempt this is exactly `connect(centre)`.
+/// Dials `centre`. In an attempt that scans (`ring` from [`scan_ring`]), the centre and its ring
+/// are probed first (all at once, each bounded by [`SCAN_SLICE`]) and the first address whose
+/// handshake completed is dialed; with none, the attempt ends with [`NetworkError::Deadline`].
+/// Outside a scanning attempt this is exactly `connect(centre)`.
 /// cancel-safe: NO — the dial that follows a found address is not cancel-safe.
 pub(crate) async fn scan_then_connect<T, P, PFut, C, CFut>(
     centre: SocketAddr,
-    epoch: u32,
+    ring: u32,
     probe: P,
     connect: C,
 ) -> Result<T, NetworkError>
@@ -90,13 +110,13 @@ where
     C: FnOnce(SocketAddr) -> CFut,
     CFut: Future<Output = Result<T, NetworkError>>,
 {
-    let ring = ring_addresses(centre, epoch);
-    if ring.is_empty() {
+    let addresses = ring_addresses(centre, ring);
+    if addresses.is_empty() {
         return connect(centre).await;
     }
-    let probed = ring.len() + 1;
+    let probed = addresses.len() + 1;
     let mut probes: FuturesUnordered<_> = std::iter::once(centre)
-        .chain(ring)
+        .chain(addresses)
         .map(|address| {
             let probe = probe(address);
             async move {
@@ -115,7 +135,7 @@ where
         }
     }
     drop(probes);
-    eprintln!("{}", scan_line(epoch, probed, found.is_some()));
+    eprintln!("{}", scan_line(ring, probed, found.is_some()));
     match found {
         Some(address) => connect(address).await,
         None => Err(NetworkError::Deadline),
@@ -142,6 +162,20 @@ mod tests {
         let second = ring_addresses(public(40_000), 2);
         assert_eq!(second[0], public(40_025));
         assert_eq!(second[1], public(39_975));
+    }
+
+    #[test]
+    fn rings_count_from_the_first_attempt_that_scanned_not_from_epoch_one() {
+        let first = AtomicU32::new(0);
+        assert_eq!(ring_after(&first, 2), 1);
+        assert_eq!(ring_after(&first, 2), 1);
+        assert_eq!(ring_after(&first, 3), 2);
+        assert_eq!(ring_after(&first, 11), 10);
+        assert!(ring_after(&first, 12) > SCAN_RINGS);
+        // An epoch before the first answered one is no ring in range, so nothing is scanned.
+        let earlier = ring_after(&first, 1);
+        assert!(!(1..=SCAN_RINGS).contains(&earlier), "ring {earlier}");
+        assert!(ring_addresses(public(40_000), earlier).is_empty());
     }
 
     #[test]
