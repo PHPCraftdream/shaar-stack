@@ -32,7 +32,7 @@ mod scan;
 #[cfg(test)]
 pub(crate) use carrier::carrier_punched_for_tests;
 pub(crate) use carrier::{CarrierPunch, connect_via_punched, route};
-pub(crate) use scan::scan_then_connect;
+pub(crate) use scan::{scan_ring, scan_then_connect};
 
 /// Maximum candidates carried per punch message and probe burst.
 pub(crate) const MAX_CANDIDATES: usize = 4;

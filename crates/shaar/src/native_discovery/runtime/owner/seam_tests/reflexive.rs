@@ -390,3 +390,16 @@ async fn fixture_fast_start_without_votes_stays_none_and_is_bounded() {
     assert!((1..=4).contains(&seen), "bounded fast lookups: {seen}");
     owner.close().await.expect("bounded close");
 }
+
+/// The punch answer reads the rewritten Mainline port through the owner: none until a window
+/// stores one, and zero never counts as a port.
+#[tokio::test]
+async fn the_rewritten_port_is_none_until_a_window_stores_one() {
+    let (mut owner, _watch) = start_owner(0x53, &[]).await;
+    assert_eq!(owner.punch_rewritten_port(), None);
+    owner.rewritten_port_cell().store(47_287, Ordering::Relaxed);
+    assert_eq!(owner.punch_rewritten_port(), Some(47_287));
+    owner.rewritten_port_cell().store(0, Ordering::Relaxed);
+    assert_eq!(owner.punch_rewritten_port(), None);
+    owner.close().await.expect("bounded close");
+}

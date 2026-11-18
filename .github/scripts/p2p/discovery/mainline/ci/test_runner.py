@@ -57,6 +57,16 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(selected, list(cases.values()))
         self.assertEqual(ignored, [ignored_name])
 
+    def test_runs_every_test_module_the_recipe_adds(self):
+        # Regression: `owned::get_trace::get_trace_tests::` compiled in CI but never ran because
+        # its prefix was missing from the runner's list.
+        self.assertIn("owned::get_trace::get_trace_tests::", RUNNER.PREFIXES)
+        name = "owned::get_trace::get_trace_tests::every_get_gets_its_own_operation_number"
+        selected, _ = RUNNER.select_cases(
+            listing(*[prefix + "run" for prefix in RUNNER.PREFIXES], name), "", VERIFY,
+        )
+        self.assertIn(name, selected)
+
     def test_rejects_empty_inventory(self):
         with self.assertRaises(ValueError):
             RUNNER.select_cases("", "", VERIFY)

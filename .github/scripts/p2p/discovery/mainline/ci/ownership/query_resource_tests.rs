@@ -581,3 +581,87 @@ async fn a_full_bucket_round_visits_only_what_the_operation_rpc_cap_allows() {
         "the four unvisited candidates keep the query alive"
     );
 }
+
+#[derive(Default)]
+struct EventLine {
+    message: String,
+    fields: String,
+}
+
+impl tracing::field::Visit for EventLine {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{value:?}");
+        } else {
+            self.fields.push_str(&format!(" {}={value:?}", field.name()));
+        }
+    }
+}
+
+struct EventCapture(Arc<std::sync::Mutex<Vec<String>>>);
+
+impl tracing::Subscriber for EventCapture {
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        let mut line = EventLine::default();
+        event.record(&mut line);
+        self.0
+            .lock()
+            .unwrap()
+            .push(format!("{}{}", line.message, line.fields));
+    }
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
+/// Regression (live attempts 9 and 10): the `Done query` event printed `visited=0` for every
+/// owned query because the owned store was not counted, and carried nothing about the NAT.
+#[tokio::test]
+async fn the_done_query_event_counts_owned_visited_nodes_and_the_address_votes() {
+    let budget = Arc::new(StoreBudget::default());
+    let mut socket = owned_socket();
+    let mut query = query(&mut socket, &budget);
+    let capture = tokio::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("loopback peer");
+    let destination = match capture.local_addr().expect("peer address") {
+        std::net::SocketAddr::V4(address) => address,
+        std::net::SocketAddr::V6(_) => unreachable!("IPv4 peer"),
+    };
+    let mut buffer = [0_u8; 4096];
+    query.visit(&mut socket, destination);
+    socket.flush_owned().await;
+    let (length, _) = tokio::time::timeout(Duration::from_secs(2), capture.recv_from(&mut buffer))
+        .await
+        .expect("request timeout")
+        .expect("receive request");
+    let request = crate::common::Message::from_bytes(&buffer[..length]).expect("decode request");
+    assert!(socket.accept_owned_response(request.transaction_id, destination));
+
+    let seen = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 40_000);
+    let other_port = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 40_001);
+    query.add_address_vote(seen);
+    query.add_address_vote(seen);
+    query.add_address_vote(other_port);
+
+    let lines = Arc::new(std::sync::Mutex::new(Vec::new()));
+    tracing::subscriber::with_default(EventCapture(Arc::clone(&lines)), || {
+        assert!(query.is_done(&socket));
+    });
+    let lines = lines.lock().unwrap();
+    let done = lines
+        .iter()
+        .find(|line| line.starts_with("Done query"))
+        .unwrap_or_else(|| panic!("no Done query event in {lines:?}"));
+    assert!(done.contains(" visited=1"), "{done}");
+    assert!(done.contains(" voted=3"), "{done}");
+    assert!(done.contains(" voted_addresses=2"), "{done}");
+    assert!(done.contains(" voted_ports=2"), "{done}");
+}

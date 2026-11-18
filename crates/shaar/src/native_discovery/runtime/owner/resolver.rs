@@ -4,7 +4,7 @@
 
 use iroh_base::EndpointId;
 use n0_mainline::{OwnedDhtHandle, OwnedQueryCompletion};
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
@@ -348,9 +348,7 @@ async fn reflexive_probe(
         read = handle.info() => read.ok().map(|info| {
             let seen = info.public_address();
             let mapping = PortMapping::of(seen, info.local_addr());
-            let rewritten = seen
-                .filter(|_| mapping == PortMapping::Changed)
-                .map(|address| address.port());
+            let rewritten = rewritten_port_of(seen, mapping);
             (
                 seen.map(|address| IpAddr::V4(*address.ip())),
                 mapping,
@@ -460,6 +458,13 @@ pub(super) struct ReflexiveSinks {
     pub(super) sender: watch::Sender<Option<IpAddr>>,
     pub(super) hint: watch::Sender<Option<IpAddr>>,
     pub(super) rewritten_port: Arc<AtomicU16>,
+}
+
+/// The port the DHT nodes saw for the Mainline socket, only when the NAT rewrote it: the centre of
+/// the Client's port scan. A kept or unknown mapping gives none.
+pub(super) fn rewritten_port_of(seen: Option<SocketAddrV4>, mapping: PortMapping) -> Option<u16> {
+    seen.filter(|_| mapping == PortMapping::Changed)
+        .map(|address| address.port())
 }
 
 /// Remembers the rewritten Mainline port of a window that observed one; an empty window keeps the
