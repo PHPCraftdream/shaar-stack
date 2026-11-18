@@ -169,49 +169,6 @@ impl ProbeHandle {
             _ => false,
         }
     }
-
-    /// A probe that names the address that answered. The backend dials a peer by key through any
-    /// address it knows for that peer, so a handshake that completes for `address` may have
-    /// completed through another address (probed at the same time): the completed probe is not
-    /// proof that `address` is live. This returns the remote address of the path the handshake
-    /// completed on, `None` when the handshake fails. Unbounded by itself: the scan bounds each
-    /// probe, and dropping the future abandons the attempt.
-    pub(crate) async fn probe_answer(
-        &self,
-        peer: PublicKey,
-        address: SocketAddr,
-    ) -> Option<SocketAddr> {
-        if !policy::dial_address(address) {
-            return None;
-        }
-        let remote = EndpointAddr::from_parts(peer, [TransportAddr::Ip(address)]);
-        let connection = self.inner.connect(remote, ALPN).await.ok()?;
-        let answered = answering_address(&connection).await;
-        connection.close(VarInt::from_u32(0), b"");
-        answered
-    }
-}
-
-/// The remote IP address of the path a client handshake completed on: the selected IP path, else
-/// the first IP path of the first snapshot that has one.
-async fn answering_address(connection: &iroh::endpoint::Connection) -> Option<SocketAddr> {
-    let mut snapshots = connection.paths_stream();
-    while let Some(paths) = snapshots.next().await {
-        let mut first = None;
-        for path in paths.iter() {
-            let TransportAddr::Ip(address) = path.remote_addr() else {
-                continue;
-            };
-            if path.is_selected() {
-                return Some(*address);
-            }
-            first.get_or_insert(*address);
-        }
-        if first.is_some() {
-            return first;
-        }
-    }
-    None
 }
 
 impl Endpoint {

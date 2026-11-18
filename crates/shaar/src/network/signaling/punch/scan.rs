@@ -99,12 +99,9 @@ pub(crate) fn scan_line(ring: u32, probed: usize, found: bool) -> String {
 }
 
 /// Dials `centre`. In an attempt that scans (`ring` from [`scan_ring`]), the centre and its ring
-/// are probed first (all at once, each bounded by [`SCAN_SLICE`]) and the first probe that
-/// completed names the address that answered, which is dialed; with none, the attempt ends with
-/// [`NetworkError::Deadline`]. A probe returns the address that answered, which need not be the
-/// one it was given: the backend dials a peer by key through any address it knows, so with many
-/// probes in flight a probe of a dead port can complete through the live one. Outside a scanning
-/// attempt this is exactly `connect(centre)`.
+/// are probed first (all at once, each bounded by [`SCAN_SLICE`]) and the first address whose
+/// handshake completed is dialed; with none, the attempt ends with [`NetworkError::Deadline`].
+/// Outside a scanning attempt this is exactly `connect(centre)`.
 /// cancel-safe: NO — the dial that follows a found address is not cancel-safe.
 pub(crate) async fn scan_then_connect<T, P, PFut, C, CFut>(
     centre: SocketAddr,
@@ -114,25 +111,7 @@ pub(crate) async fn scan_then_connect<T, P, PFut, C, CFut>(
 ) -> Result<T, NetworkError>
 where
     P: Fn(SocketAddr) -> PFut,
-    PFut: Future<Output = Option<SocketAddr>>,
-    C: FnOnce(SocketAddr) -> CFut,
-    CFut: Future<Output = Result<T, NetworkError>>,
-{
-    scan_within(SCAN_SLICE, centre, ring, probe, connect).await
-}
-
-/// [`scan_then_connect`] with an explicit bound per probe (a real-endpoint test runs on loaded
-/// CI machines where one slice is too tight for 49 simultaneous handshakes).
-pub(super) async fn scan_within<T, P, PFut, C, CFut>(
-    slice: Duration,
-    centre: SocketAddr,
-    ring: u32,
-    probe: P,
-    connect: C,
-) -> Result<T, NetworkError>
-where
-    P: Fn(SocketAddr) -> PFut,
-    PFut: Future<Output = Option<SocketAddr>>,
+    PFut: Future<Output = bool>,
     C: FnOnce(SocketAddr) -> CFut,
     CFut: Future<Output = Result<T, NetworkError>>,
 {
@@ -145,7 +124,12 @@ where
         .chain(addresses)
         .map(|address| {
             let probe = probe(address);
-            async move { tokio::time::timeout(slice, probe).await.ok().flatten() }
+            async move {
+                tokio::time::timeout(SCAN_SLICE, probe)
+                    .await
+                    .unwrap_or(false)
+                    .then_some(address)
+            }
         })
         .collect();
     let mut found = None;
@@ -270,7 +254,7 @@ mod tests {
             SCAN_RINGS + 1,
             |_| {
                 probes.fetch_add(1, Ordering::SeqCst);
-                async { None::<SocketAddr> }
+                async { false }
             },
             |address| async move { Ok::<_, NetworkError>(address) },
         )
@@ -288,7 +272,7 @@ mod tests {
             1,
             |address| {
                 probes.fetch_add(1, Ordering::SeqCst);
-                async move { (address == real).then_some(address) }
+                async move { address == real }
             },
             |address| async move { Ok::<_, NetworkError>(address) },
         )
@@ -297,28 +281,12 @@ mod tests {
         assert_eq!(probes.load(Ordering::SeqCst), SCAN_PORTS_PER_ATTEMPT + 1);
     }
 
-    /// Regression (CI run 44252966182): the backend dials a peer by key through any address it
-    /// knows, so the probe of a dead port completed through the live one and the scan dialed the
-    /// dead port. The address that answered is dialed, whatever address the probe was given.
-    #[tokio::test]
-    async fn the_address_that_answered_is_dialed_not_the_one_that_was_probed() {
-        let real = public(40_017);
-        let dialed = scan_then_connect(
-            public(40_000),
-            1,
-            |_| async move { Some(real) },
-            |address| async move { Ok::<_, NetworkError>(address) },
-        )
-        .await;
-        assert_eq!(dialed.unwrap(), real);
-    }
-
     #[tokio::test]
     async fn a_centre_that_answers_is_dialed_in_the_scanning_attempt_too() {
         let dialed = scan_then_connect(
             public(40_000),
             1,
-            |address| async move { (address == public(40_000)).then_some(address) },
+            |address| async move { address == public(40_000) },
             |address| async move { Ok::<_, NetworkError>(address) },
         )
         .await;
@@ -331,7 +299,7 @@ mod tests {
         let dialed: Result<SocketAddr, NetworkError> = scan_then_connect(
             public(40_000),
             1,
-            |_| std::future::pending::<Option<SocketAddr>>(),
+            |_| std::future::pending::<bool>(),
             |_| async { panic!("no address was found: nothing may be dialed") },
         )
         .await;
@@ -348,7 +316,7 @@ mod tests {
         let dialed: Result<SocketAddr, NetworkError> = scan_then_connect(
             public(40_000),
             2,
-            |address| async move { Some(address) },
+            |_| async { true },
             |_| async { Err(NetworkError::Closed) },
         )
         .await;

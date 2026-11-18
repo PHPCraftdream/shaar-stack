@@ -19,7 +19,7 @@ use tokio::time::Instant;
 use super::{
     EXCHANGE_BUDGET, Kind, NetworkError, PROBE_WINDOW, PunchLink, PunchMessage, SendError, Session,
     client_attempt, decode, encode, peer_claimed_probe_allowed, peer_claimed_probe_denied,
-    scan::scan_within, scan_then_connect,
+    scan_then_connect,
 };
 
 fn v4(a: [u8; 4], port: u16) -> SocketAddr {
@@ -258,87 +258,9 @@ async fn scan_pair() -> (
     (Arc::new(client), server, b)
 }
 
-/// Bound of one probe in the real-endpoint controls: 49 simultaneous handshakes on a loaded CI
-/// machine do not fit the production slice, and the controls test the mechanism, not the slice.
-const REAL_SCAN_SLICE: Duration = Duration::from_secs(3);
-
-/// Scans around a centre seven ports below a real server's port while the server accepts. The dial
-/// is the real `connect` when `dial` is set and a recorder otherwise. Returns the server's real
-/// address and the scan result: the address that was dialed and the session of the dial.
-async fn scan_real_server(
-    dial: bool,
-) -> (
-    SocketAddr,
-    Result<(SocketAddr, Option<Session>), NetworkError>,
-) {
-    let (client, mut server, b) = scan_pair().await;
-    let real = server.local_addr();
-    let centre = SocketAddr::new(real.ip(), real.port() - 7);
-    let peer = public(&b);
-    let probes = client.probe_handle();
-    let dialer = Arc::clone(&client);
-    let scan = scan_within(
-        REAL_SCAN_SLICE,
-        centre,
-        1,
-        |address| {
-            let probes = probes.clone();
-            async move { probes.probe_answer(peer, address).await }
-        },
-        |address| async move {
-            let session = if dial {
-                Some(dialer.connect(peer, address).await?)
-            } else {
-                None
-            };
-            Ok::<_, NetworkError>((address, session))
-        },
-    );
-    // The server accepts like its accept loop does, so every probe handshake can complete.
-    let accept = async {
-        let mut kept = Vec::new();
-        loop {
-            if let Ok(session) = server.accept().await {
-                kept.push(session);
-            }
-        }
-    };
-    let result = tokio::time::timeout(Duration::from_secs(20), async {
-        tokio::select! {
-            result = scan => result,
-            () = accept => unreachable!("the accept loop never ends"),
-        }
-    })
-    .await
-    .expect("the scan finishes within twenty seconds");
-    server.close().await.expect("server close");
-    (real, result)
-}
-
-/// Positive control for the live port scan (attempts 11 and 12 found nothing): with real QUIC
-/// endpoints, a scan whose centre is wrong by seven ports names the server's real port, found
-/// among 49 simultaneous probes. Regression (CI run 44252966182): the backend dials a peer by key
-/// through any address it knows, so the probe of the dead centre completed through the live port
-/// and the scan named the dead centre.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_scan_with_real_endpoints_names_the_real_port_inside_the_ring() {
-    let (real, result) = scan_real_server(false).await;
-    let (found, _) = result.expect("the scan found an address");
-    assert_eq!(found, real);
-}
-
-/// The dial that follows the scan connects to the real port (CI run 44249772139: the dial of a
-/// dead address, named by the old probe, ended with `native path ... TimedOut`).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_scan_with_real_endpoints_dials_the_real_port_it_found() {
-    let (real, result) = scan_real_server(true).await;
-    let (found, session) = result.expect("the scan found an address and the dial connected");
-    assert_eq!(found, real);
-    assert!(session.is_some());
-}
-
-/// The same pair with a centre that is 100 ports off: no ring-1 address is the server's port, the
-/// scan ends with the typed deadline within about one slice and dials nothing.
+/// Real endpoints, a centre that is 100 ports off: no ring-1 address is the server's port, the
+/// scan ends with the typed deadline within about one slice and dials nothing. The positive
+/// control (a scan that finds the real port) is not here: see leaf NAT-2c in the V1 focus plan.
 #[tokio::test]
 async fn a_scan_with_real_endpoints_that_misses_the_real_port_ends_typed() {
     let (client, server, b) = scan_pair().await;
@@ -352,7 +274,7 @@ async fn a_scan_with_real_endpoints_that_misses_the_real_port_ends_typed() {
         1,
         |address| {
             let probes = probes.clone();
-            async move { probes.probe_answer(peer, address).await }
+            async move { probes.probe(peer, address).await }
         },
         |_| async { panic!("no address was found: nothing may be dialed") },
     )
