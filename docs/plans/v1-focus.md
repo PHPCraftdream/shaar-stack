@@ -2329,6 +2329,16 @@ Advances north-star step 4 (the client tries direct QUIC after a coordinated pun
 
 **Status (2026-11-18).** Implemented and accepted by CI on `42ef2a9` (run 44263009653, ubuntu and windows green; the scan unit tests, the rewritten-port regressions and the two end-to-end punch tests `punch_exchange_establishes_the_direct_path_and_ygg_payload_stays_zero` and `a_pinned_relay_composition_punches_a_direct_session_over_the_carrier` executed and passed; the mainline fixture tests were not part of this run's selection, they ran green with the leaf that added them). Live result: attempts 11 and 12 scanned rings 2 to 10 and 1 to 10 around the phone's DHT port and found nothing. Open: the attribution defect of the scan (a completed probe proves only that the peer answered at some address it knows), recorded under attempt 12 as leaf NAT-2c; the leaf's claim stays "the scan runs and is bounded", not "a found port ends in a direct session".
 
+### Leaf FIX-3c: why a cold record lookup misses or stalls (observability first)
+
+Advances north-star step 3 (the client resolves the record) of the two-device case. Evidence: the sealed record was found on the live DHT in attempts 9 and 10 (24 to 36 s after the lookup started, after a first lookup that ended with `CacheMiss`) and not in attempts 11 and 12, although the Server's publication had finished (`put-done stored_at=11`) before the Client started. Attempt 12, Client: the first lookup ended after 8.9 s with `items=0 completed=1`, the next lookup was refused at admission (`stage=2`, 0 ms) and the one after it ran until its 30 s deadline without finishing.
+
+**Acceptance (observable).** A live run's operator lines show, for every owned GET, the rounds it admitted (`get-round`: round, candidates, room), the state it was in when its own deadline stopped it (`get-deadline`: round, closest, candidates, visited, inflight, room) and the typed error of a failed one (`error=<VARIANT>` on `get-failed`), so that the reason a lookup ends without the record (candidates exhausted, rounds exhausted, deadline with requests in flight, admission refused with a named error) is read from the log. The events carry counts and a bare variant name only.
+
+**Non-goals.** No change of the round cap, of any resource bound or of the lookup's behaviour in this leaf; no new proof mechanism; the fix, if the data names one, is a separate step with its own regression test.
+
+**Reading of the code before the data (a hypothesis, not a finding).** An owned GET takes at most three rounds and starts a round only after every request of the previous one has been answered or has timed out; unanswered nodes stay in the set of the 20 closest known nodes. From a cold routing table three rounds from the two bootstrap hosts may not reach the nodes that hold a record that a deeper store walk (`visited=48 responders=36`) reached, which would explain a first lookup that completes with `items=0` and a second one that finds it after the first has warmed the table; why the second lookup of attempts 11 and 12 did not finish is not explained and is what `get-deadline` and the error token are for.
+
 ## Checkpoint format
 
 First status line: `Distance to v1: accepted / active / not started / next / blockers`.
