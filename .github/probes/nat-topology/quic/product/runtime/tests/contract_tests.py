@@ -168,7 +168,7 @@ class ProductContractTests(unittest.TestCase):
         cases = contract.CASES
         for name, spec in cases.items():
             if name.startswith("dnat-"):
-                self.assertEqual(spec["nat"], "cone" if "cone" in name else "random", name)
+                self.assertEqual(spec["nat"], "cone" if ("cone" in name or "mapped" in name) else "random", name)
             if spec.get("direct"):
                 self.assertEqual((spec["target_accepts"], spec["client_exit"]), (1, 0), name)
             # dnat-sym-standby is the one fail-closed-for-direct case whose payload rides Yggdrasil (accepts 1, exit 0).
