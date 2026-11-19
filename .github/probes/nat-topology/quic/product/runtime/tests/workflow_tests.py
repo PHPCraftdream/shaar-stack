@@ -55,7 +55,7 @@ class MatrixWorkflowTests(unittest.TestCase):
         header = self.text.split("\njobs:\n", 1)[0]
         block = re.search(r"^      controlled_network_group:\n((?:        [^\n]*\n)+)", header, re.MULTILINE)[1]
         self.assertIn("        type: choice\n", block)
-        self.assertEqual(re.findall(r"^          - (\w+)$", block, re.MULTILINE), ["base", "nat", "faults", "punch"])
+        self.assertEqual(re.findall(r"^          - (\w+)$", block, re.MULTILINE), ["base", "nat", "faults", "punch", "mapped"])
         self.assertIn("        default: base\n", block)
         phase_step = dict(steps(self.job))["Run the bounded privileged phase (the only step using sudo)"]
         self.assertIn("MATRIX_GROUP: ${{ inputs.controlled_network_group }}", phase_step)

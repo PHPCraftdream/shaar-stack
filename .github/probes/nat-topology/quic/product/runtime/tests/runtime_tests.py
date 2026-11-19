@@ -405,6 +405,53 @@ class CaseTests(unittest.TestCase):
         self.assertEqual(idle.ev["markers"], {})
         idle.sup.mark.assert_not_called()
 
+    def test_mapped_cases_read_only_the_route_line_and_only_when_the_mapping_is_granted(self):
+        granted = self.collector("dnat-mapped-standby")
+        granted.collect_client_lines()
+        self.assertEqual(list(granted.ev["markers"]["client_lines"]), [contract.ROUTE_LINE])
+        refused = self.collector("dnat-mapped-refused-signal")
+        refused.collect_client_lines()
+        refused.sup.mark.assert_not_called()
+
+    def gateway_run(self):
+        run = object.__new__(runcase.Run)
+        run.cfg = {"prefix": "snaabbcc", "ns": {name: "snaabbcc-" + suffix for name, suffix in contract.SUFFIXES.items()}}
+        run.tools = {"ip": "/usr/sbin/ip", "nft": "/usr/sbin/nft", "python": "/usr/bin/python3"}
+        run.nonce, run.hard, run.ev = "a" * 32, time.monotonic() + 60, {"observations": {}}
+        run.sup = mock.Mock()
+        return run
+
+    def test_gateway_starts_in_the_server_router_namespace_with_the_case_arguments(self):
+        run, child = self.gateway_run(), mock.Mock()
+        child.process.pid = 77
+        run.sup.spawn.return_value = child
+        run.await_event = lambda guarded, kind, deadline, watch=(): {"role": "gateway", "nonce": "a" * 32, "pid": 77, "mode": "refuse"}
+        self.assertIs(run.start_gateway("refuse"), child)
+        name, argv, environment = run.sup.spawn.call_args.args
+        self.assertEqual(name, "gateway")
+        self.assertEqual(environment, {"SHAAR_NAT_ROLE": "gateway", "SHAAR_NAT_NONCE": "a" * 32})
+        self.assertEqual(argv[:6], ["/usr/sbin/ip", "netns", "exec", "snaabbcc-rtr-b", "/usr/bin/python3", "-I"])
+        self.assertTrue(argv[6].endswith("/gateway.py"))
+        self.assertEqual(argv[7:], ["--nonce", "a" * 32, "--prefix", "snaabbcc", "--nft", "/usr/sbin/nft", "--listen", "10.0.2.1",
+                                    "--wan", "203.0.113.2", "--client", "10.0.2.2", "--mode", "refuse"])
+        self.assertNotIn("setpriv", " ".join(argv), "the gateway is the one privileged child of a case")
+        self.assertIn("gateway_privilege", run.ev["observations"])
+        run.await_event = lambda guarded, kind, deadline, watch=(): {"role": "gateway", "nonce": "a" * 32, "pid": 78, "mode": "refuse"}
+        with self.assertRaises(ValueError):
+            run.start_gateway("refuse")
+
+    def test_gateway_is_interrupted_and_its_receipt_kept_and_a_failed_exit_is_an_error(self):
+        run, child = self.gateway_run(), mock.Mock()
+        run.gateway = child
+        run.await_event = lambda guarded, kind, deadline, watch=(): {"events": [], "active": []}
+        run.sup.wait.return_value = 0
+        run.stop_gateway()
+        run.sup.interrupt.assert_called_once_with(child)
+        self.assertEqual(run.ev["observations"]["gateway"], {"events": [], "active": []})
+        run.sup.wait.return_value = 1
+        with self.assertRaises(ValueError):
+            run.stop_gateway()
+
 
 class ControllerTests(unittest.TestCase):
     def children(self, *items):

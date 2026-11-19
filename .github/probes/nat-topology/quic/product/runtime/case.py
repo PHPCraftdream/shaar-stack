@@ -23,6 +23,7 @@ import processes  # noqa: E402
 import worker  # noqa: E402
 
 WORKER = HERE / "worker.py"
+GATEWAY = HERE.parent / "gateway.py"
 FIXTURE_ARGS = ["--ignored", "--exact", "process_smoke::composed::nat::fixture_child", "--nocapture", "--test-threads=2"]
 STARTUP = b"composed startup:"
 RESERVE_FAIL = contract.RESERVE_FAIL
@@ -67,7 +68,7 @@ class Run:
         self.hard = supervisor.deadline
         self.client_ns = contract.client_ns(self.spec)
         self.live = {}
-        self.client, self.fillers = None, []
+        self.client, self.fillers, self.gateway = None, [], None
         self.ev = {"case": case, "purpose": purpose, "identities": {}, "observations": {}, "markers": {}}
 
     def limit(self, seconds):
@@ -136,11 +137,15 @@ class Run:
         self.identity(child)
         return child
 
+    def client_needles(self):
+        """Output lines the Client must print: the punch trace and the route line of a punch, the route line alone of a mapped path."""
+        if self.spec.get("direct"):
+            return (contract.PUNCH_DIRECT, contract.ROUTE_LINE)
+        return (contract.ROUTE_LINE,) if self.spec.get("route_line") else ()
+
     def collect_client_lines(self):
-        """Direct-path cases: the Client's punch trace and route line appear when the APP dials, so they are read after the flow."""
-        if not self.spec.get("direct"):
-            return
-        for needle in (contract.PUNCH_DIRECT, contract.ROUTE_LINE):
+        """Direct-path cases: the Client's route (and punch) lines appear when the APP dials, so they are read after the flow."""
+        for needle in self.client_needles():
             line = self.sup.mark(self.client, needle.encode("ascii"), self.limit(15))
             self.ev["markers"].setdefault("client_lines", {})[needle] = line
 
@@ -233,6 +238,8 @@ class Run:
         if server_expected == 0:
             sup.interrupt(self.server)
         contract.require(sup.wait(self.server, self.limit(30)) == server_expected, "Server exit status differs from the case")
+        if self.gateway is not None:
+            self.stop_gateway()
         for filler in self.fillers:
             sup.interrupt(filler)
             contract.require(sup.wait(filler, self.limit(30)) == 0, "filler Server did not shut down normally")
@@ -252,6 +259,23 @@ class Run:
         key = self.seed_key(name, 0xE0 + index)
         config = self.owned_file(name + ".ktav", configs.server_text(self.case, key, allow, self.ports, self.relay, ns="wan"))
         return self.product(name, "wan", config, binary="server")
+
+    def start_gateway(self, mode):
+        """Mapped cases: the PCP gateway of the Server's router, a privileged child of this controller (like its nft commands)."""
+        ip = contract.IPS
+        argv = kernel.ns_argv(self.tools, self.cfg, "rtr_b", self.tools["python"], "-I", str(GATEWAY),
+                              "--nonce", self.nonce, "--prefix", self.cfg["prefix"], "--nft", self.tools["nft"],
+                              "--listen", contract.ROUTER_LAN["rtr_b"], "--wan", ip["rtr_b_wan"], "--client", ip["host_b"], "--mode", mode)
+        child = self.sup.spawn("gateway", argv, {"SHAAR_NAT_ROLE": "gateway", "SHAAR_NAT_NONCE": self.nonce})
+        contract.validate_ready(self.await_event(child, "SHAAR_NAT_READY", self.limit(20)), "gateway", self.nonce, child.process.pid)
+        self.ev["observations"]["gateway_privilege"] = "root in the owned Server-router namespace, started and reaped by the controller"
+        return child
+
+    def stop_gateway(self):
+        """Ends the gateway after the Server's joined close, so a mapping deleted at close is part of its receipt."""
+        self.sup.interrupt(self.gateway)
+        self.ev["observations"]["gateway"] = self.await_event(self.gateway, "SHAAR_NAT_RESULT", self.limit(20))
+        contract.require(self.sup.wait(self.gateway, self.limit(20)) == 0, "PCP gateway did not stop gracefully")
 
     def settle(self, seconds):
         """Bounded fixed delay for an effect with no observable signal; owned children stay supervised meanwhile."""
@@ -315,6 +339,8 @@ class Run:
         self.active_start = time.monotonic()
         self.active_end = min(self.active_start + ACTIVE_SECONDS, wan_started + 95)
         failing = contract.server_fails(spec)
+        if spec.get("gateway"):
+            self.gateway = self.start_gateway(spec["gateway"])
         self.server = self.product("server", spec["server_ns"], server_cfg, extra=(RESERVE_FAIL,) if failing else ())
         if failing:
             return  # the flow observes the Server's own typed startup failure; no record, Client or live-phase hook
@@ -328,7 +354,7 @@ class Run:
         hint = self.client_hint()
         client_cfg = self.owned_file("client.ktav", configs.client_text(
             self.case, self.server_key, str(self.work / "keys/client.key"), self.ports, self.relay, hint, address_key=address_key))
-        punch = (contract.PUNCH_DIRECT.encode("ascii"), contract.ROUTE_LINE.encode("ascii")) if spec.get("direct") else ()
+        punch = tuple(needle.encode("ascii") for needle in self.client_needles())
         self.client = self.product("client", self.client_ns, client_cfg, extra=punch)
         contract.require(("server_address=" + (hint or "none")) in ev["markers"]["client"],
                          "Client must be configured with the Server key only (plus the IPv6 hint of the IPv6 cases)")

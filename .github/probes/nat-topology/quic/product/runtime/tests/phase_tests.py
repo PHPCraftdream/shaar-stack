@@ -69,8 +69,23 @@ def evidence(case):
             routers["rtr_a"]["counters"]["relay_tcp"]["packets"] = 40
         if spec.get("relay_punch"):
             routers["rtr_a"]["counters"]["relay_tcp"]["packets"] = 40
+    elif net == "mapped":
+        result_extra["nat_calibration"] = [{"router": router, "flavor": "cone", "kept": 3, "moved": 0} for router in routers]
+        publication = {"native_addresses": [contract.ip_for(spec["server_ns"]) + ":40000", "203.0.113.2:40000"]}
+        grant = spec["gateway"] == "grant"
+        events = ([{"op": "map", "port": 40000, "lifetime": 7200}, {"op": "delete", "port": 40000, "lifetime": 0}] if grant
+                  else [{"op": "refused", "port": 40000, "lifetime": 7200}])
+        observations["gateway"] = {"role": "gateway", "mode": spec["gateway"], "events": events, "dropped": 0, "ignored": 0, "active": [],
+                                   "hits": {"packets": 9 if grant else 0, "bytes": 1200 if grant else 0}}
+        if grant:
+            routers["rtr_a"]["counters"]["peer_sent"]["packets"] = 5
+            routers["rtr_b"]["counters"]["peer_recv"]["packets"] = 6
+            result_extra["markers"] = {"client": "composed startup: server_address=none", "client_lines": {
+                contract.ROUTE_LINE: contract.ROUTE_LINE + " candidates=record:1,hint:0 resolve=found elapsed_ms=12"}}
+        else:
+            routers["rtr_b"]["counters"]["hole_in"]["packets"] = 4
     elif net == "relay":
-        observations = {"target": {"accepts": 0}, "relay_full": {"server_exit": 1, "seconds": 31.0,
+        observations = {"target": {"accepts": 0}, "relay_full":{"server_exit": 1, "seconds": 31.0,
                                                                   "message": "shaar-server: composed startup: relay reservation failed at startup"}}
     elif net == "recover":
         observations["outage"] = {"client1_exit": 1, "app_outage": {"denied": True, "reply_bytes": 0, "terminal": "reset"},
@@ -116,6 +131,40 @@ def evidence(case):
                             "observe": {router: {name: 0 for name in detector} for router in routers},
                             "observe_calibration": [{"router": router, "detected": dict(detector)} for router in routers],
                             "forwarded_bytes": 2000, "active_seconds": 12.5}}
+
+
+MAPPED_GRANT = ("peer-recv", "peer-sent", "no-route-line", "no-markers", "route-relay", "no-map", "two-ports", "port-not-published",
+                "not-deleted", "no-hits", "late-refusal")
+MAPPED_REFUSE = ("direct-path", "granted-anyway", "rule-matched", "closed-gateway-unseen", "never-asked")
+MAPPED_MUTATIONS = ("no-gateway-receipt", "gateway-mode", "lost-events", "no-map", "two-ports", "port-not-published", "not-deleted",
+                    "no-hits", "late-refusal", "granted-anyway", "rule-matched", "closed-gateway-unseen", "never-asked")
+
+
+def mutate_mapped(spec, result, counters, name):
+    """One closed breakage of the mapped-port receipts (the PCP gateway's receipt, the record, the counters)."""
+    gateway = result["observations"].get("gateway")
+    if name == "no-gateway-receipt":
+        del result["observations"]["gateway"]
+    elif name == "gateway-mode":
+        gateway["mode"] = "refuse" if spec["gateway"] == "grant" else "grant"
+    elif name == "lost-events":
+        gateway["dropped"] = 1
+    elif name in ("no-map", "not-deleted"):
+        gateway["events"] = gateway["events"][1:] if name == "no-map" else gateway["events"][:1]
+    elif name == "two-ports":
+        gateway["events"].insert(1, {"op": "map", "port": 40001, "lifetime": 7200})
+    elif name == "port-not-published":
+        result["publication"]["native_addresses"] = ["10.0.2.2:41000"]
+    elif name in ("no-hits", "rule-matched"):
+        gateway["hits"]["packets"] = 0 if name == "no-hits" else 3
+    elif name == "late-refusal":
+        gateway["events"].insert(1, {"op": "refused", "port": 40000, "lifetime": 7200})
+    elif name == "granted-anyway":
+        gateway["events"].append({"op": "map", "port": 40000, "lifetime": 7200})
+    elif name == "closed-gateway-unseen":
+        counters["rtr_b"]["counters"]["hole_in"]["packets"] = 0
+    elif name == "never-asked":
+        gateway["events"] = []
 
 
 def mutate(case, name):
@@ -227,6 +276,8 @@ def mutate(case, name):
         result["markers"]["client_lines"][contract.PUNCH_DIRECT] = contract.PUNCH_TRACE + "2 outcome=fallback elapsed_ms=120"
     elif name == "punch-zero":
         result["markers"]["client_lines"][contract.PUNCH_DIRECT] = contract.PUNCH_TRACE + "0 outcome=direct elapsed_ms=120"
+    elif name in MAPPED_MUTATIONS:
+        mutate_mapped(spec, result, counters, name)
     elif name == "ygg-used":
         counters["rtr_a"]["counters"]["ygg_tcp"]["packets"] = 1
     elif name == "ygg-missing":
@@ -273,6 +324,7 @@ MUTATIONS = {
     "dht-drop": ("no-dht-drop", "native_snat", "udp_nat"),
     "failover": ("native_snat", "udp_nat", "block-escape", "no-block-drop"),
     "dnat": ("probe-flavor", "probe-missing"),
+    "mapped": ("probe-flavor", "probe-missing", "ygg-used", "no-gateway-receipt", "gateway-mode", "lost-events"),
     "ipv6": ("forwarded", "no-v6-traffic", "no-v6-address", "ipv4-seen", "no-hint", "no-block-receipt"),
     "relay": ("server-survived", "untyped-failure", "app-ran"),
     "recover": ("client-survived", "outage-reply", "slow-outage-recovery", "no-outage-recovery"),
@@ -307,6 +359,8 @@ class EvidenceTests(unittest.TestCase):
                 names += ("no-relay-negotiation",) if spec.get("relay_punch") else ()
                 names += ("no-dht-drop-seen",) if spec.get("dht_denied") else ()
                 names += ("no-record-candidate",) if spec.get("publish") == "encrypted" else ()
+            if spec["net"] == "mapped":
+                names += MAPPED_GRANT if spec["gateway"] == "grant" else MAPPED_REFUSE
             names += MUTATIONS.get("flow:" + spec.get("flow", "single"), ())
             if spec.get("flow") == "denied-key":
                 names += ("denied-reply", "control-exit")
@@ -333,7 +387,7 @@ class PlanTests(unittest.TestCase):
         products = sum(1 for entry in phase.PLAN if entry[1] == "product")
         controls = len(phase.PLAN) - products
         self.assertEqual((products, controls), (12, 3))
-        self.assertEqual(len(contract.CASES), 35)
+        self.assertEqual(len(contract.CASES), 38)
         # The worst case of every case at its ceiling does not fit 20 minutes; admission control refuses a case
         # that cannot finish, and the expected total (about 8 minutes) leaves the margin recorded in the contract.
         self.assertGreater(products * contract.CASE_SECONDS, contract.PHASE_SECONDS)
@@ -346,7 +400,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(flags["live-failure"], ("--fault-inject-fixture",))
 
     def test_groups_cover_every_case_once_and_each_fits_the_privileged_budgets(self):
-        self.assertEqual(set(phase.GROUPS), {"base", "nat", "faults", "punch"})
+        self.assertEqual(set(phase.GROUPS), {"base", "nat", "faults", "punch", "mapped"})
         self.assertIs(phase.GROUPS["base"], phase.PLAN)
         covered = []
         for group, plan in phase.GROUPS.items():
@@ -361,6 +415,8 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(phase.allocated(phase.GROUPS["nat"]), 48 * 1024 * 1024)
         self.assertEqual(phase.allocated(phase.GROUPS["faults"]), 32 * 1024 * 1024)
         self.assertEqual(phase.allocated(phase.GROUPS["punch"]), 36 * 1024 * 1024)
+        self.assertEqual(phase.allocated(phase.GROUPS["mapped"]), 20 * 1024 * 1024)
+        self.assertEqual([entry[2] for entry in phase.GROUPS["mapped"] if entry[1] == "product"], list(phase.MAPPED_CASES))
         punch_names = [entry[0] for entry in phase.GROUPS["punch"] if entry[1] == "product"]
         self.assertEqual(punch_names, list(phase.PUNCH_CASES))
         self.assertEqual([entry[2] for entry in phase.GROUPS["nat"] if entry[1] == "product"], list(phase.NAT_CASES))

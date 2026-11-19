@@ -63,10 +63,13 @@ FAULT_CASES = ("ipv6-signal", "ipv6-standby", "denied-native-signal", "recover-s
 PUNCH_CASES = ("dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-dhtdrop-signal",
                "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby",
                "dnat-cone-encrypted-signal", "dnat-cone-encrypted-standby")
+# The mapped-port trio (leaf DIRECT-T) is its own dispatch group: 3*2*2 MiB + 2*2*2 MiB = 20 MiB.
+MAPPED_CASES = ("dnat-mapped-signal", "dnat-mapped-standby", "dnat-mapped-refused-signal")
 GROUPS = {"base": PLAN,
           "nat": (PLAN[0], *map(product, NAT_CASES), *PLAN[-2:]),
           "faults": (PLAN[0], *map(product, FAULT_CASES), *PLAN[-2:]),
-          "punch": (PLAN[0], *map(product, PUNCH_CASES), *PLAN[-2:])}
+          "punch": (PLAN[0], *map(product, PUNCH_CASES), *PLAN[-2:]),
+          "mapped": (PLAN[0], *map(product, MAPPED_CASES), *PLAN[-2:])}
 
 
 def allocated(plan):
