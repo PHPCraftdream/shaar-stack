@@ -452,6 +452,29 @@ class CaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run.stop_gateway()
 
+    def record_run(self, versions):
+        run = object.__new__(runcase.Run)
+        run.wan, run.server, run.nonce, run.server_key = object(), object(), NONCE, KEY
+        run.hard, run.waits, run.queue = time.monotonic() + 60, [], list(versions)
+        run.await_event = lambda child, kind, deadline, watch=(): (run.waits.append((child, kind, watch)), run.queue.pop(0))[1]
+        return run
+
+    def test_mapped_cases_start_the_client_on_the_record_that_names_the_router_address(self):
+        local = {"native_addresses": ["10.0.2.2:54867"]}
+        named = {"native_addresses": ["10.0.2.2:54867", "203.0.113.2:54867"]}
+        with mock.patch.object(contract, "validate_publication", side_effect=lambda event, *args, **kwargs: event) as checked:
+            run = self.record_run([named])
+            self.assertIs(run.await_router_record(local, False), named)
+            self.assertEqual(run.waits, [(run.wan, "SHAAR_NAT_PUBLICATION", (run.server,))], "the wait is guarded by the Server")
+            checked.assert_called_once_with(named, NONCE, KEY, sealed=False)
+            ready = self.record_run([])
+            self.assertIs(ready.await_router_record(named, False), named)
+            self.assertEqual(ready.waits, [], "a record that already names the address needs no wait")
+            stale = self.record_run([local] * (contract.MAX_PUBLICATIONS + 2))
+            with self.assertRaisesRegex(ValueError, "never published a record that names the router address"):
+                stale.await_router_record(local, False)
+            self.assertEqual(len(stale.waits), contract.MAX_PUBLICATIONS, "the wait is bounded")
+
 
 class ControllerTests(unittest.TestCase):
     def children(self, *items):

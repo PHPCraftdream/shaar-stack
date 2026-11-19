@@ -92,6 +92,18 @@ class Run:
                 return self.sup.event(child, kind, deadline)
             self.sup.step(deadline)
 
+    def await_router_record(self, publication, sealed):
+        """Mapped cases: the Client resolves once and Ygg is closed to it, so it starts on the record that already names the router
+        address. The Server publishes that record after its first one, once two reflexive windows agree (dispatch 44566409803)."""
+        router, deadline = contract.ip_for("rtr_b_wan"), self.limit(30)
+        for _ in range(contract.MAX_PUBLICATIONS):
+            if contract.names_address(publication, router):
+                return publication
+            publication = self.await_event(self.wan, "SHAAR_NAT_PUBLICATION", deadline, watch=(self.server,))
+            contract.validate_publication(publication, self.nonce, self.server_key, sealed=sealed)
+        contract.require(contract.names_address(publication, router), "the Server never published a record that names the router address")
+        return publication
+
     def helper(self, name, ns, role, verify=True, **extra):
         env = {"SHAAR_NAT_ROLE": role, "SHAAR_NAT_NONCE": self.nonce, **extra}
         child = self.launch(name, ns, self.products["identity-helper"]["executable"], FIXTURE_ARGS, env)
@@ -350,6 +362,8 @@ class Run:
         if address_key is None:
             contract.require(any(item.rpartition(":")[0] == server_ip for item in self.publication["native_addresses"]),
                              "signed Server record lacks its namespace Native address")
+        if spec.get("gateway"):
+            self.publication = self.await_router_record(self.publication, address_key is not None)
         ev["publication"] = self.publication
         hint = self.client_hint()
         client_cfg = self.owned_file("client.ktav", configs.client_text(

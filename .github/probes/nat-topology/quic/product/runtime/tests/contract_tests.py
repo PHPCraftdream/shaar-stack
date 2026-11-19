@@ -229,6 +229,15 @@ class ProductContractTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 contract.validate_publication(changed, nonce, key)
 
+    def test_a_record_names_the_router_address_only_for_an_exact_ip(self):
+        record = {"native_addresses": ["10.0.2.2:54867", "203.0.113.20:54867", 7]}
+        self.assertFalse(contract.names_address(record, "203.0.113.2"), "a longer address is not a match")
+        self.assertTrue(contract.names_address({"native_addresses": ["10.0.2.2:54867", "203.0.113.2:54867"]}, "203.0.113.2"))
+        self.assertTrue(contract.names_address(record, "203.0.113.20"))
+        self.assertFalse(contract.names_address({"native_addresses": []}, "203.0.113.2"))
+        self.assertFalse(contract.names_address({"sealed": True}, "203.0.113.2"), "a sealed record lists no address")
+        self.assertGreaterEqual(contract.MAX_PUBLICATIONS, 2)
+
     def test_encrypted_cases_are_the_relay_less_punch_pair_with_a_sealed_record(self):
         cases = contract.CASES
         for name, mode in (("dnat-cone-encrypted-signal", "signal"), ("dnat-cone-encrypted-standby", "standby")):
