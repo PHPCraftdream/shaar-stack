@@ -81,11 +81,13 @@ pub(crate) enum Invocation {
         place: Place,
         action: ConfigAction,
     },
-    /// `diag nat-ports`: the external UDP ports `sockets` fresh sockets get.
+    /// `diag nat-ports`: the external UDP ports `sockets` fresh sockets get; with `map` the
+    /// sockets sit on ports of the fixed set and the home router is asked to map each of them.
     DiagNatPorts {
         place: Place,
         sockets: u8,
         show_address: bool,
+        map: bool,
     },
     /// `diag port-map`: asks the home router to map `port` to the same external port.
     DiagPortMap {
@@ -420,7 +422,8 @@ pub(crate) async fn execute(invocation: Invocation) -> Result<Vec<String>, Strin
             place,
             sockets,
             show_address,
-        } => diag::ports(&place, sockets, show_address).await,
+            map,
+        } => diag::ports(&place, sockets, show_address, map).await,
         Invocation::DiagPortMap { port, show_address } => {
             Ok(diag::port_map(port, show_address).await)
         }

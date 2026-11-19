@@ -35,6 +35,7 @@ fn diag_nat_ports_takes_a_default_and_a_bounded_socket_count() {
             place: place(None),
             sockets: shaar::network::observe::DEFAULT_SOCKETS,
             show_address: false,
+            map: false,
         }
     );
     assert_eq!(
@@ -43,6 +44,7 @@ fn diag_nat_ports_takes_a_default_and_a_bounded_socket_count() {
             place: place(Some("d")),
             sockets: 3,
             show_address: false,
+            map: false,
         }
     );
     assert_eq!(
@@ -51,6 +53,7 @@ fn diag_nat_ports_takes_a_default_and_a_bounded_socket_count() {
             place: place(Some("d")),
             sockets: MAX_SOCKETS,
             show_address: false,
+            map: false,
         }
     );
     for bad in [
@@ -93,6 +96,22 @@ fn diag_nat_ports_shows_the_address_only_when_asked() {
             ..
         }
     ));
+}
+
+#[test]
+fn diag_nat_ports_asks_the_router_only_with_map() {
+    let mapped = parsed(&["diag", "nat-ports", "--map", "--sockets", "2"]);
+    assert!(matches!(
+        mapped,
+        Invocation::DiagNatPorts {
+            sockets: 2,
+            map: true,
+            show_address: false,
+            ..
+        }
+    ));
+    let plain = parsed(&["diag", "nat-ports", "--show-address"]);
+    assert!(matches!(plain, Invocation::DiagNatPorts { map: false, .. }));
 }
 
 #[test]
