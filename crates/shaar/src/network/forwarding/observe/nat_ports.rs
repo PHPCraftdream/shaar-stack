@@ -431,7 +431,7 @@ fn reply_nodes(
     }
     let reply = dict_value(packet, 0, b"r")?;
     let (nodes, _) = byte_string(packet, dict_value(packet, reply, b"nodes")?)?;
-    Some(nodes.chunks_exact(NODE_LEN).filter_map(|node| {
+    Some(nodes.as_chunks::<NODE_LEN>().0.iter().filter_map(|node| {
         let port = u16::from_be_bytes([node[24], node[25]]);
         (port != 0)
             .then(|| SocketAddrV4::new(Ipv4Addr::new(node[20], node[21], node[22], node[23]), port))
