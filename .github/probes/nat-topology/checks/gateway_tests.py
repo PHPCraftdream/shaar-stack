@@ -112,13 +112,23 @@ class NftTests(unittest.TestCase):
     def test_the_rules_replace_the_whole_chain_in_one_script_and_name_only_the_granted_ports(self):
         text = gateway.dnat_rules("snaabbcc_mapgw", WAN, CLIENT, {40001, 40000})
         self.assertEqual(text.splitlines(), [
-            "flush chain inet snaabbcc_mapgw dnat",
-            "add rule inet snaabbcc_mapgw dnat ip daddr 203.0.113.2 udp dport 40000 counter name hits dnat ip to 10.0.2.2:40000",
-            "add rule inet snaabbcc_mapgw dnat ip daddr 203.0.113.2 udp dport 40001 counter name hits dnat ip to 10.0.2.2:40001"])
-        self.assertEqual(gateway.dnat_rules("t", WAN, CLIENT, set()), "flush chain inet t dnat\n")
+            "flush chain inet snaabbcc_mapgw mapgw_in",
+            "add rule inet snaabbcc_mapgw mapgw_in ip daddr 203.0.113.2 udp dport 40000 counter name hits dnat ip to 10.0.2.2:40000",
+            "add rule inet snaabbcc_mapgw mapgw_in ip daddr 203.0.113.2 udp dport 40001 counter name hits dnat ip to 10.0.2.2:40001"])
+        self.assertEqual(gateway.dnat_rules("t", WAN, CLIENT, set()), "flush chain inet t mapgw_in\n")
         setup = gateway.setup_rules("snaabbcc_mapgw")
         self.assertIn("add counter inet snaabbcc_mapgw hits\n", setup)
-        self.assertIn("add chain inet snaabbcc_mapgw dnat { type nat hook prerouting priority -100; policy accept; }\n", setup)
+        self.assertIn("add chain inet snaabbcc_mapgw mapgw_in { type nat hook prerouting priority -100; policy accept; }\n", setup)
+
+    def test_no_object_name_is_an_nft_keyword(self):
+        # Regression of dispatch 44537954535: a chain named like the dnat statement is a syntax error to nft, which the unit
+        # tests could not see because they compare text. Every name the gateway chooses must stay out of the statement words.
+        keywords = {"dnat", "snat", "masquerade", "redirect", "counter", "accept", "drop", "reject", "jump", "goto", "return",
+                    "log", "limit", "queue", "meta", "ct", "ip", "ip6", "inet", "udp", "tcp", "type", "hook", "policy", "priority",
+                    "filter", "nat", "route", "name", "to", "table", "chain", "rule", "flush", "add", "delete", "list"}
+        self.assertNotIn(gateway.CHAIN, keywords)
+        self.assertNotIn("hits", keywords)
+        self.assertRegex(gateway.CHAIN, r"^[a-z][a-z0-9_]*$")
 
     def test_hits_are_read_from_the_named_counter_and_a_failed_tool_is_an_error(self):
         document = {"nftables": [{"metainfo": {}}, {"counter": {"family": "inet", "name": "hits", "table": "t", "packets": 3, "bytes": 300}}]}
@@ -185,7 +195,7 @@ class ServeTests(unittest.TestCase):
         self.assertEqual((result["active"], result["hits"], result["dropped"]), ([], {"packets": 4, "bytes": 400}, 0))
         self.assertIn("add table inet snaabbcc_mapgw", calls[0][1])
         self.assertIn("udp dport 48896", calls[1][1])
-        self.assertEqual(calls[2][1], "flush chain inet snaabbcc_mapgw dnat\n")
+        self.assertEqual(calls[2][1], "flush chain inet snaabbcc_mapgw mapgw_in\n")
         self.assertEqual(calls[-1][0], ["delete", "table", "inet", "snaabbcc_mapgw"])
 
 

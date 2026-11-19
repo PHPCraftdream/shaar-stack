@@ -27,6 +27,8 @@ MIN_PORT = 1024
 MAX_MAPPINGS = 4
 MAX_EVENTS = 64
 NFT_SECONDS = 10
+# Not "dnat": the nft grammar reads a chain named like a statement keyword as a syntax error (dispatch 44537954535).
+CHAIN = "mapgw_in"
 ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"}
 
 
@@ -65,13 +67,13 @@ def answer(nonce, internal, external, code, lifetime, wan, epoch):
 
 def setup_rules(table):
     return (f"add table inet {table}\nadd counter inet {table} hits\n"
-            f"add chain inet {table} dnat {{ type nat hook prerouting priority -100; policy accept; }}\n")
+            f"add chain inet {table} {CHAIN} {{ type nat hook prerouting priority -100; policy accept; }}\n")
 
 
 def dnat_rules(table, wan, client, ports):
     """The whole DNAT chain for the granted ports, replaced in one transaction (the named counter survives the flush)."""
-    lines = [f"flush chain inet {table} dnat"]
-    lines += [f"add rule inet {table} dnat ip daddr {wan} udp dport {port} counter name hits dnat ip to {client}:{port}"
+    lines = [f"flush chain inet {table} {CHAIN}"]
+    lines += [f"add rule inet {table} {CHAIN} ip daddr {wan} udp dport {port} counter name hits dnat ip to {client}:{port}"
               for port in sorted(ports)]
     return "\n".join(lines) + "\n"
 
