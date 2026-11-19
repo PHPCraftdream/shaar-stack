@@ -278,6 +278,16 @@ def validate_ready(event, role, nonce, pid):
         raise ValueError("unreviewed helper role")
 
 
+# Record versions a mapped case waits through for the one that names the router address (the Server publishes a second record
+# when two reflexive windows agree, a moment after its first).
+MAX_PUBLICATIONS = 4
+
+
+def names_address(event, ip):
+    """Whether the stored record lists an endpoint on exactly `ip` (203.0.113.2 does not match 203.0.113.20)."""
+    return any(type(item) is str and item.rpartition(":")[0] == ip for item in event.get("native_addresses", []))
+
+
 def validate_publication(event, nonce, server_key, sealed=False):
     require(hex_value(server_key, 64), "invalid expected service public key")
     require(event.get("nonce") == nonce and type(event.get("sequence")) is int and 0 <= event["sequence"] < 2 ** 63,
