@@ -13,6 +13,8 @@ use super::{
 use crate::network::ports::mapping::Gateway;
 use crate::network::ports::mapping::tests::{LOCAL, fake, pcp_answer};
 
+mod learn;
+
 const WAIT: Duration = Duration::from_millis(400);
 /// Candidate ports of zero: the system gives each socket a free port, so a test never contends
 /// with another for the ports of the fixed set.

@@ -7,6 +7,10 @@
 //! With `map` (leaf NAT-6) the sockets sit on ports of the fixed set and the home router is asked
 //! to map each port to itself for the length of the run; the run then says whether the external
 //! port the DHT hosts see is the mapped one, which tells the router's NAT from the one behind it.
+//!
+//! The second bootstrap host often returns no external endpoint, which leaves the dependence on
+//! the destination unknown. So the run also pings nodes that the bootstrap hosts name in their
+//! `find_node` replies (leaf NAT-7): every socket then talks to several destinations.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -32,22 +36,28 @@ pub const ANSWER_WAIT: Duration = Duration::from_secs(2);
 const RESOLVE_WAIT: Duration = Duration::from_secs(5);
 /// Distinct bootstrap hosts each socket pings (two, to see whether the port depends on the host).
 const HOSTS: usize = 2;
+/// Most nodes learned from the bootstrap hosts that join the pinged destinations.
+const LEARNED: usize = 12;
+/// One compact node of a `find_node` reply: a 20-byte id, an IPv4 address and a port.
+const NODE_LEN: usize = 26;
 const MAX_PACKET: usize = 1500;
 /// Ping rounds of [`learn_external`] before it gives up.
 const ROUNDS: u8 = 3;
 /// Deepest nesting the reply walker follows.
 const MAX_DEPTH: u8 = 8;
 
-/// Measures `sockets` fresh sockets against the bootstrap hosts of `network` and returns the lines
-/// to print. With `map` the sockets sit on ports of the fixed set and the home router is asked to
-/// map each of them until the run ends.
+/// Measures `sockets` fresh sockets against the bootstrap hosts of `network` and the nodes they
+/// name, and returns the lines to print. With `map` the sockets sit on ports of the fixed set and
+/// the home router is asked to map each of them until the run ends.
 pub async fn nat_ports(
     network: &MainlineNetwork,
     sockets: u8,
     show_address: bool,
     map: bool,
 ) -> Result<Vec<String>, String> {
-    let hosts = bootstrap_hosts(network).await;
+    let mut hosts = bootstrap_hosts(network).await;
+    let learned = learn_nodes(&hosts, ANSWER_WAIT).await;
+    hosts.extend(learned);
     if map {
         let gateway = home_gateway().await;
         measure_mapped(&hosts, sockets, ANSWER_WAIT, show_address, gateway, &PORTS).await
@@ -329,6 +339,105 @@ pub(crate) async fn learn_external(
     None
 }
 
+/// Up to `LEARNED` nodes on other public addresses that the bootstrap `hosts` name in their
+/// `find_node` replies within `wait`; empty when none answers. One query per host from a socket of
+/// its own, so the sockets that are measured later stay fresh.
+async fn learn_nodes(hosts: &[SocketAddrV4], wait: Duration) -> Vec<SocketAddrV4> {
+    let mut learned: Vec<SocketAddrV4> = Vec::new();
+    if hosts.is_empty() {
+        return learned;
+    }
+    let Ok(socket) = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await else {
+        return learned;
+    };
+    let (id, target) = (random_id(), random_id());
+    for (host, address) in hosts.iter().enumerate() {
+        let _ = socket
+            .send_to(
+                &find_node_packet(&id, &target, transaction(0, host)),
+                address,
+            )
+            .await;
+    }
+    let mut answered = vec![false; hosts.len()];
+    let deadline = Instant::now() + wait;
+    let mut buffer = [0_u8; MAX_PACKET];
+    while learned.len() < LEARNED && answered.contains(&false) {
+        let Ok(Ok((length, from))) = timeout_at(deadline, socket.recv_from(&mut buffer)).await
+        else {
+            break;
+        };
+        let SocketAddr::V4(from) = from else {
+            continue;
+        };
+        let Some(host) = hosts.iter().position(|address| *address == from) else {
+            continue;
+        };
+        if answered[host] {
+            continue;
+        }
+        if let Some(nodes) = reply_nodes(&buffer[..length], transaction(0, host)) {
+            answered[host] = true;
+            for node in nodes.filter(|node| plausible(*node.ip())) {
+                let known = hosts
+                    .iter()
+                    .chain(&learned)
+                    .any(|seen| seen.ip() == node.ip());
+                if learned.len() < LEARNED && !known {
+                    learned.push(node);
+                }
+            }
+        }
+    }
+    learned
+}
+
+/// Whether a node address is worth a ping: not this host, a private or link-local network or a
+/// group address. A reply cannot steer the run at the operator's own network.
+fn plausible(ip: Ipv4Addr) -> bool {
+    !(ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_multicast()
+        || ip.is_broadcast())
+}
+
+/// A Mainline `find_node` query (BEP 5): `d1:ad2:id20:<id>6:target20:<target>e1:q9:find_node...`.
+fn find_node_packet(id: &[u8; 20], target: &[u8; 20], transaction: [u8; 2]) -> Vec<u8> {
+    let mut packet = Vec::with_capacity(92);
+    packet.extend_from_slice(b"d1:ad2:id20:");
+    packet.extend_from_slice(id);
+    packet.extend_from_slice(b"6:target20:");
+    packet.extend_from_slice(target);
+    packet.extend_from_slice(b"e1:q9:find_node1:t2:");
+    packet.extend_from_slice(&transaction);
+    packet.extend_from_slice(b"1:y1:qe");
+    packet
+}
+
+/// The compact IPv4 nodes (`r` / `nodes`) of a response to this transaction; `None` unless the
+/// packet is a whole, well-formed response that carries them. A cut last entry and a port of zero
+/// are dropped.
+fn reply_nodes(
+    packet: &[u8],
+    transaction: [u8; 2],
+) -> Option<impl Iterator<Item = SocketAddrV4> + '_> {
+    if skip(packet, 0, 0)? != packet.len() {
+        return None;
+    }
+    if top_level_bytes(packet, b"y")? != b"r" || top_level_bytes(packet, b"t")? != transaction {
+        return None;
+    }
+    let reply = dict_value(packet, 0, b"r")?;
+    let (nodes, _) = byte_string(packet, dict_value(packet, reply, b"nodes")?)?;
+    Some(nodes.chunks_exact(NODE_LEN).filter_map(|node| {
+        let port = u16::from_be_bytes([node[24], node[25]]);
+        (port != 0)
+            .then(|| SocketAddrV4::new(Ipv4Addr::new(node[20], node[21], node[22], node[23]), port))
+    }))
+}
+
 /// One socket and one host name a distinct two-byte transaction.
 fn transaction(index: usize, host: usize) -> [u8; 2] {
     [
@@ -376,14 +485,20 @@ pub(crate) fn external_endpoint(packet: &[u8], transaction: [u8; 2]) -> Option<S
 
 /// The byte-string value of `key` in the top-level dictionary of a bencoded packet.
 pub(crate) fn top_level_bytes<'a>(packet: &'a [u8], key: &[u8]) -> Option<&'a [u8]> {
-    if packet.first() != Some(&b'd') {
+    let at = dict_value(packet, 0, key)?;
+    byte_string(packet, at).map(|(value, _)| value)
+}
+
+/// The position of the value of `key` in the dictionary that starts at `start`.
+fn dict_value(packet: &[u8], start: usize, key: &[u8]) -> Option<usize> {
+    if packet.get(start) != Some(&b'd') {
         return None;
     }
-    let mut at = 1;
+    let mut at = start + 1;
     while *packet.get(at)? != b'e' {
         let (name, after) = byte_string(packet, at)?;
         if name == key {
-            return byte_string(packet, after).map(|(value, _)| value);
+            return Some(after);
         }
         at = skip(packet, after, 0)?;
     }
@@ -500,5 +615,5 @@ pub(crate) fn map_summary(
 }
 
 #[cfg(test)]
-#[path = "nat_ports_tests.rs"]
+#[path = "nat_ports_tests/mod.rs"]
 mod nat_ports_tests;
