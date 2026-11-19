@@ -23,6 +23,7 @@
 mod admin;
 #[cfg(test)]
 mod admin_tests;
+mod key;
 mod network;
 #[cfg(test)]
 mod network_tests;
@@ -33,6 +34,7 @@ pub use admin::{
     ConfigAction, ConfigEditError, check_config_text, config_command, editable_keys,
     set_config_network, set_config_value, unset_config_key, write_replacing,
 };
+pub use key::{export_key, import_key, read_key_text};
 pub use network::{NetworkChoice, public_network_text};
 
 use std::fmt;

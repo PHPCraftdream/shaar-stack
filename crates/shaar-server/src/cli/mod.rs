@@ -1,4 +1,4 @@
-//! Subcommands of `shaar-server`: init, address, address-key, allow, config, diag and run.
+//! Subcommands of `shaar-server`: init, address, address-key, key, allow, config, diag and run.
 //!
 //! The legacy invocations (`shaar-server`, `shaar-server <target>`, `shaar-server --config
 //! <path>`) are parsed by `main.rs` and stay unchanged; this module only answers when the
@@ -19,14 +19,17 @@ use shaar::identity::{
 use shaar::{AllowAction, PeerKey, allowlist_command};
 
 mod diag;
+mod key;
 
 use diag::SweepArgs;
+use key::KeyCommand;
 
 /// First arguments that select this module instead of the legacy parser.
-const SUBCOMMANDS: [&str; 7] = [
+const SUBCOMMANDS: [&str; 8] = [
     "init",
     "address",
     "address-key",
+    "key",
     "allow",
     "config",
     "diag",
@@ -63,6 +66,11 @@ pub(crate) enum Invocation {
     Address(Place),
     AddressKey {
         path: PathBuf,
+    },
+    /// `key export` or `key import`; `key public` is `address`.
+    Key {
+        place: Place,
+        command: KeyCommand,
     },
     Allow {
         place: Place,
@@ -177,6 +185,7 @@ pub(crate) fn command() -> Command {
                         ),
                 ),
         )
+        .subcommand(place_args(key::command(), true))
         .subcommand(place_args(
             Command::new("allow")
                 .about("Manage the admitted client keys")
@@ -266,6 +275,13 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
                     .expect("path is required"),
             }
         }
+        "key" => match key::parse(sub) {
+            KeyCommand::Public => Invocation::Address(place_of(sub)),
+            command => Invocation::Key {
+                place: place_of(sub),
+                command,
+            },
+        },
         "allow" => {
             let (action, args) = sub.subcommand().expect("a subcommand is required");
             let action = match action {
@@ -376,6 +392,7 @@ pub(crate) async fn execute(invocation: Invocation) -> Result<Vec<String>, Strin
                     .to_owned(),
             ])
         }
+        Invocation::Key { place, command } => key::run(&file_paths(&place).await?.0, command).await,
         Invocation::Allow { place, action } => {
             let (_, allowlist) = file_paths(&place).await?;
             allowlist_command(&allowlist, action).await

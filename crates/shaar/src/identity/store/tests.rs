@@ -101,7 +101,7 @@ async fn cancelled_waiter_does_not_interrupt_owned_worker_cleanup() {
         let seed = zeroize::Zeroizing::new([8; 32]);
         create_new_with_io(
             &worker_path,
-            &seed,
+            &seed[..],
             move |file, bytes| {
                 file.write_all(&bytes[..7])?;
                 let length = file.metadata()?.len();
@@ -380,7 +380,7 @@ print('READ', len(data), data == b'readable')
         let seed = zeroize::Zeroizing::new([7u8; 32]);
         create_new_with_io(
             &key_path,
-            &seed,
+            &seed[..],
             |file, bytes| {
                 let meta = file.metadata()?;
                 assert_eq!(meta.len(), 0, "file must be zero length before write");
@@ -411,4 +411,69 @@ print('READ', len(data), data == b'readable')
         // directory, so a traversal failure cannot masquerade as proof.
         assert_positive(&control, uid);
     }
+}
+
+#[tokio::test]
+async fn an_exported_key_imports_as_the_same_identity_in_a_new_private_file() {
+    let dir = FixtureDir::new();
+    let original = Identity::create_new(dir.0.join("original"))
+        .await
+        .expect("create");
+    let text = original.export_text().expect("export");
+    let path = dir.0.join("imported");
+    let imported = Identity::import_text(&path, &text).await.expect("import");
+    assert_eq!(imported.public_key_bytes(), original.public_key_bytes());
+    // The ordinary loader reads the file, so its form and its owner-only rights are the usual ones.
+    let loaded = Identity::load(&path).await.expect("load");
+    assert_eq!(loaded.public_key_bytes(), original.public_key_bytes());
+    assert_eq!(std::fs::metadata(&path).expect("metadata").len(), 32);
+}
+
+#[tokio::test]
+async fn an_import_never_overwrites_an_existing_key_file() {
+    let dir = FixtureDir::new();
+    let path = dir.0.join("key");
+    let kept = Identity::create_new(&path).await.expect("create");
+    let other = Identity::generate().export_text().expect("export");
+    let err = Identity::import_text(&path, &other)
+        .await
+        .expect_err("existing file");
+    assert!(matches!(err, IdentityError::AlreadyExists), "{err:?}");
+    let still = Identity::load(&path).await.expect("load");
+    assert_eq!(still.public_key_bytes(), kept.public_key_bytes());
+}
+
+#[tokio::test]
+async fn a_text_that_is_not_a_key_creates_no_file() {
+    let dir = FixtureDir::new();
+    let text = Identity::generate().export_text().expect("export");
+    let mut broken = text.to_string();
+    let last = broken.pop().expect("a character");
+    broken.push(if last == '2' { '3' } else { '2' });
+    for (name, text) in [
+        ("garbage", "not a key".to_owned()),
+        ("empty", String::new()),
+        ("typo", broken),
+        ("cut", text[..text.len() - 4].to_owned()),
+    ] {
+        let path = dir.0.join(name);
+        let err = Identity::import_text(&path, &text).await.expect_err(name);
+        assert!(
+            matches!(
+                err,
+                IdentityError::InvalidKeyText | IdentityError::KeyChecksum
+            ),
+            "{name}: {err:?}"
+        );
+        assert!(!path.exists(), "{name}: nothing is created");
+    }
+}
+
+#[test]
+fn the_text_of_a_key_is_stable_and_differs_between_keys() {
+    let first = Identity::from_seed([3; 32]);
+    let second = Identity::from_seed([4; 32]);
+    let text = first.export_text().expect("export");
+    assert_eq!(*text, *first.export_text().expect("export"));
+    assert_ne!(*text, *second.export_text().expect("export"));
 }

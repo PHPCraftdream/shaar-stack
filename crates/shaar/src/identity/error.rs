@@ -24,6 +24,10 @@ pub enum IdentityError {
     /// The existing path is not a regular file (directory, symlink target
     /// of a non-regular type, device, ...).
     NotARegularFile,
+    /// The text form of a key is not one: wrong characters, length or version.
+    InvalidKeyText,
+    /// The text form of a key does not match its checksum: a typo or a cut-off copy.
+    KeyChecksum,
 }
 
 impl fmt::Display for IdentityError {
@@ -38,6 +42,11 @@ impl fmt::Display for IdentityError {
                 write!(f, "identity key file permissions are too broad")
             }
             Self::NotARegularFile => write!(f, "identity key path is not a regular file"),
+            Self::InvalidKeyText => write!(f, "the text is not a key of this program"),
+            Self::KeyChecksum => write!(
+                f,
+                "the key text does not match its checksum (a typo or a cut-off copy)"
+            ),
         }
     }
 }

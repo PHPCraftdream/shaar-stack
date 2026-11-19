@@ -1,4 +1,4 @@
-//! Subcommands of `shaar-client`: init, address, connect and config.
+//! Subcommands of `shaar-client`: init, address, connect, config and key.
 //!
 //! The legacy invocations (`shaar-client`, `shaar-client <server-key> [address]`,
 //! `shaar-client --config <path>`) are parsed by `main.rs` and stay unchanged; this module
@@ -17,8 +17,12 @@ use shaar::identity::{
     first_run_summary_lines, provision_with, role_dir,
 };
 
+mod key;
+
+use key::KeyCommand;
+
 /// First arguments that select this module instead of the legacy parser.
-const SUBCOMMANDS: [&str; 4] = ["init", "address", "connect", "config"];
+const SUBCOMMANDS: [&str; 5] = ["init", "address", "connect", "config", "key"];
 
 /// A valid public key that lets the path of a file be read before `server` is set.
 const PLACEHOLDER_SERVER: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
@@ -55,6 +59,11 @@ pub(crate) enum Invocation {
     Config {
         place: Place,
         action: ConfigAction,
+    },
+    /// `key export` or `key import`; `key public` is `address`.
+    Key {
+        place: Place,
+        command: KeyCommand,
     },
 }
 
@@ -146,6 +155,7 @@ pub(crate) fn command() -> Command {
                 ),
             true,
         ))
+        .subcommand(place_args(key::command(), true))
 }
 
 fn place_of(matches: &ArgMatches) -> Place {
@@ -195,6 +205,13 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation
         }
         "address" => Invocation::Address(place_of(sub)),
         "connect" => Invocation::Connect(place_of(sub)),
+        "key" => match key::parse(sub) {
+            KeyCommand::Public => Invocation::Address(place_of(sub)),
+            command => Invocation::Key {
+                place: place_of(sub),
+                command,
+            },
+        },
         _ => {
             let (action, args) = sub.subcommand().expect("a subcommand is required");
             let text = |name: &str| args.get_one::<String>(name).cloned().expect("required");
@@ -270,6 +287,7 @@ pub(crate) async fn execute(invocation: Invocation) -> Result<Vec<String>, Strin
         Invocation::Config { place, action } => {
             config_command(Role::Client, &config_path(&place)?, action).await
         }
+        Invocation::Key { place, command } => key::run(&key_file(&place).await?, command).await,
         Invocation::Connect(_) => Err("connect is not an administration command".to_owned()),
     }
 }

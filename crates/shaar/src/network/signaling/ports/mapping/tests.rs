@@ -4,16 +4,16 @@ use super::*;
 use std::sync::{Arc, Mutex};
 use std::time::Instant as StdInstant;
 
-const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
-const INTERNAL: u16 = 48_896;
+pub(super) const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+pub(super) const INTERNAL: u16 = 48_896;
 const EXTERNAL_IP: Ipv4Addr = Ipv4Addr::new(203, 0, 113, 7);
-const LIFETIME: Duration = Duration::from_secs(7200);
-const BUDGET: Duration = Duration::from_secs(2);
+pub(super) const LIFETIME: Duration = Duration::from_secs(7200);
+pub(super) const BUDGET: Duration = Duration::from_secs(2);
 
 /// A gateway on the loopback: every datagram it receives is recorded and the datagrams that
 /// `script` returns for it (given its index and bytes) are sent back.
-struct Fake {
-    address: SocketAddr,
+pub(super) struct Fake {
+    pub(super) address: SocketAddr,
     requests: Arc<Mutex<Vec<Vec<u8>>>>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -25,12 +25,14 @@ impl Drop for Fake {
 }
 
 impl Fake {
-    fn requests(&self) -> Vec<Vec<u8>> {
+    pub(super) fn requests(&self) -> Vec<Vec<u8>> {
         self.requests.lock().unwrap().clone()
     }
 }
 
-async fn fake(mut script: impl FnMut(usize, &[u8]) -> Vec<Vec<u8>> + Send + 'static) -> Fake {
+pub(super) async fn fake(
+    mut script: impl FnMut(usize, &[u8]) -> Vec<Vec<u8>> + Send + 'static,
+) -> Fake {
     let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let address = socket.local_addr().unwrap();
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -59,12 +61,12 @@ async fn fake(mut script: impl FnMut(usize, &[u8]) -> Vec<Vec<u8>> + Send + 'sta
     }
 }
 
-fn is_pcp(request: &[u8]) -> bool {
+pub(super) fn is_pcp(request: &[u8]) -> bool {
     request.first() == Some(&2)
 }
 
 /// The PCP answer to a MAP request: the request's own nonce and ports, the given code and port.
-fn pcp_answer(request: &[u8], code: u8, external_port: u16) -> Vec<u8> {
+pub(super) fn pcp_answer(request: &[u8], code: u8, external_port: u16) -> Vec<u8> {
     let mut reply = request.to_vec();
     reply[1] = 0x81;
     reply[3] = code;
@@ -266,14 +268,20 @@ fn a_nonce_differs_from_one_mapping_to_the_next() {
 fn the_error_and_protocol_tokens_are_fixed_words() {
     assert_eq!(MapError::Refused(2).to_string(), "refused:2");
     assert_eq!(MapError::Silent.to_string(), "silent");
+    assert_eq!(MapError::Unsupported.to_string(), "unsupported");
     assert_eq!(MapError::Io.to_string(), "io");
     assert_eq!(Protocol::Pcp.token(), "pcp");
     assert_eq!(Protocol::NatPmp.token(), "nat-pmp");
+    assert_eq!(Protocol::Upnp.token(), "upnp");
 }
+
+/// A UPnP address where nothing answers, so that the chain ends where these tests expect.
+const NO_UPNP: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
 
 fn gateway_of(fake: &Fake) -> Gateway {
     Gateway {
         address: fake.address,
+        upnp: NO_UPNP,
         local: LOCAL,
     }
 }
@@ -360,8 +368,8 @@ async fn mapped(keeper: &Keeper) -> Mapping {
     .await
     .expect("mapped in time")
     .expect("keeper alive");
-    match *state {
-        State::Mapped(mapping) => mapping,
+    match &*state {
+        State::Mapped(mapping) => mapping.clone(),
         other => panic!("{other:?}"),
     }
 }

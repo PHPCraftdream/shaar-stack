@@ -10,7 +10,7 @@ use tokio::{
     time::sleep,
 };
 
-use super::{Gateway, MapError, Mapping, map_udp, release, renew};
+use super::{Gateway, MapError, Mapping, map_any, release, renew};
 
 /// How the keeper paces itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub const DEFAULT_TIMING: Timing = Timing {
 };
 
 /// What the keeper holds now.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum State {
     /// The first request is not answered yet.
     Pending,
@@ -72,7 +72,7 @@ impl Keeper {
     /// What the keeper holds now.
     #[must_use]
     pub fn state(&self) -> State {
-        *self.state.borrow()
+        self.state.borrow().clone()
     }
 
     /// A receiver that wakes at every change of the state.
@@ -113,17 +113,7 @@ async fn keep(
     loop {
         let attempt = async {
             match &held {
-                None => {
-                    map_udp(
-                        gateway.address,
-                        gateway.local,
-                        port,
-                        port,
-                        timing.lifetime,
-                        timing.request_budget,
-                    )
-                    .await
-                }
+                None => map_any(gateway, port, timing.lifetime, timing.request_budget).await,
                 Some(mapping) => {
                     renew(
                         gateway.address,
@@ -143,14 +133,15 @@ async fn keep(
         };
         let wait = match result {
             Ok(mapping) => {
+                let wait = (mapping.lifetime / 2).max(timing.min_renew);
+                state.send_replace(State::Mapped(mapping.clone()));
                 held = Some(mapping);
-                state.send_replace(State::Mapped(mapping));
-                (mapping.lifetime / 2).max(timing.min_renew)
+                wait
             }
             Err(error) => {
                 held = None;
                 state.send_replace(State::Unavailable(error));
-                if error == MapError::Silent {
+                if matches!(error, MapError::Silent | MapError::Unsupported) {
                     timing.silent_retry
                 } else {
                     timing.retry
