@@ -7,12 +7,14 @@
 //! The gateway is a parameter: the caller finds it (the home router) and tests give a fake one.
 //! One mapping is made and released by one call each; keeping it alive is the caller's task.
 
+mod keeper;
 mod natpmp;
 mod pcp;
 mod probe;
 #[cfg(test)]
 mod tests;
 
+pub use keeper::{DEFAULT_TIMING, Keeper, State, Timing};
 pub use probe::{Gateway, MEASURE_BUDGET, MEASURE_LIFETIME, home_gateway, measure, measure_within};
 
 use std::{
@@ -162,10 +164,35 @@ pub async fn map_udp(
     lifetime: Duration,
     budget: Duration,
 ) -> Result<Mapping, MapError> {
+    let ports = (internal_port, external_port);
+    map_with(fresh_nonce(), gateway, local, ports, lifetime, budget).await
+}
+
+/// Renews `mapping` for `lifetime` more: the same request with the same nonce, asking for the
+/// external port the gateway assigned. The answer replaces the mapping.
+/// cancel-safe: yes.
+pub async fn renew(
+    gateway: SocketAddr,
+    local: IpAddr,
+    mapping: &Mapping,
+    lifetime: Duration,
+    budget: Duration,
+) -> Result<Mapping, MapError> {
+    let ports = (mapping.internal_port, mapping.external_port);
+    map_with(mapping.nonce, gateway, local, ports, lifetime, budget).await
+}
+
+async fn map_with(
+    nonce: pcp::Nonce,
+    gateway: SocketAddr,
+    local: IpAddr,
+    (internal_port, external_port): (u16, u16),
+    lifetime: Duration,
+    budget: Duration,
+) -> Result<Mapping, MapError> {
     let socket = socket_for(gateway).await?;
     let seconds = u32::try_from(lifetime.as_secs()).unwrap_or(u32::MAX);
     let started = Instant::now();
-    let nonce = fresh_nonce();
     let request = pcp::map_request(local, &nonce, internal_port, external_port, seconds);
     let pcp_deadline = started + budget * 2 / 5;
     match exchange(&socket, &request, pcp_deadline, |reply| {

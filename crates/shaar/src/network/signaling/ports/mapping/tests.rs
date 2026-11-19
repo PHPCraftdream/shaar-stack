@@ -340,3 +340,164 @@ async fn a_failed_release_is_reported_after_the_grant() {
     let lines = measure(Some(gateway_of(&gateway)), INTERNAL, false).await;
     assert_eq!(lines.last().unwrap(), "port-map release=no:silent");
 }
+
+/// The pace of the keeper tests: seconds are the unit of the lifetimes on the wire, so the
+/// granted lifetime is two seconds and a renewal comes after one.
+const FAST: Timing = Timing {
+    lifetime: Duration::from_secs(2),
+    request_budget: Duration::from_millis(300),
+    min_renew: Duration::from_millis(50),
+    retry: Duration::from_millis(100),
+    silent_retry: Duration::from_millis(100),
+};
+
+async fn mapped(keeper: &Keeper) -> Mapping {
+    let mut watch = keeper.watch();
+    let state = tokio::time::timeout(
+        Duration::from_secs(5),
+        watch.wait_for(|state| matches!(state, State::Mapped(_))),
+    )
+    .await
+    .expect("mapped in time")
+    .expect("keeper alive");
+    match *state {
+        State::Mapped(mapping) => mapping,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_kept_mapping_is_renewed_with_the_same_nonce_and_deleted_on_stop() {
+    let gateway = fake(|_, request| {
+        let mut answer = pcp_answer(request, 0, INTERNAL);
+        answer[4..8].copy_from_slice(&2_u32.to_be_bytes());
+        vec![answer]
+    })
+    .await;
+    let keeper = Keeper::start(gateway_of(&gateway), INTERNAL, FAST);
+    assert_eq!(keeper.state(), State::Pending);
+    let mapping = mapped(&keeper).await;
+    assert_eq!(mapping.external_port, INTERNAL);
+    assert_eq!(mapping.lifetime, Duration::from_secs(2));
+    tokio::time::sleep(Duration::from_millis(1300)).await;
+    keeper.stop().await;
+    let requests = gateway.requests();
+    assert!(
+        requests.len() >= 3,
+        "map, renewal, release: {}",
+        requests.len()
+    );
+    for request in &requests {
+        assert_eq!(
+            &request[24..36],
+            &requests[0][24..36],
+            "one nonce throughout"
+        );
+    }
+    assert_eq!(
+        &requests[1][4..8],
+        [0, 0, 0, 2],
+        "the renewal asks for the lifetime again"
+    );
+    let last = requests.last().unwrap();
+    assert_eq!(
+        &last[4..8],
+        [0, 0, 0, 0],
+        "the last request deletes the mapping"
+    );
+}
+
+#[tokio::test]
+async fn a_silent_gateway_leaves_the_keeper_unavailable_until_it_answers() {
+    let open = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let open_for_script = Arc::clone(&open);
+    let gateway = fake(move |_, request| {
+        if open_for_script.load(std::sync::atomic::Ordering::SeqCst) {
+            vec![pcp_answer(request, 0, INTERNAL)]
+        } else {
+            Vec::new()
+        }
+    })
+    .await;
+    let keeper = Keeper::start(gateway_of(&gateway), INTERNAL, FAST);
+    let mut watch = keeper.watch();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        watch.wait_for(|state| *state == State::Unavailable(MapError::Silent)),
+    )
+    .await
+    .expect("unavailable in time")
+    .expect("keeper alive");
+    open.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(mapped(&keeper).await.external_port, INTERNAL);
+    keeper.stop().await;
+}
+
+#[tokio::test]
+async fn a_refusal_is_the_state_of_the_keeper_with_its_code() {
+    let gateway = fake(|_, request| vec![pcp_answer(request, 2, 0)]).await;
+    let keeper = Keeper::start(gateway_of(&gateway), INTERNAL, FAST);
+    let mut watch = keeper.watch();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        watch.wait_for(|state| *state == State::Unavailable(MapError::Refused(2))),
+    )
+    .await
+    .expect("refusal in time")
+    .expect("keeper alive");
+    keeper.stop().await;
+}
+
+#[tokio::test]
+async fn stopping_is_prompt_while_a_request_is_pending_and_deletes_nothing() {
+    let gateway = fake(|_, _| Vec::new()).await;
+    let slow = Timing {
+        request_budget: Duration::from_secs(10),
+        ..FAST
+    };
+    let keeper = Keeper::start(gateway_of(&gateway), INTERNAL, slow);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let started = StdInstant::now();
+    keeper.stop().await;
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(
+        gateway
+            .requests()
+            .iter()
+            .all(|request| request.get(4..8) != Some(&[0_u8; 4][..])),
+        "no deletion without a mapping"
+    );
+}
+
+#[tokio::test]
+async fn a_dropped_keeper_ends_its_task() {
+    let gateway = fake(|_, request| vec![pcp_answer(request, 0, INTERNAL)]).await;
+    let keeper = Keeper::start(gateway_of(&gateway), INTERNAL, FAST);
+    let _ = mapped(&keeper).await;
+    drop(keeper);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let count = gateway.requests().len();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(gateway.requests().len(), count, "no renewal after the drop");
+}
+
+#[tokio::test]
+async fn a_renewal_uses_the_nonce_of_the_mapping_it_renews() {
+    let gateway = fake(|_, request| vec![pcp_answer(request, 0, 51_000)]).await;
+    let first = map(&gateway, BUDGET).await.unwrap();
+    let renewed = renew(gateway.address, LOCAL, &first, LIFETIME, BUDGET)
+        .await
+        .unwrap();
+    let requests = gateway.requests();
+    assert_eq!(&requests[1][24..36], &requests[0][24..36]);
+    assert_eq!(
+        &requests[1][42..44],
+        [0xc7, 0x38],
+        "asks for the assigned port, 51000"
+    );
+    assert_eq!(renewed.external_port, 51_000);
+}
