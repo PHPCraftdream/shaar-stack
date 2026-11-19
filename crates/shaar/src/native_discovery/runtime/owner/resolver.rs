@@ -4,9 +4,8 @@
 
 use iroh_base::EndpointId;
 use n0_mainline::{OwnedDhtHandle, OwnedQueryCompletion};
-use std::net::{IpAddr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 
@@ -285,9 +284,6 @@ pub(super) struct Window {
     pub(super) info: Option<Option<IpAddr>>,
     /// Whether the NAT kept the Mainline socket's port in the observed address (trace only).
     pub(super) mapping: PortMapping,
-    /// The port the DHT nodes saw for the Mainline socket, only when the NAT rewrote it: the
-    /// centre of the Client's port scan (leaf NAT-2). Never published.
-    pub(super) rewritten_port: Option<u16>,
 }
 
 impl Window {
@@ -348,23 +344,17 @@ async fn reflexive_probe(
         read = handle.info() => read.ok().map(|info| {
             let seen = info.public_address();
             let mapping = PortMapping::of(seen, info.local_addr());
-            let rewritten = rewritten_port_of(seen, mapping);
-            (
-                seen.map(|address| IpAddr::V4(*address.ip())),
-                mapping,
-                rewritten,
-            )
+            (seen.map(|address| IpAddr::V4(*address.ip())), mapping)
         }),
     };
-    let (info, mapping, rewritten_port) = match read {
-        Some((address, mapping, rewritten)) => (Some(address), mapping, rewritten),
-        None => (None, PortMapping::Unknown, None),
+    let (info, mapping) = match read {
+        Some((address, mapping)) => (Some(address), mapping),
+        None => (None, PortMapping::Unknown),
     };
     Some(Window {
         lookup,
         info,
         mapping,
-        rewritten_port,
     })
 }
 
@@ -452,27 +442,10 @@ pub(super) fn note_hint(
     }
 }
 
-/// What the reflexive loop publishes: the confirmed address, the punch-only hint and the rewritten
-/// Mainline port (zero: none).
+/// What the reflexive loop publishes: the confirmed address and the punch-only hint.
 pub(super) struct ReflexiveSinks {
     pub(super) sender: watch::Sender<Option<IpAddr>>,
     pub(super) hint: watch::Sender<Option<IpAddr>>,
-    pub(super) rewritten_port: Arc<AtomicU16>,
-}
-
-/// The port the DHT nodes saw for the Mainline socket, only when the NAT rewrote it: the centre of
-/// the Client's port scan. A kept or unknown mapping gives none.
-pub(super) fn rewritten_port_of(seen: Option<SocketAddrV4>, mapping: PortMapping) -> Option<u16> {
-    seen.filter(|_| mapping == PortMapping::Changed)
-        .map(|address| address.port())
-}
-
-/// Remembers the rewritten Mainline port of a window that observed one; an empty window keeps the
-/// last one. Zero means none. Never published: only the Server's punch answer reads it.
-pub(super) fn note_rewritten_port(cell: &AtomicU16, observed: Option<u16>) {
-    if let Some(port) = observed {
-        cell.store(port, Ordering::Relaxed);
-    }
 }
 
 /// Advisory reflexive-address watcher. Never published anywhere (record,
@@ -515,11 +488,7 @@ pub(super) async fn reflexive_loop(
     mut stop: oneshot::Receiver<()>,
     fast_start: bool,
 ) {
-    let ReflexiveSinks {
-        sender,
-        hint,
-        rewritten_port,
-    } = sinks;
+    let ReflexiveSinks { sender, hint } = sinks;
     let mut sent: Option<IpAddr> = None;
     let start = tokio::time::Instant::now();
     if fast_start {
@@ -529,7 +498,6 @@ pub(super) async fn reflexive_loop(
                 return;
             };
             probe.note(start);
-            note_rewritten_port(&rewritten_port, probe.rewritten_port);
             let observation = probe.observation();
             if let Some(observed) = observation {
                 let value = tally.observe(observed);
@@ -564,7 +532,6 @@ pub(super) async fn reflexive_loop(
                     return;
                 };
                 probe.note(start);
-                note_rewritten_port(&rewritten_port, probe.rewritten_port);
                 // No observation this window (bounded out, failed or no vote learned).
                 let Some(observed) = probe.observation() else {
                     continue;

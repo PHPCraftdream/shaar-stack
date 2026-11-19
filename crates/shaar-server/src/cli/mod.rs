@@ -78,6 +78,11 @@ pub(crate) enum Invocation {
         sockets: u8,
         show_address: bool,
     },
+    /// `diag port-map`: asks the home router to map `port` to the same external port.
+    DiagPortMap {
+        port: u16,
+        show_address: bool,
+    },
     /// `diag nat-filter listen`: listens `seconds` and, with a knock address, knocks on it after
     /// `knock.1` seconds; with a sweep it sends one datagram to every port of an address.
     DiagNatFilterListen {
@@ -383,6 +388,9 @@ pub(crate) async fn execute(invocation: Invocation) -> Result<Vec<String>, Strin
             sockets,
             show_address,
         } => diag::ports(&place, sockets, show_address).await,
+        Invocation::DiagPortMap { port, show_address } => {
+            Ok(diag::port_map(port, show_address).await)
+        }
         measuring @ (Invocation::DiagNatFilterListen { .. }
         | Invocation::DiagNatFilterProbe { .. }
         | Invocation::DiagNatFilterCatch { .. }) => {

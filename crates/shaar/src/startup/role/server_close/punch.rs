@@ -58,11 +58,7 @@ pub(super) fn candidate_provider(
         if let Some(candidates) = punch_candidates_for_tests(local.port()) {
             return candidates;
         }
-        punch::answer_candidates(
-            local,
-            resources.punch_address(),
-            resources.punch_rewritten_port(),
-        )
+        punch::local_candidates(local, resources.punch_address())
     }
 }
 
