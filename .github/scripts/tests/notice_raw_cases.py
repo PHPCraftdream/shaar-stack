@@ -335,8 +335,8 @@ class RegistryGapBindingTests(unittest.TestCase):
         registry_rows = inventory["identities"]
         path_rows = prepared["identities"]
         available = sum(r["classification"] in complete for r in registry_rows)
-        self.assertEqual((available, len(registry_rows)), (523, 536))
-        self.assertEqual(inventory["counts"]["registry_text_available_identities"], 523)
+        self.assertEqual((available, len(registry_rows)), (526, 539))
+        self.assertEqual(inventory["counts"]["registry_text_available_identities"], 526)
         self.assertEqual(len(path_rows), 17)
         self.assertTrue(all(r.get("classification", "package-complete") == "package-complete" for r in path_rows))
         remaining = sorted(r["name"] + "@" + r["version"] for r in registry_rows if r["classification"] not in complete)

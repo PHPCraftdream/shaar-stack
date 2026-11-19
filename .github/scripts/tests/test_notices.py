@@ -625,8 +625,8 @@ class RepositoryContractTests(unittest.TestCase):
         return json.loads(raw)
 
     def test_corpus_counts_and_reviewed_gaps(self):
-        self.assertEqual(len(self.entries), 553)
-        self.assertEqual(sum(1 for e in self.entries.values() if e.complete), 540)
+        self.assertEqual(len(self.entries), 556)
+        self.assertEqual(sum(1 for e in self.entries.values() if e.complete), 543)
         notices.check_gap_policy(self.policy, self.entries)
         self.assertEqual(len(self.policy["gap_table"]), 13)
         self.assertEqual(sorted(self.policy["targets"]), [WINDOWS, LINUX])

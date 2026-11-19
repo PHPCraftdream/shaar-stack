@@ -399,7 +399,8 @@ fn key_subcommands_parse_and_never_take_the_text_from_an_argument() {
             place: place(Some("d")),
             command: KeyCommand::Export {
                 out: Some("k.txt".into()),
-                print_secret: true
+                print_secret: true,
+                passwords: key::PasswordArgs::default()
             }
         }
     );
@@ -409,7 +410,8 @@ fn key_subcommands_parse_and_never_take_the_text_from_an_argument() {
             place: place(None),
             command: KeyCommand::Export {
                 out: None,
-                print_secret: false
+                print_secret: false,
+                passwords: key::PasswordArgs::default()
             }
         }
     );
@@ -486,4 +488,136 @@ async fn a_key_moves_between_two_data_directories_and_is_never_overwritten() {
         .unwrap();
     assert_eq!(shown.len(), 1);
     assert_eq!(shown[0], std::fs::read_to_string(out).unwrap());
+}
+
+#[test]
+fn encryption_commands_parse_with_their_costs_and_passwords() {
+    let given = |password: Option<&str>, file: Option<&str>| key::PasswordArgs {
+        password: password.map(str::to_owned),
+        file: file.map(Into::into),
+    };
+    assert_eq!(
+        parsed(&[
+            "key",
+            "encrypt",
+            "--memory-kib",
+            "8",
+            "--passes",
+            "1",
+            "--password",
+            "pw"
+        ]),
+        Invocation::Key {
+            place: Place::default(),
+            command: KeyCommand::Encrypt {
+                cost: key::CostArgs {
+                    memory_kib: Some(8),
+                    passes: Some(1)
+                },
+                passwords: given(Some("pw"), None)
+            }
+        }
+    );
+    assert_eq!(
+        parsed(&["key", "decrypt", "--password-file", "p.txt"]),
+        Invocation::Key {
+            place: Place::default(),
+            command: KeyCommand::Decrypt {
+                passwords: given(None, Some("p.txt"))
+            }
+        }
+    );
+    assert_eq!(
+        parsed(&[
+            "key",
+            "password",
+            "--password",
+            "old",
+            "--new-password",
+            "new"
+        ]),
+        Invocation::Key {
+            place: Place::default(),
+            command: KeyCommand::Password {
+                cost: key::CostArgs::default(),
+                passwords: given(Some("old"), None),
+                new_password: given(Some("new"), None)
+            }
+        }
+    );
+    let shown = format!("{:?}", parsed(&["key", "decrypt", "--password", "hunter2"]));
+    assert!(!shown.contains("hunter2"), "{shown}");
+    for bad in [
+        &["key", "encrypt", "--passes", "many"][..],
+        &["key", "encrypt", "extra"],
+    ] {
+        assert!(matches!(refused(bad), ParseError::Clap(_)), "{bad:?}");
+    }
+}
+
+/// The arguments with the data directory and a tiny cost, so that a debug build stays fast.
+fn with_cost<'a>(dir: &'a str, parts: &[&'a str]) -> Vec<&'a str> {
+    let mut all = parts.to_vec();
+    all.extend(["--dir", dir, "--memory-kib", "8", "--passes", "1"]);
+    all
+}
+
+#[tokio::test]
+async fn a_key_is_encrypted_opened_changed_and_made_plain_again() {
+    let fixture = Fixture::new();
+    run(&["init", "--dir", fixture.dir(), "--private"])
+        .await
+        .unwrap();
+    let dir = fixture.dir();
+    let plain = run(&["key", "export", "--print-secret", "--dir", dir])
+        .await
+        .unwrap();
+    let encrypted = run(&with_cost(dir, &["key", "encrypt", "--password", "one"]))
+        .await
+        .unwrap();
+    assert!(encrypted[0].starts_with("encrypted: "), "{encrypted:?}");
+    let export = |password: &'static str| async move {
+        run(&[
+            "key",
+            "export",
+            "--print-secret",
+            "--password",
+            password,
+            "--dir",
+            dir,
+        ])
+        .await
+    };
+    assert_eq!(export("one").await.unwrap(), plain);
+    let wrong = export("wrong").await.unwrap_err();
+    assert!(wrong.contains("wrong password"), "{wrong}");
+    let again = run(&with_cost(dir, &["key", "encrypt", "--password", "one"]))
+        .await
+        .unwrap_err();
+    assert!(again.contains("already encrypted"), "{again}");
+    run(&with_cost(
+        dir,
+        &[
+            "key",
+            "password",
+            "--password",
+            "one",
+            "--new-password",
+            "two",
+        ],
+    ))
+    .await
+    .unwrap();
+    assert!(export("one").await.is_err());
+    assert_eq!(export("two").await.unwrap(), plain);
+    let decrypted = run(&["key", "decrypt", "--password", "two", "--dir", dir])
+        .await
+        .unwrap();
+    assert!(decrypted[0].starts_with("decrypted: "), "{decrypted:?}");
+    assert_eq!(
+        run(&["key", "export", "--print-secret", "--dir", dir])
+            .await
+            .unwrap(),
+        plain
+    );
 }

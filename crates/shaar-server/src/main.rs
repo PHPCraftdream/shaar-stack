@@ -106,9 +106,9 @@ async fn run_from_config(config_path: PathBuf, target: Option<String>) -> Result
     let config = load_server(config_path, &overrides)
         .await
         .map_err(|error| format!("configuration: {error}"))?;
-    let identity = Identity::load(config.key_file())
+    let identity = shaar::identity::load_unlocked_default(config.key_file(), "Key password: ")
         .await
-        .map_err(|_| "could not load configured identity key".to_owned())?;
+        .map_err(|error| shaar::identity::key_load_message(&error))?;
     let keys = test_support::read_allowlist(config.allowlist_path()).await?;
     run_configured(config, identity, keys, None).await
 }

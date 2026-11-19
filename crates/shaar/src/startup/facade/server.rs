@@ -225,6 +225,23 @@ impl Server {
         Ok(Self::from_config(config, identity, allow))
     }
 
+    /// [`Self::from_config_file`] for a key file that `key encrypt` made: `password` opens it.
+    pub async fn from_config_file_with_password(
+        path: impl AsRef<Path>,
+        password: &str,
+    ) -> Result<Self, SdkError> {
+        let config = load_server(path.as_ref(), &ServerOverrides::default())
+            .await
+            .map_err(SdkError::Config)?;
+        let identity = Identity::load_with_password(config.key_file(), password)
+            .await
+            .map_err(SdkError::Identity)?;
+        let allow = AllowList::read(config.allowlist_path())
+            .await
+            .map_err(SdkError::AllowList)?;
+        Ok(Self::from_config(config, identity, allow))
+    }
+
     /// A Server over an already validated configuration; the service is its
     /// fixed `target`.
     pub fn from_config(config: ServerConfig, identity: Identity, allow: AllowList) -> Self {

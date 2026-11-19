@@ -28,6 +28,12 @@ pub enum IdentityError {
     InvalidKeyText,
     /// The text form of a key does not match its checksum: a typo or a cut-off copy.
     KeyChecksum,
+    /// The key file is encrypted and no password was given.
+    PasswordRequired,
+    /// The encrypted key file did not open: a wrong password or a damaged file, with no hint which.
+    WrongPassword,
+    /// The two answers to a new-password prompt differ.
+    PasswordMismatch,
 }
 
 impl fmt::Display for IdentityError {
@@ -47,6 +53,12 @@ impl fmt::Display for IdentityError {
                 f,
                 "the key text does not match its checksum (a typo or a cut-off copy)"
             ),
+            Self::PasswordRequired => write!(f, "the key file is encrypted and needs a password"),
+            Self::WrongPassword => write!(
+                f,
+                "could not decrypt the key file: a wrong password or a damaged file"
+            ),
+            Self::PasswordMismatch => write!(f, "the two passwords differ"),
         }
     }
 }

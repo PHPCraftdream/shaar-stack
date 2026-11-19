@@ -13,8 +13,9 @@ use std::str::FromStr;
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use shaar::config::{MainlineNetwork, ServerOverrides, load_server};
 use shaar::identity::{
-    ConfigAction, Identity, NetworkChoice, Role, config_command, default_data_dir,
-    first_run_summary_lines, provision_with, role_dir,
+    ConfigAction, Identity, NetworkChoice, PasswordSources, Role, config_command, default_data_dir,
+    first_run_summary_lines, install_password_sources, load_unlocked_default, provision_with,
+    role_dir,
 };
 use shaar::{AllowAction, PeerKey, allowlist_command};
 
@@ -153,6 +154,21 @@ pub(crate) fn command() -> Command {
     Command::new("shaar-server")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Sha'ar Server: publish an address, admit clients, forward to one TCP service")
+        .arg(
+            Arg::new("password")
+                .long("password")
+                .value_name("PASSWORD")
+                .global(true)
+                .help("Password of an encrypted key file; visible in process lists, so the weakest form (see also SHAAR_KEY_PASSWORD, --password-file, the standard input and the terminal)"),
+        )
+        .arg(
+            Arg::new("password-file")
+                .long("password-file")
+                .value_name("FILE")
+                .value_parser(value_parser!(PathBuf))
+                .global(true)
+                .help("File with the password of an encrypted key file (owner-only rights)"),
+        )
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
@@ -377,9 +393,9 @@ pub(crate) async fn execute(invocation: Invocation) -> Result<Vec<String>, Strin
         Invocation::Init { dir, private } => init(dir, private).await,
         Invocation::Address(place) => {
             let (key_file, _) = file_paths(&place).await?;
-            let identity = Identity::load(key_file)
+            let identity = load_unlocked_default(key_file, "Key password: ")
                 .await
-                .map_err(|_| "could not load configured identity key".to_owned())?;
+                .map_err(|error| shaar::identity::key_load_message(&error))?;
             Ok(PeerKey::of(&identity).summary_lines().to_vec())
         }
         Invocation::AddressKey { path } => {
@@ -485,7 +501,22 @@ async fn init(dir: Option<PathBuf>, private: bool) -> Result<Vec<String>, String
 }
 
 /// Entry point of the subcommand layer. `run` is handed back to `main.rs`.
+/// The password sources the command line names; none when the arguments do not parse.
+fn password_sources(args: &[OsString]) -> PasswordSources {
+    command()
+        .try_get_matches_from(args)
+        .ok()
+        .map(|matches| {
+            PasswordSources::new(
+                matches.get_one::<String>("password").cloned(),
+                matches.get_one::<PathBuf>("password-file").cloned(),
+            )
+        })
+        .unwrap_or_default()
+}
+
 pub(crate) async fn main(args: Vec<OsString>) -> ExitCode {
+    install_password_sources(password_sources(&args));
     let invocation = match parse(args) {
         Ok(invocation) => invocation,
         Err(ParseError::Clap(error)) => error.exit(),

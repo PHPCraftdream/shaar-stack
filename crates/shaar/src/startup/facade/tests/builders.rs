@@ -296,3 +296,48 @@ async fn loading_reports_the_failing_part_without_secrets() {
     // An allowlist of the empty list is valid and admits nobody.
     assert!(AllowList::empty().is_empty());
 }
+
+#[tokio::test]
+async fn an_encrypted_key_opens_through_the_password_variant_of_from_config_file() {
+    let dir = FixtureDir::new();
+    let client_identity = Identity::create_new(dir.0.join("client.key"))
+        .await
+        .unwrap();
+    let server_identity = write_server_files(
+        &dir.0,
+        "127.0.0.1:9".parse().unwrap(),
+        PeerKey::of(&client_identity),
+    )
+    .await;
+    let cost = crate::identity::KeyCost {
+        memory_kib: 8,
+        passes: 1,
+        lanes: 1,
+    };
+    crate::identity::encrypt_key(&dir.0.join("server.key"), "pw", cost)
+        .await
+        .unwrap();
+    let path = dir.0.join("server.ktav");
+    let plain = Server::from_config_file(&path).await.unwrap_err();
+    assert!(
+        matches!(
+            plain,
+            SdkError::Identity(crate::identity::IdentityError::PasswordRequired)
+        ),
+        "{plain}"
+    );
+    let wrong = Server::from_config_file_with_password(&path, "nope")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            wrong,
+            SdkError::Identity(crate::identity::IdentityError::WrongPassword)
+        ),
+        "{wrong}"
+    );
+    let server = Server::from_config_file_with_password(&path, "pw")
+        .await
+        .unwrap();
+    assert_eq!(server.address(), PeerKey::of(&server_identity));
+}
