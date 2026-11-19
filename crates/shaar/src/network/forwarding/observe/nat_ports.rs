@@ -3,6 +3,10 @@
 //! those ports and whether they depend on the destination. Ports and counts only unless the
 //! operator asks for the external address (`show_address`): no key is read, and the traffic is one
 //! ping per socket and host.
+//!
+//! With `map` (leaf NAT-6) the sockets sit on ports of the fixed set and the home router is asked
+//! to map each port to itself for the length of the run; the run then says whether the external
+//! port the DHT hosts see is the mapped one, which tells the router's NAT from the one behind it.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -13,6 +17,10 @@ use tokio::net::UdpSocket;
 use tokio::time::{Instant, timeout, timeout_at};
 
 use crate::config::MainlineNetwork;
+use crate::network::ports::PORTS;
+use crate::network::ports::mapping::{
+    Gateway, MEASURE_BUDGET, MEASURE_LIFETIME, Mapping, home_gateway, map_any, release,
+};
 
 /// Sockets measured when the operator names no number.
 pub const DEFAULT_SOCKETS: u8 = 6;
@@ -31,14 +39,21 @@ const ROUNDS: u8 = 3;
 const MAX_DEPTH: u8 = 8;
 
 /// Measures `sockets` fresh sockets against the bootstrap hosts of `network` and returns the lines
-/// to print.
+/// to print. With `map` the sockets sit on ports of the fixed set and the home router is asked to
+/// map each of them until the run ends.
 pub async fn nat_ports(
     network: &MainlineNetwork,
     sockets: u8,
     show_address: bool,
+    map: bool,
 ) -> Result<Vec<String>, String> {
     let hosts = bootstrap_hosts(network).await;
-    measure(&hosts, sockets, ANSWER_WAIT, show_address).await
+    if map {
+        let gateway = home_gateway().await;
+        measure_mapped(&hosts, sockets, ANSWER_WAIT, show_address, gateway, &PORTS).await
+    } else {
+        measure(&hosts, sockets, ANSWER_WAIT, show_address).await
+    }
 }
 
 /// The first `HOSTS` distinct bootstrap hosts: numeric entries first, then resolved names.
@@ -79,6 +94,117 @@ pub(crate) async fn measure(
     wait: Duration,
     show_address: bool,
 ) -> Result<Vec<String>, String> {
+    run(hosts, sockets, wait, show_address, Router::Ignored).await
+}
+
+/// [`measure`] on the first free of `ports` (the fixed set): each port is asked of `gateway`
+/// (`None`: the system names no home router) before its socket pings, and the mappings are held
+/// until every socket has been measured and then deleted.
+pub(crate) async fn measure_mapped(
+    hosts: &[SocketAddrV4],
+    sockets: u8,
+    wait: Duration,
+    show_address: bool,
+    gateway: Option<Gateway>,
+    ports: &[u16],
+) -> Result<Vec<String>, String> {
+    run(
+        hosts,
+        sockets,
+        wait,
+        show_address,
+        Router::Asked(gateway, ports),
+    )
+    .await
+}
+
+/// Whether a run asks a router for mappings.
+#[derive(Clone, Copy)]
+enum Router<'a> {
+    /// No mapping: fresh sockets on ports the system picks.
+    Ignored,
+    /// Sockets on the first free of these ports, each asked of this gateway.
+    Asked(Option<Gateway>, &'a [u16]),
+}
+
+async fn bind_fresh(count: u8) -> Result<Vec<UdpSocket>, String> {
+    let mut bound = Vec::with_capacity(usize::from(count));
+    for _ in 0..count {
+        let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))
+            .await
+            .map_err(|error| format!("could not open a UDP socket: {error}"))?;
+        bound.push(socket);
+    }
+    Ok(bound)
+}
+
+/// `count` sockets on the first free ports of the fixed set, in the order of the set.
+async fn bind_fixed(count: u8, candidates: &[u16]) -> Result<Vec<UdpSocket>, String> {
+    let mut bound = Vec::with_capacity(usize::from(count));
+    for &port in candidates {
+        if bound.len() == usize::from(count) {
+            break;
+        }
+        if let Ok(socket) = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).await {
+            bound.push(socket);
+        }
+    }
+    if bound.len() < usize::from(count) {
+        return Err(format!(
+            "could not open {count} UDP sockets on ports of the fixed set"
+        ));
+    }
+    Ok(bound)
+}
+
+/// Asks `gateway` to map `port` to itself; the line says what came of it and the mapping is
+/// returned when one was granted.
+async fn ask_router(
+    gateway: Option<Gateway>,
+    index: usize,
+    port: u16,
+) -> (String, Option<Mapping>) {
+    let head = format!("nat-ports socket={} local_port={port}", index + 1);
+    let Some(gateway) = gateway else {
+        return (format!("{head} map=no-gateway"), None);
+    };
+    match map_any(gateway, port, MEASURE_LIFETIME, MEASURE_BUDGET).await {
+        Ok(mapping) => (
+            format!(
+                "{head} map=granted protocol={} mapped_port={}",
+                mapping.protocol.token(),
+                mapping.external_port
+            ),
+            Some(mapping),
+        ),
+        Err(error) => (format!("{head} map={error}"), None),
+    }
+}
+
+/// Deletes the held mappings at `gateway`; returns how many it deleted.
+async fn release_all(gateway: Option<Gateway>, held: &[Option<Mapping>]) -> usize {
+    let Some(gateway) = gateway else {
+        return 0;
+    };
+    let mut released = 0;
+    for mapping in held.iter().flatten() {
+        if release(gateway.address, gateway.local, mapping)
+            .await
+            .is_ok()
+        {
+            released += 1;
+        }
+    }
+    released
+}
+
+async fn run(
+    hosts: &[SocketAddrV4],
+    sockets: u8,
+    wait: Duration,
+    show_address: bool,
+    router: Router<'_>,
+) -> Result<Vec<String>, String> {
     if hosts.is_empty() {
         return Err(
             "no DHT bootstrap hosts are available (see `config network public`)".to_owned(),
@@ -87,21 +213,24 @@ pub(crate) async fn measure(
     if sockets == 0 || sockets > MAX_SOCKETS {
         return Err(format!("sockets must be 1 to {MAX_SOCKETS}"));
     }
-    let mut bound = Vec::with_capacity(usize::from(sockets));
-    for _ in 0..sockets {
-        let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))
-            .await
-            .map_err(|error| format!("could not open a UDP socket: {error}"))?;
-        bound.push(socket);
-    }
+    let bound = match router {
+        Router::Ignored => bind_fresh(sockets).await?,
+        Router::Asked(_, candidates) => bind_fixed(sockets, candidates).await?,
+    };
     let mut locals = Vec::with_capacity(bound.len());
     let mut seen = Vec::with_capacity(bound.len());
+    let mut held = Vec::with_capacity(bound.len());
     let mut lines = Vec::new();
     for (index, socket) in bound.iter().enumerate() {
         let local = socket
             .local_addr()
             .map_err(|error| format!("could not read a socket port: {error}"))?
             .port();
+        if let Router::Asked(gateway, _) = router {
+            let (line, mapping) = ask_router(gateway, index, local).await;
+            lines.push(line);
+            held.push(mapping);
+        }
         let answers = ask(socket, hosts, index, wait).await;
         for (host, answer) in answers.iter().enumerate() {
             let external = answer.map_or_else(|| "none".to_owned(), |seen| seen.port().to_string());
@@ -124,6 +253,14 @@ pub(crate) async fn measure(
         );
     }
     lines.push(summary(&locals, &seen));
+    if let Router::Asked(gateway, _) = router {
+        let released = release_all(gateway, &held).await;
+        let mapped: Vec<Option<u16>> = held
+            .iter()
+            .map(|mapping| mapping.as_ref().map(|granted| granted.external_port))
+            .collect();
+        lines.push(map_summary(&mapped, &seen, released));
+    }
     Ok(lines)
 }
 
@@ -336,6 +473,29 @@ pub(crate) fn summary(locals: &[u16], seen: &[Vec<Option<u16>>]) -> String {
          preserved_ports={preserved} external_steps=[{}]",
         locals.len(),
         steps.join(",")
+    )
+}
+
+/// The line after a mapped run: how many ports the router mapped, for how many sockets every
+/// host that answered saw the mapped external port, and how many mappings were deleted again.
+pub(crate) fn map_summary(
+    mapped: &[Option<u16>],
+    seen: &[Vec<Option<u16>>],
+    released: usize,
+) -> String {
+    let granted = mapped.iter().flatten().count();
+    let at_mapped = mapped
+        .iter()
+        .zip(seen)
+        .filter(|(port, answers)| {
+            let mut ports = answers.iter().flatten().peekable();
+            port.is_some() && ports.peek().is_some() && ports.all(|value| Some(*value) == **port)
+        })
+        .count();
+    format!(
+        "nat-ports map-summary sockets={} mapped={granted} seen_at_mapped_port={at_mapped} \
+         released={released}",
+        mapped.len()
     )
 }
 

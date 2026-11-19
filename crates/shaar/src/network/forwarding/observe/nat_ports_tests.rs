@@ -1,17 +1,23 @@
 //! Tests of the NAT port measurement: the wire format, the reply walker, the summary and the
 //! whole run against fake bootstrap hosts on the loopback.
 
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
 use tokio::net::UdpSocket;
 
 use super::{
-    MAX_SOCKETS, distinct_hosts, external_endpoint, learn_external, measure, ping_packet, summary,
-    top_level_bytes,
+    MAX_SOCKETS, bind_fixed, distinct_hosts, external_endpoint, learn_external, map_summary,
+    measure, measure_mapped, ping_packet, summary, top_level_bytes,
 };
+use crate::network::ports::mapping::Gateway;
+use crate::network::ports::mapping::tests::{LOCAL, fake, pcp_answer};
 
 const WAIT: Duration = Duration::from_millis(400);
+/// Candidate ports of zero: the system gives each socket a free port, so a test never contends
+/// with another for the ports of the fixed set.
+const ANY_PORT: [u16; 8] = [0; 8];
+const NO_UPNP: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
 
 fn external_port(packet: &[u8], transaction: [u8; 2]) -> Option<u16> {
     external_endpoint(packet, transaction).map(|seen| seen.port())
@@ -347,4 +353,206 @@ async fn no_answer_in_any_round_leaves_the_external_endpoint_unknown() {
         None
     );
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+fn gateway_at(address: SocketAddr) -> Gateway {
+    Gateway {
+        address,
+        upnp: NO_UPNP,
+        local: LOCAL,
+    }
+}
+
+/// A PCP gateway that grants every request the external port it asked for.
+fn granting(_index: usize, request: &[u8]) -> Vec<Vec<u8>> {
+    let asked = u16::from_be_bytes([request[42], request[43]]);
+    vec![pcp_answer(request, 0, asked)]
+}
+
+#[tokio::test]
+async fn a_mapped_run_asks_for_every_port_holds_the_mappings_and_deletes_them() {
+    let (first, one) = host(0, false).await;
+    let (second, two) = host(0, false).await;
+    let gateway = fake(granting).await;
+    let lines = measure_mapped(
+        &[first, second],
+        3,
+        WAIT,
+        false,
+        Some(gateway_at(gateway.address)),
+        &ANY_PORT,
+    )
+    .await
+    .expect("measured");
+    assert_eq!(
+        lines.len(),
+        3 + 3 * 2 + 2,
+        "a map line and two host lines per socket, the summary and the map summary"
+    );
+    let maps: Vec<&String> = lines.iter().filter(|line| line.contains(" map=")).collect();
+    assert_eq!(maps.len(), 3);
+    for line in maps {
+        assert_eq!(field(line, "map"), "granted", "{line}");
+        assert_eq!(field(line, "protocol"), "pcp", "{line}");
+        assert_eq!(
+            field(line, "local_port"),
+            field(line, "mapped_port"),
+            "{line}"
+        );
+    }
+    let last = lines.last().expect("map summary");
+    assert_eq!(
+        last,
+        "nat-ports map-summary sockets=3 mapped=3 seen_at_mapped_port=3 released=3"
+    );
+    let requests = gateway.requests();
+    let deletions = requests
+        .iter()
+        .filter(|request| request[4..8] == [0; 4])
+        .count();
+    assert_eq!(
+        (requests.len(), deletions),
+        (6, 3),
+        "three requests, three deletions"
+    );
+    one.abort();
+    two.abort();
+}
+
+#[tokio::test]
+async fn a_host_that_sees_another_port_than_the_mapped_one_is_not_counted() {
+    let (moved, one) = host(1000, false).await;
+    let gateway = fake(granting).await;
+    let lines = measure_mapped(
+        &[moved],
+        2,
+        WAIT,
+        false,
+        Some(gateway_at(gateway.address)),
+        &ANY_PORT,
+    )
+    .await
+    .expect("measured");
+    let last = lines.last().expect("map summary");
+    assert!(
+        last.contains("mapped=2 seen_at_mapped_port=0 released=2"),
+        "{last}"
+    );
+    one.abort();
+}
+
+#[tokio::test]
+async fn without_a_gateway_or_with_a_refusing_one_the_run_still_measures_and_says_so() {
+    let (first, one) = host(0, false).await;
+    let lines = measure_mapped(&[first], 2, WAIT, false, None, &ANY_PORT)
+        .await
+        .expect("measured");
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.ends_with("map=no-gateway"))
+            .count(),
+        2
+    );
+    assert_eq!(
+        lines.last().expect("map summary"),
+        "nat-ports map-summary sockets=2 mapped=0 seen_at_mapped_port=0 released=0"
+    );
+    assert!(lines.iter().any(|line| line.contains("external_port=")));
+
+    let refusing = fake(|_, request| vec![pcp_answer(request, 2, 0)]).await;
+    let lines = measure_mapped(
+        &[first],
+        1,
+        WAIT,
+        false,
+        Some(gateway_at(refusing.address)),
+        &ANY_PORT,
+    )
+    .await
+    .expect("measured");
+    assert!(lines[0].ends_with("map=refused:2"), "{}", lines[0]);
+    assert!(
+        lines
+            .last()
+            .expect("map summary")
+            .contains("mapped=0 seen_at_mapped_port=0 released=0")
+    );
+    one.abort();
+}
+
+#[tokio::test]
+async fn a_mapped_run_prints_no_address() {
+    let (first, one) = host(0, false).await;
+    let gateway = fake(granting).await;
+    let lines = measure_mapped(
+        &[first],
+        1,
+        WAIT,
+        false,
+        Some(gateway_at(gateway.address)),
+        &ANY_PORT,
+    )
+    .await
+    .expect("measured");
+    assert!(lines.iter().all(|line| !line.contains("127.0.0.1")));
+    one.abort();
+}
+
+#[tokio::test]
+async fn the_mapped_run_keeps_the_bounds_of_the_plain_one() {
+    let (address, one) = host(0, false).await;
+    assert!(
+        measure_mapped(&[], 3, WAIT, false, None, &ANY_PORT)
+            .await
+            .is_err()
+    );
+    assert!(
+        measure_mapped(&[address], 0, WAIT, false, None, &ANY_PORT)
+            .await
+            .is_err()
+    );
+    assert!(
+        measure_mapped(&[address], MAX_SOCKETS + 1, WAIT, false, None, &ANY_PORT)
+            .await
+            .is_err()
+    );
+    one.abort();
+}
+
+#[tokio::test]
+async fn fixed_ports_skip_a_busy_one_and_fail_when_too_few_are_free() {
+    let busy = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))
+        .await
+        .expect("busy socket");
+    let taken = busy.local_addr().expect("busy address").port();
+    let sockets = bind_fixed(2, &[taken, 0, 0]).await.expect("two free ports");
+    let ports: Vec<u16> = sockets
+        .iter()
+        .map(|socket| socket.local_addr().expect("address").port())
+        .collect();
+    assert_eq!(ports.len(), 2);
+    assert!(!ports.contains(&taken), "the busy port is skipped");
+    assert!(bind_fixed(3, &[0, 0]).await.is_err());
+    assert!(bind_fixed(1, &[]).await.is_err());
+}
+
+#[test]
+fn the_map_summary_counts_a_socket_only_when_every_answer_is_the_mapped_port() {
+    let mapped = [Some(40_000), Some(40_001), Some(40_002), None, Some(40_004)];
+    let seen = vec![
+        vec![Some(40_000), Some(40_000)],
+        vec![Some(40_001), Some(9)],
+        vec![None, None],
+        vec![Some(40_003), Some(40_003)],
+        vec![None, Some(40_004)],
+    ];
+    assert_eq!(
+        map_summary(&mapped, &seen, 3),
+        "nat-ports map-summary sockets=5 mapped=4 seen_at_mapped_port=2 released=3"
+    );
+    assert_eq!(
+        map_summary(&[], &[], 0),
+        "nat-ports map-summary sockets=0 mapped=0 seen_at_mapped_port=0 released=0"
+    );
 }

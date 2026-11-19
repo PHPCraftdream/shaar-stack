@@ -11,3 +11,5 @@ mod helpers;
 mod ipv6;
 #[path = "endpoints/listener.rs"]
 mod listener;
+#[path = "endpoints/mapping.rs"]
+mod mapping;

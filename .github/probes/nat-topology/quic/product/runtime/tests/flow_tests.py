@@ -567,7 +567,7 @@ class NewVerdictTests(unittest.TestCase):
         self.assertIn("hook forward", dynamic.rules(PREFIX, "native", PORTS))
 
     def test_unreviewed_net_classes_still_fail_and_new_ones_need_their_receipts(self):
-        for net in ("dnat", "ipv6", "relay", "recover"):
+        for net in ("dnat", "mapped", "ipv6", "relay", "recover"):
             with self.subTest(net=net), self.assertRaises((ValueError, KeyError)):
                 checks.verify_class({"net": net, "nat": "cone", "direct": True, "mode": "signal"}, receipts(), {})
 

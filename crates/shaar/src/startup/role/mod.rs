@@ -25,9 +25,27 @@ use dialers::RouteLink;
 #[derive(Clone, Debug, Default)]
 pub struct RoleOptions {
     pub policy: PolicyConfig,
+    /// Whether the role asks its router to forward the port of its endpoint (leaf PORT-1, step
+    /// 3c). The library default is off; the products turn it on.
+    pub router_mapping: crate::network::ports::mapping::RouterMapping,
 }
 
+/// The environment variable that turns the router mapping of the products off (`off`, `0`, `no`
+/// or `false`).
+pub const ROUTER_MAPPING_ENV: &str = "SHAAR_ROUTER_MAPPING";
+
 impl RoleOptions {
+    /// The options of the products: the default policy, and the router mapping on unless the
+    /// environment variable [`ROUTER_MAPPING_ENV`] says it is off. The mapping asks the home router
+    /// for a forward of the port the endpoint is bound to and deletes it when the role closes.
+    #[must_use]
+    pub fn products() -> Self {
+        Self {
+            router_mapping: mapping_setting(std::env::var(ROUTER_MAPPING_ENV).ok().as_deref()),
+            ..Self::default()
+        }
+    }
+
     /// Validates the embedded policy so both roles reject degenerate tuning
     /// before any network I/O.
     pub(crate) fn validate(&self) -> Result<(), StartupError> {
@@ -318,5 +336,43 @@ fn emit_server_admission(parts: &server::ServerParts) {
             parts.events.as_ref(),
             RoleEvent::NativeBound(endpoint.local_addr()),
         );
+    }
+}
+
+/// The router mapping a value of [`ROUTER_MAPPING_ENV`] asks for; no value means the home router.
+fn mapping_setting(value: Option<&str>) -> crate::network::ports::mapping::RouterMapping {
+    use crate::network::ports::mapping::RouterMapping;
+    match value
+        .map(|text| text.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("off" | "0" | "no" | "false") => RouterMapping::Off,
+        _ => RouterMapping::HomeRouter,
+    }
+}
+
+#[cfg(test)]
+mod options_tests {
+    use super::*;
+    use crate::network::ports::mapping::RouterMapping;
+
+    #[test]
+    fn the_products_map_through_the_home_router_unless_the_environment_says_off() {
+        assert_eq!(mapping_setting(None), RouterMapping::HomeRouter);
+        for on in ["on", "1", "yes", "true", "", "anything"] {
+            assert_eq!(
+                mapping_setting(Some(on)),
+                RouterMapping::HomeRouter,
+                "{on:?}"
+            );
+        }
+        for off in ["off", "OFF", " Off ", "0", "no", "false", "False"] {
+            assert_eq!(mapping_setting(Some(off)), RouterMapping::Off, "{off:?}");
+        }
+    }
+
+    #[test]
+    fn the_library_default_asks_for_no_mapping() {
+        assert_eq!(RoleOptions::default().router_mapping, RouterMapping::Off);
     }
 }

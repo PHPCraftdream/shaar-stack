@@ -371,7 +371,10 @@ async fn idle_policy_progress_restores_native_without_disturbing_active_streams(
                 client_config,
                 client_identity,
                 &mut client_peer,
-                RoleOptions { policy },
+                RoleOptions {
+                    policy,
+                    ..RoleOptions::default()
+                },
                 super::fixtures::ROLE_BUDGET,
             );
             tokio::select! {

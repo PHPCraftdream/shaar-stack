@@ -18,6 +18,9 @@ _DNAT = {"udp": "open", "peer": True}
 _PUNCH = {**_DNAT, "tcp_a": ("transit",), "nat": "cone", "stateful": True}
 # L4b punch cases: the same stateful cone gateways, but the Client reaches only the relay (no Ygg transit).
 _PUNCH_RELAY = {**_PUNCH, "tcp_a": ("relay",)}
+# Mapped-port cases (leaf DIRECT-T): the same stateful cone gateways, but the Client is allowed no owned TCP at all (no Ygg rendezvous,
+# no relay), so the only direct path is a port the Server's router forwards after a PCP grant.
+_MAPPED = {**_PUNCH, "tcp_a": ()}
 PROFILES = {
     "native-signal": _NATIVE, "native-standby": _NATIVE,
     "blocked-standby": _BLOCKED, "blocked-signal": _BLOCKED,
@@ -35,6 +38,7 @@ PROFILES = {
     "dnat-cone-encrypted-signal": _PUNCH, "dnat-cone-encrypted-standby": _PUNCH,
     "dnat-cone-relaypunch-signal": _PUNCH_RELAY, "dnat-cone-relaypunch-standby": _PUNCH_RELAY,
     "dnat-cone-dhtdrop-signal": {**_PUNCH, "dht_drop": True},
+    "dnat-mapped-signal": _MAPPED, "dnat-mapped-standby": _MAPPED, "dnat-mapped-refused-signal": _MAPPED,
     "dnat-sym-signal": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},
     "dnat-sym-standby": {**_DNAT, "tcp_a": ("relay", "transit"), "nat": "random"},
     "hole-signal": {**_NATIVE, "native_new": True, "hole": True}, "hole-standby": {**_NATIVE, "native_new": True, "hole": True},

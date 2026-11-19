@@ -30,7 +30,8 @@ class ProductContractTests(unittest.TestCase):
             "relay-denied-signal", "failover-standby", "failover-signal", "denied-blocked-standby", "dht-drop-signal",
             "outage-standby", "dnat-cone-signal", "dnat-cone-standby", "dnat-cone-relay-signal", "dnat-cone-relay-standby",
             "dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal", "dnat-cone-relaypunch-standby",
-            "dnat-cone-dhtdrop-signal", "dnat-cone-encrypted-signal", "dnat-cone-encrypted-standby", "dnat-sym-signal", "dnat-sym-standby",
+            "dnat-cone-dhtdrop-signal", "dnat-cone-encrypted-signal", "dnat-cone-encrypted-standby",
+            "dnat-mapped-signal", "dnat-mapped-standby", "dnat-mapped-refused-signal", "dnat-sym-signal", "dnat-sym-standby",
             "hole-signal", "hole-standby", "switch-signal", "switch-standby", "relay-full-signal", "relay-full-standby",
             "ipv6-signal", "ipv6-standby", "denied-native-signal", "recover-standby"])
         self.assertEqual(contract.PHASE_SECONDS, 1200)
@@ -61,7 +62,35 @@ class ProductContractTests(unittest.TestCase):
         opted = {name for name, spec in contract.CASES.items() if contract.DHT_OBSERVED_KEY in spec}
         self.assertEqual(opted, {"dnat-cone-norelay-signal", "dnat-cone-norelay-standby", "dnat-cone-relaypunch-signal",
                                  "dnat-cone-relaypunch-standby", "dnat-cone-dhtdrop-signal", "dnat-cone-encrypted-signal",
-                                 "dnat-cone-encrypted-standby"})
+                                 "dnat-cone-encrypted-standby", "dnat-mapped-signal", "dnat-mapped-standby",
+                                 "dnat-mapped-refused-signal"})
+
+    def test_mapped_trio_closes_every_other_path_so_only_the_router_mapping_can_carry_the_client(self):
+        cases = contract.CASES
+        trio = (("dnat-mapped-signal", "grant", "signal", 1, 0), ("dnat-mapped-standby", "grant", "standby", 1, 0),
+                ("dnat-mapped-refused-signal", "refuse", "signal", 0, 1))
+        self.assertEqual({name for name, spec in cases.items() if "gateway" in spec}, {item[0] for item in trio})
+        for name, gateway, mode, accepts, code in trio:
+            spec = cases[name]
+            self.assertEqual((spec["net"], spec["gateway"], spec["mode"], spec["target_accepts"], spec["client_exit"]),
+                             ("mapped", gateway, mode, accepts, code), name)
+            self.assertTrue(spec["norelay"] and spec["ygg_client_blocked"] and spec["dht_observed"], name)
+            self.assertEqual((spec["publish"], spec["nat"], spec["server_ns"]), ("plain", "cone", "host_b"), name)
+            self.assertNotIn("direct", spec, name)
+            self.assertEqual(spec.get("route_line", False), gateway == "grant", name)
+        # The control differs from the signal case only by the gateway's answer and the outcome that follows from it.
+        twin = {key: value for key, value in cases["dnat-mapped-signal"].items()
+                if key not in ("gateway", "route_line", "target_accepts", "client_exit")}
+        control = {key: value for key, value in cases["dnat-mapped-refused-signal"].items()
+                   if key not in ("gateway", "target_accepts", "client_exit")}
+        self.assertEqual(control, twin)
+        self.assertEqual(contract.ROUTER_LAN, {"rtr_b": "10.0.2.1"})
+        self.assertEqual(contract.identity_roles(cases["dnat-mapped-signal"]), contract.IDENTITY_ROLES)
+        ready = {"role": "gateway", "nonce": "a" * 32, "pid": 7, "mode": "grant"}
+        contract.validate_ready(ready, "gateway", "a" * 32, 7)
+        for bad in ({**ready, "mode": "open"}, {**ready, "pid": 8}, {**ready, "nonce": "b" * 32}):
+            with self.assertRaises(ValueError):
+                contract.validate_ready(bad, "gateway", "a" * 32, 7)
 
     def test_new_row_cases_declare_their_flows_exits_and_identities(self):
         cases = contract.CASES
@@ -139,7 +168,7 @@ class ProductContractTests(unittest.TestCase):
         cases = contract.CASES
         for name, spec in cases.items():
             if name.startswith("dnat-"):
-                self.assertEqual(spec["nat"], "cone" if "cone" in name else "random", name)
+                self.assertEqual(spec["nat"], "cone" if ("cone" in name or "mapped" in name) else "random", name)
             if spec.get("direct"):
                 self.assertEqual((spec["target_accepts"], spec["client_exit"]), (1, 0), name)
             # dnat-sym-standby is the one fail-closed-for-direct case whose payload rides Yggdrasil (accepts 1, exit 0).
@@ -383,6 +412,13 @@ class NetworkContractTests(unittest.TestCase):
             self.assertIn(stateful % "203.0.113.1", rules("rtr_a", case), case)
             self.assertIn(stateful % "203.0.113.2", rules("rtr_b", case), case)
             self.assertNotIn("ct state", rules("rtr_a", case), case)
+        for case in ("dnat-mapped-signal", "dnat-mapped-standby", "dnat-mapped-refused-signal"):
+            self.assertIn(stateful % "203.0.113.1", rules("rtr_a", case), case)
+            self.assertIn(stateful % "203.0.113.2", rules("rtr_b", case), case)
+            self.assertIn("natout ip saddr 10.0.2.2 ip protocol udp counter name udp_nat masquerade comment", rules("rtr_b", case), case)
+            for service in ("relay_tcp", "ygg_tcp"):
+                self.assertNotIn(f"counter name {service} accept", rules("rtr_a", case), (case, service))
+                self.assertIn(f"counter name {service} accept", rules("rtr_b", case), (case, service))
         for case in ("dnat-cone-signal", "dnat-cone-relay-signal", "dnat-sym-signal", "hole-signal", "native-signal"):
             self.assertNotIn("p13-stateful-in", rules("rtr_a", case), case)
         self.assertIn("counter name hole_in comment", hole)

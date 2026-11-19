@@ -228,7 +228,7 @@ async fn run_configured(
             config.clone(),
             &identity,
             limits,
-            shaar::startup::RoleOptions::default(),
+            shaar::startup::RoleOptions::products(),
         )
         .map_err(|error| -> Box<dyn Error> { format!("composed startup: {error}").into() })?;
         let mut shutdown = std::pin::pin!(async {

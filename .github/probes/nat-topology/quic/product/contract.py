@@ -14,7 +14,7 @@ import stat
 # (no network.signaling relay fields at all), "publish" ("plain": the Server publishes the voted reflexive endpoint),
 # "dht_denied" (Client-side DHT responses are dropped by the profile), "relay_punch" (the relay is pinned AND the punch must
 # rendezvous over the carrier link of the relay circuit: the Client reaches only the relay, so Ygg carries nothing).
-NETS = ("nat", "blocked", "lan", "dht-drop", "failover", "dnat", "ipv6", "relay", "recover")
+NETS = ("nat", "blocked", "lan", "dht-drop", "failover", "dnat", "mapped", "ipv6", "relay", "recover")
 SEGMENT_NETS = ("lan", "ipv6")
 # Documentation-prefix IPv6 addresses of the two segment hosts (same plan as network.V6).
 V6 = {"rtr_a": "2001:db8:13::1", "rtr_b": "2001:db8:13::2"}
@@ -22,6 +22,11 @@ LAN = {"client_ns": "rtr_a", "server_ns": "rtr_b", "net": "lan", "udp_blocked": 
        "target_accepts": 1, "client_exit": 0}
 NATIVE = {"server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0}
 DNAT = {"server_ns": "host_b", "net": "dnat", "udp_blocked": False}
+# Mapped-port cases (leaf DIRECT-T): the relay-less cone pair with a stateful gateway on each side, no Ygg path for the Client and
+# no relay, so no punch can be coordinated: a direct path exists only if the Server's router, asked over PCP, forwards the Server's
+# QUIC port. "gateway" says how the controller-owned PCP responder of the Server's router answers: "grant" or "refuse".
+MAPPED = {**DNAT, "net": "mapped", "nat": "cone", "norelay": True, "dht_observed": True, "publish": "plain",
+          "ygg_client_blocked": True}
 CASES = {
     "native-signal": {"mode": "signal", "server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
     "native-standby": {"mode": "standby", "server_ns": "wan", "net": "nat", "udp_blocked": False, "ygg_client_blocked": True, "target_accepts": 1, "client_exit": 0},
@@ -77,6 +82,12 @@ CASES = {
                                    "publish": "encrypted", "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
     "dnat-cone-encrypted-standby": {**DNAT, "mode": "standby", "nat": "cone", "direct": True, "norelay": True, "dht_observed": True,
                                     "publish": "encrypted", "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
+    # The DIRECT-T trio. With the mapping granted the Client reaches the Server over a direct path and the exact payload crosses
+    # (both modes: Ygg is closed to the Client, so the direct path is the only one); with the gateway refusing, the same topology
+    # must fail closed, so the mapping and not the harness made the difference. Oracles were written before any run.
+    "dnat-mapped-signal": {**MAPPED, "mode": "signal", "gateway": "grant", "route_line": True, "target_accepts": 1, "client_exit": 0},
+    "dnat-mapped-standby": {**MAPPED, "mode": "standby", "gateway": "grant", "route_line": True, "target_accepts": 1, "client_exit": 0},
+    "dnat-mapped-refused-signal": {**MAPPED, "mode": "signal", "gateway": "refuse", "target_accepts": 0, "client_exit": 1},
     # Deliberate A6 negative control: fully random port mappings, must NOT flip.
     "dnat-sym-signal": {**DNAT, "mode": "signal", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 0, "client_exit": 1},
     "dnat-sym-standby": {**DNAT, "mode": "standby", "nat": "random", "direct": False, "ygg_client_blocked": False, "target_accepts": 1, "client_exit": 0},
@@ -103,6 +114,8 @@ IPS = {"wan": "203.0.113.10", "rtr_a_wan": "203.0.113.1", "rtr_b_wan": "203.0.11
 SUFFIXES = {"wan": "wan", "host_a": "host-a", "host_b": "host-b", "rtr_a": "rtr-a",
             "rtr_b": "rtr-b", "host_off": "host-off", "rtr_off": "rtr-off"}
 IP_KEYS = {"rtr_a": "rtr_a_wan", "rtr_b": "rtr_b_wan"}
+# The Server's default router on its LAN: where the Server's PCP and SSDP datagrams go (the PCP gateway of the mapped cases listens here).
+ROUTER_LAN = {"rtr_b": "10.0.2.1"}
 TRANSLATED_RANGE = (41010, 41020)
 # Long-lived owned children whose /proc privilege receipt is read; short-lived keys/app/stop workers are not sampled.
 IDENTITY_ROLES = ("wan", "target", "server", "client")
@@ -259,6 +272,8 @@ def validate_ready(event, role, nonce, pid):
         peer = event.get("relay_peer", "")
         require(type(peer) is str and 1 <= len(peer) <= 100 and peer.isascii() and peer.isalnum(),
                 "WAN relay public identity malformed")
+    elif role == "gateway":
+        require(event.get("mode") in ("grant", "refuse"), "PCP gateway mode invalid")
     elif role not in ("target", "app"):
         raise ValueError("unreviewed helper role")
 

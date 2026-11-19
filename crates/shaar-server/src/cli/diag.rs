@@ -176,6 +176,15 @@ pub(super) fn command() -> Command {
                         .default_value("6")
                         .help("Sockets to measure"),
                 )
+                .arg(
+                    Arg::new("map")
+                        .long("map")
+                        .action(ArgAction::SetTrue)
+                        .help(
+                            "Put the sockets on ports of the fixed set and ask the home router to map each \
+                             (PCP, NAT-PMP, UPnP) until the run ends, then delete the mappings",
+                        ),
+                )
                 .arg(show_address_arg()),
         )
         .subcommand(port_map_command())
@@ -258,6 +267,7 @@ pub(super) fn parse(sub: &ArgMatches) -> Result<Invocation, ParseError> {
             place: place_of(sub),
             sockets: *args.get_one::<u8>("sockets").expect("has a default"),
             show_address: args.get_flag("show-address"),
+            map: args.get_flag("map"),
         });
     }
     if what == "port-map" {
@@ -292,8 +302,9 @@ pub(super) async fn ports(
     place: &Place,
     sockets: u8,
     show_address: bool,
+    map: bool,
 ) -> Result<Vec<String>, String> {
-    nat_ports(&mainline_of(place).await?, sockets, show_address).await
+    nat_ports(&mainline_of(place).await?, sockets, show_address, map).await
 }
 
 /// `diag port-map`: one mapping at the home router of this machine by PCP or NAT-PMP, and one by

@@ -13,10 +13,10 @@ mod natpmp;
 mod pcp;
 mod probe;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod upnp;
 
-pub use keeper::{DEFAULT_TIMING, Keeper, State, Timing};
+pub use keeper::{DEFAULT_TIMING, Keeper, RouterMapping, State, Timing};
 pub use probe::{
     Gateway, MEASURE_BUDGET, MEASURE_LIFETIME, home_gateway, measure, measure_upnp, measure_within,
 };
@@ -91,6 +91,8 @@ pub enum MapError {
     Unsupported,
     /// The socket failed.
     Io,
+    /// The system names no home router.
+    NoGateway,
 }
 
 impl MapError {
@@ -100,7 +102,7 @@ impl MapError {
             Self::Refused(_) => 3,
             Self::Unsupported => 2,
             Self::Io => 1,
-            Self::Silent => 0,
+            Self::Silent | Self::NoGateway => 0,
         }
     }
 }
@@ -112,6 +114,7 @@ impl fmt::Display for MapError {
             Self::Silent => out.write_str("silent"),
             Self::Unsupported => out.write_str("unsupported"),
             Self::Io => out.write_str("io"),
+            Self::NoGateway => out.write_str("no-gateway"),
         }
     }
 }

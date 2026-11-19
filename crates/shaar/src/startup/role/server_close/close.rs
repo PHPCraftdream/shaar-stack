@@ -81,6 +81,10 @@ pub(in crate::startup::role) async fn close_parts(
             }
         }
     }
+    // Delete the router mapping of the endpoint's port, within the keeper's short bound.
+    if let Some(keeper) = parts.mapping.take() {
+        keeper.stop().await;
+    }
     // Release the reservation while signaling is still alive.
     if parts.reserved
         && let Some(ops) = parts.relay_ops.take()

@@ -151,6 +151,51 @@ def dnat(spec, counters, result):
         contract.require(packets(counters, "rtr_a", "dht_drop") > 0, "the DHT block never observed a query in the fail-closed guard")
 
 
+def published_ports(result):
+    """Ports of the addresses in the Server's signed record; the Server's own QUIC port is among them."""
+    found = set()
+    for item in result["publication"]["native_addresses"]:
+        port = item.rpartition(":")[2]
+        if port.isdigit():
+            found.add(int(port))
+    return found
+
+
+def mapped(spec, counters, result):
+    """DIRECT-T: the Server's router mapping, not the harness, decides whether the Client has a direct path (Ygg is closed to the Client)."""
+    nat_mapping(result, "cone")
+    gateway = (result.get("observations") or {}).get("gateway")
+    contract.require(type(gateway) is dict and gateway.get("mode") == spec["gateway"] and type(gateway.get("events")) is list,
+                     "PCP gateway receipt missing or of another mode")
+    contract.require(gateway.get("dropped") == 0, "PCP gateway receipt lost events")
+    ops = [item.get("op") for item in gateway["events"]]
+    contract.require(packets(counters, "rtr_a", "ygg_tcp") == 0, "Ygg TCP carried traffic although it was denied")
+    if spec["gateway"] == "refuse":
+        contract.require("refused" in ops and not {"map", "renew", "delete"} & set(ops),
+                         "the Server did not ask the gateway, or the gateway granted although it refuses")
+        contract.require(gateway.get("hits", {}).get("packets") == 0 and gateway.get("active") == [], "a DNAT rule matched traffic although none was granted")
+        contract.require(packets(counters, "rtr_b", "hole_in") > 0,
+                         "the Server's router never saw the Client's unsolicited datagrams, so the control did not exercise the closed gateway")
+        for router in counters:
+            contract.require(packets(counters, router, "peer_recv") == 0, f"{router} received Native UDP from the other router: a direct path formed")
+        return
+    granted = [item for item in gateway["events"] if item.get("op") in ("map", "renew")]
+    ports = {item["port"] for item in granted}
+    contract.require("map" in ops and len(ports) == 1 and "refused" not in ops, "the Server did not get exactly one mapped port from the gateway")
+    port = next(iter(ports))
+    contract.require(port in published_ports(result), "the mapped port is not a port of the Server's signed record")
+    last_grant = max(index for index, item in enumerate(gateway["events"]) if item.get("op") in ("map", "renew"))
+    contract.require(any(item.get("op") == "delete" and item.get("port") == port for item in gateway["events"][last_grant + 1:])
+                     and gateway.get("active") == [], "the mapping was not deleted after the Server closed")
+    hits = gateway.get("hits", {})
+    contract.require(type(hits.get("packets")) is int and hits["packets"] > 0 and hits.get("bytes", 0) > 0,
+                     "no traffic matched the DNAT rule of the mapping")
+    contract.require(packets(counters, "rtr_a", "peer_sent") > 0 and packets(counters, "rtr_b", "peer_recv") > 0,
+                     "no translated Native UDP crossed from the Client's router to the Server's router")
+    lines = (result.get("markers") or {}).get("client_lines") or {}
+    contract.require(contract.ROUTE_LINE in lines and "path=native" in lines[contract.ROUTE_LINE], "Client log lacks the native route line")
+
+
 def recover(result):
     """C7: the outage failed closed and ended the Client; a fresh Client succeeded after the blocks were lifted."""
     obs = result.get("observations", {}).get("outage", {})
@@ -208,6 +253,8 @@ def verify_class(spec, result, counters):
         ipv6(counters, result)
     elif net == "dnat":
         dnat(spec, counters, result)
+    elif net == "mapped":
+        mapped(spec, counters, result)
     elif net == "relay":
         relay_full(result)
     elif net == "recover":
