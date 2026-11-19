@@ -25,8 +25,7 @@ mod admin;
 mod admin_tests;
 mod key;
 mod network;
-#[cfg(test)]
-mod network_tests;
+mod password;
 #[cfg(test)]
 mod tests;
 
@@ -34,8 +33,15 @@ pub use admin::{
     ConfigAction, ConfigEditError, check_config_text, config_command, editable_keys,
     set_config_network, set_config_value, unset_config_key, write_replacing,
 };
-pub use key::{export_key, import_key, read_key_text};
+pub use key::{
+    change_key_password, decrypt_key, encrypt_key, export_key, import_key, read_key_text,
+};
 pub use network::{NetworkChoice, public_network_text};
+pub use password::{
+    NEW_PASSWORD_ENV, PASSWORD_ENV, PasswordSources, install_password_sources,
+    installed_password_sources, key_load_message, load_unlocked, load_unlocked_default,
+    obtain_new_password, obtain_password,
+};
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -392,9 +398,12 @@ pub async fn provision_with(
     }
     let dir_state = create_role_dir(&dir).await?;
     let key_existed = tokio::fs::metadata(&key).await.is_ok();
-    let identity = Identity::load_or_create(&key)
-        .await
-        .map_err(ProvisionError::Key)?;
+    let identity = match Identity::load_or_create(&key).await {
+        // A key file that was encrypted by `key encrypt` is opened with the installed password sources.
+        Err(IdentityError::PasswordRequired) => load_unlocked_default(&key, "Key password: ").await,
+        other => other,
+    }
+    .map_err(ProvisionError::Key)?;
     let key_state = if key_existed {
         FileState::Kept
     } else {

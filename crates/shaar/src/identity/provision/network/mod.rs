@@ -46,3 +46,6 @@ pub(super) fn append(text: &mut String, choice: NetworkChoice) {
         text.push_str(public_network_text());
     }
 }
+
+#[cfg(test)]
+mod tests;

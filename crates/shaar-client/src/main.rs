@@ -189,7 +189,9 @@ async fn run_from_config(config_path: PathBuf) -> Result<(), Box<dyn Error>> {
         &ClientEndpointOverrides::default(),
     )
     .await?;
-    let identity = Identity::load(config.key_file().to_path_buf()).await?;
+    let identity =
+        shaar::identity::load_unlocked_default(config.key_file().to_path_buf(), "Key password: ")
+            .await?;
     run_configured(config, identity, None).await
 }
 

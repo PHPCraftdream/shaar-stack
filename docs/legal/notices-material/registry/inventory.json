@@ -491,18 +491,18 @@
     "historical_pre_n1": true
   },
   "counts": {
-    "registry_identity_count": 536,
-    "root_registry": 516,
+    "registry_identity_count": 539,
+    "root_registry": 519,
     "nested_registry": 215,
     "exact_root_nested_intersection": 195,
-    "root_only": 321,
+    "root_only": 324,
     "nested_only": 20,
-    "exact_archive_matched_identities": 536,
+    "exact_archive_matched_identities": 539,
     "retired_identity_count": 2,
     "missing_archive_identities": 0,
     "current_registry_classification_counts": {
       "missing": 2,
-      "package-complete": 508,
+      "package-complete": 511,
       "preserved_complete_text": 15,
       "reference-only": 11
     },
@@ -516,7 +516,7 @@
     "current_pass_material_bytes": 4421514,
     "current_pass_complete_text_rows": 501,
     "current_pass_missing_evidence_rows": 2,
-    "registry_text_available_identities": 523
+    "registry_text_available_identities": 526
   },
   "extra_local_data_candidates": [
     {
@@ -1511,6 +1511,117 @@
                     "material_path": "packages/a-f/registry-supplement/a/range-e-to-t/r/c/hyphen/s/w/a/p/package/1.9.3/terms/LICENSE-APACHE",
                     "role": "package_terms",
                     "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+                  }
+                ],
+                "unestablished_reason": null
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      }
+    },
+    {
+      "archive_data": [
+        {
+          "url": "https://static.crates.io/crates/argon2/argon2-0.6.0.crate",
+          "path": null,
+          "bytes": 34538,
+          "sha256": "134c52ddac6d63c576bef8168db10c83c49c26444ecbc68060fef078925a901c",
+          "acquisition": "owner decision 2026-11-19 (encrypted key start, KEY-2); one GET, checksum equals the crates.io index"
+        }
+      ],
+      "checksum": "134c52ddac6d63c576bef8168db10c83c49c26444ecbc68060fef078925a901c",
+      "classification": "package-complete",
+      "declared_license": "MIT OR Apache-2.0",
+      "materials": [
+        {
+          "archive_member": "argon2-0.6.0/LICENSE-APACHE",
+          "member_bytes": 10849,
+          "member_sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "byte_range": [
+            0,
+            10849
+          ],
+          "material_path": "packages/added-1117/argon2-0.6.0/terms/LICENSE-APACHE",
+          "material_bytes": 10849,
+          "material_sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "slice_sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-APACHE"
+        },
+        {
+          "archive_member": "argon2-0.6.0/LICENSE-MIT",
+          "member_bytes": 1082,
+          "member_sha256": "57a4d75c1d095bb94754a478f3cd15e60ac66a5c5627d844be01a918eea5fe88",
+          "byte_range": [
+            0,
+            1082
+          ],
+          "material_path": "packages/added-1117/argon2-0.6.0/terms/LICENSE-MIT",
+          "material_bytes": 1082,
+          "material_sha256": "57a4d75c1d095bb94754a478f3cd15e60ac66a5c5627d844be01a918eea5fe88",
+          "slice_sha256": "57a4d75c1d095bb94754a478f3cd15e60ac66a5c5627d844be01a918eea5fe88",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-MIT"
+        }
+      ],
+      "name": "argon2",
+      "nested_lock": false,
+      "proposed_url": "https://static.crates.io/crates/argon2/argon2-0.6.0.crate",
+      "root_lock": true,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "0.6.0",
+      "manifest_evidence": [
+        {
+          "archive_member": "argon2-0.6.0/Cargo.toml",
+          "bytes": 3429,
+          "sha256": "a2ed90956e85094042bbd5333b80678f8e51f763df5a593338afc85bccddef8a",
+          "license": "MIT OR Apache-2.0",
+          "license_file": null
+        }
+      ],
+      "archive_member_count": 18,
+      "decoded_tar_bytes": 152064,
+      "review_note": "Authentic package-scope text supplies at least one complete alternative per declared expression group. This is not legal clearance, distribution sufficiency, or an OR-choice conclusion.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "MIT OR Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "MIT OR Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "MIT",
+                "identifiers": [
+                  "MIT"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "argon2-0.6.0/LICENSE-MIT",
+                    "material_path": "packages/added-1117/argon2-0.6.0/terms/LICENSE-MIT",
+                    "role": "package_terms",
+                    "sha256": "57a4d75c1d095bb94754a478f3cd15e60ac66a5c5627d844be01a918eea5fe88"
+                  }
+                ],
+                "unestablished_reason": null
+              },
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "argon2-0.6.0/LICENSE-APACHE",
+                    "material_path": "packages/added-1117/argon2-0.6.0/terms/LICENSE-APACHE",
+                    "role": "package_terms",
+                    "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
                   }
                 ],
                 "unestablished_reason": null
@@ -35865,6 +35976,85 @@
     {
       "archive_data": [
         {
+          "url": "https://static.crates.io/crates/rpassword/rpassword-7.5.5.crate",
+          "path": null,
+          "bytes": 23055,
+          "sha256": "1fa2c5d9304b618df61ff17f3d3485c6e1854a3d94902a49abbb8d43dfbe0464",
+          "acquisition": "owner decision 2026-11-19 (encrypted key start, KEY-2); one GET, checksum equals the crates.io index"
+        }
+      ],
+      "checksum": "1fa2c5d9304b618df61ff17f3d3485c6e1854a3d94902a49abbb8d43dfbe0464",
+      "classification": "package-complete",
+      "declared_license": "Apache-2.0",
+      "materials": [
+        {
+          "archive_member": "rpassword-7.5.5/LICENSE-APACHE",
+          "member_bytes": 10173,
+          "member_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+          "byte_range": [
+            0,
+            10173
+          ],
+          "material_path": "packages/added-1117/rpassword-7.5.5/terms/LICENSE-APACHE",
+          "material_bytes": 10173,
+          "material_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+          "slice_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-APACHE"
+        }
+      ],
+      "name": "rpassword",
+      "nested_lock": false,
+      "proposed_url": "https://static.crates.io/crates/rpassword/rpassword-7.5.5.crate",
+      "root_lock": true,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "7.5.5",
+      "manifest_evidence": [
+        {
+          "archive_member": "rpassword-7.5.5/Cargo.toml",
+          "bytes": 2078,
+          "sha256": "9c51962013e8d342ea50ff53ddb8dedf77d73545e9a14d4d881a492bed8b5ef1",
+          "license": "Apache-2.0",
+          "license_file": null
+        }
+      ],
+      "archive_member_count": 31,
+      "decoded_tar_bytes": 123904,
+      "review_note": "Authentic package-scope text supplies at least one complete alternative per declared expression group. This is not legal clearance, distribution sufficiency, or an OR-choice conclusion.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "rpassword-7.5.5/LICENSE-APACHE",
+                    "material_path": "packages/added-1117/rpassword-7.5.5/terms/LICENSE-APACHE",
+                    "role": "package_terms",
+                    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+                  }
+                ],
+                "unestablished_reason": null
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      }
+    },
+    {
+      "archive_data": [
+        {
           "receipt_index": 320,
           "url": "https://static.crates.io/crates/rtnetlink/rtnetlink-0.20.0.crate",
           "path": "notices-registry-authorized-1109/0320.crate",
@@ -35931,6 +36121,85 @@
                     "material_path": "packages/m-r/registry-supplement/r/range-hyphen-to-t/t/n/e/t/l/i/n/k/package/0.20.0/terms/LICENSE-MIT",
                     "role": "package_terms",
                     "sha256": "964a53330f9cd970c1790311024281a994644f9b554ff6d37e233672287bf767"
+                  }
+                ],
+                "unestablished_reason": null
+              }
+            ],
+            "satisfied_by_available_text": true
+          }
+        ],
+        "component_scoped_text": []
+      }
+    },
+    {
+      "archive_data": [
+        {
+          "url": "https://static.crates.io/crates/rtoolbox/rtoolbox-0.0.6.crate",
+          "path": null,
+          "bytes": 10837,
+          "sha256": "9a1efe12a1469752d0e6ff5ebec0b6ef4924cc5c4c71046b0ec730040535819d",
+          "acquisition": "owner decision 2026-11-19 (encrypted key start, KEY-2); one GET, checksum equals the crates.io index"
+        }
+      ],
+      "checksum": "9a1efe12a1469752d0e6ff5ebec0b6ef4924cc5c4c71046b0ec730040535819d",
+      "classification": "package-complete",
+      "declared_license": "Apache-2.0",
+      "materials": [
+        {
+          "archive_member": "rtoolbox-0.0.6/LICENSE-APACHE",
+          "member_bytes": 10173,
+          "member_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+          "byte_range": [
+            0,
+            10173
+          ],
+          "material_path": "packages/added-1117/rtoolbox-0.0.6/terms/LICENSE-APACHE",
+          "material_bytes": 10173,
+          "material_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+          "slice_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+          "role": "package_terms",
+          "kind": "package_terms",
+          "source_relative_path": "LICENSE-APACHE"
+        }
+      ],
+      "name": "rtoolbox",
+      "nested_lock": false,
+      "proposed_url": "https://static.crates.io/crates/rtoolbox/rtoolbox-0.0.6.crate",
+      "root_lock": true,
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "0.0.6",
+      "manifest_evidence": [
+        {
+          "archive_member": "rtoolbox-0.0.6/Cargo.toml",
+          "bytes": 1407,
+          "sha256": "dc84464349ff8eef23ac8f55c522282dd6c0eaa40e7af3bcf18fb9a41da22516",
+          "license": "Apache-2.0",
+          "license_file": null
+        }
+      ],
+      "archive_member_count": 18,
+      "decoded_tar_bytes": 47104,
+      "review_note": "Authentic package-scope text supplies at least one complete alternative per declared expression group. This is not legal clearance, distribution sufficiency, or an OR-choice conclusion.",
+      "terms_evidence": {
+        "scope_note": "Authentic text availability only; not a legal choice/election, clearance, or sufficiency determination.",
+        "declared_expression": "Apache-2.0",
+        "groups": [
+          {
+            "expression_group": "Apache-2.0",
+            "alternatives": [
+              {
+                "expression": "Apache-2.0",
+                "identifiers": [
+                  "Apache-2.0"
+                ],
+                "availability": "available",
+                "evidence": [
+                  {
+                    "archive_member": "rtoolbox-0.0.6/LICENSE-APACHE",
+                    "material_path": "packages/added-1117/rtoolbox-0.0.6/terms/LICENSE-APACHE",
+                    "role": "package_terms",
+                    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
                   }
                 ],
                 "unestablished_reason": null

@@ -151,6 +151,20 @@ impl Client {
         Ok(Self::from_config(config, identity))
     }
 
+    /// [`Self::from_config_file`] for a key file that `key encrypt` made: `password` opens it.
+    pub async fn from_config_file_with_password(
+        path: impl AsRef<Path>,
+        password: &str,
+    ) -> Result<Self, SdkError> {
+        let config = load_client(path.as_ref(), &ClientOverrides::default())
+            .await
+            .map_err(SdkError::Config)?;
+        let identity = Identity::load_with_password(config.key_file(), password)
+            .await
+            .map_err(SdkError::Identity)?;
+        Ok(Self::from_config(config, identity))
+    }
+
     /// A Client over an already validated configuration; it listens locally.
     pub fn from_config(config: ClientConfig, identity: Identity) -> Self {
         Self {

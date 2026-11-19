@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use iroh_base::PublicKey;
 
-use super::*;
+use super::super::*;
 use crate::config::{ClientConfig, ClientOverrides, ServerConfig, ServerOverrides};
 use crate::startup::preflight::{preflight_client, preflight_server};
 

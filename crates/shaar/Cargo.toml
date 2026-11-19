@@ -27,6 +27,12 @@ zeroize = "=1.9.1"
 # The portable text form of a key (leaf KEY-1, owner decision of 2026-11-19: base58). Already-locked edge: no new
 # package or version (bs58 0.5.1 is used by libp2p-identity); the codec runs on fixed buffers, so no feature is needed.
 bs58 = { version = "=0.5.1", default-features = false }
+# The encrypted key file and its password prompt (leaf KEY-2, owner decisions of 2026-11-19: a new library is fine).
+# argon2 0.6.0 (published 2026-08-27) has only already-locked dependencies (its `alloc` feature is left off because it
+# would pull password-hash and phc; the code supplies the memory blocks itself); rpassword 7.5.5 (2026-11-10) brings
+# rtoolbox 0.0.6 (2026-08-26). All three are past the 7-day quarantine; notices and manifests are updated with them.
+argon2 = { version = "=0.6.0", default-features = false, features = ["zeroize"] }
+rpassword = "=7.5.5"
 # L3b sealed address (owner approval 2026-11-16): authorized already-locked edges, no new package or version.
 # `alloc` only: the random salt comes from the identity generator, so no getrandom edge is enabled.
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }

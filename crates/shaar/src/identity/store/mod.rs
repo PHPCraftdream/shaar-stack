@@ -2,7 +2,8 @@
 //!
 //! # File format
 //!
-//! Exactly 32 raw bytes (the Ed25519 seed). No headers, no magic.
+//! Exactly 32 raw bytes (the Ed25519 seed), no headers, no magic; or, when the key is kept
+//! encrypted (leaf KEY-2), the 94-byte file of [`seal`], told apart by its length and its magic.
 //!
 //! # Reading (invariant I4)
 //!
@@ -57,6 +58,7 @@ use std::path::Path;
 
 use super::error::IdentityError;
 
+pub(super) mod seal;
 pub(super) mod text;
 
 /// Loads an existing key file, applying all open-handle checks.
@@ -88,7 +90,37 @@ where
     }
 }
 
-fn load_opened(mut file: File) -> Result<zeroize::Zeroizing<[u8; 32]>, IdentityError> {
+/// What a key file holds: the plain seed, or the bytes of an encrypted file.
+pub(super) enum Stored {
+    Plain(zeroize::Zeroizing<[u8; 32]>),
+    Sealed(Vec<u8>),
+}
+
+fn load_opened(file: File) -> Result<zeroize::Zeroizing<[u8; 32]>, IdentityError> {
+    match load_stored_opened(file)? {
+        Stored::Plain(seed) => Ok(seed),
+        Stored::Sealed(_) => Err(IdentityError::PasswordRequired),
+    }
+}
+
+/// Loads a key file of either form; an encrypted one is returned still sealed.
+pub(super) fn load_stored_blocking(path: &Path) -> Result<Stored, IdentityError> {
+    load_stored_opened(File::open(path).map_err(IdentityError::from)?)
+}
+
+/// The seed of a plain file, or of an encrypted one opened with `password`.
+pub fn load_with_password_blocking(
+    path: &Path,
+    password: &str,
+) -> Result<zeroize::Zeroizing<[u8; 32]>, IdentityError> {
+    match load_stored_blocking(path)? {
+        Stored::Plain(seed) => Ok(seed),
+        Stored::Sealed(bytes) => seal::open(&bytes, password),
+    }
+}
+
+/// The checks on an already-opened key file, before any byte of it is read.
+pub(super) fn check_private_file(file: &File) -> Result<(), IdentityError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -106,7 +138,7 @@ fn load_opened(mut file: File) -> Result<zeroize::Zeroizing<[u8; 32]>, IdentityE
         if !meta.is_file() {
             return Err(IdentityError::NotARegularFile);
         }
-        shaar_platform::winfile::validate_owner_only(&file)
+        shaar_platform::winfile::validate_owner_only(file)
             .map_err(|_| IdentityError::InsecurePermissions)?;
     }
     #[cfg(not(any(unix, windows)))]
@@ -116,28 +148,33 @@ fn load_opened(mut file: File) -> Result<zeroize::Zeroizing<[u8; 32]>, IdentityE
             return Err(IdentityError::NotARegularFile);
         }
     }
+    Ok(())
+}
 
-    // Fixed-size read: exactly 32 bytes, then verify EOF. The buffer never
-    // scales with the hostile file size. The 33-byte staging buffer is
-    // zeroize-on-drop, so the raw key bytes read from disk (one extra
-    // zeroized temporary) do not linger in memory.
-    let mut buf = zeroize::Zeroizing::new([0u8; 33]);
-    file.read_exact(&mut buf[..32]).map_err(|err| {
-        if err.kind() == std::io::ErrorKind::UnexpectedEof {
-            IdentityError::InvalidFormat
-        } else {
-            IdentityError::from(err)
+fn load_stored_opened(mut file: File) -> Result<Stored, IdentityError> {
+    check_private_file(&file)?;
+    // Fixed-size read: at most one byte more than an encrypted file takes, then the length
+    // decides. The buffer never scales with the hostile file size and is zeroized on drop.
+    let mut buf = zeroize::Zeroizing::new([0u8; seal::SEALED_LEN + 1]);
+    let mut length = 0;
+    while length < buf.len() {
+        match file.read(&mut buf[length..]) {
+            Ok(0) => break,
+            Ok(read) => length += read,
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(err) => return Err(IdentityError::from(err)),
         }
-    })?;
-    let n = file.read(&mut buf[32..]).map_err(IdentityError::from)?;
-    if n != 0 {
-        return Err(IdentityError::InvalidFormat);
     }
-    // Single copy out of the zeroizing staging buffer; no second plain
-    // `copy_from_slice` staging copy exists.
-    let mut seed = zeroize::Zeroizing::new([0u8; 32]);
-    seed.copy_from_slice(&buf[..32]);
-    Ok(seed)
+    match length {
+        32 => {
+            // Single copy out of the zeroizing staging buffer.
+            let mut seed = zeroize::Zeroizing::new([0u8; 32]);
+            seed.copy_from_slice(&buf[..32]);
+            Ok(Stored::Plain(seed))
+        }
+        seal::SEALED_LEN if seal::is_sealed(&buf[..]) => Ok(Stored::Sealed(buf[..length].to_vec())),
+        _ => Err(IdentityError::InvalidFormat),
+    }
 }
 
 /// Creates a NEW key file (never overwrites) and writes the seed.
@@ -155,6 +192,33 @@ pub fn create_private_new_blocking(path: &Path, data: &[u8]) -> Result<(), Ident
         |file, bytes| file.write_all(bytes),
         File::sync_all,
     )
+}
+
+/// Replaces the key file `path` by `bytes` (a plain seed or an encrypted file). The new content
+/// goes to a new owner-only file next to the old one, is read back and checked by `verify`, and
+/// only then moved over the old file; on any failure the new file is removed and the old one is
+/// left as it was. A stale `.new` file from an earlier failure is never overwritten either.
+pub(super) fn replace_blocking(
+    path: &Path,
+    bytes: &[u8],
+    verify: impl FnOnce(&[u8]) -> bool,
+) -> Result<(), IdentityError> {
+    let mut name = path
+        .file_name()
+        .ok_or(IdentityError::InvalidFormat)?
+        .to_owned();
+    name.push(".new");
+    let staged = path.with_file_name(name);
+    create_private_new_blocking(&staged, bytes)?;
+    let remove = |error: IdentityError| {
+        let _ = std::fs::remove_file(&staged);
+        error
+    };
+    let read = zeroize::Zeroizing::new(std::fs::read(&staged).map_err(|e| remove(e.into()))?);
+    if read.as_slice() != bytes || !verify(&read) {
+        return Err(remove(IdentityError::InvalidFormat));
+    }
+    std::fs::rename(&staged, path).map_err(|e| remove(e.into()))
 }
 
 fn create_new_with_io<W, S>(

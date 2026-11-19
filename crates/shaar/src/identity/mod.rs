@@ -25,13 +25,17 @@ mod ygg;
 
 pub use error::IdentityError;
 pub use provision::{
-    ConfigAction, ConfigEditError, FileState, NetworkChoice, ProvisionError, ProvisionPaths,
-    ProvisionReport, Provisioned, Role, allowlist_template_text, check_config_text,
-    client_config_text, config_command, default_data_dir, editable_keys, export_key,
-    first_run_summary_lines, import_key, path_as_config_value, provision, provision_with,
-    public_network_text, read_key_text, resolve_data_dir, role_dir, set_config_network,
-    set_config_value, unset_config_key, write_replacing,
+    ConfigAction, ConfigEditError, FileState, NEW_PASSWORD_ENV, NetworkChoice, PASSWORD_ENV,
+    PasswordSources, ProvisionError, ProvisionPaths, ProvisionReport, Provisioned, Role,
+    allowlist_template_text, change_key_password, check_config_text, client_config_text,
+    config_command, decrypt_key, default_data_dir, editable_keys, encrypt_key, export_key,
+    first_run_summary_lines, import_key, install_password_sources, installed_password_sources,
+    key_load_message, load_unlocked, load_unlocked_default, obtain_new_password, obtain_password,
+    path_as_config_value, provision, provision_with, public_network_text, read_key_text,
+    resolve_data_dir, role_dir, set_config_network, set_config_value, unset_config_key,
+    write_replacing,
 };
+pub use store::seal::{Cost as KeyCost, DEFAULT_COST as DEFAULT_KEY_COST};
 
 use std::net::Ipv6Addr;
 use std::path::PathBuf;
@@ -165,6 +169,38 @@ impl Identity {
         Ok(Self {
             secret: iroh_base::SecretKey::from_bytes(&seed),
         })
+    }
+
+    /// Loads a key file of either form: a plain one, or an encrypted one opened with `password`.
+    /// A wrong password and a damaged file are the same [`IdentityError::WrongPassword`].
+    /// cancel-safe: NO — an already-running OS read and key derivation continue after the waiter
+    /// is dropped; loading performs no writes.
+    pub async fn load_with_password(
+        path: impl Into<PathBuf>,
+        password: &str,
+    ) -> Result<Self, IdentityError> {
+        let path = path.into();
+        let password = zeroize::Zeroizing::new(password.to_owned());
+        let seed = tokio::task::spawn_blocking(move || {
+            store::load_with_password_blocking(&path, &password)
+        })
+        .await
+        .map_err(|e| IdentityError::Io(std::io::Error::other(e)))??;
+        Ok(Self {
+            secret: iroh_base::SecretKey::from_bytes(&seed),
+        })
+    }
+
+    /// Whether the key file at `path` is encrypted; reads the file without any password.
+    /// cancel-safe: NO — an already-running OS read continues after the waiter is dropped.
+    pub async fn is_encrypted(path: impl Into<PathBuf>) -> Result<bool, IdentityError> {
+        let path = path.into();
+        tokio::task::spawn_blocking(move || {
+            store::load_stored_blocking(&path)
+                .map(|stored| matches!(stored, store::Stored::Sealed(_)))
+        })
+        .await
+        .map_err(|e| IdentityError::Io(std::io::Error::other(e)))?
     }
 
     /// Loads if the file exists, otherwise creates it.

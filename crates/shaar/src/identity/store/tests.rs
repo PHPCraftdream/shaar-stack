@@ -477,3 +477,93 @@ fn the_text_of_a_key_is_stable_and_differs_between_keys() {
     assert_eq!(*text, *first.export_text().expect("export"));
     assert_ne!(*text, *second.export_text().expect("export"));
 }
+
+fn fast_cost() -> seal::Cost {
+    seal::Cost {
+        memory_kib: 8,
+        passes: 1,
+        lanes: 1,
+    }
+}
+
+#[test]
+fn a_sealed_file_is_told_by_its_length_and_magic_and_a_plain_load_asks_for_a_password() {
+    let dir = FixtureDir::new();
+    let seed = [9_u8; 32];
+    let sealed = seal::seal(&seed, "pw", fast_cost()).unwrap();
+    let path = dir.0.join("sealed");
+    create_private_new_blocking(&path, &sealed).unwrap();
+    assert!(matches!(
+        load_blocking(&path),
+        Err(IdentityError::PasswordRequired)
+    ));
+    assert!(matches!(load_stored_blocking(&path), Ok(Stored::Sealed(_))));
+    assert_eq!(*load_with_password_blocking(&path, "pw").unwrap(), seed);
+    assert!(matches!(
+        load_with_password_blocking(&path, "nope"),
+        Err(IdentityError::WrongPassword)
+    ));
+    let plain = dir.0.join("plain");
+    create_new_blocking(&plain, &seed).unwrap();
+    assert_eq!(
+        *load_with_password_blocking(&plain, "ignored").unwrap(),
+        seed,
+        "a plain file passes through whatever the password"
+    );
+    assert!(matches!(load_stored_blocking(&plain), Ok(Stored::Plain(_))));
+}
+
+#[test]
+fn a_file_of_another_length_or_without_the_magic_is_not_a_key_file() {
+    let dir = FixtureDir::new();
+    let sealed = seal::seal(&[9_u8; 32], "pw", fast_cost()).unwrap();
+    let mut longer = sealed.clone();
+    longer.push(0);
+    for (name, bytes) in [
+        ("empty", Vec::new()),
+        ("thirty-one", vec![1_u8; 31]),
+        ("thirty-three", vec![1_u8; 33]),
+        ("ninety-three", sealed[..93].to_vec()),
+        ("ninety-five", longer),
+        ("no-magic", vec![7_u8; 94]),
+    ] {
+        let path = dir.0.join(name);
+        create_private_new_blocking(&path, &bytes).unwrap();
+        assert!(
+            matches!(load_blocking(&path), Err(IdentityError::InvalidFormat)),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_replacement_goes_through_a_new_file_and_a_failed_check_keeps_the_old_one() {
+    let dir = FixtureDir::new();
+    let path = dir.0.join("key");
+    create_new_blocking(&path, &[1_u8; 32]).unwrap();
+    replace_blocking(&path, &[2_u8; 32], |read| read == [2_u8; 32]).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), [2_u8; 32]);
+    assert!(!dir.0.join("key.new").exists());
+    let refused = replace_blocking(&path, &[3_u8; 32], |_| false).unwrap_err();
+    assert!(
+        matches!(refused, IdentityError::InvalidFormat),
+        "{refused:?}"
+    );
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        [2_u8; 32],
+        "the old file is kept"
+    );
+    assert!(!dir.0.join("key.new").exists(), "the new file is removed");
+    std::fs::write(dir.0.join("key.new"), "stale").unwrap();
+    let blocked = replace_blocking(&path, &[4_u8; 32], |_| true).unwrap_err();
+    assert!(
+        matches!(blocked, IdentityError::AlreadyExists),
+        "{blocked:?}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), [2_u8; 32]);
+    assert_eq!(
+        std::fs::read_to_string(dir.0.join("key.new")).unwrap(),
+        "stale"
+    );
+}
