@@ -4,6 +4,7 @@
 //! forward the same external port to it, so the endpoint it publishes is known in advance. Two
 //! protocols are tried on the gateway's UDP port 5351: PCP (RFC 6887) first, and NAT-PMP
 //! (RFC 6886) when the gateway answers a PCP request with "unsupported version" or not at all.
+//! UPnP IGD ([`upnp`]) is the third, tried by [`map_any`] when both failed.
 //! The gateway is a parameter: the caller finds it (the home router) and tests give a fake one.
 //! One mapping is made and released by one call each; keeping it alive is the caller's task.
 
@@ -13,15 +14,19 @@ mod pcp;
 mod probe;
 #[cfg(test)]
 mod tests;
+mod upnp;
 
 pub use keeper::{DEFAULT_TIMING, Keeper, State, Timing};
-pub use probe::{Gateway, MEASURE_BUDGET, MEASURE_LIFETIME, home_gateway, measure, measure_within};
+pub use probe::{
+    Gateway, MEASURE_BUDGET, MEASURE_LIFETIME, home_gateway, measure, measure_upnp, measure_within,
+};
 
 use std::{
     fmt,
     hash::{BuildHasher, RandomState},
     io::ErrorKind,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 
@@ -44,6 +49,7 @@ const RELEASE_BUDGET: Duration = Duration::from_millis(500);
 pub enum Protocol {
     Pcp,
     NatPmp,
+    Upnp,
 }
 
 impl Protocol {
@@ -53,12 +59,13 @@ impl Protocol {
         match self {
             Self::Pcp => "pcp",
             Self::NatPmp => "nat-pmp",
+            Self::Upnp => "upnp",
         }
     }
 }
 
 /// A mapping that the gateway granted.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mapping {
     pub protocol: Protocol,
     pub internal_port: u16,
@@ -69,6 +76,8 @@ pub struct Mapping {
     /// How long the gateway keeps the mapping without a renewal.
     pub lifetime: Duration,
     nonce: pcp::Nonce,
+    /// The control endpoint of a UPnP mapping.
+    igd: Option<Arc<upnp::Igd>>,
 }
 
 /// Why no mapping was made.
@@ -78,8 +87,22 @@ pub enum MapError {
     Refused(u16),
     /// No answer in time, or nothing listens on the gateway's port.
     Silent,
+    /// The gateway answered but offers no mapping service, or its answer cannot be used.
+    Unsupported,
     /// The socket failed.
     Io,
+}
+
+impl MapError {
+    /// How much the error says about the gateway; the more telling of two is reported.
+    const fn weight(self) -> u8 {
+        match self {
+            Self::Refused(_) => 3,
+            Self::Unsupported => 2,
+            Self::Io => 1,
+            Self::Silent => 0,
+        }
+    }
 }
 
 impl fmt::Display for MapError {
@@ -87,6 +110,7 @@ impl fmt::Display for MapError {
         match self {
             Self::Refused(code) => write!(out, "refused:{code}"),
             Self::Silent => out.write_str("silent"),
+            Self::Unsupported => out.write_str("unsupported"),
             Self::Io => out.write_str("io"),
         }
     }
@@ -168,8 +192,51 @@ pub async fn map_udp(
     map_with(fresh_nonce(), gateway, local, ports, lifetime, budget).await
 }
 
-/// Renews `mapping` for `lifetime` more: the same request with the same nonce, asking for the
-/// external port the gateway assigned. The answer replaces the mapping.
+/// Maps `port` to the same external port at `gateway` by PCP or NAT-PMP, and when both fail by
+/// UPnP; each stage gets `budget`. The error reported is the most telling of the two.
+/// cancel-safe: yes — a cancelled call may leave a mapping that the gateway expires.
+pub async fn map_any(
+    gateway: Gateway,
+    port: u16,
+    lifetime: Duration,
+    budget: Duration,
+) -> Result<Mapping, MapError> {
+    let first = match map_udp(gateway.address, gateway.local, port, port, lifetime, budget).await {
+        Ok(mapping) => return Ok(mapping),
+        Err(error) => error,
+    };
+    match map_upnp(gateway, port, lifetime, budget).await {
+        Ok(mapping) => Ok(mapping),
+        Err(second) if second.weight() > first.weight() => Err(second),
+        Err(_) => Err(first),
+    }
+}
+
+/// Maps `port` to the same external port by UPnP only: finds the gateway at `gateway.upnp` and
+/// asks it. Gives up after `budget`.
+/// cancel-safe: yes — a cancelled call may leave a mapping that the gateway expires.
+pub async fn map_upnp(
+    gateway: Gateway,
+    port: u16,
+    lifetime: Duration,
+    budget: Duration,
+) -> Result<Mapping, MapError> {
+    let (igd, external_ip) =
+        upnp::map(gateway.upnp, gateway.local, (port, port), lifetime, budget).await?;
+    Ok(Mapping {
+        protocol: Protocol::Upnp,
+        internal_port: port,
+        external_port: port,
+        external_ip,
+        lifetime,
+        nonce: [0; 12],
+        igd: Some(Arc::new(igd)),
+    })
+}
+
+/// Renews `mapping` for `lifetime` more. A PCP or NAT-PMP mapping gets the same request with the
+/// same nonce, asking for the external port the gateway assigned, and the answer replaces the
+/// mapping; a UPnP mapping gets its request again at the endpoint it was made at.
 /// cancel-safe: yes.
 pub async fn renew(
     gateway: SocketAddr,
@@ -179,6 +246,13 @@ pub async fn renew(
     budget: Duration,
 ) -> Result<Mapping, MapError> {
     let ports = (mapping.internal_port, mapping.external_port);
+    if let Some(igd) = &mapping.igd {
+        upnp::renew(igd, local, ports, lifetime, budget).await?;
+        return Ok(Mapping {
+            lifetime,
+            ..mapping.clone()
+        });
+    }
     map_with(mapping.nonce, gateway, local, ports, lifetime, budget).await
 }
 
@@ -208,6 +282,7 @@ async fn map_with(
                 external_ip: Some(granted.external_ip).filter(|ip| !ip.is_unspecified()),
                 lifetime: Duration::from_secs(granted.lifetime.into()),
                 nonce,
+                igd: None,
             });
         }
         Ok(pcp::Reply::Refused(code)) => return Err(MapError::Refused(code.into())),
@@ -237,6 +312,7 @@ async fn map_with(
         external_ip,
         lifetime: Duration::from_secs(granted.lifetime.into()),
         nonce,
+        igd: None,
     })
 }
 
@@ -248,6 +324,9 @@ pub async fn release(
     local: IpAddr,
     mapping: &Mapping,
 ) -> Result<(), MapError> {
+    if let Some(igd) = &mapping.igd {
+        return upnp::delete(igd, mapping.external_port, RELEASE_BUDGET).await;
+    }
     let socket = socket_for(gateway).await?;
     let deadline = Instant::now() + RELEASE_BUDGET;
     let internal = mapping.internal_port;
@@ -273,5 +352,7 @@ pub async fn release(
             .map(|_| ())
             .map_err(MapError::Refused)
         }
+        // A UPnP mapping carries its endpoint and was released above.
+        Protocol::Upnp => Err(MapError::Unsupported),
     }
 }

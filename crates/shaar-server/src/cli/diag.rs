@@ -296,9 +296,13 @@ pub(super) async fn ports(
     nat_ports(&mainline_of(place).await?, sockets, show_address).await
 }
 
-/// `diag port-map`: one mapping at the home router of this machine, reported and deleted.
+/// `diag port-map`: one mapping at the home router of this machine by PCP or NAT-PMP, and one by
+/// UPnP, each reported and deleted.
 pub(super) async fn port_map(port: u16, show_address: bool) -> Vec<String> {
-    mapping::measure(mapping::home_gateway().await, port, show_address).await
+    let gateway = mapping::home_gateway().await;
+    let mut lines = mapping::measure(gateway, port, show_address).await;
+    lines.extend(mapping::measure_upnp(gateway, port, show_address, mapping::MEASURE_BUDGET).await);
+    lines
 }
 
 /// Whether the invocation is a measurement that prints as it goes.
