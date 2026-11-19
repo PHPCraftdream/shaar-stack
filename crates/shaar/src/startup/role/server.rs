@@ -116,6 +116,9 @@ pub(super) struct ServerParts {
     /// close (abort + join) and abort-only on degraded drop. Present only for
     /// relay-less compositions that retained a Yggdrasil bridge.
     pub(super) punch_task: Option<tokio::task::JoinHandle<()>>,
+    /// The keeper of the router mapping of the endpoint's port (leaf PORT-1, step 3c); stopped,
+    /// which deletes the mapping, by the joined close, and ended by `Drop` otherwise.
+    pub(super) mapping: Option<crate::network::ports::mapping::Keeper>,
     #[cfg(test)]
     pub(super) events: Option<RoleEventLog>,
 }
@@ -145,6 +148,7 @@ impl ServerParts {
             reserve_not_before: None,
             reserve_op: None,
             punch_task: None,
+            mapping: None,
             #[cfg(test)]
             events,
         }
@@ -293,6 +297,9 @@ impl ServerRole {
                     parts.payload = payload;
                     let outcome = match transferred {
                         Some((endpoint, relay_ops)) => {
+                            // Starting the keeper does not wait, so the phase below stays cancel-safe.
+                            parts.mapping =
+                                self.options.router_mapping.start(endpoint.local_addr());
                             parts.endpoint = Some(endpoint);
                             parts.relay_ops = Some(relay_ops);
                             None

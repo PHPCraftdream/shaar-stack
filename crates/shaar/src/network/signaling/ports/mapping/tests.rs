@@ -4,16 +4,16 @@ use super::*;
 use std::sync::{Arc, Mutex};
 use std::time::Instant as StdInstant;
 
-pub(super) const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
-pub(super) const INTERNAL: u16 = 48_896;
+pub(crate) const LOCAL: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+pub(crate) const INTERNAL: u16 = 48_896;
 const EXTERNAL_IP: Ipv4Addr = Ipv4Addr::new(203, 0, 113, 7);
-pub(super) const LIFETIME: Duration = Duration::from_secs(7200);
-pub(super) const BUDGET: Duration = Duration::from_secs(2);
+pub(crate) const LIFETIME: Duration = Duration::from_secs(7200);
+pub(crate) const BUDGET: Duration = Duration::from_secs(2);
 
 /// A gateway on the loopback: every datagram it receives is recorded and the datagrams that
 /// `script` returns for it (given its index and bytes) are sent back.
-pub(super) struct Fake {
-    pub(super) address: SocketAddr,
+pub(crate) struct Fake {
+    pub(crate) address: SocketAddr,
     requests: Arc<Mutex<Vec<Vec<u8>>>>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -25,12 +25,12 @@ impl Drop for Fake {
 }
 
 impl Fake {
-    pub(super) fn requests(&self) -> Vec<Vec<u8>> {
+    pub(crate) fn requests(&self) -> Vec<Vec<u8>> {
         self.requests.lock().unwrap().clone()
     }
 }
 
-pub(super) async fn fake(
+pub(crate) async fn fake(
     mut script: impl FnMut(usize, &[u8]) -> Vec<Vec<u8>> + Send + 'static,
 ) -> Fake {
     let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -61,12 +61,12 @@ pub(super) async fn fake(
     }
 }
 
-pub(super) fn is_pcp(request: &[u8]) -> bool {
+pub(crate) fn is_pcp(request: &[u8]) -> bool {
     request.first() == Some(&2)
 }
 
 /// The PCP answer to a MAP request: the request's own nonce and ports, the given code and port.
-pub(super) fn pcp_answer(request: &[u8], code: u8, external_port: u16) -> Vec<u8> {
+pub(crate) fn pcp_answer(request: &[u8], code: u8, external_port: u16) -> Vec<u8> {
     let mut reply = request.to_vec();
     reply[1] = 0x81;
     reply[3] = code;
@@ -270,6 +270,7 @@ fn the_error_and_protocol_tokens_are_fixed_words() {
     assert_eq!(MapError::Silent.to_string(), "silent");
     assert_eq!(MapError::Unsupported.to_string(), "unsupported");
     assert_eq!(MapError::Io.to_string(), "io");
+    assert_eq!(MapError::NoGateway.to_string(), "no-gateway");
     assert_eq!(Protocol::Pcp.token(), "pcp");
     assert_eq!(Protocol::NatPmp.token(), "nat-pmp");
     assert_eq!(Protocol::Upnp.token(), "upnp");
@@ -508,4 +509,35 @@ async fn a_renewal_uses_the_nonce_of_the_mapping_it_renews() {
         "asks for the assigned port, 51000"
     );
     assert_eq!(renewed.external_port, 51_000);
+}
+
+#[tokio::test]
+async fn a_router_mapping_starts_only_where_there_is_something_to_map() {
+    let gateway = fake(|_, request| vec![pcp_answer(request, 0, INTERNAL)]).await;
+    let setting = RouterMapping::Gateway(gateway_of(&gateway), FAST);
+    let bound = |port| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
+    assert!(RouterMapping::Off.start(bound(INTERNAL)).is_none());
+    assert!(
+        setting.start(bound(0)).is_none(),
+        "port zero has nothing to map"
+    );
+    // The home router is not asked for an endpoint that is bound to loopback.
+    let loopback = SocketAddr::new(LOCAL, INTERNAL);
+    assert!(RouterMapping::HomeRouter.start(loopback).is_none());
+    assert_eq!(RouterMapping::default(), RouterMapping::Off);
+    assert!(gateway.requests().is_empty());
+
+    let keeper = setting
+        .start(bound(INTERNAL))
+        .expect("a keeper for a bound port");
+    let mapping = mapped(&keeper).await;
+    assert_eq!(mapping.internal_port, INTERNAL);
+    keeper.stop().await;
+    let requests = gateway.requests();
+    assert_eq!(&requests[0][40..42], INTERNAL.to_be_bytes());
+    assert_eq!(
+        &requests.last().unwrap()[4..8],
+        [0, 0, 0, 0],
+        "stopping deletes it"
+    );
 }

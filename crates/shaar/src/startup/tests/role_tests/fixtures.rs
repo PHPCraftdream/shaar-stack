@@ -74,6 +74,7 @@ pub(super) fn tuned_policy() -> RoleOptions {
             max_attempts: 2,
             stable_hold: 200,
         },
+        ..RoleOptions::default()
     }
 }
 

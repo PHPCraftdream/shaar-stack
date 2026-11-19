@@ -91,6 +91,9 @@ struct ClientParts {
     outcome: Option<StartupError>,
     /// Set true only when `close_parts` completed.
     joined: bool,
+    /// The keeper of the router mapping of the endpoint's port (leaf PORT-1, step 3c); stopped,
+    /// which deletes the mapping, by the joined close, and ended by `Drop` otherwise.
+    mapping: Option<crate::network::ports::mapping::Keeper>,
     #[cfg(test)]
     events: Option<RoleEventLog>,
 }
@@ -356,7 +359,10 @@ impl ClientRole {
         // The fallback dialer clones the payload Arc before the parts take ownership; `StandbyOwner::new` failure seeds `InvalidPolicy`.
         let mut owner: Option<Box<dyn ErasedClientOwner>> = None;
         let mut native_arc: Option<Arc<SignaledEndpoint>> = None;
+        let mut mapping = None;
         if let Some(endpoint) = native {
+            // Starting the keeper does not wait, so the construction stays cancel-safe.
+            mapping = self.options.router_mapping.start(endpoint.local_addr());
             // Leaf L4b: with a pinned relay the punch rides the carrier link's side channel.
             let carrier_punch = relay_addr
                 .and_then(|_| endpoint.punch_port())
@@ -423,6 +429,7 @@ impl ClientRole {
             pump_finished: false,
             outcome: seed,
             joined: false,
+            mapping,
             #[cfg(test)]
             events: self.events.take(),
         };
@@ -568,6 +575,10 @@ async fn close_parts(mut parts: ClientParts) -> Result<(), StartupError> {
             });
         }
         drop(owner);
+    }
+    // Delete the router mapping of the endpoint's port, within the keeper's short bound.
+    if let Some(keeper) = parts.mapping.take() {
+        keeper.stop().await;
     }
     // Restore as OWNED values; unwraps succeed on the normal two-Arc path, failure is a pending orphan.
     let endpoint = match parts.native.take() {
