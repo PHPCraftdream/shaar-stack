@@ -57,6 +57,8 @@ use std::path::Path;
 
 use super::error::IdentityError;
 
+pub(super) mod text;
+
 /// Loads an existing key file, applying all open-handle checks.
 ///
 /// Returns the seed wrapped in [`zeroize::Zeroizing`]: if the caller is
@@ -140,10 +142,16 @@ fn load_opened(mut file: File) -> Result<zeroize::Zeroizing<[u8; 32]>, IdentityE
 
 /// Creates a NEW key file (never overwrites) and writes the seed.
 pub fn create_new_blocking(path: &Path, seed: &[u8; 32]) -> Result<(), IdentityError> {
+    create_private_new_blocking(path, seed)
+}
+
+/// Creates a NEW file with the key file's owner-only rights (never overwrites) and writes `data`;
+/// the portable text form of a key is kept in such a file.
+pub fn create_private_new_blocking(path: &Path, data: &[u8]) -> Result<(), IdentityError> {
     use std::io::Write;
     create_new_with_io(
         path,
-        seed,
+        data,
         |file, bytes| file.write_all(bytes),
         File::sync_all,
     )
@@ -151,12 +159,12 @@ pub fn create_new_blocking(path: &Path, seed: &[u8; 32]) -> Result<(), IdentityE
 
 fn create_new_with_io<W, S>(
     path: &Path,
-    seed: &[u8; 32],
+    data: &[u8],
     write: W,
     sync: S,
 ) -> Result<(), IdentityError>
 where
-    W: FnOnce(&mut File, &[u8; 32]) -> std::io::Result<()>,
+    W: FnOnce(&mut File, &[u8]) -> std::io::Result<()>,
     S: FnOnce(&File) -> std::io::Result<()>,
 {
     #[cfg(unix)]
@@ -188,7 +196,7 @@ where
 
     // We own this file exclusively (O_EXCL / CREATE_NEW succeeded): on any
     // write failure remove it — no pre-existing key bytes were involved.
-    let write_result = write(&mut file, seed).and_then(|()| sync(&file));
+    let write_result = write(&mut file, data).and_then(|()| sync(&file));
     if let Err(e) = write_result {
         drop(file);
         let _ = std::fs::remove_file(path);
@@ -198,5 +206,4 @@ where
 }
 
 #[cfg(test)]
-#[path = "store_tests.rs"]
 mod tests;

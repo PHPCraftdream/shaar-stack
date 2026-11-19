@@ -24,6 +24,9 @@ simple-dns = "=0.12.0"
 serde = { version = "=1.0.229", features = ["derive"] }
 tokio = { version = "=1.54.1", features = ["fs", "io-util", "rt", "sync", "time", "net", "macros"] }
 zeroize = "=1.9.1"
+# The portable text form of a key (leaf KEY-1, owner decision of 2026-11-19: base58). Already-locked edge: no new
+# package or version (bs58 0.5.1 is used by libp2p-identity); the codec runs on fixed buffers, so no feature is needed.
+bs58 = { version = "=0.5.1", default-features = false }
 # L3b sealed address (owner approval 2026-11-16): authorized already-locked edges, no new package or version.
 # `alloc` only: the random salt comes from the identity generator, so no getrandom edge is enabled.
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }

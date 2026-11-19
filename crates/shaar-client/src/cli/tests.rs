@@ -67,6 +67,7 @@ fn only_subcommands_help_and_version_select_the_cli_layer() {
         "address",
         "connect",
         "config",
+        "key",
         "help",
         "--help",
         "-h",
@@ -323,4 +324,100 @@ async fn a_missing_file_is_reported_and_connect_is_not_an_administration_command
         .await
         .unwrap_err();
     assert_eq!(error, "connect is not an administration command");
+}
+
+#[test]
+fn key_subcommands_parse_and_never_take_the_text_from_an_argument() {
+    assert_eq!(
+        parsed(&["key", "export", "--out", "k.txt", "--dir", "d"]),
+        Invocation::Key {
+            place: Place {
+                config: None,
+                dir: Some("d".into())
+            },
+            command: KeyCommand::Export {
+                out: Some("k.txt".into()),
+                print_secret: false
+            }
+        }
+    );
+    assert_eq!(
+        parsed(&["key", "import", "--from", "k.txt"]),
+        Invocation::Key {
+            place: Place::default(),
+            command: KeyCommand::Import {
+                from: Some("k.txt".into())
+            }
+        }
+    );
+    assert_eq!(
+        parsed(&["key", "public", "--dir", "d"]),
+        Invocation::Address(Place {
+            config: None,
+            dir: Some("d".into())
+        })
+    );
+    for bad in [
+        &["key"][..],
+        &["key", "import", "3mJr7AoUXx2Wqd"],
+        &["key", "export", "--dir", "d", "--config", "c"],
+    ] {
+        assert!(matches!(refused(bad), ParseError::Clap(_)), "{bad:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_key_carried_to_another_device_is_kept_by_init() {
+    let first = Fixture::new();
+    let second = Fixture::new();
+    run(&[
+        "init",
+        SERVER,
+        "--dir",
+        first.dir(),
+        "--private",
+        "--address",
+        "127.0.0.1:9",
+    ])
+    .await
+    .unwrap();
+    let out = first.0.join("key.txt");
+    let out = out.to_str().unwrap();
+    run(&["key", "export", "--out", out, "--dir", first.dir()])
+        .await
+        .unwrap();
+    run(&["key", "import", "--from", out, "--dir", second.dir()])
+        .await
+        .unwrap();
+    let original = run(&["address", "--dir", first.dir()]).await.unwrap();
+    assert_eq!(
+        run(&["key", "public", "--dir", second.dir()])
+            .await
+            .unwrap(),
+        original
+    );
+    // The new device is then initialised for the same Server: the carried key is kept.
+    let init = run(&[
+        "init",
+        SERVER,
+        "--dir",
+        second.dir(),
+        "--private",
+        "--address",
+        "127.0.0.1:9",
+    ])
+    .await
+    .unwrap();
+    assert!(
+        init.iter().any(|line| line.contains(original[0].as_str())),
+        "init names the carried key: {init:?}"
+    );
+    assert_eq!(
+        run(&["address", "--dir", second.dir()]).await.unwrap(),
+        original
+    );
+    let again = run(&["key", "import", "--from", out, "--dir", second.dir()])
+        .await
+        .unwrap_err();
+    assert!(again.contains("not overwritten"), "{again}");
 }

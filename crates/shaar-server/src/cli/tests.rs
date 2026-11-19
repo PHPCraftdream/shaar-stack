@@ -67,6 +67,7 @@ fn only_subcommands_help_and_version_select_the_cli_layer() {
         "init",
         "address",
         "address-key",
+        "key",
         "allow",
         "config",
         "diag",
@@ -376,4 +377,113 @@ async fn run_is_not_an_administration_command() {
     .await
     .unwrap_err();
     assert_eq!(error, "run is not an administration command");
+}
+
+#[test]
+fn key_subcommands_parse_and_never_take_the_text_from_an_argument() {
+    let place = |dir: Option<&str>| Place {
+        config: None,
+        dir: dir.map(Into::into),
+    };
+    assert_eq!(
+        parsed(&[
+            "key",
+            "export",
+            "--out",
+            "k.txt",
+            "--print-secret",
+            "--dir",
+            "d"
+        ]),
+        Invocation::Key {
+            place: place(Some("d")),
+            command: KeyCommand::Export {
+                out: Some("k.txt".into()),
+                print_secret: true
+            }
+        }
+    );
+    assert_eq!(
+        parsed(&["key", "export"]),
+        Invocation::Key {
+            place: place(None),
+            command: KeyCommand::Export {
+                out: None,
+                print_secret: false
+            }
+        }
+    );
+    assert_eq!(
+        parsed(&["key", "import", "--from", "k.txt"]),
+        Invocation::Key {
+            place: place(None),
+            command: KeyCommand::Import {
+                from: Some("k.txt".into())
+            }
+        }
+    );
+    assert_eq!(
+        parsed(&["key", "import"]),
+        Invocation::Key {
+            place: place(None),
+            command: KeyCommand::Import { from: None }
+        }
+    );
+    assert_eq!(
+        parsed(&["key", "public", "--config", "c.ktav"]),
+        Invocation::Address(Place {
+            config: Some("c.ktav".into()),
+            dir: None
+        })
+    );
+    for bad in [
+        &["key"][..],
+        &["key", "import", "3mJr7AoUXx2Wqd"],
+        &["key", "export", "--secret", "x"],
+    ] {
+        assert!(matches!(refused(bad), ParseError::Clap(_)), "{bad:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_key_moves_between_two_data_directories_and_is_never_overwritten() {
+    let first = Fixture::new();
+    let second = Fixture::new();
+    run(&["init", "--dir", first.dir(), "--private"])
+        .await
+        .unwrap();
+    let refused = run(&["key", "export", "--dir", first.dir()])
+        .await
+        .unwrap_err();
+    assert!(refused.contains("--print-secret"), "{refused}");
+    let out = first.0.join("key.txt");
+    let out = out.to_str().unwrap();
+    let written = run(&["key", "export", "--out", out, "--dir", first.dir()])
+        .await
+        .unwrap();
+    assert!(written[0].starts_with("written: "), "{written:?}");
+    run(&["key", "import", "--from", out, "--dir", second.dir()])
+        .await
+        .unwrap();
+    let original = run(&["address", "--dir", first.dir()]).await.unwrap();
+    assert_eq!(
+        run(&["key", "public", "--dir", second.dir()])
+            .await
+            .unwrap(),
+        original,
+        "key public prints what address prints"
+    );
+    assert_eq!(
+        run(&["address", "--dir", second.dir()]).await.unwrap(),
+        original
+    );
+    let again = run(&["key", "import", "--from", out, "--dir", second.dir()])
+        .await
+        .unwrap_err();
+    assert!(again.contains("not overwritten"), "{again}");
+    let shown = run(&["key", "export", "--print-secret", "--dir", first.dir()])
+        .await
+        .unwrap();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0], std::fs::read_to_string(out).unwrap());
 }

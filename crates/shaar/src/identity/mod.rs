@@ -27,9 +27,10 @@ pub use error::IdentityError;
 pub use provision::{
     ConfigAction, ConfigEditError, FileState, NetworkChoice, ProvisionError, ProvisionPaths,
     ProvisionReport, Provisioned, Role, allowlist_template_text, check_config_text,
-    client_config_text, config_command, default_data_dir, editable_keys, first_run_summary_lines,
-    path_as_config_value, provision, provision_with, public_network_text, resolve_data_dir,
-    role_dir, set_config_network, set_config_value, unset_config_key, write_replacing,
+    client_config_text, config_command, default_data_dir, editable_keys, export_key,
+    first_run_summary_lines, import_key, path_as_config_value, provision, provision_with,
+    public_network_text, read_key_text, resolve_data_dir, role_dir, set_config_network,
+    set_config_value, unset_config_key, write_replacing,
 };
 
 use std::net::Ipv6Addr;
@@ -124,6 +125,29 @@ impl Identity {
             .await
             .map_err(|e| IdentityError::Io(std::io::Error::other(e)))??;
         Ok(Self { secret })
+    }
+
+    /// The portable text form of this key: base58 of a version byte, the seed and a checksum,
+    /// for carrying the key to another device. It IS the secret; the buffer is zeroized on drop.
+    pub fn export_text(&self) -> Result<zeroize::Zeroizing<String>, IdentityError> {
+        let seed = zeroize::Zeroizing::new(self.secret.to_bytes());
+        store::text::encode(&seed)
+    }
+
+    /// Creates a NEW key file at `path` from the text form of a key; never overwrites an
+    /// existing file. A text that is not a key, or whose checksum does not match, is refused
+    /// before the file is touched.
+    /// cancel-safe: NO — a running worker may finish creation after the waiter is dropped.
+    pub async fn import_text(path: impl Into<PathBuf>, text: &str) -> Result<Self, IdentityError> {
+        let seed = store::text::decode(text)?;
+        let path = path.into();
+        let staged = seed.clone();
+        tokio::task::spawn_blocking(move || store::create_new_blocking(&path, &staged))
+            .await
+            .map_err(|e| IdentityError::Io(std::io::Error::other(e)))??;
+        Ok(Self {
+            secret: iroh_base::SecretKey::from_bytes(&seed),
+        })
     }
 
     /// Loads an existing key file. A malformed, inaccessible, or
