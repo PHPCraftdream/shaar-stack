@@ -188,7 +188,7 @@ async fn the_batches_of_one_peer_carry_rising_burst_numbers() {
 #[tokio::test(start_paused = true)]
 async fn a_walk_follows_only_one_burst_per_walk_interval() {
     let candidates = vec!["198.51.100.9:4433".parse().unwrap()];
-    let (in_tx, _out_rx, mut batches) = serve_with(candidates, 16).await;
+    let (in_tx, mut out_rx, mut batches) = serve_with(candidates, 16).await;
     let bursts_per_walk = punch::WALK_MIN_INTERVAL.as_secs() / punch::BURST_MIN_INTERVAL.as_secs();
     let mut numbers = Vec::new();
     for epoch in 1..=(2 * bursts_per_walk + 1) as u32 {
@@ -198,6 +198,8 @@ async fn a_walk_follows_only_one_burst_per_walk_interval() {
             .unwrap()
             .expect("batch");
         numbers.push(batch.burst);
+        // Read the answer: more offers than the answer queue holds would block the responder.
+        answer(out_rx.recv().await);
         tokio::time::advance(punch::BURST_MIN_INTERVAL).await;
     }
     let walks: Vec<u32> = numbers.iter().copied().filter(|n| *n != 0).collect();
