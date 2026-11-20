@@ -161,7 +161,7 @@ async fn same_epoch_forwards_one_batch_new_epoch_a_second() {
     assert_eq!(second.peer, PEER);
 }
 
-/// Leaf SET-1d: the batches of one peer carry rising burst numbers, which pick the slice of the
+/// Leaf SET-1d: the batches of one peer carry rising walk numbers, which pick the slice of the
 /// peer's port set that each burst walks; an offer suppressed inside the interval takes no number.
 #[tokio::test(start_paused = true)]
 async fn the_batches_of_one_peer_carry_rising_burst_numbers() {
@@ -177,9 +177,63 @@ async fn the_batches_of_one_peer_carry_rising_burst_numbers() {
         numbers.push(batch.burst);
         in_tx.send(offer(epoch + 100)).await.unwrap();
         no_batch(&mut batches).await;
-        tokio::time::advance(punch::BURST_MIN_INTERVAL).await;
+        tokio::time::advance(punch::WALK_MIN_INTERVAL).await;
     }
     assert_eq!(numbers, [1, 2, 3]);
+}
+
+/// Leaf BURST-1 (live attempt 24: a walk cost 1.8 to 2.6 MB of uplink on a phone): bursts that
+/// follow each other every `BURST_MIN_INTERVAL` walk only once per `WALK_MIN_INTERVAL`; the
+/// bursts in between carry number 0 (candidates only) and take no slice.
+#[tokio::test(start_paused = true)]
+async fn a_walk_follows_only_one_burst_per_walk_interval() {
+    let candidates = vec!["198.51.100.9:4433".parse().unwrap()];
+    let (in_tx, mut out_rx, mut batches) = serve_with(candidates, 16).await;
+    let bursts_per_walk = punch::WALK_MIN_INTERVAL.as_secs() / punch::BURST_MIN_INTERVAL.as_secs();
+    let mut numbers = Vec::new();
+    for epoch in 1..=(2 * bursts_per_walk + 1) as u32 {
+        in_tx.send(offer(epoch)).await.unwrap();
+        let batch = timeout(Duration::from_secs(1), batches.recv())
+            .await
+            .unwrap()
+            .expect("batch");
+        numbers.push(batch.burst);
+        // Read the answer: more offers than the answer queue holds would block the responder.
+        answer(out_rx.recv().await);
+        tokio::time::advance(punch::BURST_MIN_INTERVAL).await;
+    }
+    let walks: Vec<u32> = numbers.iter().copied().filter(|n| *n != 0).collect();
+    assert_eq!(walks, [1, 2, 3], "the third walk starts the third interval");
+    assert_eq!(numbers[0], 1, "the first burst walks at once");
+    assert!(
+        numbers[1..bursts_per_walk as usize].iter().all(|n| *n == 0),
+        "no walk inside the walk interval: {numbers:?}"
+    );
+}
+
+/// Leaf BURST-1: a peer is walked over the whole set once per Server run; after
+/// `WALKS_PER_RUN` walks every later burst carries number 0, however long the peer keeps offering.
+#[tokio::test(start_paused = true)]
+async fn a_peer_is_walked_over_the_set_once_per_run() {
+    let candidates = vec!["198.51.100.9:4433".parse().unwrap()];
+    let (in_tx, _out_rx, mut batches) = serve_with(candidates, 4).await;
+    let mut numbers = Vec::new();
+    for epoch in 1..=(punch::WALKS_PER_RUN + 3) {
+        in_tx.send(offer(epoch)).await.unwrap();
+        let batch = timeout(Duration::from_secs(1), batches.recv())
+            .await
+            .unwrap()
+            .expect("batch");
+        numbers.push(batch.burst);
+        tokio::time::advance(punch::WALK_MIN_INTERVAL).await;
+    }
+    let walked: Vec<u32> = (1..=punch::WALKS_PER_RUN).collect();
+    let (first, later) = numbers.split_at(walked.len());
+    assert_eq!(
+        first, walked,
+        "every slice of the set is walked once, in turn"
+    );
+    assert_eq!(later, [0, 0, 0], "the set is walked once");
 }
 
 /// Finding 1a: a flood of fresh epochs yields at most one batch per

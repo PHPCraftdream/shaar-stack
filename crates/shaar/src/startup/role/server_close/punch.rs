@@ -185,8 +185,11 @@ async fn serve_peer<L, P>(
     // Per-peer burst rate limit (Finding 1a), on the tokio (pausable)
     // monotonic clock.
     let mut last_batch: Option<tokio::time::Instant> = None;
-    // Bursts handed over for this peer: each one walks the next slice of the peer's port set.
-    let mut bursts: u32 = 0;
+    // Walk budget of this peer (leaf BURST-1): a walk of the next slice of the peer's port set costs
+    // megabytes of uplink, so it runs once per `punch::WALK_MIN_INTERVAL` and at most
+    // `punch::WALKS_PER_RUN` times; the bursts in between probe the offered candidates only.
+    let mut walks: u32 = 0;
+    let mut last_walk: Option<tokio::time::Instant> = None;
     loop {
         let Some(raw) = channel.recv_raw().await else {
             // Link died: this peer's punching is disabled.
@@ -238,13 +241,20 @@ async fn serve_peer<L, P>(
         {
             // Stamp BEFORE the handover: at most one burst per interval per
             // peer, even when the channel is full and the batch is skipped.
-            last_batch = Some(tokio::time::Instant::now());
+            let now = tokio::time::Instant::now();
+            last_batch = Some(now);
             last_epoch = Some(offer.epoch);
-            bursts = bursts.saturating_add(1);
+            // Number 0 walks nothing; like the stamp above, a walk slot is spent at the handover.
+            let walk = walks < punch::WALKS_PER_RUN
+                && last_walk.is_none_or(|at| at.elapsed() >= punch::WALK_MIN_INTERVAL);
+            if walk {
+                walks += 1;
+                last_walk = Some(now);
+            }
             let _ = batches.try_send(OfferBatch {
                 peer,
                 candidates: batch_candidates,
-                burst: bursts,
+                burst: if walk { walks } else { 0 },
             });
         } else if last_epoch != Some(offer.epoch) {
             // Suppressed burst: still track the epoch so retries of the same
