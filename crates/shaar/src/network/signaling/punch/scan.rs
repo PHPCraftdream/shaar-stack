@@ -164,8 +164,8 @@ where
 
 /// One Server probe burst for a peer: the peer's candidates one after another, up to
 /// [`MAX_CANDIDATES`] and only those that pass the peer-claimed gate, and at the same time slice
-/// [`walk_ring`] of the peer's order on its public addresses ([`walk_addresses`]). Returns whether
-/// any probe completed. The walk probes are bounded by `slice` and run at once; a candidate probe
+/// [`walk_ring`] of the peer's order on its public addresses ([`walk_addresses`]); `burst` 0 walks
+/// nothing and probes the candidates only (leaf BURST-1). Returns whether any probe completed. The walk probes are bounded by `slice` and run at once; a candidate probe
 /// bounds itself, so the burst ends within `MAX_CANDIDATES` of those bounds.
 /// cancel-safe: yes — a cancelled burst only drops its pending probes.
 pub(crate) async fn server_burst<P, PFut>(
@@ -188,6 +188,9 @@ where
         false
     };
     let walked = async {
+        if burst == 0 {
+            return false;
+        }
         let ring = walk_ring(burst);
         let addresses = walk_addresses(candidates, peer_key, ring);
         if addresses.is_empty() {
@@ -449,6 +452,37 @@ mod tests {
             assert!(seen.contains(&candidate), "candidate probed: {candidate}");
         }
         assert_eq!(seen.len(), 2 + 2 * SCAN_PORTS_PER_ATTEMPT);
+    }
+
+    /// Leaf BURST-1: burst number 0 is the burst without a walk, the candidates are still probed.
+    #[tokio::test(start_paused = true)]
+    async fn burst_zero_probes_the_candidates_and_walks_nothing() {
+        let seen = std::sync::Mutex::new(Vec::new());
+        let completed = server_burst(
+            &KEY,
+            &[at("203.0.113.7", OFF_SET), at("198.51.100.9", OFF_SET + 1)],
+            0,
+            SCAN_SLICE,
+            |address| {
+                seen.lock().unwrap().push(address);
+                async { false }
+            },
+        )
+        .await;
+        assert!(!completed);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [at("203.0.113.7", OFF_SET), at("198.51.100.9", OFF_SET + 1)]
+        );
+        let answering = server_burst(
+            &KEY,
+            &[at("203.0.113.7", OFF_SET)],
+            0,
+            SCAN_SLICE,
+            |address| async move { address.port() == OFF_SET },
+        )
+        .await;
+        assert!(answering, "the listed candidate answered without a walk");
     }
 
     #[tokio::test(start_paused = true)]

@@ -58,6 +58,12 @@ pub(crate) const BURST_CONCURRENCY_CAP: usize = 2;
 /// review Finding 1a): a fresh offer epoch inside the window is answered but
 /// starts no new burst. Monotonic per peer, measured from the burst handover.
 pub(crate) const BURST_MIN_INTERVAL: Duration = Duration::from_secs(5);
+/// Minimum interval between two walks (slices of the peer's port set) for the SAME peer (leaf
+/// BURST-1). A walk of 20 probes measured 1.8 to 2.6 MB of uplink on a phone (live attempt 24), so
+/// it must not follow every burst; the bursts in between probe the offered candidates only.
+pub(crate) const WALK_MIN_INTERVAL: Duration = Duration::from_secs(60);
+/// Walks per peer per Server run: one pass over the peer's key-ordered port set (leaf BURST-1).
+pub(crate) const WALKS_PER_RUN: u32 = scan::SCAN_RINGS;
 
 /// Role of the sender inside the offer/answer exchange.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -323,7 +329,9 @@ impl PunchLink for PunchChannel {
 }
 
 /// One server-side probe burst payload: the peer, its offered candidates and the number of this
-/// peer's bursts so far (from 1), which picks the slice of its port set that the burst walks.
+/// peer's walks so far (from 1), which picks the slice of its port set that the burst walks; 0 when
+/// the peer's walk budget ([`WALK_MIN_INTERVAL`], [`WALKS_PER_RUN`]) allows no walk, so the burst
+/// probes the candidates only.
 pub(crate) struct OfferBatch {
     pub peer: [u8; 32],
     pub candidates: Vec<SocketAddr>,
@@ -485,7 +493,7 @@ where
 /// `PROBE_WINDOW`. At the same time one slice (`burst`, the number of this
 /// peer's bursts) of the peer's key-ordered port set is walked on the peer's
 /// public addresses (`scan::server_burst`, leaf SET-1d), all at once under
-/// the same `PROBE_SLICE`. Completed connections are closed by the handle
+/// the same `PROBE_SLICE`; `burst` 0 walks nothing (leaf BURST-1). Completed connections are closed by the handle
 /// (they only open the NAT mapping; the accept loop owns the real session).
 /// Traces exactly once and returns whether any probe completed.
 pub(crate) async fn probe_burst(
