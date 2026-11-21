@@ -3,9 +3,11 @@
 //! moved by a router mapping, still uses a port of the fixed set ([`crate::network::ports`]), and
 //! the order in which it prefers them is a function of its own public key, which this side knows. So
 //! the ports of the peer's set are probed on the peer's public address in that order, in slices of
-//! [`SCAN_PORTS_PER_ATTEMPT`], one slice per attempt; nothing else is tried. A probe is the slotless
-//! QUIC handshake of [`crate::network::admission::ProbeHandle`]; the first one that completes names
-//! the address and the ordinary dial follows.
+//! [`SCAN_PORTS_PER_ATTEMPT`], one slice per attempt; nothing else is tried. A slice is probed by
+//! ONE slotless QUIC handshake of [`crate::network::admission::ProbeHandle`] that offers all its
+//! addresses to the transport, as the transport is meant to be used (leaf BURST-2): the first
+//! flight goes once to each address, not once per address per probe. The address on which the
+//! handshake completed names the peer, and the ordinary dial follows.
 //!
 //! The Server walks the same way in the other direction (leaf SET-1d): a burst of its probes also
 //! covers one slice of the Client's order on the public addresses the Client offered, so a Client
@@ -18,8 +20,6 @@ use std::{
     time::Duration,
 };
 
-use futures::{StreamExt, stream::FuturesUnordered};
-
 use super::{MAX_CANDIDATES, peer_claimed_probe_allowed};
 use crate::network::NetworkError;
 use crate::network::signaling::ports;
@@ -30,7 +30,8 @@ pub(crate) const SCAN_PORTS_PER_ATTEMPT: usize = 20;
 /// peer's order, so the slices together are the whole set once.
 pub(crate) const SCAN_RINGS: u32 = 5;
 const _: () = assert!(SCAN_PORTS_PER_ATTEMPT * SCAN_RINGS as usize == ports::PORT_COUNT);
-/// Bound of one probe: below one QUIC initial retransmission, so one datagram of about 1.2 KB.
+/// Bound of one slice probe: below one QUIC initial retransmission, so one datagram of about 1.2 KB
+/// per address of the slice.
 pub(crate) const SCAN_SLICE: Duration = Duration::from_millis(300);
 
 /// Whether the address of a peer may be walked: a public IPv4 address with a port. Private,
@@ -131,42 +132,35 @@ pub(crate) fn walk_addresses(
     walked
 }
 
-/// The first of `addresses` whose probe completes, each probe bounded by `slice`; `None` when none
-/// does. The probes run all at once and the rest are dropped at the first completion.
-pub(crate) async fn first_to_answer<P, PFut>(
-    addresses: impl IntoIterator<Item = SocketAddr>,
+/// The address on which one probe of the whole slice `addresses` completed, the probe bounded by
+/// `slice`; `None` when it did not complete or the slice is empty. The slice is ONE call of `probe`
+/// (leaf BURST-2): a probe per address would send the first flight of every probe to every
+/// address, so the cost would grow with the square of the slice.
+/// cancel-safe: yes — a cancelled call only drops the pending probe.
+pub(crate) async fn answering_address<P, PFut>(
+    addresses: Vec<SocketAddr>,
     slice: Duration,
     probe: &P,
 ) -> Option<SocketAddr>
 where
-    P: Fn(SocketAddr) -> PFut,
-    PFut: Future<Output = bool>,
+    P: Fn(Vec<SocketAddr>) -> PFut,
+    PFut: Future<Output = Option<SocketAddr>>,
 {
-    let mut probes: FuturesUnordered<_> = addresses
-        .into_iter()
-        .map(|address| {
-            let probe = probe(address);
-            async move {
-                tokio::time::timeout(slice, probe)
-                    .await
-                    .unwrap_or(false)
-                    .then_some(address)
-            }
-        })
-        .collect();
-    while let Some(result) = probes.next().await {
-        if result.is_some() {
-            return result;
-        }
+    if addresses.is_empty() {
+        return None;
     }
-    None
+    tokio::time::timeout(slice, probe(addresses))
+        .await
+        .ok()
+        .flatten()
 }
 
 /// One Server probe burst for a peer: the peer's candidates one after another, up to
 /// [`MAX_CANDIDATES`] and only those that pass the peer-claimed gate, and at the same time slice
-/// [`walk_ring`] of the peer's order on its public addresses ([`walk_addresses`]); `burst` 0 walks
-/// nothing and probes the candidates only (leaf BURST-1). Returns whether any probe completed. The walk probes are bounded by `slice` and run at once; a candidate probe
-/// bounds itself, so the burst ends within `MAX_CANDIDATES` of those bounds.
+/// [`walk_ring`] of the peer's order on its public addresses ([`walk_addresses`]) as one probe;
+/// `burst` 0 walks nothing and probes the candidates only (leaf BURST-1). Returns whether any probe
+/// completed. The walk probe is bounded by `slice`; a candidate probe bounds itself, so the burst
+/// ends within `MAX_CANDIDATES` of those bounds.
 /// cancel-safe: yes — a cancelled burst only drops its pending probes.
 pub(crate) async fn server_burst<P, PFut>(
     peer_key: &[u8; 32],
@@ -176,12 +170,12 @@ pub(crate) async fn server_burst<P, PFut>(
     probe: P,
 ) -> bool
 where
-    P: Fn(SocketAddr) -> PFut,
-    PFut: Future<Output = bool>,
+    P: Fn(Vec<SocketAddr>) -> PFut,
+    PFut: Future<Output = Option<SocketAddr>>,
 {
     let listed = async {
         for candidate in candidates.iter().take(MAX_CANDIDATES) {
-            if peer_claimed_probe_allowed(*candidate) && probe(*candidate).await {
+            if peer_claimed_probe_allowed(*candidate) && probe(vec![*candidate]).await.is_some() {
                 return true;
             }
         }
@@ -197,7 +191,7 @@ where
             return false;
         }
         let probed = addresses.len();
-        let found = first_to_answer(addresses, slice, &probe).await.is_some();
+        let found = answering_address(addresses, slice, &probe).await.is_some();
         eprintln!("{}", scan_line("server", ring, probed, found));
         found
     };
@@ -206,8 +200,8 @@ where
 }
 
 /// Dials `centre`. In an attempt that scans (`ring` from [`scan_ring`]), the centre and the slice
-/// of the peer's ordered set are probed first (all at once, each bounded by [`SCAN_SLICE`]) and the
-/// first address whose handshake completed is dialed; with none, the attempt ends with
+/// of the peer's ordered set are probed first (as one probe bounded by [`SCAN_SLICE`]) and the
+/// address on which the handshake completed is dialed; with none, the attempt ends with
 /// [`NetworkError::Deadline`]. Outside a scanning attempt this is exactly `connect(centre)`.
 /// cancel-safe: NO — the dial that follows a found address is not cancel-safe.
 pub(crate) async fn scan_then_connect<T, P, PFut, C, CFut>(
@@ -218,17 +212,18 @@ pub(crate) async fn scan_then_connect<T, P, PFut, C, CFut>(
     connect: C,
 ) -> Result<T, NetworkError>
 where
-    P: Fn(SocketAddr) -> PFut,
-    PFut: Future<Output = bool>,
+    P: Fn(Vec<SocketAddr>) -> PFut,
+    PFut: Future<Output = Option<SocketAddr>>,
     C: FnOnce(SocketAddr) -> CFut,
     CFut: Future<Output = Result<T, NetworkError>>,
 {
-    let addresses = ring_addresses(centre, peer_key, ring);
+    let mut addresses = ring_addresses(centre, peer_key, ring);
     if addresses.is_empty() {
         return connect(centre).await;
     }
-    let probed = addresses.len() + 1;
-    let found = first_to_answer(std::iter::once(centre).chain(addresses), SCAN_SLICE, &probe).await;
+    addresses.insert(0, centre);
+    let probed = addresses.len();
+    let found = answering_address(addresses, SCAN_SLICE, &probe).await;
     eprintln!("{}", scan_line("client", ring, probed, found.is_some()));
     match found {
         Some(address) => connect(address).await,
@@ -398,25 +393,46 @@ mod tests {
         assert!(walk_addresses(&[at("203.0.113.7", OFF_SET)], &KEY, SCAN_RINGS + 1).is_empty());
     }
 
+    /// A probe that completes on the first of `addresses` that is `wanted`.
+    fn completing_on(
+        wanted: u16,
+    ) -> impl Fn(Vec<SocketAddr>) -> std::future::Ready<Option<SocketAddr>> {
+        move |addresses| {
+            std::future::ready(
+                addresses
+                    .into_iter()
+                    .find(|address| address.port() == wanted),
+            )
+        }
+    }
+
+    /// Leaf BURST-2: a slice is ONE call of the probe with every address of the slice, and the
+    /// address the probe names is the answer.
     #[tokio::test(start_paused = true)]
-    async fn the_first_probe_that_completes_names_the_address() {
+    async fn a_slice_is_one_probe_that_names_the_address_that_answered() {
         let wanted = at("203.0.113.7", 31_000);
-        let found = first_to_answer(
-            [at("203.0.113.7", 30_999), wanted, at("203.0.113.7", 31_001)],
-            SCAN_SLICE,
-            &|address| async move { address == wanted },
-        )
+        let slice = vec![at("203.0.113.7", 30_999), wanted, at("203.0.113.7", 31_001)];
+        let calls = std::sync::Mutex::new(Vec::new());
+        let found = answering_address(slice.clone(), SCAN_SLICE, &|addresses: Vec<SocketAddr>| {
+            calls.lock().unwrap().push(addresses.clone());
+            async move { addresses.into_iter().find(|address| *address == wanted) }
+        })
         .await;
         assert_eq!(found, Some(wanted));
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [slice],
+            "one call carried the whole slice"
+        );
     }
 
     #[tokio::test(start_paused = true)]
-    async fn silent_probes_end_at_their_bound_with_no_address() {
+    async fn a_silent_probe_ends_at_its_bound_with_no_address_and_an_empty_slice_is_not_probed() {
         let started = tokio::time::Instant::now();
-        let found = first_to_answer(
-            [at("203.0.113.7", 31_000), at("203.0.113.7", 31_001)],
+        let found = answering_address(
+            vec![at("203.0.113.7", 31_000), at("203.0.113.7", 31_001)],
             SCAN_SLICE,
-            &|_| std::future::pending::<bool>(),
+            &|_| std::future::pending::<Option<SocketAddr>>(),
         )
         .await;
         assert_eq!(found, None);
@@ -425,14 +441,18 @@ mod tests {
             elapsed >= SCAN_SLICE && elapsed < SCAN_SLICE * 2,
             "{elapsed:?}"
         );
-        assert_eq!(
-            first_to_answer([], SCAN_SLICE, &|_| async { true }).await,
-            None
-        );
+        let probed = AtomicUsize::new(0);
+        let none = answering_address(Vec::new(), SCAN_SLICE, &|_| {
+            probed.fetch_add(1, Ordering::SeqCst);
+            async { Some(public(1)) }
+        })
+        .await;
+        assert_eq!(none, None);
+        assert_eq!(probed.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_burst_walks_the_slice_while_the_candidates_are_tried_one_by_one() {
+    async fn a_burst_walks_the_slice_as_one_probe_while_the_candidates_are_tried_one_by_one() {
         let walked_port = ports::order(&KEY)[3];
         let seen = std::sync::Mutex::new(Vec::new());
         let completed = server_burst(
@@ -440,18 +460,30 @@ mod tests {
             &[at("203.0.113.7", OFF_SET), at("198.51.100.9", OFF_SET + 1)],
             1,
             SCAN_SLICE,
-            |address| {
-                seen.lock().unwrap().push(address);
-                async move { address.port() == walked_port }
+            |addresses: Vec<SocketAddr>| {
+                seen.lock().unwrap().push(addresses.clone());
+                async move {
+                    addresses
+                        .into_iter()
+                        .find(|address| address.port() == walked_port)
+                }
             },
         )
         .await;
         assert!(completed, "a walked port answered");
         let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 3, "two candidates and one walk probe");
         for candidate in [at("203.0.113.7", OFF_SET), at("198.51.100.9", OFF_SET + 1)] {
-            assert!(seen.contains(&candidate), "candidate probed: {candidate}");
+            assert!(
+                seen.contains(&vec![candidate]),
+                "candidate probed: {candidate}"
+            );
         }
-        assert_eq!(seen.len(), 2 + 2 * SCAN_PORTS_PER_ATTEMPT);
+        let walk = seen
+            .iter()
+            .find(|call| call.len() > 1)
+            .expect("a walk probe");
+        assert_eq!(walk.len(), 2 * SCAN_PORTS_PER_ATTEMPT);
     }
 
     /// Leaf BURST-1: burst number 0 is the burst without a walk, the candidates are still probed.
@@ -463,23 +495,26 @@ mod tests {
             &[at("203.0.113.7", OFF_SET), at("198.51.100.9", OFF_SET + 1)],
             0,
             SCAN_SLICE,
-            |address| {
-                seen.lock().unwrap().push(address);
-                async { false }
+            |addresses: Vec<SocketAddr>| {
+                seen.lock().unwrap().push(addresses);
+                async { None }
             },
         )
         .await;
         assert!(!completed);
         assert_eq!(
             *seen.lock().unwrap(),
-            [at("203.0.113.7", OFF_SET), at("198.51.100.9", OFF_SET + 1)]
+            [
+                vec![at("203.0.113.7", OFF_SET)],
+                vec![at("198.51.100.9", OFF_SET + 1)]
+            ]
         );
         let answering = server_burst(
             &KEY,
             &[at("203.0.113.7", OFF_SET)],
             0,
             SCAN_SLICE,
-            |address| async move { address.port() == OFF_SET },
+            completing_on(OFF_SET),
         )
         .await;
         assert!(answering, "the listed candidate answered without a walk");
@@ -493,7 +528,7 @@ mod tests {
             &[at("203.0.113.7", OFF_SET)],
             2,
             SCAN_SLICE,
-            |_| async { false },
+            |_| async { None },
         )
         .await;
         assert!(!none);
@@ -502,7 +537,7 @@ mod tests {
             &[at("203.0.113.7", OFF_SET), at("192.168.1.5", OFF_SET + 1)],
             3,
             SCAN_SLICE,
-            |address| async move { address.port() == OFF_SET },
+            completing_on(OFF_SET),
         )
         .await;
         assert!(only_candidate, "the listed candidate answered");
@@ -517,16 +552,19 @@ mod tests {
             &[at("169.254.1.1", OFF_SET), at("192.168.1.5", OFF_SET + 1)],
             1,
             SCAN_SLICE,
-            |address| {
-                seen.lock().unwrap().push(address);
-                async { false }
+            |addresses: Vec<SocketAddr>| {
+                seen.lock().unwrap().push(addresses);
+                async { None }
             },
         )
         .await;
         assert!(!completed);
         // Only the private candidate itself was probed: the link-local one is gated out and a
         // private host is never walked.
-        assert_eq!(*seen.lock().unwrap(), [at("192.168.1.5", OFF_SET + 1)]);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [vec![at("192.168.1.5", OFF_SET + 1)]]
+        );
     }
 
     #[tokio::test]
@@ -538,7 +576,7 @@ mod tests {
             SCAN_RINGS + 1,
             |_| {
                 probes.fetch_add(1, Ordering::SeqCst);
-                async { false }
+                async { None }
             },
             |address| async move { Ok::<_, NetworkError>(address) },
         )
@@ -547,23 +585,27 @@ mod tests {
         assert_eq!(probes.load(Ordering::SeqCst), 0);
     }
 
+    /// Leaf BURST-2: the centre and the slice go to the probe in ONE call, centre first.
     #[tokio::test]
     async fn the_address_whose_probe_completes_is_the_one_that_is_dialed() {
-        let probes = AtomicUsize::new(0);
+        let probes = std::sync::Mutex::new(Vec::new());
         let real = public(ports::order(&KEY)[7]);
         let dialed = scan_then_connect(
             public(40_000),
             &KEY,
             1,
-            |address| {
-                probes.fetch_add(1, Ordering::SeqCst);
-                async move { address == real }
+            |addresses: Vec<SocketAddr>| {
+                probes.lock().unwrap().push(addresses.clone());
+                async move { addresses.into_iter().find(|address| *address == real) }
             },
             |address| async move { Ok::<_, NetworkError>(address) },
         )
         .await;
         assert_eq!(dialed.unwrap(), real);
-        assert_eq!(probes.load(Ordering::SeqCst), SCAN_PORTS_PER_ATTEMPT + 1);
+        let probes = probes.lock().unwrap();
+        assert_eq!(probes.len(), 1, "one probe for the whole slice");
+        assert_eq!(probes[0].len(), SCAN_PORTS_PER_ATTEMPT + 1);
+        assert_eq!(probes[0][0], public(40_000));
     }
 
     #[tokio::test]
@@ -572,7 +614,11 @@ mod tests {
             public(40_000),
             &KEY,
             1,
-            |address| async move { address == public(40_000) },
+            |addresses: Vec<SocketAddr>| async move {
+                addresses
+                    .into_iter()
+                    .find(|address| *address == public(40_000))
+            },
             |address| async move { Ok::<_, NetworkError>(address) },
         )
         .await;
@@ -586,7 +632,7 @@ mod tests {
             public(40_000),
             &KEY,
             1,
-            |_| std::future::pending::<bool>(),
+            |_| std::future::pending::<Option<SocketAddr>>(),
             |_| async { panic!("no address was found: nothing may be dialed") },
         )
         .await;
@@ -604,7 +650,7 @@ mod tests {
             public(40_000),
             &KEY,
             2,
-            |_| async { true },
+            |addresses: Vec<SocketAddr>| async move { addresses.first().copied() },
             |_| async { Err(NetworkError::Closed) },
         )
         .await;

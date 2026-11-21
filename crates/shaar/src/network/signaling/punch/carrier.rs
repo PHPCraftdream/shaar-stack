@@ -165,9 +165,9 @@ pub(crate) async fn connect_via_punched(
                     address,
                     peer.as_bytes(),
                     scan_ring(epoch),
-                    |probe_address| {
+                    |probe_addresses| {
                         let probes = endpoint.probe_handle();
-                        async move { probes.probe(peer, probe_address).await }
+                        async move { probes.probe_any(peer, probe_addresses).await }
                     },
                     |dial_address| endpoint.connect(peer, dial_address),
                 )
