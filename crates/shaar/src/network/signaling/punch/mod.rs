@@ -486,14 +486,15 @@ where
 /// run inside the responder task (off the accept loop).
 ///
 /// For at most `MAX_CANDIDATES` probe-gated candidates in order, one
-/// [`crate::network::ProbeHandle::probe`] per candidate, each bounded by its
+/// [`crate::network::ProbeHandle::probe_any`] per candidate, each bounded by its
 /// own `PROBE_SLICE` deadline inside the handle (a silent candidate cannot
 /// starve the rest); the whole burst is thus bounded by
 /// `MAX_CANDIDATES * PROBE_SLICE` (2 s), matching the client's
 /// `PROBE_WINDOW`. At the same time one slice (`burst`, the number of this
 /// peer's bursts) of the peer's key-ordered port set is walked on the peer's
-/// public addresses (`scan::server_burst`, leaf SET-1d), all at once under
-/// the same `PROBE_SLICE`; `burst` 0 walks nothing (leaf BURST-1). Completed connections are closed by the handle
+/// public addresses (`scan::server_burst`, leaf SET-1d) as ONE probe of all
+/// its addresses under the same `PROBE_SLICE` (leaf BURST-2); `burst` 0 walks
+/// nothing (leaf BURST-1). Completed connections are closed by the handle
 /// (they only open the NAT mapping; the accept loop owns the real session).
 /// Traces exactly once and returns whether any probe completed.
 pub(crate) async fn probe_burst(
@@ -504,11 +505,14 @@ pub(crate) async fn probe_burst(
     role: &'static str,
 ) -> bool {
     let started = Instant::now();
-    let completed =
-        scan::server_burst(peer.as_bytes(), candidates, burst, PROBE_SLICE, |address| {
-            probes.probe(peer, address)
-        })
-        .await;
+    let completed = scan::server_burst(
+        peer.as_bytes(),
+        candidates,
+        burst,
+        PROBE_SLICE,
+        |addresses| probes.probe_any(peer, addresses),
+    )
+    .await;
     let reason = if completed {
         EndReason::Direct
     } else {

@@ -163,29 +163,56 @@ const _: () = {
 };
 
 impl ProbeHandle {
-    /// One bounded punch probe of one peer-claimed candidate: validates
-    /// against the dial policy, connects the raw inner endpoint under
-    /// [`crate::network::signaling::punch::PROBE_SLICE`], and closes any
-    /// completed connection at once with application code 0. Returns
-    /// whether the handshake completed (the NAT mapping opened).
-    pub(crate) async fn probe(&self, peer: PublicKey, address: SocketAddr) -> bool {
-        if !policy::dial_address(address) {
-            return false;
+    /// One bounded punch probe of the peer-claimed `addresses` of one peer (leaf BURST-2): the
+    /// addresses that pass the dial policy are offered to ONE connect of the raw inner endpoint
+    /// under [`crate::network::signaling::punch::PROBE_SLICE`], which sends its first flight once
+    /// to each of them and keeps the path that answers first, and any completed connection is
+    /// closed at once with application code 0. Returns the address on which the handshake
+    /// completed (the NAT mapping opened), `None` when none did. One connect per address would
+    /// make every connect send its flight to the addresses of all the others, so the datagrams
+    /// would grow with the square of the number of addresses.
+    pub(crate) async fn probe_any(
+        &self,
+        peer: PublicKey,
+        addresses: Vec<SocketAddr>,
+    ) -> Option<SocketAddr> {
+        let offered: Vec<TransportAddr> = addresses
+            .into_iter()
+            .filter(|address| policy::dial_address(*address))
+            .map(TransportAddr::Ip)
+            .collect();
+        if offered.is_empty() {
+            return None;
         }
-        let remote = EndpointAddr::from_parts(peer, [TransportAddr::Ip(address)]);
-        match tokio::time::timeout(
+        let remote = EndpointAddr::from_parts(peer, offered);
+        let connection = tokio::time::timeout(
             crate::network::signaling::punch::PROBE_SLICE,
             self.inner.connect(remote, ALPN),
         )
         .await
-        {
-            Ok(Ok(connection)) => {
-                connection.close(VarInt::from_u32(0), b"");
-                true
+        .ok()?
+        .ok()?;
+        let answered = answered_address(&connection);
+        connection.close(VarInt::from_u32(0), b"");
+        answered
+    }
+}
+
+/// The remote address of the path a completed probe ended on: the selected path, else the first IP
+/// path, in the canonical form of the addresses that were offered.
+fn answered_address(connection: &iroh::endpoint::Connection) -> Option<SocketAddr> {
+    let paths = connection.paths();
+    let mut first = None;
+    for path in paths.iter() {
+        if let TransportAddr::Ip(address) = path.remote_addr() {
+            let address = SocketAddr::new(address.ip().to_canonical(), address.port());
+            if path.is_selected() {
+                return Some(address);
             }
-            _ => false,
+            first.get_or_insert(address);
         }
     }
+    first
 }
 
 impl Endpoint {

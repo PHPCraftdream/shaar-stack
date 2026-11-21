@@ -15,6 +15,9 @@ use super::{DiscoveredRelay, DiscoveryConfig, check_peers, owner::Owned, peer_id
 #[path = "tests/discovery_tests.rs"]
 mod discovery_tests;
 #[cfg(test)]
+#[path = "tests/probe_slice_tests.rs"]
+mod probe_slice_tests;
+#[cfg(test)]
 #[path = "tests/owned_tests.rs"]
 mod tests;
 
