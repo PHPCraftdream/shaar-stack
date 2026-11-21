@@ -1,6 +1,7 @@
 //! Keeping one mapping alive for the life of a socket (leaf PORT-1, step 3): the keeper asks the
 //! gateway for the mapping, renews it at half its granted lifetime with the same nonce, tries
-//! again when the gateway failed or was silent, and deletes the mapping when it is stopped.
+//! again when the gateway failed or was silent, and deletes the mapping when it is stopped. A
+//! change of the outcome class is reported on stderr in one line without any address or port.
 
 use std::{net::SocketAddr, time::Duration};
 
@@ -10,7 +11,7 @@ use tokio::{
     time::sleep,
 };
 
-use super::{Gateway, MapError, Mapping, home_gateway, map_any, release, renew};
+use super::{Gateway, MapError, Mapping, Protocol, home_gateway, map_any, release, renew};
 
 /// How the keeper paces itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +47,48 @@ pub enum State {
     Mapped(Mapping),
     /// The last request failed; the keeper tries again.
     Unavailable(MapError),
+}
+
+/// The class of a request result: a line is printed only when it changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Outcome {
+    Granted(Protocol),
+    Failed(MapError),
+}
+
+impl Outcome {
+    pub(super) fn of(result: &Result<Mapping, MapError>) -> Self {
+        match result {
+            Ok(mapping) => Self::Granted(mapping.protocol),
+            Err(error) => Self::Failed(*error),
+        }
+    }
+}
+
+/// The line for `result` when its class differs from `previous`, else nothing. A grant names the
+/// protocol and the granted lifetime, a failure its reason; never an address or a port.
+pub(super) fn outcome_line(
+    previous: Option<Outcome>,
+    result: &Result<Mapping, MapError>,
+) -> Option<String> {
+    if previous == Some(Outcome::of(result)) {
+        return None;
+    }
+    Some(match result {
+        Ok(mapping) => format!(
+            "shaar: router mapping outcome=granted protocol={} lifetime_s={}",
+            mapping.protocol.token(),
+            mapping.lifetime.as_secs()
+        ),
+        Err(error) => format!("shaar: router mapping outcome=unavailable reason={error}"),
+    })
+}
+
+fn announce(reported: &mut Option<Outcome>, result: &Result<Mapping, MapError>) {
+    if let Some(line) = outcome_line(*reported, result) {
+        eprintln!("{line}");
+    }
+    *reported = Some(Outcome::of(result));
 }
 
 /// Which gateway the keeper asks.
@@ -156,6 +199,7 @@ async fn keep(
 ) {
     let mut held: Option<Mapping> = None;
     let mut known: Option<Gateway> = None;
+    let mut reported: Option<Outcome> = None;
     loop {
         // A home router is looked up until one is named; the mapping starts after that.
         let gateway = if let Some(found) = known {
@@ -170,6 +214,7 @@ async fn keep(
                 },
             };
             let Some(found) = found else {
+                announce(&mut reported, &Err(MapError::NoGateway));
                 state.send_replace(State::Unavailable(MapError::NoGateway));
                 tokio::select! {
                     biased;
@@ -201,6 +246,7 @@ async fn keep(
             _ = &mut stopped => break,
             result = attempt => result,
         };
+        announce(&mut reported, &result);
         let wait = match result {
             Ok(mapping) => {
                 let wait = (mapping.lifetime / 2).max(timing.min_renew);

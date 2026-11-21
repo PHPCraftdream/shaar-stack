@@ -1,5 +1,6 @@
 //! Tests of the mapping client against a fake gateway on the loopback.
 
+use super::keeper::{Outcome, outcome_line};
 use super::*;
 use std::sync::{Arc, Mutex};
 use std::time::Instant as StdInstant;
@@ -540,4 +541,97 @@ async fn a_router_mapping_starts_only_where_there_is_something_to_map() {
         [0, 0, 0, 0],
         "stopping deletes it"
     );
+}
+
+// Leaf LOG-1: the keeper's one line per change of the outcome class.
+
+fn granted(protocol: Protocol, lifetime: Duration) -> Result<Mapping, MapError> {
+    Ok(Mapping {
+        protocol,
+        internal_port: INTERNAL,
+        external_port: 51_234,
+        external_ip: Some(IpAddr::V4(EXTERNAL_IP)),
+        lifetime,
+        nonce: fresh_nonce(),
+        igd: None,
+    })
+}
+
+#[test]
+fn the_first_grant_prints_one_line_with_the_protocol_and_the_lifetime() {
+    let result = granted(Protocol::Pcp, Duration::from_secs(5_400));
+    assert_eq!(
+        outcome_line(None, &result).as_deref(),
+        Some("shaar: router mapping outcome=granted protocol=pcp lifetime_s=5400")
+    );
+    for (protocol, token) in [(Protocol::NatPmp, "nat-pmp"), (Protocol::Upnp, "upnp")] {
+        let line = outcome_line(None, &granted(protocol, LIFETIME)).unwrap();
+        assert!(line.contains(&format!("protocol={token} ")), "{line}");
+    }
+}
+
+#[test]
+fn a_renewal_or_a_repeat_of_the_same_class_prints_nothing() {
+    let first = granted(Protocol::Pcp, Duration::from_secs(5_400));
+    let renewed = granted(Protocol::Pcp, Duration::from_secs(1_800));
+    assert_eq!(outcome_line(Some(Outcome::of(&first)), &renewed), None);
+    for error in [
+        MapError::Refused(2),
+        MapError::Silent,
+        MapError::Unsupported,
+        MapError::Io,
+        MapError::NoGateway,
+    ] {
+        let failed = Err(error);
+        assert!(outcome_line(None, &failed).is_some());
+        assert_eq!(outcome_line(Some(Outcome::of(&failed)), &failed), None);
+    }
+}
+
+#[test]
+fn granted_then_refused_prints_one_line_with_the_reason() {
+    let first = granted(Protocol::Upnp, LIFETIME);
+    let previous = Some(Outcome::of(&first));
+    let expected = [
+        (MapError::Refused(2), "refused:2"),
+        (MapError::Silent, "silent"),
+        (MapError::Unsupported, "unsupported"),
+        (MapError::Io, "io"),
+        (MapError::NoGateway, "no-gateway"),
+    ];
+    for (error, reason) in expected {
+        assert_eq!(
+            outcome_line(previous, &Err(error)),
+            Some(format!(
+                "shaar: router mapping outcome=unavailable reason={reason}"
+            ))
+        );
+    }
+}
+
+#[test]
+fn a_changed_reason_or_a_grant_after_a_failure_prints_again() {
+    let silent = Some(Outcome::of(&Err(MapError::Silent)));
+    assert!(outcome_line(silent, &Err(MapError::Refused(3))).is_some());
+    let refused = Some(Outcome::of(&Err(MapError::Refused(2))));
+    assert!(outcome_line(refused, &Err(MapError::Refused(3))).is_some());
+    let line = outcome_line(refused, &granted(Protocol::NatPmp, LIFETIME)).unwrap();
+    assert!(line.contains("outcome=granted"), "{line}");
+    // Another protocol is another class.
+    let pcp = Some(Outcome::of(&granted(Protocol::Pcp, LIFETIME)));
+    assert!(outcome_line(pcp, &granted(Protocol::Upnp, LIFETIME)).is_some());
+}
+
+#[test]
+fn a_line_never_names_an_address_or_a_port() {
+    let result = granted(Protocol::Pcp, Duration::from_secs(5_400));
+    let line = outcome_line(None, &result).unwrap();
+    for secret in [
+        INTERNAL.to_string(),
+        "51234".to_owned(),
+        EXTERNAL_IP.to_string(),
+        "203".to_owned(),
+    ] {
+        assert!(!line.contains(&secret), "{secret} in {line}");
+    }
 }
