@@ -20,9 +20,17 @@ use crate::native_discovery::runtime::clock::ClockSample;
 use crate::native_discovery::runtime::owner::{LoopbackPeer, RuntimeOwner, endpoint_key};
 use crate::native_discovery::runtime::publisher::{PublicationStatus, PublisherState};
 
+/// No gap: every replacement goes at once.
 const GENEROUS: MirrorTiming = MirrorTiming {
     interval: Duration::from_secs(3),
+    gap: Duration::ZERO,
     request_bound: Duration::from_secs(5),
+};
+
+/// The same with a gap of 600 ms between two requests to one relay.
+const GAPPED: MirrorTiming = MirrorTiming {
+    gap: Duration::from_millis(600),
+    ..GENEROUS
 };
 
 #[derive(Clone, Copy)]
@@ -386,6 +394,61 @@ async fn a_refresh_waits_for_the_interval_and_a_replacement_does_not() {
     mirror.offer(&[3; 40], true);
     wait_until(|| relay.count() == 2).await;
     assert_eq!(relay.bodies()[1], vec![3; 8]);
+}
+
+/// Regression of the PKARR-3 run: a failing DHT publication is retried as a new replacement each
+/// time, and every one of them went to every relay at once (15 requests in 58 s for 3 relays).
+#[tokio::test]
+async fn a_burst_of_replacements_costs_one_request_per_gap_and_the_latest_wins() {
+    let relay = FakeRelay::start(Reply::Header("8")).await;
+    let relays = [relay.url()];
+    let mirror = RelayMirror::start(key_only(0x6d), spec(&relays, GAPPED)).expect("relay");
+    mirror.offer(&[1; 40], true);
+    wait_until(|| relay.count() == 1).await;
+    let first = std::time::Instant::now();
+    for packet in [[2_u8; 40], [3; 40], [4; 40]] {
+        mirror.offer(&packet, true);
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(relay.count(), 1, "the burst waits out the gap");
+    wait_until(|| relay.count() == 2).await;
+    assert!(
+        first.elapsed() >= Duration::from_millis(450),
+        "the second request came {:?} after the first, inside the gap",
+        first.elapsed()
+    );
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    assert_eq!(
+        relay.bodies(),
+        vec![vec![1; 8], vec![4; 8]],
+        "one request for the whole burst, carrying the latest packet"
+    );
+}
+
+/// A refresh that arrives while a replacement waits for the gap is the newer packet of the same
+/// content: it is the one sent, and nothing is lost or sent twice.
+#[tokio::test]
+async fn a_refresh_during_the_wait_is_sent_in_place_of_the_replacement() {
+    let relay = FakeRelay::start(Reply::Header("8")).await;
+    let relays = [relay.url()];
+    let mirror = RelayMirror::start(key_only(0x6e), spec(&relays, GAPPED)).expect("relay");
+    mirror.offer(&[1; 40], true);
+    wait_until(|| relay.count() == 1).await;
+    mirror.offer(&[2; 40], true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    mirror.offer(&[3; 40], false);
+    wait_until(|| relay.count() == 2).await;
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    assert_eq!(relay.bodies(), vec![vec![1; 8], vec![3; 8]]);
+}
+
+/// The budget of the live run (item 24 of the v1 focus): 106 s, three relays, at most 9 requests.
+#[test]
+fn the_product_gap_keeps_a_live_run_within_three_requests_per_relay() {
+    let run = 106;
+    let per_relay = run / MirrorTiming::PRODUCT.gap.as_secs() + 1;
+    assert!(per_relay * 3 <= 9, "{per_relay} requests per relay");
+    assert!(MirrorTiming::PRODUCT.gap <= MirrorTiming::PRODUCT.interval);
 }
 
 #[tokio::test]

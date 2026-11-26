@@ -33,18 +33,23 @@ const MAX_PACKET_BYTES: usize = 1104;
 /// Most relays one mirror serves; the surplus of a longer list is ignored.
 pub(crate) const MAX_RELAYS: usize = 4;
 
-/// The two bounds of the mirror. A refresh is sent at most once per `interval` per relay (a
-/// replacement at once), so a relay's copy is never much older than the freshness of the record;
+/// The three bounds of the mirror. A refresh is sent at most once per `interval` per relay and
+/// any request at least `gap` after the previous one to that relay (a replacement waits out the
+/// rest of the gap, the latest packet wins), so the rate toward a third-party relay never follows
+/// the publisher's churn and a relay's copy stays well inside the freshness of the record;
 /// `request_bound` caps one request, connect included.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MirrorTiming {
     pub(crate) interval: Duration,
+    pub(crate) gap: Duration,
     pub(crate) request_bound: Duration,
 }
 
 impl MirrorTiming {
+    /// At most 3 requests per relay in a 106 s run (`106 / 40 + 1`), 9 for three relays.
     pub(crate) const PRODUCT: Self = Self {
         interval: Duration::from_secs(120),
+        gap: Duration::from_secs(40),
         request_bound: Duration::from_secs(10),
     };
 }
@@ -98,7 +103,7 @@ impl RelayMirror {
                     index,
                     RelayClient::new(http.clone(), relay, key),
                     receiver.clone(),
-                    timing.interval,
+                    timing,
                 ))
             })
             .collect();
@@ -106,8 +111,9 @@ impl RelayMirror {
     }
 
     /// Hands over a signed packet (with its key); `initial` marks a publication of new content,
-    /// which is sent at once, against a refresh of the same content, which waits for the
-    /// interval. Never blocks and never fails: a malformed size is ignored.
+    /// which is sent as soon as the gap since the previous request allows, against a refresh of
+    /// the same content, which waits for the interval. Never blocks and never fails: a malformed
+    /// size is ignored.
     pub(in crate::native_discovery::runtime) fn offer(&self, packet: &[u8], initial: bool) {
         if packet.len() <= KEY_BYTES || packet.len() > MAX_PACKET_BYTES {
             return;
@@ -153,7 +159,7 @@ async fn relay_task(
     index: usize,
     client: RelayClient,
     mut offers: watch::Receiver<Option<Offer>>,
-    interval: Duration,
+    timing: MirrorTiming,
 ) {
     let mut last_sent: Option<Instant> = None;
     let mut paused_until: Option<Instant> = None;
@@ -164,15 +170,28 @@ async fn relay_task(
         let now = Instant::now();
         let waiting = paused_until.is_some_and(|until| now < until)
             || (!offer.initial
-                && last_sent.is_some_and(|sent| now.duration_since(sent) < interval));
+                && last_sent.is_some_and(|sent| now.duration_since(sent) < timing.interval));
         if waiting {
             continue;
         }
-        last_sent = Some(now);
-        let class = client.put(&offer.packet[KEY_BYTES..]).await;
-        emit(trace_line(index, class, now.elapsed()));
+        // Wait out the gap, then send whatever is newest: a packet that arrived meanwhile
+        // replaces the one that started the wait, whichever kind it is.
+        let packet = match last_sent.map(|sent| sent + timing.gap) {
+            Some(ready) if now < ready => {
+                tokio::time::sleep_until(ready).await;
+                offers
+                    .borrow_and_update()
+                    .as_ref()
+                    .map_or(offer.packet, |latest| Arc::clone(&latest.packet))
+            }
+            _ => offer.packet,
+        };
+        let started = Instant::now();
+        last_sent = Some(started);
+        let class = client.put(&packet[KEY_BYTES..]).await;
+        emit(trace_line(index, class, started.elapsed()));
         if class == Class::RateLimited {
-            paused_until = Some(Instant::now() + interval);
+            paused_until = Some(Instant::now() + timing.interval);
         }
     }
 }
