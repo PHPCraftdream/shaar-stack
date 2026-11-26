@@ -599,18 +599,25 @@ async fn an_explicit_port_is_kept_and_a_full_set_falls_back_to_an_ephemeral_port
     assert_eq!(kept.local_addr().port(), explicit);
     kept.close().await;
 
-    // With every port of the set held, the endpoint takes an ephemeral port.
+    // With every port of the set held, the endpoint takes an ephemeral port. The other tests of
+    // this process bind and close endpoints on the same set at any time, so a port that this test
+    // could not take (`busy`) may be free again by the time of the fallback; the endpoint may
+    // then legitimately take that one, and no other port of the set.
     let mut held = Vec::new();
+    let mut busy = Vec::new();
     for &port in &ports::PORTS {
-        if let Ok(socket) = UdpSocket::bind(any_ip(port)).await {
-            held.push(socket);
+        match UdpSocket::bind(any_ip(port)).await {
+            Ok(socket) => held.push(socket),
+            Err(_) => busy.push(port),
         }
     }
     let fallback = bind_unspecified(75).await;
+    let port = fallback.local_addr().port();
     assert!(
-        !ports::PORTS.contains(&fallback.local_addr().port()),
-        "port {} is in the set although all of it was held",
-        fallback.local_addr().port()
+        !ports::PORTS.contains(&port) || busy.contains(&port),
+        "port {port} is in the set, was held by this test ({} held, {} busy), and the endpoint took it",
+        held.len(),
+        busy.len()
     );
     fallback.close().await;
     drop(held);
