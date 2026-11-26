@@ -201,3 +201,24 @@ pub(super) fn stage_pair() -> (
     let (release_tx, release_rx) = oneshot::channel();
     ((entered_tx, release_rx), (entered_rx, release_tx))
 }
+
+/// Hands the freshly started owner's publication watch and Mainline actor id to the test
+/// accessors of `SharedResources`.
+#[cfg(test)]
+pub(super) async fn register_owner_for_tests(shared: &super::SharedState, owner: &RuntimeOwner) {
+    *shared
+        .publication_watch_for_tests
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(owner.publication_watch());
+    let actor_id: n0_mainline::Id = *owner
+        .dht_handle()
+        .expect("owned mainline DHT handle")
+        .info()
+        .await
+        .expect("mainline actor info")
+        .id();
+    *shared
+        .mainline_actor_id_for_tests
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(actor_id);
+}

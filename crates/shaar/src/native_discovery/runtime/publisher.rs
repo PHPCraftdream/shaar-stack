@@ -12,7 +12,7 @@ use iroh_dns::endpoint_info::{EndpointData, EndpointInfo, UserData};
 use std::net::SocketAddr;
 use std::time::Duration;
 
-pub(super) mod relay;
+pub(crate) mod relay;
 
 const TTL_SECONDS: u32 = 30;
 const SIGNED_AGE_SECONDS: u64 = 300;

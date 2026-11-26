@@ -18,6 +18,7 @@ use url::Url;
 
 use super::error::{ConfigError, ValidationKind};
 use super::raw::{parse_socket_addr, require_dial_destination};
+use crate::native_discovery::runtime::publisher::relay::{MAX_RELAYS, RelayUrl};
 
 mod bootstrap;
 pub use bootstrap::BootstrapHost;
@@ -50,6 +51,9 @@ pub(crate) struct MainlineFile {
     bind: Option<String>,
     #[serde(default)]
     bootstrap: Option<Vec<String>>,
+    /// Public pkarr relays that the Server mirrors its signed record to (leaf PKARR-2).
+    #[serde(default)]
+    pkarr_relays: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,6 +129,7 @@ pub struct MainlineNetwork {
     bind: SocketAddrV4,
     bootstrap: Vec<SocketAddrV4>,
     hosts: Vec<BootstrapHost>,
+    pkarr_relays: Vec<RelayUrl>,
 }
 
 impl MainlineNetwork {
@@ -145,6 +150,12 @@ impl MainlineNetwork {
         &self.hosts
     }
 
+    /// Public pkarr relays the Server mirrors its signed record to; empty (the default) means
+    /// none. The Client ignores them.
+    pub(crate) fn pkarr_relays(&self) -> &[RelayUrl] {
+        &self.pkarr_relays
+    }
+
     /// Replaces the host names by their resolved endpoints, keeping the
     /// numeric entries first and dropping duplicates.
     pub(crate) fn with_resolved(&self, resolved: &[SocketAddrV4]) -> MainlineNetwork {
@@ -158,6 +169,7 @@ impl MainlineNetwork {
             bind: self.bind,
             bootstrap,
             hosts: Vec::new(),
+            pkarr_relays: self.pkarr_relays.clone(),
         }
     }
 }
@@ -295,11 +307,31 @@ fn parse_mainline(raw: MainlineFile) -> Result<MainlineNetwork, ConfigError> {
             bootstrap::Entry::Host(host) => hosts.push(host),
         }
     }
+    let pkarr_relays = parse_pkarr_relays(raw.pkarr_relays.as_deref().unwrap_or_default())?;
     Ok(MainlineNetwork {
         bind,
         bootstrap,
         hosts,
+        pkarr_relays,
     })
+}
+
+/// 0..=4 relay base URLs (`https://` with a domain name, or `http://` to a loopback IPv4
+/// literal); a repeated entry is kept once. Values are never echoed.
+fn parse_pkarr_relays(entries: &[String]) -> Result<Vec<RelayUrl>, ConfigError> {
+    const FIELD: &str = "network.mainline.pkarr_relays";
+    if entries.len() > MAX_RELAYS {
+        return Err(ConfigError::validation(FIELD, ValidationKind::TooMany));
+    }
+    let mut relays = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let relay = RelayUrl::parse(entry)
+            .map_err(|_| ConfigError::validation(FIELD, ValidationKind::InvalidUri))?;
+        if !relays.contains(&relay) {
+            relays.push(relay);
+        }
+    }
+    Ok(relays)
 }
 
 fn parse_signaling(raw: SignalingFile) -> Result<SignalingNetwork, ConfigError> {
@@ -482,3 +514,6 @@ mod guide_examples_tests;
 
 #[cfg(test)]
 mod bootstrap_tests;
+
+#[cfg(test)]
+mod relay_tests;

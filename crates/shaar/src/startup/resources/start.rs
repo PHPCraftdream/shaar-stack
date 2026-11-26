@@ -15,6 +15,7 @@ use crate::config::{Fallback, PublishAddress};
 use crate::identity::Identity;
 use crate::identity::address_key::AddressKey;
 use crate::native_discovery::runtime::owner::RuntimeOwner;
+use crate::native_discovery::runtime::publisher::relay::RelayUrl;
 use crate::network::{Allowlist, Limits, SignaledEndpoint, YggEndpoint};
 use crate::startup::StartupError;
 use crate::startup::preflight::ComposedStartupPlan;
@@ -30,11 +31,19 @@ use super::{
 
 type OwnerCommands = mpsc::Sender<OwnerRequest>;
 
+/// The Mainline part of the settings: the socket, the bootstrap nodes and the pkarr relays the
+/// Server's signed record is mirrored to (empty: none).
+struct MainlineStart {
+    bind: std::net::SocketAddrV4,
+    bootstrap: Vec<std::net::SocketAddrV4>,
+    relays: Vec<RelayUrl>,
+}
+
 /// Plan-derived startup inputs, owned so the spawned owner task can take
 /// them by value after `start_seamed` resolves the borrowed plan.
 struct StartupSettings {
     signaling_bind: Option<SocketAddr>,
-    mainline: Option<(std::net::SocketAddrV4, Vec<std::net::SocketAddrV4>)>,
+    mainline: Option<MainlineStart>,
     ygg_peers: Option<Vec<String>>,
     app_peers: Vec<PublicKey>,
     mode: Fallback,
@@ -206,9 +215,11 @@ impl SharedResourcesStart {
                 .relay()
                 .and_then(|(peer_id, address)| RelayAddr::new(*peer_id, *address).ok())
         });
-        let mainline = network
-            .mainline()
-            .map(|settings| (settings.bind(), settings.bootstrap().to_vec()));
+        let mainline = network.mainline().map(|settings| MainlineStart {
+            bind: settings.bind(),
+            bootstrap: settings.bootstrap().to_vec(),
+            relays: settings.pkarr_relays().to_vec(),
+        });
         let ygg_peers = network.ygg().map(|settings| settings.peers().to_vec());
         let app_peers = plan.app_peers().to_vec();
         let mode = plan.fallback();
@@ -395,11 +406,15 @@ async fn run_startup(
         .map_or((None, None), |(entered, release)| {
             (Some(entered), Some(release))
         });
-    let (signaling_bind, (mainline_bind, mainline_bootstrap), ygg_peers) =
-        match (signaling_bind, mainline, ygg_peers) {
-            (Some(signaling), Some(mainline), Some(ygg)) => (signaling, mainline, ygg),
-            _ => return finish_fatal(shared, StartupError::NetworkRequired, owner_requests).await,
-        };
+    let (signaling_bind, mainline, ygg_peers) = match (signaling_bind, mainline, ygg_peers) {
+        (Some(signaling), Some(mainline), Some(ygg)) => (signaling, mainline, ygg),
+        _ => return finish_fatal(shared, StartupError::NetworkRequired, owner_requests).await,
+    };
+    let MainlineStart {
+        bind: mainline_bind,
+        bootstrap: mainline_bootstrap,
+        relays: mainline_relays,
+    } = mainline;
 
     // The address key is read before anything binds, so a bad key fails the start cleanly.
     let address_key = match address_key_file {
@@ -443,36 +458,18 @@ async fn run_startup(
         ygg: None,
     });
 
-    let owner = match RuntimeOwner::start_sealed(
+    let owner = match RuntimeOwner::start_mirrored(
         identity.clone(),
         mainline_bind,
         &mainline_bootstrap,
         address_key,
+        &mainline_relays,
     ) {
         Ok(owner) => owner,
         Err(_) => return finish_fatal(shared, StartupError::MainlineStart, owner_requests).await,
     };
     #[cfg(test)]
-    {
-        *shared
-            .publication_watch_for_tests
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(owner.publication_watch());
-    }
-    #[cfg(test)]
-    {
-        let actor_id: n0_mainline::Id = *owner
-            .dht_handle()
-            .expect("owned mainline DHT handle")
-            .info()
-            .await
-            .expect("mainline actor info")
-            .id();
-        *shared
-            .mainline_actor_id_for_tests
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(actor_id);
-    }
+    super::test_access::register_owner_for_tests(shared, &owner).await;
     let watcher = {
         #[cfg(test)]
         {

@@ -114,19 +114,9 @@ impl RuntimeOwner {
         )
     }
 
-    /// `start` with the address key of the encrypted publication: the Server seals its address
-    /// list under it and the Client opens a sealed record with it.
-    pub(crate) fn start_sealed(
-        identity: Identity,
-        bind: SocketAddrV4,
-        bootstrap: &[SocketAddrV4],
-        address_key: Option<AddressKey>,
-    ) -> std::io::Result<Self> {
-        Self::start_mirrored(identity, bind, bootstrap, address_key, &[])
-    }
-
-    /// `start_sealed` that also mirrors every signed packet to the given public pkarr relays
-    /// (leaf PKARR-1); an empty list is `start_sealed`.
+    /// `start` with the address key of the encrypted publication (the Server seals its address
+    /// list under it and the Client opens a sealed record with it) and the public pkarr relays
+    /// that every signed packet is also mirrored to (leaf PKARR-1); an empty list mirrors nothing.
     pub(crate) fn start_mirrored(
         identity: Identity,
         bind: SocketAddrV4,
