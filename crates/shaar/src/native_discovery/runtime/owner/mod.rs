@@ -19,7 +19,7 @@ use super::super::address::SnapshotError;
 #[cfg(test)]
 use super::clock::TestClock;
 use super::clock::{Clock, ClockSample};
-use super::publisher::relay::{MirrorSpec, MirrorTiming, RelayMirror, RelayUrl};
+use super::publisher::relay::{MirrorSpec, MirrorTiming, RelayMirror, RelayReader, RelayUrl};
 use super::publisher::{PublicationStatus, PublishError, PublisherState, SignedSnapshot};
 use crate::identity::Identity;
 use crate::identity::address_key::AddressKey;
@@ -90,6 +90,8 @@ pub(crate) struct RuntimeOwner {
     clock: Clock,
     clock_fault: Arc<AtomicBool>,
     resolver: ResolverState,
+    /// The public pkarr relays that a lookup also reads from (leaf PKARR-4); `None` without any.
+    reader: Option<RelayReader>,
     publication: watch::Receiver<PublicationStatus>,
     public_address: watch::Receiver<Option<IpAddr>>,
     punch_hint: watch::Receiver<Option<IpAddr>>,
@@ -153,6 +155,27 @@ impl RuntimeOwner {
             false,
             None,
             MirrorSpec::NONE,
+        )
+    }
+
+    /// `start_controlled` with the address key and the pkarr relays of a Client (leaf PKARR-4).
+    #[cfg(test)]
+    pub(super) fn start_controlled_relays(
+        identity: Identity,
+        bind: SocketAddrV4,
+        bootstrap: &[SocketAddrV4],
+        clock: TestClock,
+        address_key: Option<AddressKey>,
+        mirror: MirrorSpec<'_>,
+    ) -> std::io::Result<Self> {
+        Self::start_with_clock(
+            identity,
+            bind,
+            bootstrap,
+            clock.clock(),
+            false,
+            address_key,
+            mirror,
         )
     }
 
@@ -232,6 +255,7 @@ impl RuntimeOwner {
             clock: owner_clock.clone(),
             clock_fault: Arc::new(AtomicBool::new(false)),
             resolver: ResolverState::new(owner_clock, address_key),
+            reader: RelayReader::start(mirror),
             publication,
             public_address,
             punch_hint,
@@ -339,36 +363,7 @@ impl RuntimeOwner {
             }
             return Ok(cached);
         }
-        let handle = self.dht.as_ref().ok_or(RuntimeError::Closed)?.handle();
-        let target = MutableItem::target_from_key(key.as_bytes(), None);
-        let completion = handle
-            .resolve_mutable_until(target, deadline)
-            .await
-            .map_err(|error| match error {
-                n0_mainline::ResourceError::DeadlineExceeded => RuntimeError::DeadlineExceeded,
-                other => RuntimeError::Resource(other),
-            })?;
-        let sample = match self.clock.sample() {
-            Ok(sample) => sample,
-            Err(error) => {
-                self.resolver.note_terminal_clock_fault();
-                self.clock_fault.store(true, Ordering::Release);
-                let _ = tokio::time::timeout_at(deadline, self.withdraw())
-                    .await
-                    .map_err(|_| RuntimeError::DeadlineExceeded)?;
-                return Err(error);
-            }
-        };
-        if tokio::time::Instant::now() >= deadline {
-            return Err(RuntimeError::DeadlineExceeded);
-        }
-        self.resolver
-            .complete(key, completion, sample, deadline)
-            .await
-            .map_err(|error| match error {
-                ResolveError::DeadlineExceeded => RuntimeError::DeadlineExceeded,
-                other => RuntimeError::Resolve(other),
-            })
+        self.network_lookup(key, deadline).await
     }
 
     async fn sample_until(

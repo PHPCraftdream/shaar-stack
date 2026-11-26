@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
-//! One `PUT` of a signed record to a public pkarr relay (leaf PKARR-1): the HTTP client, the
-//! validated relay address and the classification of the answer. Nothing here keeps state.
+//! One `PUT` of a signed record to a public pkarr relay (leaf PKARR-1) and one `GET` of it (leaf
+//! PKARR-4): the HTTP client, the validated relay address and the classification of the answer.
+//! Nothing here keeps state.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use iroh_base::EndpointId;
 use url::{Host, Url};
+
+use super::MAX_BODY_BYTES;
 
 /// Header of a relay's `204` that counts the DHT nodes which stored the packet.
 const STORED_NODES: &str = "pkarr-dht-stored-nodes";
@@ -93,6 +96,53 @@ impl Class {
     }
 }
 
+/// How one `GET` ended, without any remote text. The body of a `200` is the signed packet without
+/// its key, at most `MAX_BODY_BYTES`; whether it verifies is for the caller to decide.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::native_discovery::runtime) enum Fetched {
+    Found(Vec<u8>),
+    NotFound,
+    TooLarge,
+    RateLimited,
+    ServerError,
+    Status(u16),
+    Timeout,
+    Network,
+}
+
+impl Fetched {
+    pub(in crate::native_discovery::runtime) fn token(&self) -> String {
+        match self {
+            Self::Found(_) => "found".to_owned(),
+            Self::NotFound => "not-found".to_owned(),
+            Self::TooLarge => "too-large".to_owned(),
+            Self::RateLimited => "rate-limited".to_owned(),
+            Self::ServerError => "server-error".to_owned(),
+            Self::Status(code) => format!("status-{code}"),
+            Self::Timeout => "timeout".to_owned(),
+            Self::Network => "network".to_owned(),
+        }
+    }
+}
+
+/// The answer of a `GET` that carries no packet (every status but `200`).
+pub(super) fn classify_read(status: u16) -> Fetched {
+    match status {
+        404 => Fetched::NotFound,
+        429 => Fetched::RateLimited,
+        500..=599 => Fetched::ServerError,
+        other => Fetched::Status(other),
+    }
+}
+
+fn transport_failure(error: &reqwest::Error) -> Fetched {
+    if error.is_timeout() {
+        Fetched::Timeout
+    } else {
+        Fetched::Network
+    }
+}
+
 pub(super) fn classify(status: u16, stored: Option<u32>) -> Class {
     match status {
         204 => Class::Stored(stored),
@@ -164,6 +214,37 @@ impl RelayClient {
             }
             Err(error) if error.is_timeout() => Class::Timeout,
             Err(_) => Class::Network,
+        }
+    }
+
+    /// `GET` of the signed packet without its key. The request carries its own time bound, the
+    /// body included; a redirect is an answer, not followed; the body is read to
+    /// `MAX_BODY_BYTES` at most, so a hostile relay cannot make the read grow.
+    pub(super) async fn get(&self) -> Fetched {
+        let mut response = match self.http.get(self.url.clone()).send().await {
+            Ok(response) => response,
+            Err(error) => return transport_failure(&error),
+        };
+        let status = response.status().as_u16();
+        if status != 200 {
+            return classify_read(status);
+        }
+        let oversize = response
+            .content_length()
+            .is_some_and(|length| !usize::try_from(length).is_ok_and(|n| n <= MAX_BODY_BYTES));
+        if oversize {
+            return Fetched::TooLarge;
+        }
+        let mut body = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) if body.len() + chunk.len() <= MAX_BODY_BYTES => {
+                    body.extend_from_slice(&chunk);
+                }
+                Ok(Some(_)) => return Fetched::TooLarge,
+                Ok(None) => return Fetched::Found(body),
+                Err(error) => return transport_failure(&error),
+            }
         }
     }
 }

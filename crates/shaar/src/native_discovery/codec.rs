@@ -133,6 +133,25 @@ pub(super) fn decode_mutable_record(
     decode_record_with(&envelope[..end], expected, address_key)
 }
 
+/// Decode the body of a pkarr relay's `GET` (leaf PKARR-4): the signed packet without its 32-byte
+/// key. The expected key is re-attached, so a packet signed by any other key fails the signature
+/// check, and the rest is the same verification and profile as for any record.
+pub(super) fn decode_relay_record(
+    body: &[u8],
+    expected: EndpointId,
+    address_key: Option<&AddressKey>,
+) -> Result<DecodedRecord, DecodeError> {
+    const KEY_BYTES: usize = 32;
+    if body.len() > SIGNED_HEADER_BYTES - KEY_BYTES + MAX_DNS_BYTES {
+        return Err(DecodeError::OverLimit);
+    }
+    let mut packet = [0; SIGNED_HEADER_BYTES + MAX_DNS_BYTES];
+    packet[..KEY_BYTES].copy_from_slice(expected.as_bytes());
+    let end = KEY_BYTES + body.len();
+    packet[KEY_BYTES..end].copy_from_slice(body);
+    decode_record_with(&packet[..end], expected, address_key)
+}
+
 /// Verify the upstream signed envelope, then enforce this leaf's strict DNS/TXT profile.
 #[cfg(test)]
 pub(super) fn decode_record(

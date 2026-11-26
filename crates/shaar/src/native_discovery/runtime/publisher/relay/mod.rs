@@ -8,9 +8,12 @@
 //! a lossy phone socket lacks. The mirror is independent of the DHT publication: the publisher
 //! only hands over the bytes it already holds (`offer`, never blocks), and no answer of a relay
 //! sets any state of the publisher. One task per relay, one request in flight per relay, only the
-//! latest packet is kept.
+//! latest packet is kept. The read side (leaf PKARR-4) lives in `read`.
 
 mod client;
+mod read;
+#[cfg(test)]
+mod read_tests;
 #[cfg(test)]
 mod tests;
 
@@ -22,14 +25,20 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+pub(in crate::native_discovery::runtime) use self::client::Fetched;
 pub(crate) use self::client::RelayUrl;
 use self::client::{Class, RelayClient, http_client};
+pub(in crate::native_discovery::runtime) use self::read::{
+    Answer, RelayRead, RelayReader, read_line,
+};
 use crate::network::observe::emit;
 
 /// Bytes of the public key at the head of a signed packet; a relay takes the packet without them.
 const KEY_BYTES: usize = 32;
 /// Largest signed packet: key, signature, timestamp and at most 1000 bytes of DNS.
 const MAX_PACKET_BYTES: usize = 1104;
+/// Largest body of a relay `PUT` or `GET`: a signed packet without its key.
+const MAX_BODY_BYTES: usize = MAX_PACKET_BYTES - KEY_BYTES;
 /// Most relays one mirror serves; the surplus of a longer list is ignored.
 pub(crate) const MAX_RELAYS: usize = 4;
 

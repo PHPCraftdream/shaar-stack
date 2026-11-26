@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
+mod lookup;
+
 use iroh_base::EndpointId;
 use n0_mainline::{OwnedDhtHandle, OwnedQueryCompletion};
 use std::net::{IpAddr, SocketAddr};
@@ -11,10 +13,10 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 
 use super::super::clock::{Clock, ClockSample};
 use crate::identity::address_key::AddressKey;
-use crate::native_discovery::codec::{DecodeError, decode_mutable_record};
+use crate::native_discovery::codec::{DecodeError, decode_mutable_record, decode_relay_record};
 use crate::native_discovery::policy::{
     ClockSample as PolicyClock, CompletedQuery, PolicyOwner, PreparedQuery, QuerySource,
-    RecordError,
+    RecordError, RecordObservation,
 };
 use crate::network::observe::PortMapping;
 
@@ -155,6 +157,35 @@ impl ResolverState {
                     .map_err(ResolveError::Decode)
             })
             .collect::<Result<Vec<_>, _>>()?;
+        self.deliver(key, records, Some(completion), sample, deadline)
+            .await
+    }
+
+    /// A record that a public pkarr relay served (leaf PKARR-4): decoded with the key re-attached
+    /// and then through the same policy as a DHT item. `sample` is taken when the answer arrived.
+    pub(super) async fn complete_relay(
+        &mut self,
+        key: EndpointId,
+        body: &[u8],
+        sample: ClockSample,
+        deadline: tokio::time::Instant,
+    ) -> Result<ResolvedAddresses, ResolveError> {
+        let record = decode_relay_record(body, key, self.address_key.as_ref())
+            .map_err(ResolveError::Decode)?;
+        self.deliver(key, vec![record.into()], None, sample, deadline)
+            .await
+    }
+
+    /// The policy and the delivery of decoded records of one network answer; `completion` is the
+    /// backend charge a DHT answer keeps through delivery (a relay answer has none).
+    async fn deliver(
+        &mut self,
+        key: EndpointId,
+        records: Vec<RecordObservation>,
+        completion: Option<OwnedQueryCompletion>,
+        sample: ClockSample,
+        deadline: tokio::time::Instant,
+    ) -> Result<ResolvedAddresses, ResolveError> {
         // `sample` is the backend receipt sample, taken locally from the
         // shared clock authority immediately after the backend future
         // returned; it anchors the cache receipt deadline.
@@ -214,7 +245,7 @@ impl ResolverState {
         };
         Ok(ResolvedAddresses {
             addresses,
-            _completion: Some(completion),
+            _completion: completion,
             _delivery: permit,
         })
     }
