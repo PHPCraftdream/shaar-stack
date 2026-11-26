@@ -1,11 +1,12 @@
 //! One-shot trace of a node's first moments (leaf YGG-4a): the core ready, each configured link
 //! up or down, the first datagram handed to the core and the first one received. It shows where
-//! the first seconds of a cold node go. A line carries a phase name, a link index, a count and
-//! milliseconds since the node start, never a URI, key, address or error text. A node prints at
-//! most [`MAX_LINES`] lines, so a flapping link cannot flood stderr.
+//! the first seconds of a cold node go. A line carries a phase name, a link index, a count,
+//! milliseconds since the node start and the same instant on the wall clock (leaf YGG-4c, so the
+//! logs of two devices can be laid side by side), never a URI, key, address or error text. A node
+//! prints at most [`MAX_LINES`] lines, so a flapping link cannot flood stderr.
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// Lines one node may print, links and one-shot phases together.
 pub(crate) const MAX_LINES: u8 = 16;
@@ -44,26 +45,41 @@ impl Phase {
     }
 }
 
-/// `shaar: ygg phase=<name>[ peer=<index> up=<count>] t_ms=<milliseconds>`
-pub(crate) fn render(phase: Phase, link: Option<(usize, usize)>, t_ms: u64) -> String {
+/// `shaar: ygg phase=<name>[ peer=<index> up=<count>] t_ms=<milliseconds> unix_ms=<milliseconds>`
+pub(crate) fn render(
+    phase: Phase,
+    link: Option<(usize, usize)>,
+    t_ms: u64,
+    unix_ms: u64,
+) -> String {
     let token = phase.token();
     match link {
-        Some((peer, up)) => format!("shaar: ygg phase={token} peer={peer} up={up} t_ms={t_ms}"),
-        None => format!("shaar: ygg phase={token} t_ms={t_ms}"),
+        Some((peer, up)) => {
+            format!("shaar: ygg phase={token} peer={peer} up={up} t_ms={t_ms} unix_ms={unix_ms}")
+        }
+        None => format!("shaar: ygg phase={token} t_ms={t_ms} unix_ms={unix_ms}"),
     }
 }
 
 /// The clock and the line budget of one node.
 pub(crate) struct Phases {
     origin: Instant,
+    /// The wall clock at the node start, in milliseconds since the Unix epoch (0 before it).
+    origin_unix_ms: u64,
     lines: AtomicU8,
     fired: AtomicU8,
 }
 
 impl Phases {
     pub(crate) fn new() -> Self {
+        let origin_unix_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| {
+                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+            });
         Self {
             origin: Instant::now(),
+            origin_unix_ms,
             lines: AtomicU8::new(0),
             fired: AtomicU8::new(0),
         }
@@ -71,6 +87,13 @@ impl Phases {
 
     fn elapsed_ms(&self) -> u64 {
         u64::try_from(self.origin.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// The milliseconds since the node start and the same instant on the wall clock. The wall clock
+    /// is the one read at the start plus the elapsed time, so it never jumps with the clock.
+    fn stamp(&self) -> (u64, u64) {
+        let t_ms = self.elapsed_ms();
+        (t_ms, self.origin_unix_ms.saturating_add(t_ms))
     }
 
     /// Takes one line of the budget, which is `limit` lines in all.
@@ -100,7 +123,8 @@ impl Phases {
     /// Prints a one-shot phase the first time it happens. Never blocks and never fails.
     pub(crate) fn mark(&self, phase: Phase) {
         if self.fires(phase) && self.claim_line(MAX_LINES) {
-            eprintln!("{}", render(phase, None, self.elapsed_ms()));
+            let (t_ms, unix_ms) = self.stamp();
+            eprintln!("{}", render(phase, None, t_ms, unix_ms));
         }
     }
 
@@ -119,7 +143,8 @@ impl Phases {
         ] {
             for peer in (0..LinksUp::MAX).filter(|&peer| (bits >> peer) & 1 == 1) {
                 if self.claim_line(LINK_LINES) {
-                    eprintln!("{}", render(phase, Some((peer, up)), self.elapsed_ms()));
+                    let (t_ms, unix_ms) = self.stamp();
+                    eprintln!("{}", render(phase, Some((peer, up)), t_ms, unix_ms));
                 }
             }
         }
@@ -160,24 +185,24 @@ mod tests {
     #[test]
     fn a_line_names_the_phase_the_link_the_count_and_the_time_only() {
         assert_eq!(
-            render(Phase::CoreReady, None, 12),
-            "shaar: ygg phase=core-ready t_ms=12"
+            render(Phase::CoreReady, None, 12, 1_000_012),
+            "shaar: ygg phase=core-ready t_ms=12 unix_ms=1000012"
         );
         assert_eq!(
-            render(Phase::PeerUp, Some((1, 2)), 3_400),
-            "shaar: ygg phase=peer-up peer=1 up=2 t_ms=3400"
+            render(Phase::PeerUp, Some((1, 2)), 3_400, 1_003_400),
+            "shaar: ygg phase=peer-up peer=1 up=2 t_ms=3400 unix_ms=1003400"
         );
         assert_eq!(
-            render(Phase::PeerDown, Some((0, 1)), 9),
-            "shaar: ygg phase=peer-down peer=0 up=1 t_ms=9"
+            render(Phase::PeerDown, Some((0, 1)), 9, 1_000_009),
+            "shaar: ygg phase=peer-down peer=0 up=1 t_ms=9 unix_ms=1000009"
         );
         assert_eq!(
-            render(Phase::FirstSend, None, 7),
-            "shaar: ygg phase=first-send t_ms=7"
+            render(Phase::FirstSend, None, 7, 1_000_007),
+            "shaar: ygg phase=first-send t_ms=7 unix_ms=1000007"
         );
         assert_eq!(
-            render(Phase::FirstRecv, None, 8),
-            "shaar: ygg phase=first-recv t_ms=8"
+            render(Phase::FirstRecv, None, 8, 1_000_008),
+            "shaar: ygg phase=first-recv t_ms=8 unix_ms=1000008"
         );
     }
 
@@ -222,6 +247,21 @@ mod tests {
         assert_eq!(up.count(), 2);
         assert!(up.contains(0) && up.contains(3));
         assert!(!up.contains(1) && !up.contains(LinksUp::MAX) && !up.contains(usize::MAX));
+    }
+
+    #[test]
+    fn the_wall_clock_of_a_line_is_the_start_plus_the_elapsed_time() {
+        let phases = Phases::new();
+        let (first_t, first_unix) = phases.stamp();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let (second_t, second_unix) = phases.stamp();
+        assert!(second_t >= first_t + 20, "the clock of the node moved on");
+        assert_eq!(first_unix - first_t, second_unix - second_t);
+        assert_eq!(first_unix - first_t, phases.origin_unix_ms);
+        assert!(
+            phases.origin_unix_ms > 1_700_000_000_000,
+            "the wall clock at the start is after 2023"
+        );
     }
 
     #[test]
