@@ -17,7 +17,8 @@ written in English. The directory `docs/checkpoints/` may remain in Russian.
   asking the router for a port mapping is allowed (2026-11-18).
 - Four networks, each covering another's weakness: iroh/QUIC (fast direct data
   path, priority), Mainline DHT (signed address records by key), libp2p
-  (negotiation only, never application data), Yggdrasil (key-derived address,
+  (negotiation; since 2026-11-26 also a backup data path through public
+  relays, never the primary one), Yggdrasil (key-derived address,
   blockade resilience).
 - The synergy lives in path policy (P10). Before P10 starts, record measurable
   efficiency criteria with the user: time to first byte, failover time under
