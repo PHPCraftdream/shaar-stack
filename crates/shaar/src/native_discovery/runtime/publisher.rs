@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
+use self::relay::RelayMirror;
 use super::super::address::{SnapshotError, validate_transport_addresses};
 use super::clock::ClockSample;
 use crate::identity::Identity;
@@ -10,6 +11,8 @@ use iroh_base::{EndpointId, TransportAddr};
 use iroh_dns::endpoint_info::{EndpointData, EndpointInfo, UserData};
 use std::net::SocketAddr;
 use std::time::Duration;
+
+pub(super) mod relay;
 
 const TTL_SECONDS: u32 = 30;
 const SIGNED_AGE_SECONDS: u64 = 300;
@@ -117,6 +120,7 @@ pub(super) struct PublisherState {
     last_signed_at: tokio::time::Instant,
     active: Option<Vec<SocketAddr>>,
     seal: Option<AddressKey>,
+    mirror: Option<RelayMirror>,
 }
 
 impl PublisherState {
@@ -133,7 +137,19 @@ impl PublisherState {
             last_signed_at: tokio::time::Instant::now(),
             active: None,
             seal: None,
+            mirror: None,
         }
+    }
+
+    /// Mirrors every signed packet to public pkarr relays (leaf PKARR-1); `None` keeps the
+    /// publication to the DHT alone.
+    pub(super) fn with_mirror(mut self, mirror: Option<RelayMirror>) -> Self {
+        self.mirror = mirror;
+        self
+    }
+
+    pub(super) fn mirror(&self) -> Option<&RelayMirror> {
+        self.mirror.as_ref()
     }
 
     /// Seals every published address list under `seal` (encrypted publication); `None` keeps

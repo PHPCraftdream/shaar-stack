@@ -53,6 +53,14 @@ tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 # edge: no new package or version (netwatch 0.19.3 was a dev dependency of this package; iroh uses it).
 netwatch = "=0.19.3"
 
+# The mirror of the signed record to public pkarr relays (leaf PKARR-1): one HTTPS `PUT` per relay. Already-locked edges, no
+# new package or version (reqwest 0.13.5 and rustls 0.23.46 come with iroh, webpki-roots 1.0.10 with iroh-relay). The
+# preconfigured rustls client uses the ring provider and the bundled roots, not the platform verifier, which needs a Java
+# environment that a native process on the phone does not have.
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "=1.0.10"
+
 [target.'cfg(windows)'.dependencies]
 shaar-platform = { path = "../shaar-platform" }
 

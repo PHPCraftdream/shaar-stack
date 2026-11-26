@@ -11,6 +11,7 @@ use tokio::sync::{oneshot, watch};
 use super::super::super::address::SnapshotError;
 use super::super::clock::Clock;
 use super::super::owner::{RuntimeError, to_mutable};
+use super::super::publisher::relay::RelayMirror;
 use super::super::publisher::{PublicationStatus, PublishError, PublisherState, SignedSnapshot};
 use super::ResolveError;
 use crate::identity::Identity;
@@ -300,6 +301,7 @@ pub(super) fn make_replacement(
             signed_at: state.signed_at(),
         },
         terminal,
+        state.mirror(),
     );
     if flight.is_none() {
         revoke(state, terminal);
@@ -362,6 +364,7 @@ pub(super) fn make_refresh(
             signed_at: state.signed_at(),
         },
         terminal,
+        state.mirror(),
     );
     if flight.is_none() {
         if *terminal {
@@ -377,6 +380,7 @@ fn make_flight(
     packet: SignedSnapshot,
     draft: FlightDraft,
     terminal: &mut bool,
+    mirror: Option<&RelayMirror>,
 ) -> Option<Flight> {
     let FlightDraft {
         generation,
@@ -385,6 +389,10 @@ fn make_flight(
         deadline,
         signed_at,
     } = draft;
+    // The relays get the packet whatever becomes of the DHT put; the hand-over never blocks.
+    if let Some(mirror) = mirror {
+        mirror.offer(&packet.bytes, initial);
+    }
     let item = match to_mutable(&packet) {
         Ok(item) => item,
         Err(error) => {

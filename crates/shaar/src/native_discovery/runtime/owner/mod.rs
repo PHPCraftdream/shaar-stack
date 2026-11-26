@@ -19,6 +19,7 @@ use super::super::address::SnapshotError;
 #[cfg(test)]
 use super::clock::TestClock;
 use super::clock::{Clock, ClockSample};
+use super::publisher::relay::{MirrorSpec, MirrorTiming, RelayMirror, RelayUrl};
 use super::publisher::{PublicationStatus, PublishError, PublisherState, SignedSnapshot};
 use crate::identity::Identity;
 use crate::identity::address_key::AddressKey;
@@ -69,93 +70,14 @@ pub(super) enum Command {
 mod endpoint;
 #[path = "../publisher/flight.rs"]
 mod flight;
+#[path = "../publisher/handle.rs"]
+mod handle;
+pub(crate) use self::handle::PublicationHandle;
 #[path = "../publisher/owner_loop.rs"]
 mod loop_state;
 mod options;
 pub(crate) use self::options::{LOOKUP_BOUND, PUBLISH_BOUND};
 mod resolver;
-
-#[derive(Clone)]
-pub(crate) struct PublicationHandle {
-    commands: mpsc::Sender<Command>,
-    clock_fault: Arc<AtomicBool>,
-}
-
-impl PublicationHandle {
-    /// cancel-safe: NO — queue admission can precede response delivery; publisher retains cleanup.
-    pub(crate) async fn replace_with_admission(
-        &self,
-        snapshot: Vec<TransportAddr>,
-        admitted: oneshot::Sender<()>,
-    ) -> Result<(), RuntimeError> {
-        self.replace_inner(
-            snapshot,
-            tokio::time::Instant::now() + PUBLISH_BOUND,
-            Some(admitted),
-        )
-        .await
-    }
-
-    async fn replace_inner(
-        &self,
-        snapshot: Vec<TransportAddr>,
-        deadline: tokio::time::Instant,
-        admitted: Option<oneshot::Sender<()>>,
-    ) -> Result<(), RuntimeError> {
-        let result = self.send_replacement(snapshot, deadline, admitted).await;
-        if matches!(
-            result,
-            Err(RuntimeError::Clock | RuntimeError::Publish(PublishError::ClockFault))
-        ) {
-            self.clock_fault.store(true, Ordering::Release);
-        }
-        result
-    }
-
-    async fn send_replacement(
-        &self,
-        snapshot: Vec<TransportAddr>,
-        deadline: tokio::time::Instant,
-        admitted: Option<oneshot::Sender<()>>,
-    ) -> Result<(), RuntimeError> {
-        if self.clock_fault.load(Ordering::Acquire) {
-            return Err(RuntimeError::Publish(PublishError::ClockFault));
-        }
-        let (reply, response) = oneshot::channel();
-        tokio::time::timeout_at(
-            deadline,
-            self.commands.send(Command::Replace(
-                bounded_replace(snapshot),
-                deadline,
-                reply,
-                admitted,
-            )),
-        )
-        .await
-        .map_err(|_| RuntimeError::DeadlineExceeded)?
-        .map_err(|_| RuntimeError::Closed)?;
-        let result = tokio::time::timeout_at(deadline, response)
-            .await
-            .map_err(|_| RuntimeError::DeadlineExceeded)?
-            .map_err(|_| RuntimeError::Closed)?;
-        if matches!(
-            result,
-            Err(RuntimeError::Clock | RuntimeError::Publish(PublishError::ClockFault))
-        ) {
-            self.clock_fault.store(true, Ordering::Release);
-        }
-        result
-    }
-
-    pub(crate) async fn query_publication_status(&self) -> Option<PublicationStatus> {
-        let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::PublicationStatus(reply))
-            .await
-            .ok()?;
-        response.await.ok()
-    }
-}
 
 pub(crate) struct RuntimeOwner {
     commands: mpsc::Sender<Command>,
@@ -188,6 +110,7 @@ impl RuntimeOwner {
             Clock::system(),
             !cfg!(test),
             None,
+            MirrorSpec::NONE,
         )
     }
 
@@ -199,6 +122,18 @@ impl RuntimeOwner {
         bootstrap: &[SocketAddrV4],
         address_key: Option<AddressKey>,
     ) -> std::io::Result<Self> {
+        Self::start_mirrored(identity, bind, bootstrap, address_key, &[])
+    }
+
+    /// `start_sealed` that also mirrors every signed packet to the given public pkarr relays
+    /// (leaf PKARR-1); an empty list is `start_sealed`.
+    pub(crate) fn start_mirrored(
+        identity: Identity,
+        bind: SocketAddrV4,
+        bootstrap: &[SocketAddrV4],
+        address_key: Option<AddressKey>,
+        relays: &[RelayUrl],
+    ) -> std::io::Result<Self> {
         Self::start_with_clock(
             identity,
             bind,
@@ -206,6 +141,10 @@ impl RuntimeOwner {
             Clock::system(),
             !cfg!(test),
             address_key,
+            MirrorSpec {
+                relays,
+                timing: MirrorTiming::PRODUCT,
+            },
         )
     }
 
@@ -216,7 +155,15 @@ impl RuntimeOwner {
         bootstrap: &[SocketAddrV4],
         clock: TestClock,
     ) -> std::io::Result<Self> {
-        Self::start_with_clock(identity, bind, bootstrap, clock.clock(), false, None)
+        Self::start_with_clock(
+            identity,
+            bind,
+            bootstrap,
+            clock.clock(),
+            false,
+            None,
+            MirrorSpec::NONE,
+        )
     }
 
     #[cfg(test)]
@@ -226,7 +173,15 @@ impl RuntimeOwner {
         bootstrap: &[SocketAddrV4],
         clock: TestClock,
     ) -> std::io::Result<Self> {
-        Self::start_with_clock(identity, bind, bootstrap, clock.clock(), true, None)
+        Self::start_with_clock(
+            identity,
+            bind,
+            bootstrap,
+            clock.clock(),
+            true,
+            None,
+            MirrorSpec::NONE,
+        )
     }
 
     fn start_with_clock(
@@ -236,6 +191,7 @@ impl RuntimeOwner {
         clock: Clock,
         fast_reflexive: bool,
         address_key: Option<AddressKey>,
+        mirror: MirrorSpec<'_>,
     ) -> std::io::Result<Self> {
         // The library's query counters reach the operator trace (leaf FIX-3b).
         crate::network::observe::install_dht_trace();
@@ -266,7 +222,9 @@ impl RuntimeOwner {
         ));
         let publisher = tokio::spawn(loop_state::publisher_loop(
             identity,
-            PublisherState::new(key).with_seal(address_key.clone()),
+            PublisherState::new(key)
+                .with_seal(address_key.clone())
+                .with_mirror(RelayMirror::start(key, mirror)),
             handle,
             receiver,
             stop_receiver,
