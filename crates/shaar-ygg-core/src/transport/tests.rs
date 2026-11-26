@@ -5,6 +5,8 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use super::{YggConfig, YggError, YggTransport};
+use crate::LinksUp;
+use crate::phases::Phase;
 
 const STEP: Duration = Duration::from_millis(20);
 const BUDGET: Duration = Duration::from_secs(10);
@@ -98,4 +100,82 @@ async fn closing_a_connected_pair_releases_both_cores() {
     drop(dialer);
     assert_core_released("listener", weak_listener).await;
     assert_core_released("dialer", weak_dialer).await;
+}
+
+/// The one-shot phases fire at the real boundaries: the core ready at the start, the first datagram
+/// handed to the core by the sender, the first one received by the receiver.
+#[tokio::test]
+async fn one_shot_phases_fire_at_the_start_the_first_send_and_the_first_receive() {
+    let (listener, port) = start_listener([0x75; 32]).await;
+    let dialer = YggTransport::start(config(
+        [0x76; 32],
+        vec![],
+        vec![format!("tcp://127.0.0.1:{port}")],
+    ))
+    .await
+    .expect("dialer starts");
+    for transport in [&listener, &dialer] {
+        assert!(transport.phases.has_fired(Phase::CoreReady));
+        assert!(!transport.phases.has_fired(Phase::FirstSend));
+        assert!(!transport.phases.has_fired(Phase::FirstRecv));
+    }
+    wait_for_path(&dialer, &listener).await;
+    assert!(dialer.phases.has_fired(Phase::FirstSend));
+    assert!(listener.phases.has_fired(Phase::FirstRecv));
+    for transport in [&listener, &dialer] {
+        transport.close().await.expect("close");
+    }
+}
+
+/// A configured link is reported up by its index once the dial succeeds, a dead peer never
+/// counts, and the link is reported down once its peer is gone.
+#[tokio::test]
+async fn the_link_watch_follows_a_configured_link_up_and_down() {
+    let (listener, port) = start_listener([0x73; 32]).await;
+    let dead = reserve_port();
+    let peers = vec![
+        format!("tcp://127.0.0.1:{dead}"),
+        format!("tcp://127.0.0.1:{port}"),
+    ];
+    let dialer = YggTransport::start(config([0x74; 32], vec![], peers))
+        .await
+        .expect("dialer starts");
+    let watch = dialer.link_watch();
+    let up = tokio::time::timeout(BUDGET, watch.next(LinksUp::default()))
+        .await
+        .expect("the live link comes up");
+    assert!(
+        up.contains(1) && !up.contains(0),
+        "the live peer is index 1"
+    );
+    assert_eq!(up.count(), 1);
+    assert_eq!(watch.up().await, up);
+    let quiet = tokio::time::timeout(Duration::from_millis(300), watch.next(up)).await;
+    assert!(quiet.is_err(), "nothing changed, so nothing is reported");
+    listener.close().await.expect("listener closes");
+    let down = tokio::time::timeout(BUDGET, watch.next(up))
+        .await
+        .expect("the link goes down with its peer");
+    assert_eq!(down, LinksUp::default());
+    drop(watch);
+    dialer.close().await.expect("dialer closes");
+}
+
+/// A node whose only peer does not answer has no link up, and asking again reports no change.
+#[tokio::test]
+async fn a_dead_peer_never_counts_as_a_link() {
+    let dead = reserve_port();
+    let dialer = YggTransport::start(config(
+        [0x77; 32],
+        vec![],
+        vec![format!("tcp://127.0.0.1:{dead}")],
+    ))
+    .await
+    .expect("dialer starts");
+    let watch = dialer.link_watch();
+    assert_eq!(watch.up().await, LinksUp::default());
+    let quiet = tokio::time::timeout(Duration::from_millis(300), watch.next(LinksUp::default()));
+    assert!(quiet.await.is_err());
+    drop(watch);
+    dialer.close().await.expect("dialer closes");
 }

@@ -7,12 +7,14 @@
 //! addressed by the 32-byte peer key; the adapter adds no queue of its own.
 
 mod address;
+mod phases;
 mod registry;
 mod transport;
 mod validate;
 
 pub use address::address_for_key;
-pub use transport::{YggConfig, YggError, YggTransport};
+pub use phases::LinksUp;
+pub use transport::{LinkWatch, YggConfig, YggError, YggTransport};
 pub use validate::uri_supported;
 
 #[cfg(test)]

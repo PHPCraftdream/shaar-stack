@@ -24,8 +24,9 @@
 
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
-use shaar_ygg::{YggConfig, YggError, YggTransport};
+use shaar_ygg::{LinkWatch, YggConfig, YggError, YggTransport};
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use zeroize::Zeroizing;
@@ -33,6 +34,14 @@ use zeroize::Zeroizing;
 use crate::identity::Identity;
 
 use super::StartupError;
+
+/// How long after the start the links of the node are traced (leaf YGG-4a).
+const LINK_TRACE_WINDOW: Duration = Duration::from_secs(60);
+
+/// Prints one line per change of the configured links for the first minute of the node. Cancel-safe.
+async fn trace_links(watch: &LinkWatch) {
+    let _ = tokio::time::timeout(LINK_TRACE_WINDOW, watch.trace()).await;
+}
 
 /// Lifecycle status. Carries NO transport: dropping a status value is
 /// always safe.
@@ -333,11 +342,21 @@ pub(crate) fn start_ygg_same_identity(
                 return Ok(());
             }
         };
+        let watch = transport.link_watch();
         *slot_lock(&task_shared.slot) = Some(transport);
         task_shared.set_status(Status::Admitted);
         // Retain until an explicit shutdown signal arrives; a dropped sender
         // (every handle dropped without shutdown) closes the transport too.
-        let _ = shutdown_rx.await;
+        // The link trace runs beside the wait and ends with it; the watch is
+        // dropped before the close so it never keeps the core alive.
+        let mut shutdown_rx = shutdown_rx;
+        tokio::select! {
+            _ = &mut shutdown_rx => {}
+            () = trace_links(&watch) => {
+                let _ = (&mut shutdown_rx).await;
+            }
+        }
+        drop(watch);
         // Take the transport out BEFORE the async close so the synchronous
         // lock is never held across an await, and record the closed status
         // so `wait` can no longer report a false admission.

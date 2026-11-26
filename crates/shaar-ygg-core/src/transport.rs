@@ -12,8 +12,13 @@ use ironwood::Addr;
 use yggdrasil::config::Config;
 use yggdrasil::core::Core;
 
+use crate::phases::{Phase, Phases};
 use crate::registry::KeyClaim;
 use crate::validate::validate;
+
+mod links;
+
+pub use links::LinkWatch;
 
 /// Settings for one transport. The seed and group password are secrets and are
 /// never printed or echoed in errors.
@@ -119,12 +124,16 @@ pub struct YggTransport {
     core: Arc<Core>,
     claim: KeyClaim,
     closed: AtomicBool,
+    /// The configured peer URIs in order, to name a link by its index.
+    peers: Arc<[String]>,
+    phases: Arc<Phases>,
 }
 
 impl YggTransport {
     /// Start the core, listen on every listen URI and dial every peer URI.
     /// Await it to completion: dropping the future early can leave the core running.
     pub async fn start(config: YggConfig) -> Result<Self, YggError> {
+        let phases = Arc::new(Phases::new());
         validate(&config)?;
         let signing_key = SigningKey::from_bytes(&config.seed);
         let claim =
@@ -142,6 +151,8 @@ impl YggTransport {
             core,
             claim,
             closed: AtomicBool::new(false),
+            peers: Arc::from(config.peers.as_slice()),
+            phases,
         };
         for uri in &config.listen {
             if transport.core.listen(uri).await.is_err() {
@@ -155,7 +166,17 @@ impl YggTransport {
                 return Err(YggError::Start { stage: "peer" });
             }
         }
+        transport.phases.mark(Phase::CoreReady);
         Ok(transport)
+    }
+
+    /// A read-only view of this node's links. Drop it before closing the transport.
+    pub fn link_watch(&self) -> LinkWatch {
+        LinkWatch::new(
+            Arc::clone(&self.core),
+            Arc::clone(&self.peers),
+            Arc::clone(&self.phases),
+        )
     }
 
     /// This node's public key, which is also its address.
@@ -180,6 +201,7 @@ impl YggTransport {
                 mtu,
             });
         }
+        self.phases.mark(Phase::FirstSend);
         self.core
             .write_to(payload, &Addr(*peer))
             .await
@@ -201,6 +223,7 @@ impl YggTransport {
             });
         }
         let (range, sender) = self.core.read_from(buf).await.map_err(map_core_error)?;
+        self.phases.mark(Phase::FirstRecv);
         let len = range.len();
         buf.copy_within(range, 0);
         Ok((len, sender.0))

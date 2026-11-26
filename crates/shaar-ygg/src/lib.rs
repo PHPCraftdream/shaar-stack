@@ -19,7 +19,9 @@ pub use bridge::{
     ProbeError, YggBridge, YggCarrier, YggPump,
 };
 pub use pending::MAX_PENDING_PROBES;
-pub use shaar_ygg_core::{YggConfig, YggError, YggTransport, address_for_key, uri_supported};
+pub use shaar_ygg_core::{
+    LinkWatch, LinksUp, YggConfig, YggError, YggTransport, address_for_key, uri_supported,
+};
 
 #[cfg(test)]
 mod bridge_tests;
