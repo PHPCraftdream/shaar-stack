@@ -1,5 +1,5 @@
 //! The `diag` subcommands of `shaar-server`: measurements of this machine's network (leaves
-//! NAT-3a to NAT-3c). They print ports and counts, and an address only on request.
+//! NAT-3a to NAT-3c and NAT-9). They print ports and counts, and an address only on request.
 
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::Duration;
@@ -9,8 +9,9 @@ use shaar::network::observe::{
     ANSWER_WAIT, CATCH_EVERY, Catch, DEFAULT_CATCH_SECONDS, DEFAULT_KNOCK_AFTER_SECONDS,
     DEFAULT_LISTEN_SECONDS, DEFAULT_PROBE_WAIT_SECONDS, DEFAULT_SWEEP_AFTER_SECONDS,
     DEFAULT_SWEEP_FROM, DEFAULT_SWEEP_RATE, DEFAULT_SWEEP_TO, KNOCK_EVERY, KNOCK_PORT, Knock,
-    Listen, MAX_CATCH_SECONDS, MAX_LISTEN_SECONDS, MAX_PROBE_WAIT_SECONDS, MAX_SOCKETS,
-    MAX_SWEEP_RATE, Sweep, nat_filter_catch, nat_filter_listen, nat_filter_probe, nat_ports,
+    Listen, MAX_CATCH_SECONDS, MAX_DESTINATIONS, MAX_LISTEN_SECONDS, MAX_PROBE_WAIT_SECONDS,
+    MAX_RATE, MAX_SOCKETS, MAX_SWEEP_RATE, Sweep, nat_fanout, nat_filter_catch, nat_filter_listen,
+    nat_filter_probe, nat_ports,
 };
 use shaar::network::ports::{PORTS, mapping};
 
@@ -189,6 +190,26 @@ pub(super) fn command() -> Command {
         )
         .subcommand(port_map_command())
         .subcommand(
+            Command::new("nat-fanout")
+                .about("Count the answers of one socket that sends one query to each of many distinct DHT nodes")
+                .arg(
+                    Arg::new("destinations")
+                        .long("destinations")
+                        .value_name("N")
+                        .value_parser(value_parser!(u16).range(1..=i64::from(MAX_DESTINATIONS)))
+                        .default_value("2000")
+                        .help("Distinct nodes to send to (at most 8000)"),
+                )
+                .arg(
+                    Arg::new("rate")
+                        .long("rate")
+                        .value_name("R")
+                        .value_parser(value_parser!(u16).range(1..=i64::from(MAX_RATE)))
+                        .default_value("100")
+                        .help("Queries per second (at most 200)"),
+                ),
+        )
+        .subcommand(
             Command::new("nat-filter")
                 .about("Measure which datagrams the NAT in front of this machine lets in")
                 .subcommand_required(true)
@@ -270,6 +291,13 @@ pub(super) fn parse(sub: &ArgMatches) -> Result<Invocation, ParseError> {
             map: args.get_flag("map"),
         });
     }
+    if what == "nat-fanout" {
+        return Ok(Invocation::DiagNatFanout {
+            place: place_of(sub),
+            destinations: *args.get_one::<u16>("destinations").expect("has a default"),
+            rate: *args.get_one::<u16>("rate").expect("has a default"),
+        });
+    }
     if what == "port-map" {
         return Ok(Invocation::DiagPortMap {
             port: args.get_one::<u16>("port").copied().unwrap_or(PORTS[0]),
@@ -305,6 +333,15 @@ pub(super) async fn ports(
     map: bool,
 ) -> Result<Vec<String>, String> {
     nat_ports(&mainline_of(place).await?, sockets, show_address, map).await
+}
+
+/// `diag nat-fanout`.
+pub(super) async fn fanout(
+    place: &Place,
+    destinations: u16,
+    rate: u16,
+) -> Result<Vec<String>, String> {
+    nat_fanout(&mainline_of(place).await?, destinations, rate).await
 }
 
 /// `diag port-map`: one mapping at the home router of this machine by PCP or NAT-PMP, and one by
