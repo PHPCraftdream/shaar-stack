@@ -2,10 +2,10 @@
 //! network.
 
 use shaar::network::observe::{
-    DEFAULT_CATCH_SECONDS, DEFAULT_KNOCK_AFTER_SECONDS, DEFAULT_LISTEN_SECONDS,
-    DEFAULT_PROBE_WAIT_SECONDS, DEFAULT_SWEEP_AFTER_SECONDS, DEFAULT_SWEEP_FROM,
-    DEFAULT_SWEEP_RATE, DEFAULT_SWEEP_TO, MAX_CATCH_SECONDS, MAX_LISTEN_SECONDS,
-    MAX_PROBE_WAIT_SECONDS, MAX_SOCKETS,
+    DEFAULT_CATCH_SECONDS, DEFAULT_DESTINATIONS, DEFAULT_KNOCK_AFTER_SECONDS,
+    DEFAULT_LISTEN_SECONDS, DEFAULT_PROBE_WAIT_SECONDS, DEFAULT_RATE, DEFAULT_SWEEP_AFTER_SECONDS,
+    DEFAULT_SWEEP_FROM, DEFAULT_SWEEP_RATE, DEFAULT_SWEEP_TO, MAX_CATCH_SECONDS, MAX_DESTINATIONS,
+    MAX_LISTEN_SECONDS, MAX_PROBE_WAIT_SECONDS, MAX_RATE, MAX_SOCKETS,
 };
 
 use super::tests::{Fixture, parsed, refused, run};
@@ -65,6 +65,63 @@ fn diag_nat_ports_takes_a_default_and_a_bounded_socket_count() {
     ] {
         assert!(matches!(refused(bad), ParseError::Clap(_)), "{bad:?}");
     }
+}
+
+#[test]
+fn diag_nat_fanout_takes_defaults_and_bounded_numbers() {
+    let place = |dir: Option<&str>| Place {
+        config: None,
+        dir: dir.map(PathBuf::from),
+    };
+    assert_eq!(
+        parsed(&["diag", "nat-fanout"]),
+        Invocation::DiagNatFanout {
+            place: place(None),
+            destinations: DEFAULT_DESTINATIONS,
+            rate: DEFAULT_RATE,
+        }
+    );
+    assert_eq!(
+        parsed(&[
+            "diag",
+            "--dir",
+            "d",
+            "nat-fanout",
+            "--destinations",
+            "8000",
+            "--rate",
+            "200",
+        ]),
+        Invocation::DiagNatFanout {
+            place: place(Some("d")),
+            destinations: MAX_DESTINATIONS,
+            rate: MAX_RATE,
+        }
+    );
+    for bad in [
+        &["diag", "nat-fanout", "--destinations", "0"][..],
+        &["diag", "nat-fanout", "--destinations", "8001"],
+        &["diag", "nat-fanout", "--rate", "0"],
+        &["diag", "nat-fanout", "--rate", "201"],
+        &["diag", "nat-fanout", "--rate", "fast"],
+    ] {
+        assert!(matches!(refused(bad), ParseError::Clap(_)), "{bad:?}");
+    }
+}
+
+#[tokio::test]
+async fn diag_nat_fanout_needs_the_bootstrap_hosts_of_a_public_configuration() {
+    let fixture = Fixture::new();
+    run(&["init", "--dir", fixture.dir(), "--private"])
+        .await
+        .unwrap();
+    let direct_only = run(&["diag", "nat-fanout", "--dir", fixture.dir()])
+        .await
+        .unwrap_err();
+    assert!(
+        direct_only.contains("no DHT bootstrap hosts"),
+        "{direct_only}"
+    );
 }
 
 #[tokio::test]

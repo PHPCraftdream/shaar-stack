@@ -488,5 +488,4 @@ pub async fn catch(options: &Catch, emit: &mut (dyn FnMut(String) + Send)) -> Re
 }
 
 #[cfg(test)]
-#[path = "nat_filter_tests.rs"]
-mod nat_filter_tests;
+mod tests;

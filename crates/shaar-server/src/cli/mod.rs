@@ -89,6 +89,13 @@ pub(crate) enum Invocation {
         show_address: bool,
         map: bool,
     },
+    /// `diag nat-fanout`: one socket sends one query to each of `destinations` distinct DHT nodes
+    /// at `rate` per second and the answers are counted per hundred destinations.
+    DiagNatFanout {
+        place: Place,
+        destinations: u16,
+        rate: u16,
+    },
     /// `diag port-map`: asks the home router to map `port` to the same external port.
     DiagPortMap {
         port: u16,
@@ -424,6 +431,11 @@ pub(crate) async fn execute(invocation: Invocation) -> Result<Vec<String>, Strin
             show_address,
             map,
         } => diag::ports(&place, sockets, show_address, map).await,
+        Invocation::DiagNatFanout {
+            place,
+            destinations,
+            rate,
+        } => diag::fanout(&place, destinations, rate).await,
         Invocation::DiagPortMap { port, show_address } => {
             Ok(diag::port_map(port, show_address).await)
         }

@@ -7,10 +7,12 @@ use super::{ForwardError, ForwardStats, ServeReport};
 use crate::path::PathKind;
 
 mod dht;
+mod fanout;
 mod nat_filter;
 mod nat_ports;
 mod trace;
 pub use dht::install_dht_trace;
+pub use fanout::{DEFAULT_DESTINATIONS, DEFAULT_RATE, MAX_DESTINATIONS, MAX_RATE, nat_fanout};
 pub use nat_filter::{
     CATCH_EVERY, Catch, DEFAULT_CATCH_SECONDS, DEFAULT_KNOCK_AFTER_SECONDS, DEFAULT_LISTEN_SECONDS,
     DEFAULT_PROBE_WAIT_SECONDS, DEFAULT_SWEEP_AFTER_SECONDS, DEFAULT_SWEEP_FROM,

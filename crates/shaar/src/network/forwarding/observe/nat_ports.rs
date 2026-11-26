@@ -394,7 +394,7 @@ async fn learn_nodes(hosts: &[SocketAddrV4], wait: Duration) -> Vec<SocketAddrV4
 
 /// Whether a node address is worth a ping: not this host, a private or link-local network or a
 /// group address. A reply cannot steer the run at the operator's own network.
-fn plausible(ip: Ipv4Addr) -> bool {
+pub(super) fn plausible(ip: Ipv4Addr) -> bool {
     !(ip.is_unspecified()
         || ip.is_loopback()
         || ip.is_private()
@@ -404,7 +404,7 @@ fn plausible(ip: Ipv4Addr) -> bool {
 }
 
 /// A Mainline `find_node` query (BEP 5): `d1:ad2:id20:<id>6:target20:<target>e1:q9:find_node...`.
-fn find_node_packet(id: &[u8; 20], target: &[u8; 20], transaction: [u8; 2]) -> Vec<u8> {
+pub(super) fn find_node_packet(id: &[u8; 20], target: &[u8; 20], transaction: [u8; 2]) -> Vec<u8> {
     let mut packet = Vec::with_capacity(92);
     packet.extend_from_slice(b"d1:ad2:id20:");
     packet.extend_from_slice(id);
@@ -419,7 +419,7 @@ fn find_node_packet(id: &[u8; 20], target: &[u8; 20], transaction: [u8; 2]) -> V
 /// The compact IPv4 nodes (`r` / `nodes`) of a response to this transaction; `None` unless the
 /// packet is a whole, well-formed response that carries them. A cut last entry and a port of zero
 /// are dropped.
-fn reply_nodes(
+pub(super) fn reply_nodes(
     packet: &[u8],
     transaction: [u8; 2],
 ) -> Option<impl Iterator<Item = SocketAddrV4> + '_> {
@@ -447,7 +447,7 @@ fn transaction(index: usize, host: usize) -> [u8; 2] {
 }
 
 /// A random-looking node id from the keyed hasher of the standard library; it only has to differ.
-fn random_id() -> [u8; 20] {
+pub(super) fn random_id() -> [u8; 20] {
     let mut id = [0_u8; 20];
     for chunk in id.chunks_mut(8) {
         let word = RandomState::new().build_hasher().finish().to_be_bytes();
