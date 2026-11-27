@@ -63,6 +63,9 @@ pub(super) struct ActivePut {
     pub(super) request_lease: Arc<RequestLease>,
     pub(super) deadline: tokio::time::Instant,
     pub(super) pending_error: Option<ResourceError>,
+    /// When the put became active, and how many `Owned put wait` lines it has printed.
+    pub(super) started: tokio::time::Instant,
+    pub(super) waits: u8,
 }
 #[derive(Debug)]
 struct OwnedWaiter {

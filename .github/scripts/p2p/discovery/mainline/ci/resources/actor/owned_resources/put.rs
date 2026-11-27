@@ -4,7 +4,43 @@
 
 use super::*;
 
+/// How long an active put may stay unresolved before each `Owned put wait` line (leaf PACE-STALL).
+const PUT_WAIT_STEP: std::time::Duration = std::time::Duration::from_secs(10);
+/// Most `Owned put wait` lines one put prints.
+const PUT_WAIT_LINES: u8 = 2;
+
+fn put_wait_due(age: std::time::Duration, printed: u8) -> bool {
+    printed < PUT_WAIT_LINES && age >= PUT_WAIT_STEP * (u32::from(printed) + 1)
+}
+
 impl Actor {
+    /// Prints where a put that stays unresolved is held: how many of its requests wait for an
+    /// answer, how many never left the outbox, and its attempt counter.
+    fn trace_owned_put_waits(&mut self, now: tokio::time::Instant) {
+        let Some(owner) = self.owned_resources.as_mut() else {
+            return;
+        };
+        for (target, active) in owner.active_puts.iter_mut() {
+            let age = now.saturating_duration_since(active.started);
+            if !put_wait_due(age, active.waits) {
+                continue;
+            }
+            active.waits += 1;
+            let (attempts, tids) = self
+                .core
+                .put_queries
+                .get(target)
+                .map_or((0, &[][..]), |put| {
+                    (put.owned_attempts(), put.transaction_ids())
+                });
+            let (inflight, queued, rpc) = self.socket.owned_request_state(tids);
+            tracing::debug!(
+                age_ms = ?age.as_millis(), inflight = ?inflight, queued = ?queued,
+                attempts = ?attempts, rpc = ?rpc, "Owned put wait"
+            );
+        }
+    }
+
     pub(crate) fn owned_put_admission_until(
         &mut self,
         target: Id,
@@ -111,6 +147,7 @@ impl Actor {
     }
 
     pub(crate) fn maintain_owned_puts_at(&mut self, now: tokio::time::Instant) {
+        self.trace_owned_put_waits(now);
         let Some(owner) = self.owned_resources.as_mut() else {
             return;
         };
@@ -232,6 +269,8 @@ impl Actor {
                 request_lease: put.request_lease,
                 deadline: put.deadline,
                 pending_error: None,
+                started: now,
+                waits: 0,
             };
             self.owned_resources
                 .as_mut()

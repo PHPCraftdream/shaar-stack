@@ -14,7 +14,7 @@ use tracing::{Event, Level, Metadata, Subscriber};
 const LIBRARY: &str = "n0_mainline";
 
 /// The library messages worth a line, with the label each one prints under.
-const MESSAGES: [(&str, &str); 10] = [
+const MESSAGES: [(&str, &str); 12] = [
     ("Owned GET finished", "get-finished"),
     ("Owned GET failed", "get-failed"),
     ("Owned GET dropped", "get-dropped"),
@@ -25,10 +25,12 @@ const MESSAGES: [(&str, &str); 10] = [
     ("Owned GET round", "get-round"),
     ("Owned GET deadline", "get-deadline"),
     ("Owned pace", "pace"),
+    ("Owned pace outcome", "pace-outcome"),
+    ("Owned put wait", "put-wait"),
 ];
 
 /// The numeric fields printed, in this order, when an event carries them.
-const COUNTERS: [&str; 21] = [
+const COUNTERS: [&str; 27] = [
     "op",
     "stage",
     "total_ms",
@@ -45,11 +47,17 @@ const COUNTERS: [&str; 21] = [
     "nodes_count",
     "round",
     "candidates",
+    "age_ms",
     "inflight",
     "room",
     "timeout_ms",
     "rate",
     "share_pct",
+    "queued",
+    "attempts",
+    "rpc",
+    "sent",
+    "kind",
 ];
 
 /// Longest error variant name printed.
@@ -262,6 +270,38 @@ mod tests {
             .collect();
         assert_eq!(tails, ["rate=25 share_pct=18", "rate=0 share_pct=100"]);
         assert!(lines[0].starts_with("shaar: dht pace "), "{}", lines[0]);
+    }
+
+    #[test]
+    fn a_request_outcome_and_a_put_wait_print_their_numbers_in_a_fixed_order() {
+        let lines = captured(|| {
+            tracing::debug!(
+                target: "n0_mainline::actor::socket::socket_resources",
+                kind = ?1_u8, sent = ?42_u64, "Owned pace outcome"
+            );
+            tracing::debug!(
+                target: "n0_mainline::actor::owned_resources::put",
+                rpc = ?9_usize, attempts = ?2_u8, queued = ?3_usize, inflight = ?4_usize,
+                age_ms = ?10_001_u128, "Owned put wait"
+            );
+        });
+        let tails: Vec<&str> = lines
+            .iter()
+            .map(|line| line.split_once(" t=").unwrap().1.split_once(' ').unwrap().1)
+            .collect();
+        assert_eq!(
+            tails,
+            [
+                "sent=42 kind=1",
+                "age_ms=10001 inflight=4 queued=3 attempts=2 rpc=9"
+            ]
+        );
+        assert!(
+            lines[0].starts_with("shaar: dht pace-outcome "),
+            "{}",
+            lines[0]
+        );
+        assert!(lines[1].starts_with("shaar: dht put-wait "), "{}", lines[1]);
     }
 
     #[test]

@@ -77,6 +77,7 @@ def edits() -> dict[str, list[tuple[str, str]]]:
     #[cfg(test)]
     pub(crate) fn set_owned_next_jitter(&mut self, value: u8) { self.owned_next_jitter = Some(value); }
     pub(crate) fn owned_retry_at(&self) -> Option<tokio::time::Instant> { self.owned_retry_at }
+    pub(crate) fn owned_attempts(&self) -> u8 { self.owned_attempts }
 
     pub(crate) fn schedule_owned_retry(&mut self, socket: &KrpcSocket, now: tokio::time::Instant) -> bool {
         if self.owned_retry_at.is_some() { return true; }

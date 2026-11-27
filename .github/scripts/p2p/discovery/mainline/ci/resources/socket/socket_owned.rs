@@ -561,9 +561,18 @@ impl super::KrpcSocket {
         };
         for tid in owned.resources.expired(timeout) {
             self.inflight_requests.forget(tid);
-            owned.resources.rollback_rpc(tid);
+            owned.resources.expire_rpc(tid);
             owned.pacer.observe(false);
         }
+    }
+
+    /// For the `Owned put wait` trace: of the requests `tids`, how many left and wait, how many
+    /// still sit in the outbox, and how many requests the whole table holds.
+    pub(crate) fn owned_request_state(&self, tids: &[u32]) -> (usize, usize, usize) {
+        self.owned.as_ref().map_or((0, 0, 0), |owned| {
+            let (inflight, queued) = owned.resources.request_state(tids);
+            (inflight, queued, owned.resources.rpc_len())
+        })
     }
 
     /// When the pacing releases the next queued request, if it holds one back now.

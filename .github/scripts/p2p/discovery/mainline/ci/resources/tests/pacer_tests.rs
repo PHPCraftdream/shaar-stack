@@ -5,10 +5,15 @@
 //! Contract of the adaptive departure pacing of the owned requests (leaf PACE-1).
 
 use std::collections::VecDeque;
+use std::fmt::Debug;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::time::Instant;
+use tracing::field::{Field, Visit};
+use tracing::span::{Attributes, Id as SpanId, Record};
+use tracing::{Event, Metadata, Subscriber};
 
 use super::super::KrpcSocket;
 use super::pacer::{Pacer, WINDOW};
@@ -415,4 +420,130 @@ async fn answers_that_arrive_speed_a_paced_schedule_up() {
         assert!(socket.accept_owned_response(tid, destination));
     }
     assert_eq!(socket.owned_pacing_rate_for_test(), Some(30));
+}
+
+/// Collects the fields of the `Owned pace outcome` events as `sent=<n> kind=<k>` (leaf PACE-3a).
+#[derive(Clone, Default)]
+struct Outcomes(Arc<Mutex<Vec<String>>>);
+
+#[derive(Default)]
+struct Picked {
+    message: String,
+    fields: Vec<String>,
+}
+
+impl Visit for Picked {
+    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+        if field.name() == "message" {
+            self.message = format!("{value:?}");
+        } else {
+            self.fields.push(format!("{}={value:?}", field.name()));
+        }
+    }
+}
+
+impl Subscriber for Outcomes {
+    fn enabled(&self, _: &Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, _: &Attributes<'_>) -> SpanId {
+        SpanId::from_u64(1)
+    }
+
+    fn record(&self, _: &SpanId, _: &Record<'_>) {}
+
+    fn record_follows_from(&self, _: &SpanId, _: &SpanId) {}
+
+    fn event(&self, event: &Event<'_>) {
+        let mut picked = Picked::default();
+        event.record(&mut picked);
+        if picked.message == "Owned pace outcome" {
+            self.0.lock().unwrap().push(picked.fields.join(" "));
+        }
+    }
+
+    fn enter(&self, _: &SpanId) {}
+
+    fn exit(&self, _: &SpanId) {}
+}
+
+impl Outcomes {
+    /// The lines printed since the last call, sorted (requests resolved together have no order).
+    fn take(&self) -> Vec<String> {
+        let mut lines = std::mem::take(&mut *self.0.lock().unwrap());
+        lines.sort();
+        lines
+    }
+}
+
+fn outcomes() -> (Outcomes, tracing::subscriber::DefaultGuard) {
+    let outcomes = Outcomes::default();
+    let guard = tracing::subscriber::set_default(outcomes.clone());
+    (outcomes, guard)
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_departure_index_follows_the_order_of_departure_not_of_resolution() {
+    let (outcomes, _guard) = outcomes();
+    let (peer, destination) = capture();
+    let (mut socket, operation) = paced_socket(30).await;
+    let tids = queue(&mut socket, operation, destination, 3);
+    socket.flush_owned().await;
+    assert_eq!(drain(&peer).len(), 3);
+    assert!(outcomes.take().is_empty(), "nothing resolved yet");
+    assert!(socket.accept_owned_response(tids[2], destination));
+    assert_eq!(outcomes.take(), ["sent=2 kind=0"]);
+    socket.expire_owned_requests(Duration::ZERO);
+    assert_eq!(outcomes.take(), ["sent=0 kind=1", "sent=1 kind=1"]);
+    let next = queue(&mut socket, operation, destination, 1);
+    socket.flush_owned().await;
+    assert_eq!(drain(&peer).len(), 1);
+    assert!(socket.accept_owned_response(next[0], destination));
+    assert_eq!(outcomes.take(), ["sent=3 kind=0"], "the count goes on");
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancelling_the_operation_prints_the_dropped_kind_for_departed_requests_only() {
+    let (outcomes, _guard) = outcomes();
+    let (peer, destination) = capture();
+    let (mut socket, operation) = paced_socket(30).await;
+    queue(&mut socket, operation, destination, 6);
+    socket.flush_owned().await;
+    assert_eq!(drain(&peer).len(), 4);
+    socket.cancel_owned_operation(operation);
+    assert_eq!(
+        outcomes.take(),
+        ["sent=0 kind=2", "sent=1 kind=2", "sent=2 kind=2", "sent=3 kind=2"],
+        "the two queued requests never left and print nothing"
+    );
+    tokio::time::advance(Duration::from_secs(1)).await;
+    socket.flush_owned().await;
+    assert!(outcomes.take().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_answer_after_the_expiry_prints_nothing() {
+    let (outcomes, _guard) = outcomes();
+    let (peer, destination) = capture();
+    let (mut socket, operation) = paced_socket(30).await;
+    let tids = queue(&mut socket, operation, destination, 1);
+    socket.flush_owned().await;
+    assert_eq!(drain(&peer).len(), 1);
+    socket.expire_owned_requests(Duration::ZERO);
+    assert_eq!(outcomes.take(), ["sent=0 kind=1"]);
+    assert!(!socket.accept_owned_response(tids[0], destination));
+    assert!(outcomes.take().is_empty(), "one line per request");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_that_failed_to_leave_prints_nothing() {
+    let (outcomes, _guard) = outcomes();
+    let (_peer, destination) = capture();
+    let (mut socket, operation) = paced_socket(30).await;
+    queue(&mut socket, operation, destination, 1);
+    socket.fail_next_send_for_test();
+    socket.flush_owned().await;
+    assert!(outcomes.take().is_empty());
+    assert_eq!(socket.owned_test_state().map(|state| state.2), Some(0));
 }

@@ -602,3 +602,19 @@ fn an_operation_without_a_registered_deadline_admits_no_round() {
         Err(ResourceError::DeadlineExceeded)
     );
 }
+
+#[test]
+fn request_state_counts_departed_and_queued_requests_and_skips_unknown_ones() {
+    let mut resources = super::resources::SocketResources::default();
+    let operation = resources.allocate_operation().unwrap();
+    let to = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 6881);
+    for tid in 1..=3 {
+        resources.admit_rpc(tid, operation, to).unwrap();
+    }
+    assert_eq!(resources.request_state(&[1, 2, 3]), (0, 3));
+    assert!(resources.rpc_sent(1));
+    assert_eq!(resources.request_state(&[1, 2, 3, 99]), (1, 2));
+    assert!(resources.complete_rpc(1, to));
+    assert_eq!(resources.request_state(&[1, 2, 3]), (0, 2));
+    assert_eq!(resources.request_state(&[]), (0, 0));
+}

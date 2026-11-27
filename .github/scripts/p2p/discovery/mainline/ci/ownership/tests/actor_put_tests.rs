@@ -2,7 +2,171 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 #![forbid(unsafe_code)]
 
+use std::fmt::Debug;
+use std::sync::Mutex;
+
+use tracing::field::{Field, Visit};
+use tracing::span::{Attributes, Id as SpanId, Record};
+use tracing::{Event, Metadata, Subscriber};
+
 use super::*;
+
+/// Collects the fields of the `Owned put wait` events as one line each (leaf PACE-STALL).
+#[derive(Clone, Default)]
+struct Waits(Arc<Mutex<Vec<String>>>);
+
+#[derive(Default)]
+struct Picked {
+    message: String,
+    fields: Vec<String>,
+}
+
+impl Visit for Picked {
+    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+        if field.name() == "message" {
+            self.message = format!("{value:?}");
+        } else {
+            self.fields.push(format!("{}={value:?}", field.name()));
+        }
+    }
+}
+
+impl Subscriber for Waits {
+    fn enabled(&self, _: &Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, _: &Attributes<'_>) -> SpanId {
+        SpanId::from_u64(1)
+    }
+
+    fn record(&self, _: &SpanId, _: &Record<'_>) {}
+
+    fn record_follows_from(&self, _: &SpanId, _: &SpanId) {}
+
+    fn event(&self, event: &Event<'_>) {
+        let mut picked = Picked::default();
+        event.record(&mut picked);
+        if picked.message == "Owned put wait" {
+            self.0.lock().unwrap().push(picked.fields.join(" "));
+        }
+    }
+
+    fn enter(&self, _: &SpanId) {}
+
+    fn exit(&self, _: &SpanId) {}
+}
+
+impl Waits {
+    /// The lines printed since the last call.
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
+}
+
+fn waits() -> (Waits, tracing::subscriber::DefaultGuard) {
+    let waits = Waits::default();
+    let guard = tracing::subscriber::set_default(waits.clone());
+    (waits, guard)
+}
+
+#[tokio::test]
+async fn a_put_that_stays_unresolved_prints_a_wait_line_at_ten_and_at_twenty_seconds() {
+    let (waits, _guard) = waits();
+    let (_bootstrap_peer, bootstrap) = captured_peer();
+    let mut actor = actor(bootstrap);
+    actor.owned_disable_maintenance_for_test = true;
+    let now = tokio::time::Instant::now();
+    let item = crate::common::MutableItem::new(
+        &ed25519_dalek::SigningKey::from_bytes(&[0xA9; 32]),
+        b"put wait",
+        1,
+        None,
+    );
+    let target = *item.target();
+    let (reply, mut reply_rx) = oneshot::channel();
+    let (cleanup, _cleanup_rx) = oneshot::channel();
+    let (cancel, cancel_rx) = oneshot::channel();
+    let lease = actor.owned_request_budget().acquire().expect("request lease");
+    let deadline = now + Duration::from_secs(300);
+    actor.owned_put_admission_until(target, item, reply, cleanup, cancel_rx, deadline, lease);
+    actor.maintain_owned_puts_at(now);
+    let _result = reply_rx.try_recv().expect("PUT admitted").expect("no admission error");
+    let peers: Vec<_> = (0..6).map(|_| captured_peer()).collect();
+    let nodes: Vec<Node> = peers
+        .iter()
+        .enumerate()
+        .map(|(index, (_, address))| {
+            Node::new_with_token(
+                Id::from([0x50 + index as u8; 20]),
+                *address,
+                vec![7, 8].into_boxed_slice(),
+            )
+        })
+        .collect();
+    // With the pacing engaged only a burst of the requests leaves; the rest stays in the outbox.
+    actor.socket.collapse_owned_pacing_for_test();
+    actor
+        .core
+        .put_queries
+        .get_mut(&target)
+        .expect("pending PUT")
+        .start(&mut actor.socket, &nodes)
+        .expect("start the PUT");
+    actor.socket.flush_owned().await;
+    let tids = actor.core.put_queries[&target].transaction_ids().to_vec();
+    let (inflight, queued, rpc) = actor.socket.owned_request_state(&tids);
+    assert_eq!(inflight + queued, 6);
+    assert!(inflight > 0 && queued > 0, "{inflight} left, {queued} queued");
+
+    actor.maintain_owned_puts_at(now + Duration::from_millis(9_999));
+    assert!(waits.take().is_empty(), "nothing before ten seconds");
+    actor.maintain_owned_puts_at(now + Duration::from_secs(10));
+    assert_eq!(
+        waits.take(),
+        [format!("age_ms=10000 inflight={inflight} queued={queued} attempts=1 rpc={rpc}")]
+    );
+    actor.maintain_owned_puts_at(now + Duration::from_secs(15));
+    assert!(waits.take().is_empty(), "one line per step");
+    actor.maintain_owned_puts_at(now + Duration::from_secs(20));
+    assert_eq!(
+        waits.take(),
+        [format!("age_ms=20000 inflight={inflight} queued={queued} attempts=1 rpc={rpc}")]
+    );
+    actor.maintain_owned_puts_at(now + Duration::from_secs(120));
+    assert!(waits.take().is_empty(), "never a third line");
+    assert_eq!(actor.owned_resources.as_ref().unwrap().active_put_len(), 1);
+    drop((cancel, peers));
+}
+
+#[tokio::test]
+async fn a_put_that_ends_before_ten_seconds_prints_no_wait_line() {
+    let (waits, _guard) = waits();
+    let (_bootstrap_peer, bootstrap) = captured_peer();
+    let mut actor = actor(bootstrap);
+    actor.owned_disable_maintenance_for_test = true;
+    let now = tokio::time::Instant::now();
+    let item = crate::common::MutableItem::new(
+        &ed25519_dalek::SigningKey::from_bytes(&[0xAA; 32]),
+        b"short put",
+        1,
+        None,
+    );
+    let (reply, mut reply_rx) = oneshot::channel();
+    let (cleanup, _cleanup_rx) = oneshot::channel();
+    let (cancel, cancel_rx) = oneshot::channel();
+    let lease = actor.owned_request_budget().acquire().expect("request lease");
+    let deadline = now + Duration::from_secs(300);
+    actor.owned_put_admission_until(*item.target(), item, reply, cleanup, cancel_rx, deadline, lease);
+    actor.maintain_owned_puts_at(now);
+    let _result = reply_rx.try_recv().expect("PUT admitted").expect("no admission error");
+    cancel.send(()).expect("request cancellation");
+    actor.maintain_owned_puts_at(now + Duration::from_secs(1));
+    assert_eq!(actor.owned_resources.as_ref().unwrap().active_put_len(), 0);
+    actor.maintain_owned_puts_at(now + Duration::from_secs(10));
+    actor.maintain_owned_puts_at(now + Duration::from_secs(20));
+    assert!(waits.take().is_empty());
+}
 
 #[tokio::test]
 async fn held_put_keeps_operation_charge_after_shared_get_deadline() {

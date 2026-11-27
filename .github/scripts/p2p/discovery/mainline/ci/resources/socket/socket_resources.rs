@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::net::SocketAddrV4;
 use std::time::{Duration, Instant};
 
+use tracing::debug;
+
 use crate::resource::{OperationId, ResourceError};
 
 #[cfg(test)]
@@ -40,16 +42,26 @@ pub(crate) const OWNED_GET_ROUNDS: u8 = 6;
 /// bound to 10 s and publication waits for it, so six slow rounds do not fit (leaf FIX-3f).
 pub(crate) const OWNED_MAINTENANCE_ROUNDS: u8 = 3;
 
+/// How a request that left was resolved, as the `Owned pace outcome` trace prints it (leaf PACE-3a).
+const OUTCOME_ANSWERED: u8 = 0;
+const OUTCOME_EXPIRED: u8 = 1;
+/// Released with neither an answer nor an expiry: cancelled with its operation or forgotten.
+const OUTCOME_DROPPED: u8 = 2;
+
 #[derive(Debug)]
 struct RpcOwner {
     operation: OperationId,
     to: SocketAddrV4,
     queued: bool,
     sent_at: Option<Instant>,
+    /// Departure index on this socket (0, 1, 2, ... in the order requests left).
+    sent_index: Option<u64>,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct SocketResources {
+    /// Requests that have left so far.
+    departures: u64,
     rpc: HashMap<u32, RpcOwner>,
     per_operation: HashMap<OperationId, usize>,
     deadlines: HashMap<OperationId, (tokio::time::Instant, u8)>,
@@ -160,6 +172,7 @@ impl SocketResources {
                 to,
                 queued: true,
                 sent_at: None,
+                sent_index: None,
             },
         );
         *self.per_operation.entry(operation).or_default() += 1;
@@ -172,6 +185,8 @@ impl SocketResources {
         };
         owner.queued = false;
         owner.sent_at = Some(Instant::now());
+        owner.sent_index = Some(self.departures);
+        self.departures += 1;
         true
     }
 
@@ -185,17 +200,27 @@ impl SocketResources {
         if !self.matches_response(tid, from) {
             return false;
         }
-        self.release_rpc(tid)
+        self.release_rpc(tid, OUTCOME_ANSWERED)
     }
 
     pub(crate) fn rollback_rpc(&mut self, tid: u32) -> bool {
-        self.release_rpc(tid)
+        self.release_rpc(tid, OUTCOME_DROPPED)
     }
 
-    fn release_rpc(&mut self, tid: u32) -> bool {
+    /// Releases a request whose timeout ran out.
+    pub(crate) fn expire_rpc(&mut self, tid: u32) -> bool {
+        self.release_rpc(tid, OUTCOME_EXPIRED)
+    }
+
+    /// The single place where a request leaves the table; a request that had left prints how it
+    /// was resolved, one line per request.
+    fn release_rpc(&mut self, tid: u32, outcome: u8) -> bool {
         let Some(owner) = self.rpc.remove(&tid) else {
             return false;
         };
+        if let Some(sent) = owner.sent_index {
+            debug!(sent = ?sent, kind = ?outcome, "Owned pace outcome");
+        }
         if let Some(count) = self.per_operation.get_mut(&owner.operation) {
             *count -= 1;
             if *count == 0 {
@@ -217,6 +242,20 @@ impl SocketResources {
                 .then_some(tid)
             })
             .collect()
+    }
+
+    /// Of the requests `tids`: how many left and wait for an answer, and how many still sit in
+    /// the outbox. Unknown ids count nowhere.
+    pub(crate) fn request_state(&self, tids: &[u32]) -> (usize, usize) {
+        tids.iter()
+            .filter_map(|tid| self.rpc.get(tid))
+            .fold((0, 0), |(inflight, queued), owner| {
+                if owner.queued {
+                    (inflight, queued + 1)
+                } else {
+                    (inflight + 1, queued)
+                }
+            })
     }
 
     pub(crate) fn operation(&self, tid: u32) -> Option<OperationId> {
