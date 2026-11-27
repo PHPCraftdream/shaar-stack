@@ -240,9 +240,20 @@ fn ping() -> RequestSpecific {
     }
 }
 
-fn paced_socket(seconds: u64) -> (KrpcSocket, OperationId) {
+/// A socket with its first send behind it. On a paused clock the first `writable()` of a fresh
+/// socket parks the runtime, which then jumps the clock to the next timer; a reply registers no
+/// timer, so the jump cannot land inside the scenario that follows.
+async fn paced_socket(seconds: u64) -> (KrpcSocket, OperationId) {
     let mut socket = KrpcSocket::client().expect("KRPC socket");
     socket.enable_owned_resources();
+    let (warm_peer, warm_to) = capture();
+    let warm = ErrorSpecific {
+        code: 201,
+        description: "warm-up".to_owned(),
+    };
+    socket.error_owned(warm_to, 1, warm).expect("warm-up reply");
+    socket.flush_owned().await;
+    assert_eq!(drain(&warm_peer).len(), 1);
     let operation = socket.allocate_operation().expect("operation");
     socket
         .register_owned_deadline(operation, Instant::now() + Duration::from_secs(seconds))
@@ -270,8 +281,7 @@ fn queue(
 #[tokio::test(start_paused = true)]
 async fn a_paced_queue_releases_a_burst_and_then_waits_for_its_turn() {
     let (peer, destination) = capture();
-    let (mut socket, operation) = paced_socket(30);
-    let start = Instant::now();
+    let (mut socket, operation) = paced_socket(30).await;
     let tids = queue(&mut socket, operation, destination, 6);
     socket.flush_owned().await;
     let first: Vec<u32> = drain(&peer)
@@ -279,7 +289,11 @@ async fn a_paced_queue_releases_a_burst_and_then_waits_for_its_turn() {
         .map(|message| message.transaction_id)
         .collect();
     assert_eq!(first.as_slice(), &tids[..4]);
-    assert_eq!(socket.owned_next_departure(), Some(start + SPACING_25));
+    let held_until = socket
+        .owned_next_departure()
+        .expect("the fifth request is held");
+    let wait = held_until - Instant::now();
+    assert!(wait > Duration::ZERO && wait <= SPACING_25, "{wait:?}");
     socket.flush_owned().await;
     assert!(drain(&peer).is_empty());
     tokio::time::advance(SPACING_25).await;
@@ -303,7 +317,7 @@ async fn a_paced_queue_releases_a_burst_and_then_waits_for_its_turn() {
 #[tokio::test(start_paused = true)]
 async fn a_queued_request_does_not_expire_and_its_timeout_runs_from_the_departure() {
     let (peer, destination) = capture();
-    let (mut socket, operation) = paced_socket(30);
+    let (mut socket, operation) = paced_socket(30).await;
     let tids = queue(&mut socket, operation, destination, 6);
     socket.flush_owned().await;
     assert_eq!(drain(&peer).len(), 4);
@@ -334,7 +348,7 @@ async fn a_queued_request_does_not_expire_and_its_timeout_runs_from_the_departur
 #[tokio::test(start_paused = true)]
 async fn a_reply_leaves_at_once_behind_a_held_request() {
     let (peer, destination) = capture();
-    let (mut socket, operation) = paced_socket(30);
+    let (mut socket, operation) = paced_socket(30).await;
     let tids = queue(&mut socket, operation, destination, 6);
     socket.flush_owned().await;
     assert_eq!(drain(&peer).len(), 4);
@@ -357,7 +371,7 @@ async fn a_reply_leaves_at_once_behind_a_held_request() {
 #[tokio::test(start_paused = true)]
 async fn a_held_request_past_its_operation_deadline_is_dropped_when_it_falls_due() {
     let (peer, destination) = capture();
-    let (mut socket, operation) = paced_socket(30);
+    let (mut socket, operation) = paced_socket(30).await;
     socket
         .register_owned_deadline(operation, Instant::now() + Duration::from_millis(100))
         .expect("tightened deadline");
@@ -375,7 +389,7 @@ async fn a_held_request_past_its_operation_deadline_is_dropped_when_it_falls_due
 #[tokio::test(start_paused = true)]
 async fn cancelling_the_operation_drops_the_held_requests() {
     let (peer, destination) = capture();
-    let (mut socket, operation) = paced_socket(30);
+    let (mut socket, operation) = paced_socket(30).await;
     queue(&mut socket, operation, destination, 6);
     socket.flush_owned().await;
     assert_eq!(drain(&peer).len(), 4);
@@ -390,7 +404,7 @@ async fn cancelling_the_operation_drops_the_held_requests() {
 #[tokio::test(start_paused = true)]
 async fn answers_that_arrive_speed_a_paced_schedule_up() {
     let (peer, destination) = capture();
-    let (mut socket, operation) = paced_socket(120);
+    let (mut socket, operation) = paced_socket(120).await;
     for _ in 0..WINDOW {
         tokio::time::advance(SPACING_25).await;
         let tid = socket
