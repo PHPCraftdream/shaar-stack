@@ -18,6 +18,7 @@ use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+mod discover;
 mod role;
 mod run;
 mod wire;
@@ -28,6 +29,8 @@ mod model;
 mod tests;
 
 // The leaf that wires the trial into the punch uses these; until then only the cases do.
+#[allow(unused_imports)]
+pub(crate) use discover::{DISCOVER_WINDOW, MAX_PINGS, discover};
 #[allow(unused_imports)]
 pub(crate) use role::{classify, local_role};
 #[allow(unused_imports)]
