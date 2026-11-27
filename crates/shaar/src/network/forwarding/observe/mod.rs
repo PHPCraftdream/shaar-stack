@@ -22,7 +22,9 @@ pub use nat_filter::{
     catch as nat_filter_catch, listen as nat_filter_listen, probe as nat_filter_probe,
 };
 pub use nat_ports::{ANSWER_WAIT, DEFAULT_SOCKETS, MAX_SOCKETS, nat_ports};
-pub use trace::{PortMapping, client_direct, client_lookup, server_publication};
+pub use trace::{
+    PortMapping, client_direct, client_lookup, server_publication, server_publication_cut,
+};
 
 /// Which product emits an operator line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

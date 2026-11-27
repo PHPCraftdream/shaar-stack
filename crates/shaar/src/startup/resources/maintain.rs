@@ -16,7 +16,7 @@ use crate::native_discovery::runtime::owner::{
     vote_changed,
 };
 use crate::native_discovery::runtime::publisher::PublicationStatus;
-use crate::network::observe::{emit, server_publication};
+use crate::network::observe::{emit, server_publication, server_publication_cut};
 
 use super::MAX_SNAPSHOT_ADDRESSES;
 
@@ -431,6 +431,10 @@ async fn maintain(
             }
             Event::Command(None) => break,
             Event::Snapshot(next) => {
+                // A put in flight is cut by this snapshot (leaf PUT-CUT): say whether the list changed.
+                if publish.is_some() {
+                    emit(server_publication_cut(current.as_ref() != Some(&next)));
+                }
                 latest = Some(next);
                 publish = None;
                 publish_admission = None;

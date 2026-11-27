@@ -26,6 +26,16 @@ pub fn server_publication(outcome: &str, retries: usize) -> String {
     format!("shaar-server: record publication outcome={outcome} retries={retries}")
 }
 
+/// The Server's line when a newer snapshot of its address cut a publication that was still in
+/// flight (leaf PUT-CUT). `changed` says whether the list to publish differs from the one cut: a
+/// change of content is a legitimate replacement, an unchanged list a restart for nothing.
+pub fn server_publication_cut(changed: bool) -> String {
+    format!(
+        "shaar-server: record publication cut changed={}",
+        yes_no(changed)
+    )
+}
+
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
@@ -85,6 +95,18 @@ mod tests {
         assert_eq!(
             server_publication("failed:resource:CandidateLimit", 2),
             "shaar-server: record publication outcome=failed:resource:CandidateLimit retries=2"
+        );
+    }
+
+    #[test]
+    fn the_cut_line_says_only_whether_the_content_changed() {
+        assert_eq!(
+            server_publication_cut(true),
+            "shaar-server: record publication cut changed=yes"
+        );
+        assert_eq!(
+            server_publication_cut(false),
+            "shaar-server: record publication cut changed=no"
         );
     }
 
