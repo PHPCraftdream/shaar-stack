@@ -92,6 +92,13 @@ impl super::super::KrpcSocket {
         }
     }
 
+    /// The `Owned pace outcome` lines printed since the last call, sorted.
+    pub(crate) fn take_outcomes_for_test(&mut self) -> Vec<String> {
+        self.owned
+            .as_mut()
+            .map_or_else(Vec::new, |owned| owned.resources.take_outcome_log())
+    }
+
     pub(crate) fn owned_pacing_rate_for_test(&self) -> Option<u32> {
         self.owned.as_ref()?.pacer.rate()
     }

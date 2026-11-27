@@ -7,13 +7,9 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::time::Instant;
-use tracing::field::{Field, Visit};
-use tracing::span::{Attributes, Id as SpanId, Record};
-use tracing::{Event, Metadata, Subscriber};
 
 use super::super::KrpcSocket;
 use super::pacer::{Pacer, WINDOW};
@@ -422,128 +418,152 @@ async fn answers_that_arrive_speed_a_paced_schedule_up() {
     assert_eq!(socket.owned_pacing_rate_for_test(), Some(30));
 }
 
-/// Collects the fields of the `Owned pace outcome` events as `sent=<n> kind=<k>` (leaf PACE-3a).
-#[derive(Clone, Default)]
-struct Outcomes(Arc<Mutex<Vec<String>>>);
+// The outcome lines (`sent=<n> kind=<k>`, leaf PACE-3a) are read from the log the socket keeps
+// next to the trace, not captured from `tracing`: a thread-local subscriber loses its events when
+// a parallel case without one is the first to hit the callsite (the interest cache is global).
 
-#[derive(Default)]
-struct Picked {
-    message: String,
-    fields: Vec<String>,
+/// Failure-only diagnostics of a case: the notes it took are printed as one tagged line when the
+/// case panics and never otherwise (a green run prints nothing, which the CI output check also
+/// enforces). Each note carries the real and the paused clock, so a stall shows as a gap.
+struct Notes {
+    real: std::time::Instant,
+    paused: Instant,
+    lines: Vec<String>,
 }
 
-impl Visit for Picked {
-    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
-        if field.name() == "message" {
-            self.message = format!("{value:?}");
-        } else {
-            self.fields.push(format!("{}={value:?}", field.name()));
+impl Notes {
+    fn new() -> Self {
+        Self {
+            real: std::time::Instant::now(),
+            paused: Instant::now(),
+            lines: Vec::new(),
+        }
+    }
+
+    fn note(&mut self, label: &str, value: &dyn Debug) {
+        self.lines.push(format!(
+            "{{\"real_ms\":{},\"virtual_ms\":{},\"label\":{label:?},\"value\":{:?}}}",
+            self.real.elapsed().as_millis(),
+            self.paused.elapsed().as_millis(),
+            format!("{value:?}")
+        ));
+    }
+
+    fn render(&self, test: &str) -> String {
+        format!(
+            "[failure diagnostics] {{\"test\":{test:?},\"notes\":[{}]}}",
+            self.lines.join(",")
+        )
+    }
+}
+
+impl Drop for Notes {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            let thread = std::thread::current();
+            eprintln!("{}", self.render(thread.name().unwrap_or("?")));
         }
     }
 }
 
-impl Subscriber for Outcomes {
-    fn enabled(&self, _: &Metadata<'_>) -> bool {
-        true
-    }
-
-    fn new_span(&self, _: &Attributes<'_>) -> SpanId {
-        SpanId::from_u64(1)
-    }
-
-    fn record(&self, _: &SpanId, _: &Record<'_>) {}
-
-    fn record_follows_from(&self, _: &SpanId, _: &SpanId) {}
-
-    fn event(&self, event: &Event<'_>) {
-        let mut picked = Picked::default();
-        event.record(&mut picked);
-        if picked.message == "Owned pace outcome" {
-            self.0.lock().unwrap().push(picked.fields.join(" "));
-        }
-    }
-
-    fn enter(&self, _: &SpanId) {}
-
-    fn exit(&self, _: &SpanId) {}
-}
-
-impl Outcomes {
-    /// The lines printed since the last call, sorted (requests resolved together have no order).
-    fn take(&self) -> Vec<String> {
-        let mut lines = std::mem::take(&mut *self.0.lock().unwrap());
-        lines.sort();
-        lines
-    }
-}
-
-fn outcomes() -> (Outcomes, tracing::subscriber::DefaultGuard) {
-    let outcomes = Outcomes::default();
-    let guard = tracing::subscriber::set_default(outcomes.clone());
-    (outcomes, guard)
+#[tokio::test(start_paused = true)]
+async fn the_failure_report_lists_the_notes_in_order_and_names_the_case() {
+    let mut notes = Notes::new();
+    notes.note("first", &Some(3_usize));
+    notes.note("second", &"two words");
+    let report = notes.render("case");
+    assert!(report.starts_with("[failure diagnostics] {\"test\":\"case\",\"notes\":[{"));
+    assert!(report.contains("\"label\":\"first\",\"value\":\"Some(3)\""));
+    assert!(report.find("\"first\"").unwrap() < report.find("\"second\"").unwrap());
+    assert!(report.contains("\"real_ms\":") && report.contains("\"virtual_ms\":"));
+    assert!(report.ends_with("}]}"));
 }
 
 #[tokio::test(start_paused = true)]
 async fn the_departure_index_follows_the_order_of_departure_not_of_resolution() {
-    let (outcomes, _guard) = outcomes();
+    let mut notes = Notes::new();
     let (peer, destination) = capture();
     let (mut socket, operation) = paced_socket(30).await;
     let tids = queue(&mut socket, operation, destination, 3);
     socket.flush_owned().await;
-    assert_eq!(drain(&peer).len(), 3);
-    assert!(outcomes.take().is_empty(), "nothing resolved yet");
+    let departed = drain(&peer).len();
+    notes.note("departed", &departed);
+    notes.note("state after the flush", &socket.owned_test_state());
+    assert_eq!(departed, 3);
+    assert!(socket.take_outcomes_for_test().is_empty(), "nothing resolved yet");
     assert!(socket.accept_owned_response(tids[2], destination));
-    assert_eq!(outcomes.take(), ["sent=2 kind=0"]);
+    let answered = socket.take_outcomes_for_test();
+    notes.note("after the answer of the third", &answered);
+    assert_eq!(answered, ["sent=2 kind=0"]);
     socket.expire_owned_requests(Duration::ZERO);
-    assert_eq!(outcomes.take(), ["sent=0 kind=1", "sent=1 kind=1"]);
+    let expired = socket.take_outcomes_for_test();
+    notes.note("after the expiry", &expired);
+    notes.note("state after the expiry", &socket.owned_test_state());
+    assert_eq!(expired, ["sent=0 kind=1", "sent=1 kind=1"]);
     let next = queue(&mut socket, operation, destination, 1);
     socket.flush_owned().await;
     assert_eq!(drain(&peer).len(), 1);
     assert!(socket.accept_owned_response(next[0], destination));
-    assert_eq!(outcomes.take(), ["sent=3 kind=0"], "the count goes on");
+    assert_eq!(socket.take_outcomes_for_test(), ["sent=3 kind=0"], "the count goes on");
 }
 
 #[tokio::test(start_paused = true)]
 async fn cancelling_the_operation_prints_the_dropped_kind_for_departed_requests_only() {
-    let (outcomes, _guard) = outcomes();
+    let mut notes = Notes::new();
     let (peer, destination) = capture();
     let (mut socket, operation) = paced_socket(30).await;
     queue(&mut socket, operation, destination, 6);
     socket.flush_owned().await;
-    assert_eq!(drain(&peer).len(), 4);
+    let departed = drain(&peer).len();
+    notes.note("departed", &departed);
+    notes.note("state after the flush", &socket.owned_test_state());
+    assert_eq!(departed, 4);
     socket.cancel_owned_operation(operation);
+    let dropped = socket.take_outcomes_for_test();
+    notes.note("after the cancellation", &dropped);
     assert_eq!(
-        outcomes.take(),
+        dropped,
         ["sent=0 kind=2", "sent=1 kind=2", "sent=2 kind=2", "sent=3 kind=2"],
         "the two queued requests never left and print nothing"
     );
     tokio::time::advance(Duration::from_secs(1)).await;
     socket.flush_owned().await;
-    assert!(outcomes.take().is_empty());
+    assert!(socket.take_outcomes_for_test().is_empty());
 }
 
 #[tokio::test(start_paused = true)]
 async fn an_answer_after_the_expiry_prints_nothing() {
-    let (outcomes, _guard) = outcomes();
+    let mut notes = Notes::new();
     let (peer, destination) = capture();
     let (mut socket, operation) = paced_socket(30).await;
     let tids = queue(&mut socket, operation, destination, 1);
+    notes.note("state after the queueing", &socket.owned_test_state());
     socket.flush_owned().await;
-    assert_eq!(drain(&peer).len(), 1);
+    let departed = drain(&peer).len();
+    notes.note("departed", &departed);
+    notes.note("state after the flush", &socket.owned_test_state());
+    notes.note("rate", &socket.owned_pacing_rate_for_test());
+    assert_eq!(departed, 1);
     socket.expire_owned_requests(Duration::ZERO);
-    assert_eq!(outcomes.take(), ["sent=0 kind=1"]);
+    let expired = socket.take_outcomes_for_test();
+    notes.note("after the expiry", &expired);
+    notes.note("state after the expiry", &socket.owned_test_state());
+    assert_eq!(expired, ["sent=0 kind=1"]);
     assert!(!socket.accept_owned_response(tids[0], destination));
-    assert!(outcomes.take().is_empty(), "one line per request");
+    assert!(socket.take_outcomes_for_test().is_empty(), "one line per request");
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_request_that_failed_to_leave_prints_nothing() {
-    let (outcomes, _guard) = outcomes();
+    let mut notes = Notes::new();
     let (_peer, destination) = capture();
     let (mut socket, operation) = paced_socket(30).await;
     queue(&mut socket, operation, destination, 1);
     socket.fail_next_send_for_test();
     socket.flush_owned().await;
-    assert!(outcomes.take().is_empty());
+    let lines = socket.take_outcomes_for_test();
+    notes.note("lines after the failed send", &lines);
+    notes.note("state after the failed send", &socket.owned_test_state());
+    assert!(lines.is_empty());
     assert_eq!(socket.owned_test_state().map(|state| state.2), Some(0));
 }

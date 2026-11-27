@@ -38,6 +38,11 @@ impl Actor {
                 age_ms = ?age.as_millis(), inflight = ?inflight, queued = ?queued,
                 attempts = ?attempts, rpc = ?rpc, "Owned put wait"
             );
+            #[cfg(test)]
+            owner.put_wait_log.push(format!(
+                "age_ms={} inflight={inflight} queued={queued} attempts={attempts} rpc={rpc}",
+                age.as_millis()
+            ));
         }
     }
 

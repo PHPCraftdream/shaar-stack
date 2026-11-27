@@ -85,6 +85,10 @@ pub(crate) struct OwnedActor {
     pub(crate) terminal: Option<ResourceError>,
     #[cfg(test)]
     pub(crate) put_start_deadline_operation: Option<OperationId>,
+    /// The `Owned put wait` lines as printed; a case reads this log, not a captured trace (see
+    /// `SocketResources::outcome_log`).
+    #[cfg(test)]
+    pub(crate) put_wait_log: Vec<String>,
     failure_status: Arc<OnceLock<ResourceError>>,
     bootstrap_leases: Vec<HolderLease>,
     completions: HashMap<Id, Vec<OwnedWaiter>>,
@@ -170,6 +174,8 @@ impl OwnedActor {
             terminal: None,
             #[cfg(test)]
             put_start_deadline_operation: None,
+            #[cfg(test)]
+            put_wait_log: Vec::new(),
             failure_status: Arc::new(OnceLock::new()),
             bootstrap_leases,
             completions: HashMap::new(),

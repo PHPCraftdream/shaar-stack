@@ -3,76 +3,74 @@
 #![forbid(unsafe_code)]
 
 use std::fmt::Debug;
-use std::sync::Mutex;
-
-use tracing::field::{Field, Visit};
-use tracing::span::{Attributes, Id as SpanId, Record};
-use tracing::{Event, Metadata, Subscriber};
 
 use super::*;
 
-/// Collects the fields of the `Owned put wait` events as one line each (leaf PACE-STALL).
-#[derive(Clone, Default)]
-struct Waits(Arc<Mutex<Vec<String>>>);
-
-#[derive(Default)]
-struct Picked {
-    message: String,
-    fields: Vec<String>,
+/// The `Owned put wait` lines (leaf PACE-STALL) printed since the last call. They are read from
+/// the log the actor keeps next to the trace, not captured from `tracing`: a thread-local
+/// subscriber loses its events when a parallel case without one is the first to hit the callsite
+/// (the interest cache is global).
+fn waits(actor: &mut Actor) -> Vec<String> {
+    std::mem::take(&mut actor.owned_resources.as_mut().expect("owned profile").put_wait_log)
 }
 
-impl Visit for Picked {
-    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
-        if field.name() == "message" {
-            self.message = format!("{value:?}");
-        } else {
-            self.fields.push(format!("{}={value:?}", field.name()));
+/// Failure-only diagnostics of a case: the notes it took are printed as one tagged line when the
+/// case panics and never otherwise (a green run prints nothing, which the CI output check also
+/// enforces). The clock is the real one; the put's own age is a parameter of each step.
+struct Notes {
+    started: std::time::Instant,
+    lines: Vec<String>,
+}
+
+impl Notes {
+    fn new() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            lines: Vec::new(),
+        }
+    }
+
+    fn note(&mut self, label: &str, value: &dyn Debug) {
+        self.lines.push(format!(
+            "{{\"real_ms\":{},\"label\":{label:?},\"value\":{:?}}}",
+            self.started.elapsed().as_millis(),
+            format!("{value:?}")
+        ));
+    }
+
+    fn render(&self, test: &str) -> String {
+        format!(
+            "[failure diagnostics] {{\"test\":{test:?},\"notes\":[{}]}}",
+            self.lines.join(",")
+        )
+    }
+}
+
+impl Drop for Notes {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            let thread = std::thread::current();
+            eprintln!("{}", self.render(thread.name().unwrap_or("?")));
         }
     }
 }
 
-impl Subscriber for Waits {
-    fn enabled(&self, _: &Metadata<'_>) -> bool {
-        true
-    }
-
-    fn new_span(&self, _: &Attributes<'_>) -> SpanId {
-        SpanId::from_u64(1)
-    }
-
-    fn record(&self, _: &SpanId, _: &Record<'_>) {}
-
-    fn record_follows_from(&self, _: &SpanId, _: &SpanId) {}
-
-    fn event(&self, event: &Event<'_>) {
-        let mut picked = Picked::default();
-        event.record(&mut picked);
-        if picked.message == "Owned put wait" {
-            self.0.lock().unwrap().push(picked.fields.join(" "));
-        }
-    }
-
-    fn enter(&self, _: &SpanId) {}
-
-    fn exit(&self, _: &SpanId) {}
-}
-
-impl Waits {
-    /// The lines printed since the last call.
-    fn take(&self) -> Vec<String> {
-        std::mem::take(&mut *self.0.lock().unwrap())
-    }
-}
-
-fn waits() -> (Waits, tracing::subscriber::DefaultGuard) {
-    let waits = Waits::default();
-    let guard = tracing::subscriber::set_default(waits.clone());
-    (waits, guard)
+#[test]
+fn the_failure_report_of_a_put_case_lists_the_notes_in_order_and_names_the_case() {
+    let mut notes = Notes::new();
+    notes.note("first", &(1_usize, 2_usize));
+    notes.note("second", &Some("two words"));
+    let report = notes.render("case");
+    assert!(report.starts_with("[failure diagnostics] {\"test\":\"case\",\"notes\":[{"));
+    assert!(report.contains("\"label\":\"first\",\"value\":\"(1, 2)\""));
+    assert!(report.find("\"first\"").unwrap() < report.find("\"second\"").unwrap());
+    assert!(report.contains("\"real_ms\":"));
+    assert!(report.ends_with("}]}"));
 }
 
 #[tokio::test]
 async fn a_put_that_stays_unresolved_prints_a_wait_line_at_ten_and_at_twenty_seconds() {
-    let (waits, _guard) = waits();
+    let mut notes = Notes::new();
     let (_bootstrap_peer, bootstrap) = captured_peer();
     let mut actor = actor(bootstrap);
     actor.owned_disable_maintenance_for_test = true;
@@ -116,32 +114,42 @@ async fn a_put_that_stays_unresolved_prints_a_wait_line_at_ten_and_at_twenty_sec
     actor.socket.flush_owned().await;
     let tids = actor.core.put_queries[&target].transaction_ids().to_vec();
     let (inflight, queued, rpc) = actor.socket.owned_request_state(&tids);
+    notes.note("inflight, queued, rpc after the flush", &(inflight, queued, rpc));
+    notes.note("state of the socket", &actor.socket.owned_test_state());
     assert_eq!(inflight + queued, 6);
     assert!(inflight > 0 && queued > 0, "{inflight} left, {queued} queued");
 
     actor.maintain_owned_puts_at(now + Duration::from_millis(9_999));
-    assert!(waits.take().is_empty(), "nothing before ten seconds");
+    let before = waits(&mut actor);
+    notes.note("lines at 9.999 s", &before);
+    assert!(before.is_empty(), "nothing before ten seconds");
     actor.maintain_owned_puts_at(now + Duration::from_secs(10));
+    let at_ten = waits(&mut actor);
+    notes.note("lines at 10 s", &at_ten);
     assert_eq!(
-        waits.take(),
+        at_ten,
         [format!("age_ms=10000 inflight={inflight} queued={queued} attempts=1 rpc={rpc}")]
     );
     actor.maintain_owned_puts_at(now + Duration::from_secs(15));
-    assert!(waits.take().is_empty(), "one line per step");
+    assert!(waits(&mut actor).is_empty(), "one line per step");
     actor.maintain_owned_puts_at(now + Duration::from_secs(20));
+    let at_twenty = waits(&mut actor);
+    notes.note("lines at 20 s", &at_twenty);
     assert_eq!(
-        waits.take(),
+        at_twenty,
         [format!("age_ms=20000 inflight={inflight} queued={queued} attempts=1 rpc={rpc}")]
     );
     actor.maintain_owned_puts_at(now + Duration::from_secs(120));
-    assert!(waits.take().is_empty(), "never a third line");
-    assert_eq!(actor.owned_resources.as_ref().unwrap().active_put_len(), 1);
+    assert!(waits(&mut actor).is_empty(), "never a third line");
+    let active = actor.owned_resources.as_ref().unwrap().active_put_len();
+    notes.note("active puts at the end", &active);
+    assert_eq!(active, 1);
     drop((cancel, peers));
 }
 
 #[tokio::test]
 async fn a_put_that_ends_before_ten_seconds_prints_no_wait_line() {
-    let (waits, _guard) = waits();
+    let mut notes = Notes::new();
     let (_bootstrap_peer, bootstrap) = captured_peer();
     let mut actor = actor(bootstrap);
     actor.owned_disable_maintenance_for_test = true;
@@ -162,10 +170,14 @@ async fn a_put_that_ends_before_ten_seconds_prints_no_wait_line() {
     let _result = reply_rx.try_recv().expect("PUT admitted").expect("no admission error");
     cancel.send(()).expect("request cancellation");
     actor.maintain_owned_puts_at(now + Duration::from_secs(1));
-    assert_eq!(actor.owned_resources.as_ref().unwrap().active_put_len(), 0);
+    let active = actor.owned_resources.as_ref().unwrap().active_put_len();
+    notes.note("active puts one second after the cancellation", &active);
+    assert_eq!(active, 0);
     actor.maintain_owned_puts_at(now + Duration::from_secs(10));
     actor.maintain_owned_puts_at(now + Duration::from_secs(20));
-    assert!(waits.take().is_empty());
+    let lines = waits(&mut actor);
+    notes.note("lines after twenty seconds", &lines);
+    assert!(lines.is_empty());
 }
 
 #[tokio::test]

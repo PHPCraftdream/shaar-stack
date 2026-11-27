@@ -69,9 +69,24 @@ pub(crate) struct SocketResources {
     next_operation: u64,
     datagrams: usize,
     bytes: usize,
+    /// The `Owned pace outcome` lines as printed. A case reads this log instead of capturing the
+    /// trace: the interest cache of `tracing` is process-wide, so a case that captured with a
+    /// thread-local subscriber lost its events whenever a parallel case without one hit the same
+    /// callsite first.
+    #[cfg(test)]
+    outcome_log: Vec<String>,
 }
 
 impl SocketResources {
+    /// The outcome lines printed since the last call, sorted (requests resolved together have no
+    /// order).
+    #[cfg(test)]
+    pub(crate) fn take_outcome_log(&mut self) -> Vec<String> {
+        let mut lines = std::mem::take(&mut self.outcome_log);
+        lines.sort();
+        lines
+    }
+
     pub(crate) fn register_owned_deadline(
         &mut self,
         operation: OperationId,
@@ -220,6 +235,8 @@ impl SocketResources {
         };
         if let Some(sent) = owner.sent_index {
             debug!(sent = ?sent, kind = ?outcome, "Owned pace outcome");
+            #[cfg(test)]
+            self.outcome_log.push(format!("sent={sent} kind={outcome}"));
         }
         if let Some(count) = self.per_operation.get_mut(&owner.operation) {
             *count -= 1;
