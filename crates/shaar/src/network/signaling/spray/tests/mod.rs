@@ -8,7 +8,9 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::Instant;
 
-use super::model::{EASY, HARD_IP, HardPort, Net};
+mod model;
+mod negotiate_cases;
+
 use super::run::{EasyPlan, HardPlan, Hit, Schedule, Trial, run_easy, run_hard};
 use super::wire::{self, MESSAGE_LEN};
 use super::{
@@ -16,6 +18,7 @@ use super::{
     Report, Rng, Role, SprayMessage, TRIAL_WINDOW, UDP_IPV4_HEADER, datagram, random_ports,
     read_datagram,
 };
+use model::{EASY, HARD_IP, HardPort, Net};
 
 const INSTANT: Schedule = Schedule {
     per_tick: usize::MAX,
