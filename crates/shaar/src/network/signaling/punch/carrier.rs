@@ -36,7 +36,17 @@ async fn send_encoded(
     budget: Duration,
 ) -> Result<(), SendError> {
     let bytes = encode(message).ok_or(SendError::Closed)?;
-    match timeout(budget, sender.send(peer, &bytes)).await {
+    send_bytes(sender, peer, &bytes, budget).await
+}
+
+/// Sends already encoded bytes on the peer's current carrier link, with the same ends as above.
+async fn send_bytes(
+    sender: &PunchSender,
+    peer: PeerId,
+    bytes: &[u8],
+    budget: Duration,
+) -> Result<(), SendError> {
+    match timeout(budget, sender.send(peer, bytes)).await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(error)) => Err(match error.kind() {
             std::io::ErrorKind::NotConnected
@@ -71,6 +81,10 @@ impl PunchLink for CarrierPunch {
         send_encoded(&self.sender, self.peer, message, budget).await
     }
 
+    async fn send_raw(&self, bytes: &[u8], budget: Duration) -> Result<(), SendError> {
+        send_bytes(&self.sender, self.peer, bytes, budget).await
+    }
+
     async fn recv_raw(&mut self) -> Option<Vec<u8>> {
         loop {
             let inbound = self.port.recv().await?;
@@ -91,6 +105,10 @@ pub(crate) struct CarrierPeerLink {
 impl PunchLink for CarrierPeerLink {
     async fn send(&self, message: &PunchMessage, budget: Duration) -> Result<(), SendError> {
         send_encoded(&self.sender, self.peer, message, budget).await
+    }
+
+    async fn send_raw(&self, bytes: &[u8], budget: Duration) -> Result<(), SendError> {
+        send_bytes(&self.sender, self.peer, bytes, budget).await
     }
 
     async fn recv_raw(&mut self) -> Option<Vec<u8>> {

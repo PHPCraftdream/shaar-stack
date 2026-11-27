@@ -13,6 +13,7 @@ use futures::{StreamExt, future::select_all, stream::FuturesUnordered};
 use iroh_base::PublicKey;
 use tokio::sync::mpsc;
 
+use super::spray::{Ground, Real, Spray};
 use crate::network::signaling::punch::{
     self, Kind, OfferBatch, PunchChannel, PunchLink, PunchMessage, SendError,
 };
@@ -143,8 +144,13 @@ pub(super) async fn drive_links<L, P>(
         .into_iter()
         .map(|(peer, channel)| {
             let provider = provider.clone();
-            Box::pin(serve_peer(peer, provider, batches.clone(), channel))
-                as Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+            Box::pin(serve_peer_with(
+                peer,
+                provider,
+                batches.clone(),
+                channel,
+                Some(Spray::new(Real)),
+            )) as Pin<Box<dyn std::future::Future<Output = ()> + Send>>
         })
         .collect();
     items.push(Box::pin(run_batches(batch_rx, burst)));
@@ -172,14 +178,31 @@ pub(super) async fn drive_links<L, P>(
 /// hostile input is silently discarded; a closed link ends the worker (peer
 /// punching disabled), while a refused Answer is left to the peer's next Offer
 /// copy.
+#[cfg(test)]
 async fn serve_peer<L, P>(
     peer: [u8; 32],
     provider: P,
     batches: mpsc::Sender<OfferBatch>,
-    mut channel: L,
+    channel: L,
 ) where
     L: PunchLink + Send,
     P: Fn() -> Vec<SocketAddr> + Send,
+{
+    serve_peer_with(peer, provider, batches, channel, None::<Spray<Real>>).await;
+}
+
+/// [`serve_peer`] with the birthday trial (leaf BDAY-1b): a datagram of the trial is handled by
+/// `spray` first, anything else is read as a punch message as before.
+async fn serve_peer_with<L, P, G>(
+    peer: [u8; 32],
+    provider: P,
+    batches: mpsc::Sender<OfferBatch>,
+    mut channel: L,
+    mut spray: Option<Spray<G>>,
+) where
+    L: PunchLink + Send,
+    P: Fn() -> Vec<SocketAddr> + Send,
+    G: Ground,
 {
     let mut last_epoch: Option<u32> = None;
     // Per-peer burst rate limit (Finding 1a), on the tokio (pausable)
@@ -195,6 +218,11 @@ async fn serve_peer<L, P>(
             // Link died: this peer's punching is disabled.
             return;
         };
+        if let Some(spray) = spray.as_mut()
+            && spray.handle(&raw, peer, &mut channel).await
+        {
+            continue;
+        }
         // Malformed, hostile or Answer-kind datagrams: silently discarded.
         let Some(offer) = punch::decode(&raw) else {
             continue;

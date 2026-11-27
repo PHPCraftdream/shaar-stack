@@ -13,9 +13,10 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio::time::{Instant, sleep_until, timeout_at};
 
+use super::negotiate::Agreement;
 use super::{
-    Counters, DATAGRAM_LEN, MAX_PROBES, MAX_SOCKETS, Mark, Rng, Token, datagram, random_ports,
-    read_datagram,
+    Counters, DATAGRAM_LEN, MAX_PROBES, MAX_SOCKETS, Mark, Report, Rng, Role, TRIAL_WINDOW, Token,
+    datagram, random_ports, read_datagram,
 };
 use crate::network::signaling::punch::peer_claimed_probe_allowed;
 
@@ -325,6 +326,88 @@ pub(crate) async fn run_easy<P: Datagrams>(
                 _ = sleep_until(wake) => break,
             }
         }
+    }
+}
+
+/// What one side found when its trial ended, with what it used.
+pub(crate) struct Finished<T> {
+    /// The hit: the socket and the peer endpoint (hard side) or the endpoint heard (easy side).
+    pub found: Option<T>,
+    pub report: Report,
+    pub elapsed: Duration,
+}
+
+impl<T> Finished<T> {
+    /// A trial that did not run: nothing found, nothing used.
+    fn idle() -> Self {
+        Self {
+            found: None,
+            report: Counters::new().report(),
+            elapsed: Duration::ZERO,
+        }
+    }
+
+    /// The operator line of this device and trial: counts only, no address and no token.
+    pub(crate) fn line(&self, role: Role) -> String {
+        self.report.line(role, self.found.is_some(), self.elapsed)
+    }
+}
+
+/// The trial of an agreement: its token, fresh counters and the window from now.
+fn agreed_trial(
+    agreement: &Agreement,
+    cancel: watch::Receiver<bool>,
+) -> (Trial, Arc<Counters>, Instant) {
+    let started = Instant::now();
+    let counters = Arc::new(Counters::new());
+    let trial = Trial {
+        token: agreement.token,
+        counters: Arc::clone(&counters),
+        deadline: started + TRIAL_WINDOW,
+        cancel,
+    };
+    (trial, counters, started)
+}
+
+/// Runs the hard side of an agreement to its end: the sockets the agreement plans, each writing
+/// once to the easy endpoint it names. An agreement of the other role runs nothing.
+pub(crate) async fn run_hard_agreed<O: Opener>(
+    opener: &mut O,
+    agreement: &Agreement,
+    cancel: watch::Receiver<bool>,
+) -> Finished<Hit<O::Port>> {
+    if agreement.role != Role::Hard {
+        return Finished::idle();
+    }
+    let (trial, counters, started) = agreed_trial(agreement, cancel);
+    let plan = HardPlan::new(usize::from(agreement.planned));
+    let found = run_hard(opener, agreement.peer, plan, trial).await;
+    Finished {
+        found,
+        report: counters.report(),
+        elapsed: started.elapsed(),
+    }
+}
+
+/// Runs the easy side of an agreement to its end: the probes the agreement plans, from `port`
+/// (the socket whose endpoint the agreement named) to random ports of the hard side's address.
+/// An agreement of the other role runs nothing.
+pub(crate) async fn run_easy_agreed<P: Datagrams>(
+    port: &mut P,
+    agreement: &Agreement,
+    rng: &mut Rng,
+    cancel: watch::Receiver<bool>,
+) -> Finished<SocketAddrV4> {
+    if agreement.role != Role::Easy {
+        return Finished::idle();
+    }
+    let (trial, counters, started) = agreed_trial(agreement, cancel);
+    let plan = EasyPlan::new(usize::from(agreement.planned));
+    let found = run_easy(port, *agreement.peer.ip(), plan, rng, trial).await;
+    Finished {
+        found,
+        report: counters.report(),
+        elapsed: started.elapsed(),
     }
 }
 

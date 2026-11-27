@@ -120,6 +120,8 @@ pub(crate) struct NativeDialer {
     carrier_punch: Option<punch::CarrierPunch>,
     /// Wrapping epoch distinguishing successive punch attempts.
     punch_epoch: u32,
+    /// The birthday trial offered after the honest punch rounds failed (leaf BDAY-1b).
+    spray: super::client::spray::SprayDial<super::client::spray::Real>,
     lease: Option<RelayLease>,
     /// Shared OBS-1 resolve observation written after every route decision.
     note: tokio::sync::watch::Sender<Option<ResolveObservation>>,
@@ -143,6 +145,9 @@ impl NativeDialer {
         #[cfg(test)] events: Option<super::RoleEventLog>,
     ) -> Self {
         let hint_count = candidates.len();
+        let spray = super::client::spray::SprayDial::new(super::client::spray::Real {
+            resources: resources.clone(),
+        });
         Self {
             endpoint,
             peer,
@@ -154,6 +159,7 @@ impl NativeDialer {
             punch,
             carrier_punch: None,
             punch_epoch: 0,
+            spray,
             lease: None,
             note,
             hint_count,
@@ -473,6 +479,11 @@ impl Dialer for NativeDialer {
                 ));
                 return Ok(session);
             }
+            // The honest rounds opened no path: offer the birthday trial (leaf BDAY-1b). Only the
+            // exchange runs here, bounded by the deadline of the dial; the trial is a detached task.
+            self.spray
+                .attempt(channel, *peer.as_bytes(), epoch, deadline)
+                .await;
         }
         // Relay negotiation only when a relay is configured and time remains:
         // exhausting the list exactly at the deadline still ends the attempt

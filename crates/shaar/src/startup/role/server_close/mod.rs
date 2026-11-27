@@ -5,6 +5,9 @@
 mod carrier_punch;
 mod close;
 mod punch;
+mod spray;
+#[cfg(test)]
+mod spray_tests;
 
 pub(super) use carrier_punch::spawn_carrier_responder;
 pub(super) use close::{close_parts, reap_session, spawn_session};

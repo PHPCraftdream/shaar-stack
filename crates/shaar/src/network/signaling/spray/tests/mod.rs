@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::Instant;
 
+mod agreed_cases;
 mod model;
 mod negotiate_cases;
 

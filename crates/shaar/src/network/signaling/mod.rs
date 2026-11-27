@@ -78,10 +78,11 @@ pub(crate) fn peer_id(key: &PublicKey) -> io::Result<PeerId> {
 
 pub(crate) mod punch;
 
-// The birthday trial (leaf BDAY-1a): the engine and its control messages. It is wired into the
-// punch by the next leaf, so nothing outside its tests uses it yet.
+// The birthday trial (leaf BDAY-1): the engine, its control messages and the exchange. The Server's
+// responder and the Client's dial use it (leaf BDAY-1b); the handover of a hit is BDAY-2, so some of
+// its parts are used by the cases only.
 #[allow(dead_code)]
-mod spray;
+pub(crate) mod spray;
 
 #[cfg(test)]
 #[path = "tests/tests.rs"]

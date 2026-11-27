@@ -55,6 +55,9 @@ use crate::startup::resources::{SharedResources, SharedResourcesStart};
 use crate::startup::role::RoleOptions;
 pub(super) mod route_link;
 mod run_loop;
+pub(super) mod spray;
+#[cfg(test)]
+mod spray_tests;
 use run_loop::run_parts;
 
 use crate::startup::role::dialers::{

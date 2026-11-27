@@ -9,7 +9,7 @@ use tokio::time::Instant;
 
 use super::super::negotiate::{
     Admit, Agreement, COOLDOWN_PEERS, Cooldown, DEFAULT_PROBES, DEFAULT_SOCKETS, EXCHANGE_WINDOW,
-    Hits, OFFER_RESEND, Side, Wire, initiate, respond,
+    Hits, OFFER_RESEND, Side, Wire, answer, initiate, prepare, respond,
 };
 use super::super::wire::{self, Kind, SprayMessage};
 use super::super::{MAX_PROBES, MAX_SOCKETS, MIN_INTERVAL, Role, Token};
@@ -334,4 +334,32 @@ fn a_hit_report_is_taken_once_and_only_for_its_epoch_and_token() {
     assert_eq!(hits.take(b"garbage"), None);
     assert_eq!(hits.take(&hit(Kind::Hit, 7, TOKEN)), Some(heard));
     assert_eq!(hits.take(&hit(Kind::Hit, 7, TOKEN)), None, "once");
+}
+
+#[test]
+fn the_peer_is_booked_by_the_answer_and_not_by_the_preparation() {
+    let t0 = Instant::now();
+    let mut cooldown = Cooldown::new();
+    let offer = message(Kind::Offer, 7, TOKEN, HARD);
+    let admitted = prepare(&offer, Role::Easy, PEER, &cooldown, t0).expect("admitted");
+    assert!(admitted.fresh);
+    assert_eq!(cooldown.len(), 0, "preparing books nothing");
+    // Prepared again, the Offer is still fresh: the endpoint could not be learned the first time.
+    assert!(
+        prepare(&offer, Role::Easy, PEER, &cooldown, t0)
+            .expect("admitted")
+            .fresh
+    );
+    let response = answer(&admitted, EASY, PEER, &mut cooldown, t0).expect("answered");
+    assert!(response.start.is_some());
+    assert_eq!(cooldown.len(), 1);
+    assert!(
+        !prepare(&offer, Role::Easy, PEER, &cooldown, t0)
+            .expect("admitted")
+            .fresh
+    );
+    let next = message(Kind::Offer, 8, TOKEN, HARD);
+    assert!(prepare(&next, Role::Easy, PEER, &cooldown, t0).is_none());
+    // The same role as the Offer's is no match, whatever the cooldown says.
+    assert!(prepare(&offer, Role::Hard, PEER, &cooldown, t0).is_none());
 }

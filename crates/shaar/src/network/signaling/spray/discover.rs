@@ -7,6 +7,7 @@
 //! not a probe of ports and not a probe of the peer.
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use tokio::time::{Instant, timeout_at};
@@ -125,6 +126,20 @@ pub(crate) fn read_endpoint(bytes: &[u8], tx: [u8; TX_LEN]) -> Option<SocketAddr
         && endpoint.port() != 0
         && peer_claimed_probe_allowed(SocketAddr::V4(endpoint)))
     .then_some(endpoint)
+}
+
+/// The DHT hosts the operator configured, as the DHT owner of this process was started with them.
+/// A process runs one DHT owner, so the first call wins; at most [`MAX_PINGS`] are kept.
+static NODES: OnceLock<Vec<SocketAddrV4>> = OnceLock::new();
+
+/// Remembers the configured DHT hosts for [`known_nodes`].
+pub(crate) fn remember_nodes(nodes: &[SocketAddrV4]) {
+    let _ = NODES.set(nodes.iter().take(MAX_PINGS).copied().collect());
+}
+
+/// The configured DHT hosts of this process; empty before a DHT owner started.
+pub(crate) fn known_nodes() -> Vec<SocketAddrV4> {
+    NODES.get().cloned().unwrap_or_default()
 }
 
 /// Asks the configured DHT nodes, one after the other, for the endpoint this socket has outside:

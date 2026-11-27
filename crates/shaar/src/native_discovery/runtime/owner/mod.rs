@@ -208,6 +208,9 @@ impl RuntimeOwner {
     ) -> std::io::Result<Self> {
         // The library's query counters reach the operator trace (leaf FIX-3b).
         crate::network::observe::install_dht_trace();
+        // The hosts the operator configured also serve the birthday trial's one DHT ping (leaf
+        // BDAY-1b).
+        crate::network::signaling::spray::remember_nodes(bootstrap);
         let dht = OwnedDht::new(bind, bootstrap)?;
         let handle = dht.handle();
         let key = endpoint_key(&identity)?;

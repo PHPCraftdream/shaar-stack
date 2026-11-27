@@ -29,17 +29,18 @@ mod tests;
 
 // The leaf that wires the trial into the punch uses these; until then only the cases do.
 #[allow(unused_imports)]
-pub(crate) use discover::{DISCOVER_WINDOW, MAX_PINGS, discover};
+pub(crate) use discover::{DISCOVER_WINDOW, MAX_PINGS, discover, known_nodes, remember_nodes};
 #[allow(unused_imports)]
 pub(crate) use negotiate::{
-    Admit, Agreement, Cooldown, DEFAULT_PROBES, DEFAULT_SOCKETS, Hits, Side, Wire, initiate,
-    respond,
+    Admit, Admitted, Agreement, Cooldown, DEFAULT_PROBES, DEFAULT_SOCKETS, Hits, OverPunch, Side,
+    Wire, answer, initiate, prepare, respond,
 };
 #[allow(unused_imports)]
 pub(crate) use role::{classify, local_role};
 #[allow(unused_imports)]
 pub(crate) use run::{
-    Datagrams, EasyPlan, HardPlan, Hit, Opener, Trial, UdpOpener, run_easy, run_hard,
+    Datagrams, EasyPlan, Finished, HardPlan, Hit, Opener, Trial, UdpOpener, run_easy,
+    run_easy_agreed, run_hard, run_hard_agreed,
 };
 #[allow(unused_imports)]
 pub(crate) use wire::{Kind, SprayMessage, decode, encode};

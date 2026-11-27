@@ -15,6 +15,7 @@ use tokio::time::{Instant, timeout_at};
 
 use super::wire::{self, Kind, SprayMessage};
 use super::{MIN_INTERVAL, Role, Token};
+use crate::network::signaling::punch::{EXCHANGE_BUDGET, PunchLink};
 
 /// Sockets a hard side plans by default: 3000 sockets and 200 probes give 9.3 expected hits, a
 /// chance of 99.99 % in the model, for about 150 KB from the hard side and 10 KB from the easy
@@ -139,16 +140,25 @@ impl Cooldown {
         Self::default()
     }
 
+    /// What booking an Offer of `epoch` from `peer` at `now` would say, without booking it.
+    pub(crate) fn check(&self, peer: [u8; 32], epoch: u32, now: Instant) -> Admit {
+        match self.last.get(&peer) {
+            Some((at, last_epoch)) if now.saturating_duration_since(*at) < MIN_INTERVAL => {
+                if *last_epoch == epoch {
+                    Admit::Repeat
+                } else {
+                    Admit::Refused
+                }
+            }
+            _ => Admit::Fresh,
+        }
+    }
+
     /// Books an Offer of `epoch` from `peer` at `now`.
     pub(crate) fn admit(&mut self, peer: [u8; 32], epoch: u32, now: Instant) -> Admit {
-        if let Some((at, last_epoch)) = self.last.get(&peer)
-            && now.saturating_duration_since(*at) < MIN_INTERVAL
-        {
-            return if *last_epoch == epoch {
-                Admit::Repeat
-            } else {
-                Admit::Refused
-            };
+        let verdict = self.check(peer, epoch, now);
+        if verdict != Admit::Fresh {
+            return verdict;
         }
         if self.last.len() >= COOLDOWN_PEERS && !self.last.contains_key(&peer) {
             self.last
@@ -181,20 +191,50 @@ pub(crate) struct Response {
     pub start: Option<Agreement>,
 }
 
-/// The responder: `None` (no answer, nothing started) for anything but an Offer from a peer whose
-/// role fits, whose epoch the cooldown admits, and whose answer the codec accepts.
-pub(crate) fn respond(
+/// An Offer that this side may answer: of the other role, and not refused by the cooldown. `fresh`
+/// tells the first copy of an epoch from a repeated one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Admitted {
+    pub offer: SprayMessage,
+    pub fresh: bool,
+}
+
+/// The first half of the responder, which books nothing: `None` for anything but an Offer of the
+/// other role from a peer the cooldown admits. The responder learns its own endpoint between the
+/// two halves, so a failure to learn it leaves the peer unbooked.
+pub(crate) fn prepare(
     raw: &[u8],
+    mine: Role,
+    peer: [u8; 32],
+    cooldown: &Cooldown,
+    now: Instant,
+) -> Option<Admitted> {
+    let offer = wire::decode(raw)?;
+    if offer.kind != Kind::Offer || !compatible(mine, offer.role) {
+        return None;
+    }
+    match cooldown.check(peer, offer.epoch, now) {
+        Admit::Refused => None,
+        Admit::Repeat => Some(Admitted {
+            offer,
+            fresh: false,
+        }),
+        Admit::Fresh => Some(Admitted { offer, fresh: true }),
+    }
+}
+
+/// The second half: the Answer for an admitted Offer, with this side's own `side`, and the
+/// agreement when it is the first copy of its epoch (the peer is booked then). `None` when the
+/// codec refuses the Answer.
+pub(crate) fn answer(
+    admitted: &Admitted,
     side: Side,
     peer: [u8; 32],
     cooldown: &mut Cooldown,
     now: Instant,
 ) -> Option<Response> {
-    let offer = wire::decode(raw)?;
-    if offer.kind != Kind::Offer || !compatible(side.role, offer.role) {
-        return None;
-    }
-    let answer = wire::encode(&SprayMessage {
+    let offer = &admitted.offer;
+    let bytes = wire::encode(&SprayMessage {
         kind: Kind::Answer,
         epoch: offer.epoch,
         token: offer.token,
@@ -202,18 +242,34 @@ pub(crate) fn respond(
         address: side.address,
         planned: side.planned,
     })?;
-    let start = match cooldown.admit(peer, offer.epoch, now) {
-        Admit::Refused => return None,
-        Admit::Repeat => None,
-        Admit::Fresh => Some(Agreement {
+    let start = if admitted.fresh {
+        cooldown.admit(peer, offer.epoch, now);
+        Some(Agreement {
             epoch: offer.epoch,
             token: offer.token,
             role: side.role,
             peer: offer.address,
             planned: side.planned,
-        }),
+        })
+    } else {
+        None
     };
-    Some(Response { answer, start })
+    Some(Response {
+        answer: bytes,
+        start,
+    })
+}
+
+/// Both halves at once, for a side that knows its endpoint already.
+pub(crate) fn respond(
+    raw: &[u8],
+    side: Side,
+    peer: [u8; 32],
+    cooldown: &mut Cooldown,
+    now: Instant,
+) -> Option<Response> {
+    let admitted = prepare(raw, side.role, peer, cooldown, now)?;
+    answer(&admitted, side, peer, cooldown, now)
 }
 
 /// Takes the hit report of one agreement, once: the first `Hit` message with the agreement's
@@ -246,5 +302,19 @@ impl Hits {
         }
         self.taken = true;
         Some(message.address)
+    }
+}
+
+/// A punch link as a [`Wire`]: the control messages of the trial ride the link that carries the
+/// punch offers, bounded by the budget of one punch exchange.
+pub(crate) struct OverPunch<'a, L>(pub(crate) &'a mut L);
+
+impl<L: PunchLink + Send> Wire for OverPunch<'_, L> {
+    async fn send(&mut self, bytes: &[u8]) -> bool {
+        self.0.send_raw(bytes, EXCHANGE_BUDGET).await.is_ok()
+    }
+
+    async fn recv(&mut self) -> Option<Vec<u8>> {
+        self.0.recv_raw().await
     }
 }

@@ -287,6 +287,16 @@ pub(crate) trait PunchLink {
     /// Receives one raw datagram; `None` when the link is closed. Must be
     /// cancel-safe: callers bound it with timeouts and call it again.
     fn recv_raw(&mut self) -> impl Future<Output = Option<Vec<u8>>> + Send;
+    /// Sends already encoded control bytes: the exchange of the birthday trial (leaf BDAY-1b)
+    /// rides the same link. The default refuses for good, so a link that cannot carry them stays
+    /// as it is.
+    fn send_raw(
+        &self,
+        _bytes: &[u8],
+        _budget: Duration,
+    ) -> impl Future<Output = Result<(), SendError>> + Send {
+        async { Err(SendError::Closed) }
+    }
 }
 
 /// Punch channel over the Yggdrasil bridge control datagrams.
@@ -312,8 +322,12 @@ impl PunchChannel {
 impl PunchLink for PunchChannel {
     async fn send(&self, message: &PunchMessage, budget: Duration) -> Result<(), SendError> {
         let bytes = encode(message).ok_or(SendError::Closed)?;
+        self.send_raw(&bytes, budget).await
+    }
+
+    async fn send_raw(&self, bytes: &[u8], budget: Duration) -> Result<(), SendError> {
         self.sender
-            .send(&bytes, budget)
+            .send(bytes, budget)
             .await
             .map_err(|error| match error {
                 DatagramError::Busy | DatagramError::TimedOut | DatagramError::Transport(_) => {
