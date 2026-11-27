@@ -28,7 +28,7 @@ PREFIXES = (
     "core::iterative_query::resource_tests::", "resource::store_resource_tests::",
     "resource::visited_store::tests::", "common::messages::signed_peer_length_tests::",
     "common::messages::ingress_tests::", "actor::socket::ingress_tests::",
-    "actor::socket::resource_tests::",
+    "actor::socket::resource_tests::", "actor::socket::owned_socket::pacer_tests::",
     "actor::hostile_resource_tests::",
     "resource::publication_observer::tests::",
 )
