@@ -443,3 +443,28 @@ fn hostile_input_never_panics_and_never_decodes_to_something_else() {
         }
     }
 }
+
+#[test]
+fn the_votes_of_the_two_measured_devices_give_the_two_roles() {
+    // The phone: every node saw one port. The computer: every node saw another port.
+    assert_eq!(super::classify(30, 1), Some(Role::Easy));
+    assert_eq!(super::classify(35, 35), Some(Role::Hard));
+    // The edges of the rule: half as many ports as votes is hard, one port less is not.
+    assert_eq!(super::classify(30, 15), Some(Role::Hard));
+    assert_eq!(super::classify(30, 14), None);
+    assert_eq!(super::classify(8, 1), Some(Role::Easy));
+    assert_eq!(super::classify(8, 4), Some(Role::Hard));
+}
+
+#[test]
+fn a_picture_that_shows_neither_side_gives_no_role() {
+    // A few distinct ports, too few votes, no votes, counts that contradict each other.
+    assert_eq!(super::classify(30, 3), None);
+    assert_eq!(super::classify(7, 7), None);
+    assert_eq!(super::classify(7, 1), None);
+    assert_eq!(super::classify(0, 0), None);
+    assert_eq!(super::classify(30, 0), None);
+    assert_eq!(super::classify(10, 11), None);
+    assert_eq!(super::classify(u32::MAX, u32::MAX), Some(Role::Hard));
+    assert_eq!(super::classify(u32::MAX, 1), Some(Role::Easy));
+}
