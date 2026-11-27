@@ -84,6 +84,18 @@ impl super::super::KrpcSocket {
         self.inflight_requests.next_tid = u32::MAX - 1;
     }
 
+    /// Engages the pacing as a window of unanswered requests does.
+    pub(crate) fn collapse_owned_pacing_for_test(&mut self) {
+        let owned = self.owned.get_or_insert_with(OwnedSocket::default);
+        for _ in 0..pacer::WINDOW {
+            owned.pacer.observe(false);
+        }
+    }
+
+    pub(crate) fn owned_pacing_rate_for_test(&self) -> Option<u32> {
+        self.owned.as_ref()?.pacer.rate()
+    }
+
     pub(crate) fn operation_rpc_len(&self, operation: OperationId) -> usize {
         self.owned
             .as_ref()

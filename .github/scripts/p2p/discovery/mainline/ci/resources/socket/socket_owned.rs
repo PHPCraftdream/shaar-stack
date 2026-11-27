@@ -10,6 +10,11 @@ use super::resources::{OWNED_GET_ROUNDS, OWNED_MAINTENANCE_ROUNDS, SocketResourc
 use crate::common::{ErrorSpecific, MessageType, RequestSpecific, ResponseSpecific};
 use crate::resource::{OperationId, ResourceError};
 
+#[path = "pacer.rs"]
+mod pacer;
+#[cfg(test)]
+#[path = "pacer_tests.rs"]
+mod pacer_tests;
 #[cfg(test)]
 #[path = "test_controls.rs"]
 mod test_controls;
@@ -26,6 +31,7 @@ struct OwnedPacket {
 pub(super) struct OwnedSocket {
     pub(super) resources: SocketResources,
     outbox: VecDeque<OwnedPacket>,
+    pacer: pacer::Pacer,
     publication_observer: Option<crate::resource::Observer>,
     pub(super) last_response: Option<(u32, OperationId)>,
     pub(super) failure: Option<ResourceError>,
@@ -52,6 +58,17 @@ pub(super) struct OwnedSocket {
     charge_probe: Option<
         tokio::sync::mpsc::Receiver<tokio::sync::oneshot::Sender<(usize, usize, usize, usize)>>,
     >,
+}
+
+impl OwnedSocket {
+    /// Index of the first queued packet that may leave at `now`: a reply always, a request
+    /// unless the pacing holds requests back.
+    fn next_due(&self, now: tokio::time::Instant) -> Option<usize> {
+        let held = self.pacer.wait_until(now).is_some();
+        self.outbox
+            .iter()
+            .position(|packet| packet.tid.is_none() || !held)
+    }
 }
 
 impl super::KrpcSocket {
@@ -345,9 +362,10 @@ impl super::KrpcSocket {
             let Some(owned) = self.owned.as_mut() else {
                 return;
             };
-            let Some(packet) = owned.outbox.front() else {
+            let Some(index) = owned.next_due(tokio::time::Instant::now()) else {
                 return;
             };
+            let packet = &owned.outbox[index];
             let tid = packet.tid;
             let byte_len = packet.bytes.len();
             let destination = packet.to;
@@ -445,9 +463,10 @@ impl super::KrpcSocket {
                 .expect("owned socket remains enabled during flush");
             match result {
                 Ok(()) => {
-                    owned.outbox.pop_front();
+                    owned.outbox.remove(index);
                     owned.resources.sent(byte_len);
                     if let Some(tid) = tid {
+                        owned.pacer.departed(tokio::time::Instant::now());
                         owned.resources.rpc_sent(tid);
                         if let Some(request) = self
                             .inflight_requests
@@ -462,7 +481,7 @@ impl super::KrpcSocket {
                 Err(error)
                     if error.kind() == std::io::ErrorKind::TimedOut && deadline.is_some() =>
                 {
-                    owned.outbox.pop_front();
+                    owned.outbox.remove(index);
                     owned.resources.sent(byte_len);
                     if let Some(tid) = tid {
                         self.inflight_requests.remove(tid);
@@ -472,7 +491,7 @@ impl super::KrpcSocket {
                 }
                 Err(_) => {
                     let operation = tid.and_then(|tid| owned.resources.operation(tid));
-                    owned.outbox.pop_front();
+                    owned.outbox.remove(index);
                     owned.resources.sent(byte_len);
                     if let Some(tid) = tid {
                         self.inflight_requests.remove(tid);
@@ -543,7 +562,17 @@ impl super::KrpcSocket {
         for tid in owned.resources.expired(timeout) {
             self.inflight_requests.forget(tid);
             owned.resources.rollback_rpc(tid);
+            owned.pacer.observe(false);
         }
+    }
+
+    /// When the pacing releases the next queued request, if it holds one back now.
+    pub(crate) fn owned_next_departure(&self) -> Option<tokio::time::Instant> {
+        let owned = self.owned.as_ref()?;
+        if owned.outbox.iter().all(|packet| packet.tid.is_none()) {
+            return None;
+        }
+        owned.pacer.wait_until(tokio::time::Instant::now())
     }
 
     pub(crate) fn maintain_owned_requests(&mut self) {
@@ -591,10 +620,12 @@ impl super::KrpcSocket {
             completed,
             "validated owned response remains admitted until completion"
         );
-        self.owned
+        let owned = self
+            .owned
             .as_mut()
-            .expect("owned response owner retained")
-            .last_response = Some((tid, operation));
+            .expect("owned response owner retained");
+        owned.last_response = Some((tid, operation));
+        owned.pacer.observe(true);
         true
     }
 

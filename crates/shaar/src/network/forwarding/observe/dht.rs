@@ -14,7 +14,7 @@ use tracing::{Event, Level, Metadata, Subscriber};
 const LIBRARY: &str = "n0_mainline";
 
 /// The library messages worth a line, with the label each one prints under.
-const MESSAGES: [(&str, &str); 9] = [
+const MESSAGES: [(&str, &str); 10] = [
     ("Owned GET finished", "get-finished"),
     ("Owned GET failed", "get-failed"),
     ("Owned GET dropped", "get-dropped"),
@@ -24,10 +24,11 @@ const MESSAGES: [(&str, &str); 9] = [
     ("Put Query: failed", "put-failed"),
     ("Owned GET round", "get-round"),
     ("Owned GET deadline", "get-deadline"),
+    ("Owned pace", "pace"),
 ];
 
 /// The numeric fields printed, in this order, when an event carries them.
-const COUNTERS: [&str; 19] = [
+const COUNTERS: [&str; 21] = [
     "op",
     "stage",
     "total_ms",
@@ -47,6 +48,8 @@ const COUNTERS: [&str; 19] = [
     "inflight",
     "room",
     "timeout_ms",
+    "rate",
+    "share_pct",
 ];
 
 /// Longest error variant name printed.
@@ -239,6 +242,26 @@ mod tests {
         );
         assert!(lines[0].starts_with("shaar: dht get-round "));
         assert!(lines[1].starts_with("shaar: dht get-deadline "));
+    }
+
+    #[test]
+    fn a_change_of_the_pacing_rate_prints_the_rate_and_the_answered_share() {
+        let lines = captured(|| {
+            tracing::debug!(
+                target: "n0_mainline::actor::socket::pacer",
+                rate = ?25_u32, share_pct = ?18_u32, "Owned pace"
+            );
+            tracing::debug!(
+                target: "n0_mainline::actor::socket::pacer",
+                rate = ?0_u32, share_pct = ?100_u32, "Owned pace"
+            );
+        });
+        let tails: Vec<&str> = lines
+            .iter()
+            .map(|line| line.split_once(" t=").unwrap().1.split_once(' ').unwrap().1)
+            .collect();
+        assert_eq!(tails, ["rate=25 share_pct=18", "rate=0 share_pct=100"]);
+        assert!(lines[0].starts_with("shaar: dht pace "), "{}", lines[0]);
     }
 
     #[test]

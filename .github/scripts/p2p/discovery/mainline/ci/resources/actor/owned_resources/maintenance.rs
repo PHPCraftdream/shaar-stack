@@ -183,6 +183,7 @@ impl Actor {
                     .values()
                     .filter_map(|query| query.owned_retry_at()),
             )
+            .chain(self.socket.owned_next_departure())
             .min()
     }
 }

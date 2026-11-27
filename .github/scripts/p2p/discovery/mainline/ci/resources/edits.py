@@ -67,7 +67,7 @@ def edits() -> dict[str, list[tuple[str, str]]]:
             ),
             (
                 "        self.inflight_requests.cleanup();\n",
-                "        if let Some(owned) = self.owned.as_mut() {\n            for tid in owned.resources.expired(self.inflight_requests.request_timeout()) {\n                self.inflight_requests.forget(tid);\n                owned.resources.rollback_rpc(tid);\n            }\n        } else {\n            self.inflight_requests.cleanup();\n        }\n",
+                "        if self.owned.is_some() {\n            self.maintain_owned_requests();\n        } else {\n            self.inflight_requests.cleanup();\n        }\n",
             ),
             (
                 "    pub fn inflight(&self, transaction_id: &u32) -> bool {\n        self.inflight_requests.get(*transaction_id).is_some()\n    }",
