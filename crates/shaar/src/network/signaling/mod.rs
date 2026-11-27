@@ -78,6 +78,11 @@ pub(crate) fn peer_id(key: &PublicKey) -> io::Result<PeerId> {
 
 pub(crate) mod punch;
 
+// The birthday trial (leaf BDAY-1a): the engine and its control messages. It is wired into the
+// punch by the next leaf, so nothing outside its tests uses it yet.
+#[allow(dead_code)]
+mod spray;
+
 #[cfg(test)]
 #[path = "tests/tests.rs"]
 mod tests;
