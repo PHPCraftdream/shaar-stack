@@ -171,6 +171,18 @@ async fn wait_until(mut reached: impl FnMut() -> bool) {
     panic!("condition not reached within 3 s");
 }
 
+/// Serves the record only once the relay holds the request, so the DHT's answer always lands
+/// on a request in flight: a loopback DHT answers in about 10 ms, and a cancel that comes
+/// before the relay's connection has sent its request leaves nothing for the relay to see close.
+async fn serve_once_the_relay_has_the_request(
+    peer: &mut LoopbackPeer,
+    item: &MutableItem,
+    relay: &FakeGet,
+) {
+    wait_until(|| relay.count() >= 1).await;
+    peer.serve_record(item).await;
+}
+
 fn sample(wall_us: i64) -> ClockSample {
     ClockSample {
         wall_us,
@@ -476,7 +488,9 @@ async fn the_dht_wins_when_it_answers_first_and_the_slow_relay_is_cancelled() {
     let result = tokio::time::timeout(Duration::from_secs(8), async {
         tokio::select! {
             result = rig.owner.resolve_until(key, deadline(10_000)) => result,
-            _ = rig.peer.serve_record(&item) => unreachable!("serves until dropped"),
+            _ = serve_once_the_relay_has_the_request(&mut rig.peer, &item, &hung) => {
+                unreachable!("serves until dropped")
+            }
         }
     })
     .await
