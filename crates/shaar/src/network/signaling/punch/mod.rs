@@ -400,11 +400,31 @@ where
     C: Fn(SocketAddr) -> Fut,
     Fut: Future<Output = Result<Session, NetworkError>>,
 {
+    client_attempt_reasoned(channel, connect, candidates, epoch, deadline, role)
+        .await
+        .0
+}
+
+/// [`client_attempt`] that also returns why the attempt ended (leaf BDAY-1c): the birthday trial is
+/// offered only after a round in which an Answer came back.
+pub(crate) async fn client_attempt_reasoned<L, C, Fut>(
+    channel: &mut L,
+    connect: C,
+    candidates: Vec<SocketAddr>,
+    epoch: u32,
+    deadline: Instant,
+    role: &'static str,
+) -> (Option<Session>, EndReason)
+where
+    L: PunchLink,
+    C: Fn(SocketAddr) -> Fut,
+    Fut: Future<Output = Result<Session, NetworkError>>,
+{
     let started = Instant::now();
     let offered = candidates.len();
     let (session, reason) = client_exchange(channel, connect, candidates, epoch, deadline).await;
     trace_attempt(role, offered, reason, started);
-    session
+    (session, reason)
 }
 
 /// The attempt itself; returns the session (if any) and why the attempt ended.

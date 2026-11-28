@@ -442,7 +442,7 @@ impl Dialer for NativeDialer {
             let candidates = punch::local_candidates(self.endpoint.local_addr(), reflexive);
             let endpoint = Arc::clone(&self.endpoint);
             let epoch = self.punch_epoch;
-            if let Some(session) = punch::client_attempt(
+            let (punched, reason) = punch::client_attempt_reasoned(
                 channel,
                 move |address| {
                     let endpoint = Arc::clone(&endpoint);
@@ -465,8 +465,8 @@ impl Dialer for NativeDialer {
                 deadline,
                 "client",
             )
-            .await
-            {
+            .await;
+            if let Some(session) = punched {
                 #[cfg(test)]
                 if let Some(events) = &self.events {
                     events.capture_native(&session);
@@ -479,10 +479,11 @@ impl Dialer for NativeDialer {
                 ));
                 return Ok(session);
             }
-            // The honest rounds opened no path: offer the birthday trial (leaf BDAY-1b). Only the
-            // exchange runs here, bounded by the deadline of the dial; the trial is a detached task.
+            // The honest rounds opened no path: offer the birthday trial (leaf BDAY-1b) when the
+            // round got an Answer back (leaf BDAY-1c). Only the exchange runs here, bounded by the
+            // deadline of the dial; the trial is a detached task.
             self.spray
-                .attempt(channel, *peer.as_bytes(), epoch, deadline)
+                .attempt(channel, *peer.as_bytes(), epoch, deadline, reason)
                 .await;
         }
         // Relay negotiation only when a relay is configured and time remains:

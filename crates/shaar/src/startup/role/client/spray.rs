@@ -11,7 +11,7 @@ use std::pin::Pin;
 use tokio::sync::watch;
 use tokio::time::Instant;
 
-use crate::network::signaling::punch::PunchLink;
+use crate::network::signaling::punch::{EndReason, PunchLink};
 use crate::network::signaling::spray::{
     self, Admit, Agreement, Cooldown, DEFAULT_SOCKETS, OverPunch, Rng, Role, Side, UdpOpener,
 };
@@ -71,18 +71,25 @@ impl<G: Ground> SprayDial<G> {
         }
     }
 
-    /// Offers the trial over `link` and starts this side when it is answered. `false` when no
-    /// trial started: the role is not hard or unknown, no public address is known, the peer had an
-    /// Offer lately, the peer did not answer inside the window or `deadline`, or its Answer does
-    /// not fit. The cooldown is booked with the Offer, so a silent peer costs the dial its window
-    /// once in ten minutes and not at every dial.
+    /// Offers the trial over `link` and starts this side when it is answered. `reason` is why the
+    /// honest punch round that just failed ended: the Offer goes out only after `Probe`, the round
+    /// in which an Answer came back, so the control link carries both ways (leaf BDAY-1c); after
+    /// any other reason nothing is sent, nothing is waited for and nothing is booked. `false` when
+    /// no trial started: that reason, the role is not hard or unknown, no public address is known,
+    /// the peer had an Offer lately, the peer did not answer inside the window or `deadline`, or
+    /// its Answer does not fit. The cooldown is booked with the Offer, so a silent peer costs the
+    /// dial its window once in ten minutes and not at every dial.
     pub(in crate::startup::role) async fn attempt<L: PunchLink + Send>(
         &mut self,
         link: &mut L,
         peer: [u8; 32],
         epoch: u32,
         deadline: Instant,
+        reason: EndReason,
     ) -> bool {
+        if reason != EndReason::Probe {
+            return false;
+        }
         if self.ground.role() != Some(Role::Hard) {
             return false;
         }

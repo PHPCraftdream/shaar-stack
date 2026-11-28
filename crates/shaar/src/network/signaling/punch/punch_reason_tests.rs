@@ -15,7 +15,7 @@ use tokio::time::Instant;
 use super::punch_tests::direct_session;
 use super::{
     EXCHANGE_BUDGET, EndReason, Kind, NetworkError, PROBE_WINDOW, PunchLink, PunchMessage,
-    SendError, client_exchange, decode, encode, trace_line,
+    SendError, client_attempt_reasoned, client_exchange, decode, encode, trace_line,
 };
 
 const BOUND: Duration = EXCHANGE_BUDGET.saturating_add(PROBE_WINDOW);
@@ -189,4 +189,40 @@ fn the_ports_line_is_bounded_by_the_candidate_limit() {
         listed <= 2 * super::MAX_CANDIDATES,
         "at most MAX_CANDIDATES ports per side: {line}"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_reasoned_attempt_returns_the_reason_its_exchange_named() {
+    // An Answer comes back and the probe fails: Probe.
+    let (mut client, peer) = pair();
+    let _answerer = answering(peer);
+    let (session, reason) = client_attempt_reasoned(
+        &mut client,
+        failing,
+        vec![],
+        1,
+        Instant::now() + BOUND,
+        "client",
+    )
+    .await;
+    assert!(session.is_none());
+    assert_eq!(reason, EndReason::Probe);
+    // Nobody answers: NoAnswer when the exchange window ends.
+    let (mut client, _silent) = pair();
+    let (session, reason) = client_attempt_reasoned(
+        &mut client,
+        failing,
+        vec![],
+        2,
+        Instant::now() + BOUND,
+        "client",
+    )
+    .await;
+    assert!(session.is_none());
+    assert_eq!(reason, EndReason::NoAnswer);
+    // No time left: Deadline.
+    let (mut client, _silent) = pair();
+    let (_, reason) =
+        client_attempt_reasoned(&mut client, failing, vec![], 3, Instant::now(), "client").await;
+    assert_eq!(reason, EndReason::Deadline);
 }

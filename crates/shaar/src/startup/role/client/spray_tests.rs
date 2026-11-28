@@ -12,7 +12,7 @@ use tokio::sync::{Notify, mpsc};
 use tokio::time::Instant;
 
 use super::spray::{Ground, SprayDial};
-use crate::network::signaling::punch::{PunchLink, PunchMessage, SendError};
+use crate::network::signaling::punch::{EndReason, PunchLink, PunchMessage, SendError};
 use crate::network::signaling::spray::{
     self, Agreement, DEFAULT_SOCKETS, Kind, MIN_INTERVAL, Role, SprayMessage,
 };
@@ -149,7 +149,10 @@ async fn settle() {
 async fn a_hard_client_offers_with_its_public_address_and_starts_its_side_on_an_answer() {
     let (mut dial, mut started) = dial(Some(Role::Hard), Some(PUBLIC_IP));
     let mut link = Link::new(Peer::Easy);
-    assert!(dial.attempt(&mut link, PEER, 7, later()).await);
+    assert!(
+        dial.attempt(&mut link, PEER, 7, later(), EndReason::Probe)
+            .await
+    );
     let offers = link.offers();
     assert_eq!(offers.len(), 1, "the Answer came before the first resend");
     let offer = &offers[0];
@@ -175,7 +178,11 @@ async fn nothing_is_offered_unless_the_role_is_hard_and_a_public_address_is_know
     ] {
         let (mut dial, mut started) = dial(role, ip);
         let mut link = Link::new(Peer::Easy);
-        assert!(!dial.attempt(&mut link, PEER, 1, later()).await);
+        assert!(
+            !dial
+                .attempt(&mut link, PEER, 1, later(), EndReason::Probe)
+                .await
+        );
         assert!(link.offers().is_empty());
         settle().await;
         assert!(started.try_recv().is_err());
@@ -187,18 +194,30 @@ async fn a_silent_peer_costs_the_window_once_and_the_next_dial_inside_ten_minute
     let (mut dial, mut started) = dial(Some(Role::Hard), Some(PUBLIC_IP));
     let mut link = Link::new(Peer::Silent);
     let began = Instant::now();
-    assert!(!dial.attempt(&mut link, PEER, 1, later()).await);
+    assert!(
+        !dial
+            .attempt(&mut link, PEER, 1, later(), EndReason::Probe)
+            .await
+    );
     assert_eq!(Instant::now() - began, WINDOW);
     let first = link.offers().len();
     assert!(first >= 2, "the Offer is repeated inside the window");
     // The next dial, another epoch, inside the cooldown: no Offer and no wait.
     let again = Instant::now();
-    assert!(!dial.attempt(&mut link, PEER, 2, later()).await);
+    assert!(
+        !dial
+            .attempt(&mut link, PEER, 2, later(), EndReason::Probe)
+            .await
+    );
     assert_eq!(Instant::now(), again);
     assert_eq!(link.offers().len(), first);
     // After the cooldown the Offer goes out again.
     tokio::time::advance(MIN_INTERVAL).await;
-    assert!(!dial.attempt(&mut link, PEER, 3, later()).await);
+    assert!(
+        !dial
+            .attempt(&mut link, PEER, 3, later(), EndReason::Probe)
+            .await
+    );
     assert!(link.offers().len() > first);
     settle().await;
     assert!(started.try_recv().is_err());
@@ -210,7 +229,11 @@ async fn the_deadline_of_the_dial_cuts_the_window_short() {
     let mut link = Link::new(Peer::Silent);
     let began = Instant::now();
     let deadline = began + Duration::from_millis(700);
-    assert!(!dial.attempt(&mut link, PEER, 1, deadline).await);
+    assert!(
+        !dial
+            .attempt(&mut link, PEER, 1, deadline, EndReason::Probe)
+            .await
+    );
     assert!(Instant::now() - began <= Duration::from_millis(700));
 }
 
@@ -218,7 +241,11 @@ async fn the_deadline_of_the_dial_cuts_the_window_short() {
 async fn an_answer_of_a_hard_peer_starts_no_trial() {
     let (mut dial, mut started) = dial(Some(Role::Hard), Some(PUBLIC_IP));
     let mut link = Link::new(Peer::Hard);
-    assert!(!dial.attempt(&mut link, PEER, 1, later()).await);
+    assert!(
+        !dial
+            .attempt(&mut link, PEER, 1, later(), EndReason::Probe)
+            .await
+    );
     settle().await;
     assert!(started.try_recv().is_err());
 }
@@ -229,8 +256,39 @@ async fn a_closed_link_ends_the_attempt_at_once() {
     let mut link = Link::new(Peer::Silent);
     link.closed = true;
     let began = Instant::now();
-    assert!(!dial.attempt(&mut link, PEER, 1, later()).await);
+    assert!(
+        !dial
+            .attempt(&mut link, PEER, 1, later(), EndReason::Probe)
+            .await
+    );
     assert!(Instant::now() - began < Duration::from_millis(500));
     settle().await;
     assert!(started.try_recv().is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn after_a_round_without_an_answer_nothing_is_offered_nothing_is_waited_for_and_nothing_is_booked()
+ {
+    let (mut dial, mut started) = dial(Some(Role::Hard), Some(PUBLIC_IP));
+    let mut link = Link::new(Peer::Easy);
+    let began = Instant::now();
+    for (epoch, reason) in [
+        (1, EndReason::NoAnswer),
+        (2, EndReason::Deadline),
+        (3, EndReason::Closed),
+    ] {
+        assert!(!dial.attempt(&mut link, PEER, epoch, later(), reason).await);
+    }
+    assert!(link.offers().is_empty());
+    assert_eq!(Instant::now(), began, "no window was spent");
+    settle().await;
+    assert!(started.try_recv().is_err());
+    // The cooldown was not booked: the next round that got an Answer back offers at once.
+    assert!(
+        dial.attempt(&mut link, PEER, 4, later(), EndReason::Probe)
+            .await
+    );
+    assert_eq!(link.offers().len(), 1);
+    settle().await;
+    assert_eq!(started.try_recv().map(|agreement| agreement.epoch), Ok(4));
 }
